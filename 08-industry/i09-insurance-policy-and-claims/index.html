@@ -1,0 +1,6163 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Beginner to Architect — Java/Spring system design with production code, design documents and interview mastery">
+      
+      
+        <meta name="author" content="Ashish">
+      
+      
+      
+        <link rel="prev" href="../i08-stockbroking-platform/">
+      
+      
+        <link rel="next" href="../i10-travel-and-railway-ticketing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>I09. Insurance Policy & Claims - System Design Enterprise Handbook</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#i09-insurance-policy-claims-platform" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-header__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            System Design Enterprise Handbook
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              I09. Insurance Policy & Claims
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Orientation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Foundations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../02-distributed-core/10-replication/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Distributed Core
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../03-production/21-data-at-scale/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Production
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../04-architect/31-architecture-decision-making/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architect
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Case Studies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Capstone
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Interview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Industry Designs
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../99-appendix/qa-index/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Appendix
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-nav__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    System Design Enterprise Handbook
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Orientation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Orientation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    00. How to Use This Handbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/01-what-system-design-is/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    01. What System Design Is
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    02. Back-of-the-Envelope Estimation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/03-networking-essentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    03. Networking Essentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/04-api-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    04. API Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/05-relational-databases-deep-dive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    05. Relational Databases Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/06-nosql-and-polyglot-persistence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    06. NoSQL & Polyglot Persistence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/07-caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    07. Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/08-load-balancing-proxies-and-gateways/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    08. Load Balancing, Proxies & Gateways
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/09-scalability-fundamentals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    09. Scalability Fundamentals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distributed Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/10-replication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    10. Replication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/11-partitioning-and-sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    11. Partitioning & Sharding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/12-consistency-time-and-consensus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    12. Consistency, Time & Consensus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/13-distributed-transactions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    13. Distributed Transactions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/14-messaging-and-event-streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    14. Messaging & Event Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/15-event-driven-architecture-cqrs-and-event-sourcing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    15. Event-Driven Architecture, CQRS & Event Sourcing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/16-microservices-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    16. Microservices Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/17-inter-service-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    17. Inter-Service Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/18-resilience-patterns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    18. Resilience Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/19-concurrency-at-scale-in-java/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    19. Concurrency at Scale in Java
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/20-idempotency-ids-and-distributed-locks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    20. Idempotency, IDs & Distributed Locks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Production
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/21-data-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    21. Data at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/22-search-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    22. Search Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/23-security-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    23. Security Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/24-observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    24. Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/25-performance-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    25. Performance Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/26-deployment-and-infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    26. Deployment & Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/27-reliability-and-disaster-recovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    27. Reliability & Disaster Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/28-schema-and-data-evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    28. Schema & Data Evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/29-testing-distributed-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    29. Testing Distributed Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/30-multi-tenancy-and-saas-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    30. Multi-Tenancy & SaaS Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architect
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architect
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/31-architecture-decision-making/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    31. Architecture Decision Making
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/32-design-documents-and-architecture-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    32. Design Documents & Architecture Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/33-domain-driven-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    33. Domain-Driven Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/34-modern-architecture-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    34. Modern Architecture Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/35-cost-engineering-and-finops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    35. Cost Engineering & FinOps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/36-compliance-governance-and-data-residency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    36. Compliance, Governance & Data Residency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/37-leading-architecture-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    37. Leading Architecture at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Case Studies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Case Studies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    38. URL Shortener & SMS Short Links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/39-distributed-rate-limiter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    39. Distributed Rate Limiter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/40-notification-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    40. Notification System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/41-chat-customer-rider-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    41. Chat — Customer–Rider Messaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/42-search-autocomplete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    42. Search Autocomplete (Typeahead)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/43-home-feed-and-recommendations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    43. Home Feed & Recommendations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/44-distributed-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    44. Distributed Cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/45-payment-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    45. Payment System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/46-grocery-checkout-and-inventory-reservation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    46. Grocery Checkout & Inventory Reservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    47. Delivery Dispatch & Live Tracking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/48-delivery-slot-booking-and-capacity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    48. Delivery Slot Booking & Capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/49-pricing-promotions-and-coupons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    49. Pricing, Promotions & Coupons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/50-distributed-job-scheduler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    50. Distributed Job Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/51-real-time-analytics-and-top-k/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    51. Real-time Analytics & Top-K
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/52-object-storage-and-media-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    52. Object Storage & Media Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/53-web-crawler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    53. Web Crawler (Price Monitoring)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/54-distributed-key-value-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    54. Distributed Key-Value Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/55-order-matching-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    55. Order Matching Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capstone
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Capstone
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    56. The Grocery Marketplace, End to End
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interview
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interview
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    57. The System Design Interview Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/58-level-expectations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    58. Level Expectations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/59-interview-qa-bank/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    59. Interview Q&A Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/60-mock-interviews/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    60. Mock Interviews
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/61-behavioral-and-leadership/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    61. Behavioural & Leadership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/qa-bank-starred/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ⭐ Drill Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Industry Designs
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Industry Designs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01-amazon-style-global-marketplace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01. Amazon-Style Global Marketplace
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01b-amazon-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01b. Amazon — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02-flipkart-style-sale-day-ecommerce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02. Flipkart-Style Sale-Day E-Commerce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02b-flipkart-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02b. Flipkart — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i03-core-banking-and-upi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I03. Core Banking & UPI Payments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i04-hospital-ehr-and-telemedicine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I04. Hospital EHR & Telemedicine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i05-ride-hailing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I05. Ride-Hailing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i06-video-streaming-and-live-cricket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I06. Video Streaming & Live Cricket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i07-messaging-and-social-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I07. Messaging & Social Feed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i08-stockbroking-platform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I08. Stockbroking Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I09. Insurance Policy & Claims
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I09. Insurance Policy & Claims
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-how-an-insurer-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 How an insurer works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-main-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Main systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-scale-for-this-design-assumptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Scale for this design (assumptions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-it-works-journeys-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How It Works — Journeys End to End
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How It Works — Journeys End to End">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-journey-1-buying-motor-insurance-on-an-aggregator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Journey 1: buying motor insurance on an aggregator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-journey-2-buying-a-family-health-policy-in-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Journey 2: buying a family health policy in the app
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-journey-3-a-cashless-hospital-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Journey 3: a cashless hospital claim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-journey-4-a-motor-accident-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Journey 4: a motor accident claim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-journey-5-a-life-insurance-death-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Journey 5: a life insurance death claim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-journey-6-renewal-and-lapse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Journey 6: renewal and lapse
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-core-subsystems-in-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Core Subsystems in Depth
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Core Subsystems in Depth">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-product-configurator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Product configurator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-rating-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Rating engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-policy-administration-with-bitemporal-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Policy administration with bitemporal data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-billing-and-collections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Billing and collections
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-claims-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Claims management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-reinsurance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Reinsurance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-fraud-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Fraud management
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-pricing-with-generalised-linear-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Pricing with generalised linear models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-rules-engines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Rules engines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-underwriting-scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Underwriting scoring
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-telematics-usage-based-motor-insurance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Telematics (usage-based motor insurance)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-image-based-damage-assessment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Image-based damage assessment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-fraud-networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Fraud networks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-claims-triage-and-bill-auditing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Claims triage and bill auditing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-reserving-ibnr-with-the-chain-ladder-method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Reserving (IBNR) with the chain-ladder method
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-lapse-and-renewal-prediction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 Lapse and renewal prediction
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-operational-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Operational stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-warehouse-and-actuarial-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Warehouse and actuarial data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-ml-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 ML platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack-reference-choice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack (reference choice)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-privacy-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Privacy &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i10-travel-and-railway-ticketing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I10. Travel & Railway Ticketing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i11-telecom-billing-and-charging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I11. Telecom Billing & Charging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i12-logistics-and-supply-chain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I12. Logistics & Supply Chain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i13-online-exams-and-live-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I13. Online Exams & Live Classes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i14-national-digital-id-and-vaccination-registration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I14. National Digital ID & Vaccination Registration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i15-multiplayer-gaming-and-leaderboards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I15. Multiplayer Gaming & Leaderboards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i16-smart-metering-and-iot-telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I16. Smart Metering & IoT Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i17-hotel-and-homestay-booking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I17. Hotel & Homestay Booking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i18-food-delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I18. Food Delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Appendix
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Appendix
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/qa-index/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full Question Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/lab-catalogue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab Catalogue
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-how-an-insurer-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 How an insurer works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-main-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Main systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-scale-for-this-design-assumptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Scale for this design (assumptions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-it-works-journeys-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How It Works — Journeys End to End
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How It Works — Journeys End to End">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-journey-1-buying-motor-insurance-on-an-aggregator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Journey 1: buying motor insurance on an aggregator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-journey-2-buying-a-family-health-policy-in-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Journey 2: buying a family health policy in the app
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-journey-3-a-cashless-hospital-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Journey 3: a cashless hospital claim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-journey-4-a-motor-accident-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Journey 4: a motor accident claim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-journey-5-a-life-insurance-death-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Journey 5: a life insurance death claim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-journey-6-renewal-and-lapse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Journey 6: renewal and lapse
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-core-subsystems-in-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Core Subsystems in Depth
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Core Subsystems in Depth">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-product-configurator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Product configurator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-rating-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Rating engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-policy-administration-with-bitemporal-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Policy administration with bitemporal data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-billing-and-collections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Billing and collections
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-claims-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Claims management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-reinsurance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Reinsurance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-fraud-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Fraud management
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-pricing-with-generalised-linear-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Pricing with generalised linear models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-rules-engines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Rules engines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-underwriting-scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Underwriting scoring
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-telematics-usage-based-motor-insurance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Telematics (usage-based motor insurance)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-image-based-damage-assessment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Image-based damage assessment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-fraud-networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Fraud networks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-claims-triage-and-bill-auditing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Claims triage and bill auditing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-reserving-ibnr-with-the-chain-ladder-method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Reserving (IBNR) with the chain-ladder method
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-lapse-and-renewal-prediction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 Lapse and renewal prediction
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-operational-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Operational stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-warehouse-and-actuarial-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Warehouse and actuarial data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-ml-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 ML platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack-reference-choice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack (reference choice)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-privacy-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Privacy &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="i09-insurance-policy-claims-platform">I09. Insurance Policy &amp; Claims Platform<a class="headerlink" href="#i09-insurance-policy-claims-platform" title="Permanent link">&para;</a></h1>
+<div class="admonition abstract">
+<p class="admonition-title">Chapter at a glance</p>
+<p><strong>Sector:</strong> Insurance (India) · <strong>Format:</strong> system design walkthrough (no code) · <strong>Reader bands:</strong> B1 → B4 · <strong>Builds on:</strong> <a href="../i04-hospital-ehr-and-telemedicine/">I04</a> (cashless hospital claims), <a href="../../05-case-studies/45-payment-system/">Ch 45</a>, <a href="../../02-distributed-core/13-distributed-transactions/">Ch 13</a>, <a href="../../03-production/21-data-at-scale/">Ch 21</a></p>
+<p><strong>What you get:</strong> the design of a digital insurer selling <strong>health</strong>, <strong>motor</strong> and <strong>term life</strong> policies through its app, agents, banks and aggregators. It covers:</p>
+<ul>
+<li>the <strong>product and rating engine</strong> (how a premium is calculated), quotes, <strong>underwriting</strong>, policy issuance;</li>
+<li><strong>endorsements</strong> (mid-term changes), renewals, premium collection;</li>
+<li><strong>claims:</strong> first notice of loss, health cashless and reimbursement, motor surveys with photos, life claims, fraud detection, settlement;</li>
+<li><strong>reinsurance</strong>, <strong>actuarial reserving</strong>, finance and regulatory reporting;</li>
+<li><strong>the algorithms:</strong> GLM pricing, rules engines, underwriting scores, telematics, image-based damage assessment, fraud networks, claims triage, chain-ladder reserves, lapse prediction;</li>
+<li><strong>the data platform</strong> and <strong>tech stack</strong>, with India specifics (IRDAI, NHCX, Bima Sugam).</li>
+</ul>
+<p><strong>Reading time:</strong> 80 min.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Regulatory content</p>
+<p>Insurance in India is regulated by IRDAI. Product approval, policyholder protection (free-look periods, claim timelines, grievance redressal), distribution rules, solvency and reporting requirements change over time. Every regulatory statement here is a summary marked <strong>VERIFY</strong>. Commercial core systems are mentioned as common market options, not endorsements. Pricing and reserving methods must be owned by qualified actuaries.</p>
+</div>
+<hr />
+<h2 id="1-the-system-in-one-page">1. The System in One Page<a class="headerlink" href="#1-the-system-in-one-page" title="Permanent link">&para;</a></h2>
+<h3 id="11-how-an-insurer-works">1.1 How an insurer works<a class="headerlink" href="#11-how-an-insurer-works" title="Permanent link">&para;</a></h3>
+<p>An insurer <strong>collects premiums now and pays claims later</strong>. Its software must:</p>
+<ol>
+<li><strong>Price</strong> each risk correctly: too cheap loses money, too expensive loses customers.</li>
+<li><strong>Issue and administer</strong> policies exactly as the contract says, for years (life policies for decades).</li>
+<li><strong>Pay valid claims fast</strong>, and detect invalid ones.</li>
+<li><strong>Hold enough reserves</strong> for claims not yet reported, and share large risks with reinsurers.</li>
+<li><strong>Prove all of this</strong> to the regulator, auditors and policyholders.</li>
+</ol>
+<h3 id="12-main-systems">1.2 Main systems<a class="headerlink" href="#12-main-systems" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Product configurator</strong></td>
+<td>Defines products: coverages, options, eligibility, rating factors, rules, documents</td>
+</tr>
+<tr>
+<td><strong>Rating engine</strong></td>
+<td>Computes premium from risk factors and product rules</td>
+</tr>
+<tr>
+<td><strong>Distribution</strong></td>
+<td>App/web, agents, brokers, banks (bancassurance), aggregators; commissions</td>
+</tr>
+<tr>
+<td><strong>Quote and underwriting</strong></td>
+<td>Collects risk data, applies rules and scores, decides accept/load/decline/refer</td>
+</tr>
+<tr>
+<td><strong>Policy administration (PAS)</strong></td>
+<td>Issuance, policy documents, endorsements, renewals, cancellations, lapses and revivals</td>
+</tr>
+<tr>
+<td><strong>Billing and collections</strong></td>
+<td>Premium payments, instalments, mandates (NACH/UPI AutoPay), grace periods</td>
+</tr>
+<tr>
+<td><strong>Claims management</strong></td>
+<td>Intake, validation, investigation, assessment, approval, payment, recovery</td>
+</tr>
+<tr>
+<td><strong>Health TPA / cashless</strong></td>
+<td>Hospital pre-authorisation, network hospitals, tariffs, bill auditing</td>
+</tr>
+<tr>
+<td><strong>Motor surveys and garages</strong></td>
+<td>Surveyor assignment, photo/video inspection, garage network, repair estimates</td>
+</tr>
+<tr>
+<td><strong>Fraud and SIU</strong></td>
+<td>Fraud scoring, network analysis, the special investigations unit's case management</td>
+</tr>
+<tr>
+<td><strong>Reinsurance</strong></td>
+<td>Treaties, cessions, recoveries, bordereaux</td>
+</tr>
+<tr>
+<td><strong>Actuarial and finance</strong></td>
+<td>Reserves (IBNR), experience analysis, financial and regulatory reporting</td>
+</tr>
+<tr>
+<td><strong>Customer service</strong></td>
+<td>Contact centre, grievances, self-service</td>
+</tr>
+<tr>
+<td><strong>Documents and communications</strong></td>
+<td>Policy wordings, schedules, letters, e-policies</td>
+</tr>
+<tr>
+<td><strong>Data platform</strong></td>
+<td>Warehouse, actuarial data marts, ML</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13-scale-for-this-design-assumptions">1.3 Scale for this design (assumptions)<a class="headerlink" href="#13-scale-for-this-design-assumptions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Policies in force</td>
+<td>8M (health 3M, motor 4.5M, life 0.5M)</td>
+</tr>
+<tr>
+<td>New policies per day</td>
+<td>20k; quotes per day 1M (aggregators generate many)</td>
+</tr>
+<tr>
+<td>Renewals per day</td>
+<td>~15k</td>
+</tr>
+<tr>
+<td>Claims per day</td>
+<td>~8k (health cashless dominate), with seasonal and catastrophe spikes (floods, epidemics)</td>
+</tr>
+<tr>
+<td>Documents</td>
+<td>~50M documents/year (proposals, bills, photos, reports)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Estimation highlights:</strong></p>
+<ul>
+<li><strong>Quotes dwarf policies (50:1)</strong>, especially from aggregators. The rating engine must be fast and cacheable. Quote storage has short retention unless converted.</li>
+<li><strong>Claims are the operational heart.</strong> Each claim involves documents, people and payments over days or weeks. That makes it a <strong>workflow</strong> problem more than a throughput one.</li>
+<li><strong>Catastrophes create sudden claim volumes:</strong> motor and home claims after a flood can reach ten times normal in a week. They need surge operations and simplified processes.</li>
+</ul>
+<hr />
+<h2 id="2-requirements">2. Requirements<a class="headerlink" href="#2-requirements" title="Permanent link">&para;</a></h2>
+<h3 id="21-functional">2.1 Functional<a class="headerlink" href="#21-functional" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Launch new products and variants quickly by configuration, after regulatory approval (VERIFY the file-and-use process).</li>
+<li>Quote in under a second for aggregators and the app. Buy online with e-KYC and payment. Receive the policy document instantly.</li>
+<li>Underwrite automatically where possible (straight-through), refer complex cases to human underwriters, request medical tests for life and health when needed.</li>
+<li>Handle mid-term changes (add a family member, change a vehicle, change a nominee) with pro-rata premium adjustments.</li>
+<li>Renewals with reminders, auto-debit, and no-claim bonus/discount rules. Life policies: premium due, grace periods, lapse, revival.</li>
+<li>
+<p>Claims:</p>
+<ul>
+<li><strong>health cashless</strong> (hospital-initiated pre-auth) and <strong>reimbursement</strong> (customer uploads bills);</li>
+<li><strong>motor</strong> own-damage and third party, with surveys;</li>
+<li><strong>life</strong> death claims with nominee verification.</li>
+</ul>
+<p>All with status tracking and timelines.
+7. Fraud detection and investigation workflows.
+8. Reinsurance cessions and recoveries; reserves; regulatory returns.
+9. Grievances and ombudsman escalations (VERIFY processes).</p>
+</li>
+</ol>
+<h3 id="22-non-functional">2.2 Non-functional<a class="headerlink" href="#22-non-functional" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Quote latency</strong></td>
+<td>p95 &lt; 500 ms including external lookups (vehicle registry, KYC checks)</td>
+</tr>
+<tr>
+<td><strong>Correctness</strong></td>
+<td>Premiums, endorsements and claim payments exactly per contract terms; every change versioned</td>
+</tr>
+<tr>
+<td><strong>Auditability</strong></td>
+<td>Full history of every policy and claim decision with who/what/why</td>
+</tr>
+<tr>
+<td><strong>Longevity</strong></td>
+<td>Policies administered for decades; product versions preserved forever</td>
+</tr>
+<tr>
+<td><strong>Availability</strong></td>
+<td>Sales channels and cashless approvals ≥ 99.9%; hospital pre-auth within regulatory timelines (VERIFY)</td>
+</tr>
+<tr>
+<td><strong>Privacy</strong></td>
+<td>Health and personal data protected; consent-based data use (DPDP Act; VERIFY)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-high-level-architecture">3. High-Level Architecture<a class="headerlink" href="#3-high-level-architecture" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart TB
+    subgraph Channels
+        APP[App and web]
+        AGG[Aggregators and partners - APIs]
+        AGT[Agent and bank portals]
+        HOSP[Hospitals and TPAs]
+        GAR[Garages and surveyors]
+    end
+    subgraph Edge
+        GW[API gateway, partner auth, rate limits]
+    end
+    subgraph Core
+        PROD[Product configurator]
+        RATE[Rating engine]
+        UW[Underwriting - rules and scores]
+        PAS[Policy administration]
+        BILL[Billing and collections]
+        CLM[Claims management - workflows]
+        FRAUD[Fraud scoring and SIU]
+        RI[Reinsurance]
+        COMM[Commissions]
+        DOC[Documents and communications]
+    end
+    subgraph External
+        KYC[KYC and CKYC]
+        VEH[Vehicle and licence registries]
+        MIB[Industry data - claims history, fraud repositories]
+        PAY[Payments - UPI, NACH, bank transfers]
+        NHCX[Health claims exchange]
+    end
+    subgraph Data
+        K[Event streams]
+        DW[Warehouse and actuarial marts]
+        ML[ML platform]
+        REG[Regulatory reporting]
+    end
+    Channels --&gt; GW
+    GW --&gt; RATE
+    GW --&gt; PAS
+    GW --&gt; CLM
+    RATE --&gt; PROD
+    UW --&gt; RATE
+    PAS --&gt; UW
+    PAS --&gt; BILL
+    PAS --&gt; DOC
+    CLM --&gt; FRAUD
+    CLM --&gt; PAY
+    PAS --&gt; RI
+    CLM --&gt; RI
+    PAS --&gt; COMM
+    UW --&gt; KYC
+    UW --&gt; VEH
+    CLM --&gt; MIB
+    HOSP --&gt; NHCX --&gt; CLM
+    Core --&gt; K --&gt; DW
+    DW --&gt; ML --&gt; UW
+    ML --&gt; FRAUD
+    DW --&gt; REG</code></pre>
+<p><strong>Key decisions:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Choice</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Products as configuration</strong></td>
+<td>A product configurator with versioned product definitions (coverages, rules, rate tables) interpreted by the rating, underwriting and policy engines</td>
+<td>New products without code changes; old versions preserved for in-force policies</td>
+</tr>
+<tr>
+<td><strong>Policy data model</strong></td>
+<td><strong>Bitemporal</strong>: effective dates (when a change applies in the contract) and recorded dates (when we learned it)</td>
+<td>Back-dated endorsements, audits, "what did we know when"</td>
+</tr>
+<tr>
+<td><strong>Claims</strong></td>
+<td>Workflow engine with human tasks, SLAs and rules</td>
+<td>Long-running, multi-party processes (<a href="../../05-case-studies/50-distributed-job-scheduler/">Ch 50</a>)</td>
+</tr>
+<tr>
+<td><strong>Buy vs build</strong></td>
+<td>Many insurers buy a core suite (policy/billing/claims) and build digital channels, rating services, fraud and data around it</td>
+<td>Mature domain, regulatory features; differentiation is at the edges</td>
+</tr>
+<tr>
+<td><strong>Integration</strong></td>
+<td>APIs for partners, events internally, file exchanges where industry partners require them</td>
+<td>Real-world mix</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-how-it-works-journeys-end-to-end">4. How It Works — Journeys End to End<a class="headerlink" href="#4-how-it-works-journeys-end-to-end" title="Permanent link">&para;</a></h2>
+<h3 id="41-journey-1-buying-motor-insurance-on-an-aggregator">4.1 Journey 1: buying motor insurance on an aggregator<a class="headerlink" href="#41-journey-1-buying-motor-insurance-on-an-aggregator" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Quote request:</strong> the customer enters their vehicle registration number on an aggregator site, which calls the insurer's <strong>quote API</strong>.</li>
+<li><strong>Enrichment:</strong><ul>
+<li>the insurer fetches vehicle details (make, model, variant, fuel, registration date) from a vehicle registry integration (VERIFY data-access arrangements);</li>
+<li>checks previous insurance and claims history through industry data where available (VERIFY);</li>
+<li>looks up the <strong>insured declared value (IDV)</strong> from depreciation schedules.</li>
+</ul>
+</li>
+<li>
+<p><strong>Rating</strong> (§6.1): base premium from rate tables by vehicle class, zone and age, then adjustments:</p>
+<ul>
+<li><strong>No Claim Bonus</strong> carried from the previous policy (VERIFY current NCB slabs);</li>
+<li>add-ons (zero depreciation, engine protection, roadside assistance);</li>
+<li>voluntary deductible;</li>
+<li>the insurer's pricing model loading or discount within filed ranges;</li>
+<li>taxes (GST).</li>
+</ul>
+<p>Third-party premium is set by the regulator (VERIFY).
+4. <strong>Response:</strong> the quote returns within hundreds of milliseconds with a <strong>quote ID</strong> valid for a short time. Aggregators may show 20 insurers side by side.
+5. <strong>Purchase:</strong> the customer selects and pays.
+- <strong>KYC</strong> is mandatory for all policies now (VERIFY), done with CKYC lookup or e-KYC.
+- <strong>Break-in cases</strong> (expired policy) need a <strong>self-inspection</strong>: the customer records a guided video or photos of the car in the app. An image model checks for damage and fraud (§6.5), and a human reviews exceptions.
+6. <strong>Issuance:</strong>
+- underwriting rules pass;
+- the policy is created in PAS;
+- the premium is recorded in billing;
+- commission is accrued for the aggregator;
+- the <strong>policy document</strong> is generated (schedule plus wordings) and emailed instantly.
+7. <strong>Downstream:</strong> the policy is reported to industry and regulatory repositories as required (VERIFY), and becomes a reinsurance cession if a treaty covers it.</p>
+</li>
+</ol>
+<h3 id="42-journey-2-buying-a-family-health-policy-in-the-app">4.2 Journey 2: buying a family health policy in the app<a class="headerlink" href="#42-journey-2-buying-a-family-health-policy-in-the-app" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Proposal:</strong> the customer adds members (ages, pre-existing conditions, lifestyle questions).</li>
+<li>
+<p><strong>Underwriting rules:</strong></p>
+<ul>
+<li><strong>accept</strong> at standard rates (young, no conditions);</li>
+<li><strong>accept with loading</strong> or a waiting period for declared conditions;</li>
+<li><strong>refer</strong> to medical underwriting (tele-medical interview or medical tests at partner labs);</li>
+<li><strong>decline</strong> outside appetite.</li>
+</ul>
+<p>A <strong>score</strong> (§6.3) orders referrals by risk.
+3. <strong>Pricing:</strong> premium by age band per member, sum insured, zone (city tier), deductibles, add-ons. The family floater discount is applied.
+4. <strong>Payment and mandate:</strong> annual payment, or instalments via NACH/UPI AutoPay mandates.
+5. <strong>Issuance:</strong> the policy with <strong>waiting periods</strong> recorded per member and condition. A <strong>health card</strong> is issued (digital) for cashless use.
+6. <strong>Free-look period:</strong> the customer can cancel within a set number of days for a refund minus proportionate costs (VERIFY the current period and rules). The PAS supports this as a special cancellation.</p>
+</li>
+</ol>
+<h3 id="43-journey-3-a-cashless-hospital-claim">4.3 Journey 3: a cashless hospital claim<a class="headerlink" href="#43-journey-3-a-cashless-hospital-claim" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Admission and pre-auth request:</strong> the patient is admitted to a network hospital. The hospital's insurance desk sends a <strong>pre-authorisation request</strong> with the diagnosis, planned treatment, estimated cost and doctor notes. It arrives via the insurer's TPA portal/API or the <strong>National Health Claims Exchange</strong> (NHCX, FHIR-based; VERIFY adoption) (<a href="../i04-hospital-ehr-and-telemedicine/">I04</a> §4.4).</li>
+<li><strong>Coverage checks</strong> (automated first):<ul>
+<li>policy in force;</li>
+<li>member covered;</li>
+<li>waiting periods passed for this condition;</li>
+<li>sum insured available (after previous claims);</li>
+<li>sub-limits (room rent caps, disease-specific limits);</li>
+<li>exclusions;</li>
+<li>hospital in network with an agreed <strong>package tariff</strong>.</li>
+</ul>
+</li>
+<li><strong>Medical adjudication:</strong><ul>
+<li>rules auto-approve standard packages (e.g. cataract surgery at the agreed tariff);</li>
+<li>otherwise a <strong>medical officer</strong> reviews: are the treatment and length of stay appropriate for the diagnosis?</li>
+<li>queries go back to the hospital as tasks.</li>
+</ul>
+</li>
+<li><strong>Approval:</strong> within the regulatory timeline for pre-auth decisions (VERIFY). An <strong>approved amount</strong> is issued, with enhancements if the stay extends.</li>
+<li><strong>Discharge:</strong><ul>
+<li>the hospital submits the <strong>final bill</strong> with itemisation and discharge summary;</li>
+<li><strong>bill audit</strong> (§6.7) checks items against the tariff, flags non-payables (consumables excluded by policy) and applies co-pay and deductibles;</li>
+<li>final approval is issued, again within timelines (VERIFY);</li>
+<li>the patient pays the non-payables and leaves.</li>
+</ul>
+</li>
+<li><strong>Settlement:</strong> the insurer pays the hospital via bank transfer in batches, reconciled per claim.</li>
+<li><strong>Accounting:</strong> the claim updates the <strong>sum insured utilisation</strong>, the <strong>no-claim bonus</strong> status for renewal, reserves (§6.8) and reinsurance recoveries.</li>
+</ol>
+<h3 id="44-journey-4-a-motor-accident-claim">4.4 Journey 4: a motor accident claim<a class="headerlink" href="#44-journey-4-a-motor-accident-claim" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>FNOL (first notice of loss):</strong> in the app, the customer records the accident location, photos and description, and chooses a garage.</li>
+<li><strong>Triage:</strong><ul>
+<li>small, simple claims with clear photos go to <strong>AI-assisted assessment</strong>: damage detection and estimate by part (§6.5), within a threshold;</li>
+<li>larger or suspicious claims get a <strong>surveyor</strong> (licensed, per regulation; VERIFY thresholds for mandatory surveys);</li>
+<li><strong>third-party injury claims</strong> follow legal processes (motor accident claims tribunals) and are handled separately, with long durations.</li>
+</ul>
+</li>
+<li><strong>Survey:</strong><ul>
+<li>the surveyor inspects, virtually or in person, and records findings in the surveyor app;</li>
+<li>the garage submits a repair estimate;</li>
+<li>the system compares the estimate to part price catalogues and labour norms;</li>
+<li><strong>depreciation</strong> is applied per part material, unless a zero-depreciation add-on applies.</li>
+</ul>
+</li>
+<li><strong>Approval:</strong> the repair is authorised. After repair, a <strong>re-inspection</strong> (photos) is done. The insurer pays the garage directly (cashless garage), or reimburses the customer.</li>
+<li><strong>Fraud checks</strong> throughout (§6.6): inconsistent photos, previously claimed damage (image similarity against past claims), staged accident patterns, linked parties.</li>
+<li><strong>Recovery:</strong><ul>
+<li><strong>salvage</strong> for total losses (the vehicle is sold via auction);</li>
+<li><strong>subrogation</strong> against a third party's insurer where applicable.</li>
+</ul>
+</li>
+</ol>
+<h3 id="45-journey-5-a-life-insurance-death-claim">4.5 Journey 5: a life insurance death claim<a class="headerlink" href="#45-journey-5-a-life-insurance-death-claim" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Intimation:</strong> the nominee intimates the claim via the app, branch or call centre, with the death certificate, policy details, and their own KYC and bank details.</li>
+<li><strong>Validation:</strong> policy in force at the date of death, no lapse, and nominee identity verified.</li>
+<li><strong>Early claims</strong> (e.g. within the first few years) may be <strong>investigated</strong> for non-disclosure, within legal limits on contestability (VERIFY Section 45 of the Insurance Act as amended).</li>
+<li><strong>Decision and payment:</strong> payment to the nominee's verified account within regulatory timelines, with interest for delays where required (VERIFY). Reinsurance recovery for amounts above retention.</li>
+</ol>
+<h3 id="46-journey-6-renewal-and-lapse">4.6 Journey 6: renewal and lapse<a class="headerlink" href="#46-journey-6-renewal-and-lapse" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Reminders:</strong> renewal notices go out before expiry by email, SMS and app. For <strong>motor and health</strong>, the renewal premium is recalculated (age band change, NCB, claims experience, rate revisions).</li>
+<li><strong>Auto-renewal:</strong> where a mandate exists, the premium is debited after the pre-debit notification (VERIFY rules).</li>
+<li><strong>Grace periods:</strong> during the grace period, cover continuity rules apply per product (VERIFY).<ul>
+<li><strong>Health:</strong> continuity preserves waiting-period credit.</li>
+<li><strong>Life:</strong> unpaid premiums lead to <strong>lapse</strong> after the grace period. <strong>Revival</strong> is possible within a window, with arrears plus interest and possibly fresh underwriting.</li>
+</ul>
+</li>
+<li><strong>Lapse prediction</strong> (§6.9) triggers targeted outreach before due dates.</li>
+</ol>
+<hr />
+<h2 id="5-core-subsystems-in-depth">5. Core Subsystems in Depth<a class="headerlink" href="#5-core-subsystems-in-depth" title="Permanent link">&para;</a></h2>
+<h3 id="51-product-configurator">5.1 Product configurator<a class="headerlink" href="#51-product-configurator" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A product definition</strong> includes:<ul>
+<li>coverages and benefits;</li>
+<li>options and add-ons;</li>
+<li>eligibility rules;</li>
+<li>rating factors and rate tables;</li>
+<li>underwriting rules;</li>
+<li>policy wording templates;</li>
+<li>claims rules (waiting periods, sub-limits, exclusions, co-pays);</li>
+<li>commission rules;</li>
+<li>regulatory identifiers.</li>
+</ul>
+</li>
+<li><strong>Versioned with effective dates.</strong> A policy is always administered under the product version it was sold on, or renewed into, per rules.</li>
+<li><strong>Output:</strong> a machine-readable product model interpreted by the rating engine, the underwriting engine, PAS and claims. One definition, many consumers, which avoids inconsistencies between quoting and claims.</li>
+<li><strong>Testing:</strong> every product version has test cases (premium examples filed with the regulator, claims examples) run automatically before release.</li>
+</ul>
+<h3 id="52-rating-engine">5.2 Rating engine<a class="headerlink" href="#52-rating-engine" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Stateless and fast.</strong> Input: risk data + product version. Output: premium breakdown (per coverage, loadings, discounts, taxes).</li>
+<li><strong>Rate tables</strong> are loaded in memory. Pricing models (§6.1) are served as tables or model artefacts.</li>
+<li><strong>Aggregator traffic:</strong> very high quote volumes with low conversion. <strong>Cache</strong> quotes by risk signature (vehicle variant + zone + age + NCB + add-ons) for minutes. Rate-limit per partner.</li>
+<li><strong>Explainability:</strong> every quote stores its factor contributions, for disputes and regulatory review.</li>
+</ul>
+<h3 id="53-policy-administration-with-bitemporal-data">5.3 Policy administration with bitemporal data<a class="headerlink" href="#53-policy-administration-with-bitemporal-data" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Policy versions:</strong> each change (endorsement) creates a new version with an <strong>effective date range</strong> (when the change applies in the contract) and a <strong>transaction time</strong> (when it was recorded).</li>
+<li><strong>Back-dated changes</strong> (e.g. a vehicle change effective last week) produce premium adjustments computed pro-rata for the affected period.</li>
+<li><strong>Queries:</strong><ul>
+<li>"what cover applied on the accident date?" uses effective time;</li>
+<li>"what did we know when we approved that claim?" uses transaction time.</li>
+</ul>
+</li>
+<li><strong>Documents:</strong> endorsement schedules generated per version.</li>
+<li><strong>Cancellations:</strong> pro-rata or short-period scales per rules. Refund computation and payment.</li>
+</ul>
+<h3 id="54-billing-and-collections">5.4 Billing and collections<a class="headerlink" href="#54-billing-and-collections" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Payment modes:</strong> single premium, instalments (monthly or quarterly), mandates (NACH, UPI AutoPay; VERIFY limits and pre-debit rules), card, net banking.</li>
+<li><strong>Premium allocation:</strong> premium receivable accounts per policy; unallocated receipts handled by rules.</li>
+<li><strong>Dunning:</strong> failed debits → retry → notify → grace period → lapse or cancellation per product.</li>
+<li><strong>Integration</strong> with finance: premium income recognition, GST, commission payable.</li>
+</ul>
+<h3 id="55-claims-management">5.5 Claims management<a class="headerlink" href="#55-claims-management" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A claim is a case with a workflow:</strong><ol>
+<li>intake (FNOL);</li>
+<li>coverage verification;</li>
+<li>triage (complexity, fraud score, value);</li>
+<li>assignment (automation, adjuster, surveyor, medical officer);</li>
+<li>investigation;</li>
+<li>assessment;</li>
+<li>approval (authority limits by role and amount);</li>
+<li>payment;</li>
+<li>recovery (reinsurance, salvage, subrogation);</li>
+<li>closure, and reopen if needed.</li>
+</ol>
+</li>
+<li><strong>Human tasks</strong> with SLAs. <strong>Authority matrices</strong> (who can approve how much). Maker-checker for payments above thresholds.</li>
+<li><strong>Reserves per claim:</strong> an initial reserve at intimation (by triage model), updated as information arrives. These <strong>case reserves</strong> feed actuarial reserving.</li>
+<li><strong>Straight-through processing (STP):</strong> simple claims (low value, clear coverage, low fraud score) auto-approve and pay within minutes, e.g. small OPD health claims or windshield replacement.</li>
+<li><strong>Communication:</strong> status updates to customers and hospitals, and document requests as tasks visible in the app.</li>
+</ul>
+<h3 id="56-reinsurance">5.6 Reinsurance<a class="headerlink" href="#56-reinsurance" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Treaties:</strong><ul>
+<li><strong>quota share:</strong> a fixed percentage of every policy ceded;</li>
+<li><strong>surplus:</strong> amounts above the retention ceded, per policy;</li>
+<li><strong>excess of loss:</strong> the reinsurer pays losses above a threshold per event or per risk;</li>
+<li><strong>catastrophe</strong> covers.</li>
+</ul>
+</li>
+<li><strong>Cessions:</strong> computed per policy (at issuance and endorsement), with cession premiums.</li>
+<li><strong>Recoveries:</strong> computed per claim or per event (catastrophes aggregate many claims).</li>
+<li><strong>Bordereaux</strong> (listings) are sent to reinsurers periodically. Reinsurance accounting is reconciled.</li>
+<li><strong>Facultative reinsurance</strong> for individual large risks outside treaties (a workflow with reinsurer quotes).</li>
+</ul>
+<h3 id="57-fraud-management">5.7 Fraud management<a class="headerlink" href="#57-fraud-management" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Scoring at key points:</strong> policy issuance (application fraud), claim intimation, and before payment.</li>
+<li><strong>Rules:</strong><ul>
+<li>claims soon after inception;</li>
+<li>high-value claims just below approval thresholds;</li>
+<li>repeated claimants;</li>
+<li>hospitals or garages with outlier patterns.</li>
+</ul>
+</li>
+<li><strong>Models:</strong> supervised (from past confirmed fraud) plus anomaly detection.</li>
+<li><strong>Network analysis (§6.6):</strong> links between claimants, garages, hospitals, doctors, phones, bank accounts and addresses reveal rings.</li>
+<li><strong>SIU case management:</strong> investigation tasks, evidence, outcomes that feed back as labels.</li>
+<li><strong>Industry sharing:</strong> fraud repositories and claims history databases shared across insurers, where regulated (VERIFY).</li>
+</ul>
+<hr />
+<h2 id="6-algorithms">6. Algorithms<a class="headerlink" href="#6-algorithms" title="Permanent link">&para;</a></h2>
+<h3 id="61-pricing-with-generalised-linear-models">6.1 Pricing with generalised linear models<a class="headerlink" href="#61-pricing-with-generalised-linear-models" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong>Frequency × severity:</strong></p>
+<ul>
+<li>model claim <strong>frequency</strong> (claims per policy-year) with a <strong>Poisson GLM</strong> (log link);</li>
+<li>model claim <strong>severity</strong> (cost per claim) with a <strong>Gamma GLM</strong> (log link);</li>
+<li>pure premium = frequency × severity.</li>
+</ul>
+<p>With log links, factors multiply: premium = base × factor(age) × factor(zone) × factor(vehicle)…
+- <strong>Tweedie GLMs</strong> model pure premium directly.
+- <strong>Credibility and smoothing:</strong> sparse cells are smoothed, e.g. a rare vehicle model gets credibility-weighted factors between its own experience and its group's.
+- <strong>Gradient-boosted models</strong> capture interactions but must be explainable and filed. Many insurers use GBMs to find interactions, then encode them in GLM-style tables for filing and transparency (VERIFY local product filing rules).
+- <strong>Final premium:</strong> pure premium + expense loadings + profit margin + commissions + taxes, within approved rate ranges.</p>
+</li>
+</ul>
+<h3 id="62-rules-engines">6.2 Rules engines<a class="headerlink" href="#62-rules-engines" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Underwriting, eligibility and claims coverage rules</strong> are expressed declaratively: "if age &gt; 55 and sum insured &gt; 50 lakh then refer".</li>
+<li><strong>Engines:</strong> the Rete algorithm (e.g. Drools) evaluates many rules efficiently by sharing conditions and incrementally matching facts. Decision tables are for business users.</li>
+<li><strong>Governance:</strong> versioned rule sets tied to product versions, test suites, and audit of which rules fired for each decision.</li>
+</ul>
+<h3 id="63-underwriting-scoring">6.3 Underwriting scoring<a class="headerlink" href="#63-underwriting-scoring" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A risk score</strong> from applicant data (age, BMI, declared conditions, occupation, income-to-cover ratio), external data (bureau-based signals where permitted; VERIFY), and medical test results.</li>
+<li><strong>Decisions:</strong> thresholds map the score to bands (accept, loading, referral, decline), with rules as guard rails.</li>
+<li><strong>Accelerated underwriting:</strong> lower-risk applicants skip medical tests. The model must control <strong>mortality/morbidity slippage</strong>, monitored against actual claims experience.</li>
+<li><strong>Fairness:</strong> exclude prohibited factors; monitor outcomes across groups (VERIFY applicable rules).</li>
+</ul>
+<h3 id="64-telematics-usage-based-motor-insurance">6.4 Telematics (usage-based motor insurance)<a class="headerlink" href="#64-telematics-usage-based-motor-insurance" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Data:</strong> trips from a phone app or device: distance, time of day, speeding relative to road limits, harsh braking and acceleration, phone use while driving.</li>
+<li><strong>Driving score:</strong> event rates per 100 km weighted by severity and exposure. Premium discounts are tied to the score (VERIFY regulatory framework for pay-as-you-drive products).</li>
+<li><strong>Pipeline:</strong> sensor streams → trip segmentation → map matching (<a href="../i05-ride-hailing/">I05</a> §6.5) → event detection → aggregation per policy period.</li>
+</ul>
+<h3 id="65-image-based-damage-assessment">6.5 Image-based damage assessment<a class="headerlink" href="#65-image-based-damage-assessment" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Guided capture</strong> ensures angles and coverage. Photo metadata checks: time, location, device consistency.</li>
+<li><strong>Computer vision models:</strong><ul>
+<li><strong>part detection</strong> (bumper, door, headlamp);</li>
+<li><strong>damage detection and classification</strong> (scratch, dent, crack);</li>
+<li><strong>severity</strong> → repair vs replace decisions.</li>
+</ul>
+</li>
+<li><strong>Estimate:</strong> parts price catalogue + labour norms + paint → estimated cost. The confidence decides auto-approve or survey.</li>
+<li><strong>Fraud:</strong><ul>
+<li><strong>perceptual hashing</strong> against past claim photos (reused images; <a href="../i07-messaging-and-social-feed/">I07</a> §6.8);</li>
+<li>edited image detection;</li>
+<li>odometer and plate consistency.</li>
+</ul>
+</li>
+</ul>
+<h3 id="66-fraud-networks">6.6 Fraud networks<a class="headerlink" href="#66-fraud-networks" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Graph:</strong> nodes = policyholders, claims, vehicles, garages, hospitals, doctors, phones, emails, bank accounts, addresses; edges = relationships.</li>
+<li><strong>Detection:</strong><ul>
+<li><strong>connected components and community detection</strong> find rings;</li>
+<li><strong>centrality</strong> finds hubs (a garage linked to many suspicious claims);</li>
+<li><strong>graph features</strong> (degree, shared attributes) feed supervised models.</li>
+</ul>
+</li>
+<li><strong>Entity resolution</strong> first: the same person with different spellings or phones (<a href="../i04-hospital-ehr-and-telemedicine/">I04</a> §6.1 patterns).</li>
+</ul>
+<h3 id="67-claims-triage-and-bill-auditing">6.7 Claims triage and bill auditing<a class="headerlink" href="#67-claims-triage-and-bill-auditing" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Triage model:</strong> predicts complexity, expected cost and fraud risk at intimation. It routes to STP, a junior or senior adjuster, or the SIU, and sets the initial reserve.</li>
+<li><strong>Health bill audit:</strong><ul>
+<li>map bill items to standard codes;</li>
+<li>compare with the package tariff and reasonable-cost benchmarks for the diagnosis and city;</li>
+<li>flag non-payable consumables per regulatory lists (VERIFY), duplicate charges, and room-rent proportionate deductions.</li>
+</ul>
+</li>
+<li><strong>Length-of-stay benchmarks</strong> per diagnosis flag outliers for medical review.</li>
+</ul>
+<h3 id="68-reserving-ibnr-with-the-chain-ladder-method">6.8 Reserving (IBNR) with the chain-ladder method<a class="headerlink" href="#68-reserving-ibnr-with-the-chain-ladder-method" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The problem:</strong> at any date, some claims have happened but aren't reported yet (IBNR), and reported claims will still develop. Reserves must cover the ultimate cost.</li>
+<li><strong>Chain ladder:</strong><ul>
+<li>arrange paid (or incurred) claims in a <strong>triangle</strong>: rows = accident period, columns = development period;</li>
+<li>compute <strong>age-to-age development factors</strong> as the ratio of cumulative claims between consecutive development periods, weighted across accident periods;</li>
+<li>multiply the latest diagonal by the remaining factors to project <strong>ultimate</strong> claims per accident period;</li>
+<li>IBNR = ultimate − reported.</li>
+</ul>
+</li>
+<li><strong>Variants:</strong> Bornhuetter–Ferguson (blending expected loss ratio for immature periods), Mack's method for uncertainty, stochastic bootstraps.</li>
+<li><strong>Systems role:</strong> the data platform produces <strong>clean triangles</strong> by product, line and period, reconciled with finance. Actuaries run and sign off models.</li>
+</ul>
+<h3 id="69-lapse-and-renewal-prediction">6.9 Lapse and renewal prediction<a class="headerlink" href="#69-lapse-and-renewal-prediction" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Model:</strong> classifier on payment history, tenure, channel, premium change at renewal, engagement and claims experience.</li>
+<li><strong>Use:</strong> targeted reminders, agent follow-ups, offering instalments. Measured by uplift experiments.</li>
+</ul>
+<hr />
+<h2 id="7-data-architecture">7. Data Architecture<a class="headerlink" href="#7-data-architecture" title="Permanent link">&para;</a></h2>
+<h3 id="71-operational-stores">7.1 Operational stores<a class="headerlink" href="#71-operational-stores" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Store (reference)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Product definitions, rules, rate tables</td>
+<td>Versioned configuration store (Git-backed + database)</td>
+<td>Released as artefacts</td>
+</tr>
+<tr>
+<td>Policies (bitemporal)</td>
+<td>PostgreSQL / core suite database</td>
+<td>Versions with effective and transaction time</td>
+</tr>
+<tr>
+<td>Claims and workflows</td>
+<td>Workflow engine store + PostgreSQL</td>
+<td>Tasks, SLAs, audit</td>
+</tr>
+<tr>
+<td>Billing and ledgers</td>
+<td>Relational with double-entry</td>
+<td><a href="../../05-case-studies/45-payment-system/">Ch 45</a></td>
+</tr>
+<tr>
+<td>Documents</td>
+<td>Object storage + DMS metadata</td>
+<td>Encrypted; retention per regulation</td>
+</tr>
+<tr>
+<td>Quotes</td>
+<td>KV with TTL + warehouse copy for analytics</td>
+<td>High volume, low conversion</td>
+</tr>
+<tr>
+<td>Fraud graph</td>
+<td>Graph database or graph tables in the warehouse</td>
+<td>Updated daily and on events</td>
+</tr>
+</tbody>
+</table>
+<h3 id="72-warehouse-and-actuarial-data">7.2 Warehouse and actuarial data<a class="headerlink" href="#72-warehouse-and-actuarial-data" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>CDC/events</strong> from PAS, billing, claims and reinsurance → lakehouse → <strong>warehouse</strong>.</li>
+<li><strong>Core subject areas:</strong><ul>
+<li><strong>policy/exposure:</strong> earned exposure per policy per period;</li>
+<li><strong>premium:</strong> written and earned;</li>
+<li><strong>claims:</strong> transactions, payments, reserves by date;</li>
+<li><strong>reinsurance:</strong> ceded premium, recoveries;</li>
+<li><strong>commissions</strong>;</li>
+<li><strong>customer</strong>.</li>
+</ul>
+</li>
+<li><strong>Actuarial marts:</strong> exposure and claims per accident period and development period (triangles), per product and line. Experience studies (loss ratios by factor, mortality and morbidity experience vs expected).</li>
+<li><strong>Finance and regulatory reporting:</strong> premium, claims, reserves, solvency calculations, and regulatory returns in prescribed formats (VERIFY IRDAI reporting and Ind AS 117 / IFRS 17 adoption status).</li>
+<li><strong>IFRS 17-style accounting</strong> (if adopted) needs grouping of contracts, cash flow projections and a contractual service margin, a significant data and calculation engine in its own right (VERIFY).</li>
+</ul>
+<h3 id="73-ml-platform">7.3 ML platform<a class="headerlink" href="#73-ml-platform" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Models:</strong> pricing support, underwriting scores, lapse, claims triage, fraud, image damage, bill audit anomalies, catastrophe exposure analysis.</li>
+<li><strong>Governance:</strong><ul>
+<li>model risk management (validation, documentation);</li>
+<li>explainability for decisions affecting customers;</li>
+<li>monitoring for drift (e.g. inflation changes severity);</li>
+<li>human override paths.</li>
+</ul>
+</li>
+</ul>
+<h3 id="74-data-flow">7.4 Data flow<a class="headerlink" href="#74-data-flow" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>flowchart LR
+    PAS[Policy admin] --&gt; K[Kafka and CDC]
+    BILL[Billing] --&gt; K
+    CLM[Claims] --&gt; K
+    RI[Reinsurance] --&gt; K
+    K --&gt; LAKE[Lakehouse]
+    LAKE --&gt; DW[Warehouse - premium, claims, exposure]
+    DW --&gt; ACT[Actuarial marts - triangles, experience]
+    DW --&gt; FIN[Finance and regulatory reporting]
+    LAKE --&gt; FEAT[Features]
+    FEAT --&gt; MODELS[Pricing, underwriting, fraud, triage models]
+    MODELS --&gt; SVC[Rating, underwriting, claims services]
+    ACT --&gt; RES[Reserving by actuaries]
+    RES --&gt; FIN</code></pre>
+<hr />
+<h2 id="8-tech-stack-reference-choice">8. Tech Stack (reference choice)<a class="headerlink" href="#8-tech-stack-reference-choice" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Choice</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Core policy/billing/claims</td>
+<td>Commercial suite (e.g. Guidewire, Duck Creek, or Indian vendors) or built on Java/Spring</td>
+<td>Many insurers buy; digital layers are built</td>
+</tr>
+<tr>
+<td>Rating and underwriting</td>
+<td>Java/Kotlin services; Drools for rules; model serving</td>
+<td>Fast, explainable</td>
+</tr>
+<tr>
+<td>Workflows</td>
+<td>Camunda/Temporal (BPMN for human tasks)</td>
+<td>Claims and underwriting referrals</td>
+</tr>
+<tr>
+<td>APIs</td>
+<td>Spring Boot, API gateway with partner management</td>
+<td>Aggregator scale</td>
+</tr>
+<tr>
+<td>Databases</td>
+<td>PostgreSQL; Redis for quote cache</td>
+<td>Proven</td>
+</tr>
+<tr>
+<td>Documents</td>
+<td>Object storage + DMS; templating for policy documents</td>
+<td>Long retention</td>
+</tr>
+<tr>
+<td>Messaging</td>
+<td>Kafka + Debezium CDC</td>
+<td>Events to data platform</td>
+</tr>
+<tr>
+<td>Lakehouse/warehouse</td>
+<td>Iceberg + Spark + Trino, or a cloud warehouse (in-country per rules)</td>
+<td>Actuarial marts</td>
+</tr>
+<tr>
+<td>BI</td>
+<td>Superset/Power BI</td>
+<td>Finance and ops dashboards</td>
+</tr>
+<tr>
+<td>ML</td>
+<td>Python (scikit-learn, XGBoost, PyTorch for images), MLflow</td>
+<td>Model governance</td>
+</tr>
+<tr>
+<td>Graph</td>
+<td>Neo4j or graph features in the warehouse</td>
+<td>Fraud rings</td>
+</tr>
+<tr>
+<td>Mobile</td>
+<td>Native or cross-platform app with guided photo/video capture</td>
+<td>Self-inspection, FNOL</td>
+</tr>
+<tr>
+<td>Platform</td>
+<td>Kubernetes, Terraform, Argo CD</td>
+<td>Standard</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-security-privacy-compliance">9. Security, Privacy &amp; Compliance<a class="headerlink" href="#9-security-privacy-compliance" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Health data:</strong> strict access by role and claim assignment, and audit (<a href="../i04-hospital-ehr-and-telemedicine/">I04</a> §10 patterns). Consent for data use. DPDP Act obligations (VERIFY).</li>
+<li><strong>KYC/AML:</strong> KYC for all policies, sanctions and PEP screening, suspicious transaction reporting for large premiums or refunds (VERIFY).</li>
+<li><strong>Policyholder protection:</strong><ul>
+<li>free-look;</li>
+<li>claim decision and payment timelines;</li>
+<li>grievance redressal with escalation to the Bima Bharosa system and ombudsman;</li>
+<li>disclosure of rejection reasons (VERIFY current rules).</li>
+</ul>
+</li>
+<li><strong>Distribution compliance:</strong> commission and expense limits, disclosure by intermediaries, aggregator rules (VERIFY).</li>
+<li><strong>Industry platforms:</strong> <strong>Bima Sugam</strong>, an IRDAI-backed insurance marketplace platform in development, and insurance repositories for e-policies (VERIFY current status).</li>
+<li><strong>Cybersecurity:</strong> IRDAI information and cyber security guidelines (VERIFY).</li>
+</ul>
+<hr />
+<h2 id="10-reliability-operations">10. Reliability &amp; Operations<a class="headerlink" href="#10-reliability-operations" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Channel availability:</strong> quote and buy APIs are horizontally scaled and stateless. Aggregator traffic is rate-limited per partner. Rating is cached.</li>
+<li><strong>Cashless approvals</strong> must work 24×7. The TPA and medical officer workflow needs on-call coverage. System outages delay patient discharges.</li>
+<li><strong>Catastrophe mode:</strong> after floods or cyclones, activate simplified claims processes:<ul>
+<li>self-survey with photos;</li>
+<li>relaxed documentation per regulator advisories (VERIFY);</li>
+<li>surge surveyor allocation;</li>
+<li>dedicated dashboards;</li>
+<li>reserve estimates per event for reinsurance notification.</li>
+</ul>
+</li>
+<li><strong>Month-end and year-end:</strong> closing processes (earned premium, reserves, reinsurance accounting) run as scheduled pipelines with reconciliation checks.</li>
+<li><strong>Data quality:</strong> exposure and claims data errors directly distort pricing and reserves. Build validation rules into pipelines and reconcile with finance.</li>
+</ul>
+<hr />
+<h2 id="11-key-trade-offs">11. Key Trade-offs<a class="headerlink" href="#11-key-trade-offs" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Chosen</th>
+<th>Accepted cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Core systems</td>
+<td>Buy a suite, build the edges</td>
+<td>Vendor constraints; integration work</td>
+</tr>
+<tr>
+<td>Product definition</td>
+<td>Configuration-driven, versioned</td>
+<td>Configurator complexity</td>
+</tr>
+<tr>
+<td>Policy data</td>
+<td>Bitemporal</td>
+<td>Harder queries and storage</td>
+</tr>
+<tr>
+<td>Claims</td>
+<td>Workflows with STP for simple cases</td>
+<td>Model risk in auto-approvals</td>
+</tr>
+<tr>
+<td>Pricing</td>
+<td>GLM tables (with ML insights)</td>
+<td>Less flexible than pure ML</td>
+</tr>
+<tr>
+<td>Fraud</td>
+<td>Rules + models + graphs + SIU</td>
+<td>Investigation cost; false positives</td>
+</tr>
+<tr>
+<td>Reserving</td>
+<td>Actuarial models on clean triangles</td>
+<td>Data engineering effort</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-interview-qa">12. Interview Q&amp;A<a class="headerlink" href="#12-interview-qa" title="Permanent link">&para;</a></h2>
+<h3 id="beginner-b1">Beginner <span class="band b1">B1</span><a class="headerlink" href="#beginner-b1" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q1 [B1] ⭐ What are the core systems of an insurance company?</summary>
+<p><strong>30-second answer:</strong> Product configuration and rating, distribution channels, underwriting, policy administration (issuance, endorsements, renewals), billing and collections, claims management, fraud, reinsurance, actuarial and finance, customer service, and a data platform for reporting and pricing.</p>
+<p><strong>Deep answer:</strong> §1.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Buy a suite vs build.</p>
+<p><strong>Follow-ups:</strong>
+1. Most complex? → Claims.
+2. Most changed? → Products and pricing.</p>
+<p><strong>Red flags:</strong> "It's just a CRUD app for policies."</p>
+</details>
+<details class="question">
+<summary>Q2 [B1] How is a motor insurance premium calculated?</summary>
+<p><strong>30-second answer:</strong> From vehicle details (class, age, value), zone, the insured declared value, no-claim bonus, add-ons and deductibles through rate tables and model-based loadings, plus the regulated third-party premium and taxes.</p>
+<p><strong>Deep answer:</strong> §4.1, §6.1 (VERIFY current rules).</p>
+<p><strong>Trade-offs I'd call out:</strong> Speed vs enrichment lookups.</p>
+<p><strong>Follow-ups:</strong>
+1. NCB? → Discount for claim-free years.
+2. Aggregators? → Cached quotes.</p>
+<p><strong>Red flags:</strong> Hard-coded premiums in code.</p>
+</details>
+<details class="question">
+<summary>Q3 [B1] What happens in a cashless hospital claim?</summary>
+<p><strong>30-second answer:</strong> The hospital requests pre-authorisation; the insurer checks policy coverage, waiting periods, limits and network tariffs; a medical officer reviews if needed; an approved amount is issued; at discharge the final bill is audited; the insurer pays the hospital and the patient pays non-payables.</p>
+<p><strong>Deep answer:</strong> §4.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Speed vs checks.</p>
+<p><strong>Follow-ups:</strong>
+1. Timelines? → Regulatory limits.
+2. Enhancements? → For longer stays.</p>
+<p><strong>Red flags:</strong> Only reimbursement claims.</p>
+</details>
+<details class="question">
+<summary>Q4 [B1] What is an endorsement?</summary>
+<p><strong>30-second answer:</strong> A mid-term change to a policy — adding a member, changing a vehicle or address — creating a new policy version with an effective date and, often, a pro-rata premium adjustment.</p>
+<p><strong>Deep answer:</strong> §5.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Versioning complexity.</p>
+<p><strong>Follow-ups:</strong>
+1. Back-dated? → Bitemporal data.
+2. Documents? → Endorsement schedule.</p>
+<p><strong>Red flags:</strong> Overwriting the policy row.</p>
+</details>
+<h3 id="intermediate-b2">Intermediate <span class="band b2">B2</span><a class="headerlink" href="#intermediate-b2" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q5 [B2] ⭐ Why use a bitemporal data model for policies?</summary>
+<p><strong>30-second answer:</strong> Changes can apply from a past or future date (effective time) and are recorded at a different time (transaction time); claims need "what cover applied on the loss date" and audits need "what did we know when we decided" — both require keeping both timelines.</p>
+<p><strong>Deep answer:</strong> §5.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Query and storage complexity.</p>
+<p><strong>Follow-ups:</strong>
+1. Example? → Back-dated vehicle change.
+2. Implementation? → Valid-from/to plus recorded-at columns.</p>
+<p><strong>Red flags:</strong> Only the latest state.</p>
+</details>
+<details class="question">
+<summary>Q6 [B2] How do you launch new insurance products quickly?</summary>
+<p><strong>30-second answer:</strong> A product configurator with versioned definitions (coverages, rules, rate tables, wordings, claims rules) consumed by rating, underwriting, policy and claims engines, with automated test cases per version — code changes only for genuinely new behaviour.</p>
+<p><strong>Deep answer:</strong> §5.1.</p>
+<p><strong>Trade-offs I'd call out:</strong> Configurator complexity vs speed.</p>
+<p><strong>Follow-ups:</strong>
+1. Old policies? → Stay on their version.
+2. Regulatory approval? → Before release (VERIFY).</p>
+<p><strong>Red flags:</strong> Product logic scattered in code.</p>
+</details>
+<details class="question">
+<summary>Q7 [B2] How would you handle aggregator quote traffic?</summary>
+<p><strong>30-second answer:</strong> Stateless, horizontally scaled rating with in-memory tables, caching by risk signature, per-partner rate limits and quotas, fast external lookups with fallbacks, short quote retention, and monitoring conversion per partner.</p>
+<p><strong>Deep answer:</strong> §5.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Cache freshness vs cost.</p>
+<p><strong>Follow-ups:</strong>
+1. Registry outage? → Manual details path.
+2. Price changes? → Cache invalidation by version.</p>
+<p><strong>Red flags:</strong> Full underwriting per quote.</p>
+</details>
+<details class="question">
+<summary>Q8 [B2] How do claims workflows work?</summary>
+<p><strong>30-second answer:</strong> A case moves through intake, coverage checks, triage, assignment, investigation, assessment, authority-based approval, payment and recovery, with human tasks, SLAs, reserves updated along the way, and straight-through processing for simple low-risk claims.</p>
+<p><strong>Deep answer:</strong> §5.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Automation vs control.</p>
+<p><strong>Follow-ups:</strong>
+1. Authority limits? → Matrix by role/amount.
+2. Reopen? → Allowed with audit.</p>
+<p><strong>Red flags:</strong> Email-driven claims.</p>
+</details>
+<details class="question">
+<summary>Q9 [B2] What is reinsurance and how does the system support it?</summary>
+<p><strong>30-second answer:</strong> Insurers transfer part of their risk to reinsurers via treaties (quota share, surplus, excess of loss, catastrophe) or facultative deals; the system computes cessions per policy, recoveries per claim or event, and produces bordereaux and reinsurance accounting.</p>
+<p><strong>Deep answer:</strong> §5.6.</p>
+<p><strong>Trade-offs I'd call out:</strong> Accuracy vs batch timing.</p>
+<p><strong>Follow-ups:</strong>
+1. Catastrophe? → Event aggregation.
+2. Retention? → Per treaty.</p>
+<p><strong>Red flags:</strong> Spreadsheet reinsurance.</p>
+</details>
+<h3 id="senior-b3">Senior <span class="band b3">B3</span><a class="headerlink" href="#senior-b3" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q10 [B3] ⭐ How would you price motor insurance with data?</summary>
+<p><strong>30-second answer:</strong> Frequency (Poisson GLM) × severity (Gamma GLM) with log links giving multiplicative factors, credibility smoothing for sparse cells, ML to discover interactions then encoded in explainable tables, plus expense and profit loadings, within filed ranges — and monitor actual vs expected.</p>
+<p><strong>Deep answer:</strong> §6.1.</p>
+<p><strong>Trade-offs I'd call out:</strong> Accuracy vs explainability and filing.</p>
+<p><strong>Follow-ups:</strong>
+1. Telematics? → Behaviour-based factors.
+2. Inflation? → Severity trends.</p>
+<p><strong>Red flags:</strong> One flat rate per vehicle class.</p>
+</details>
+<details class="question">
+<summary>Q11 [B3] ⭐ How do you detect insurance fraud rings?</summary>
+<p><strong>30-second answer:</strong> Entity resolution across people, vehicles, providers, phones, bank accounts and addresses; build a graph; find communities and hubs; combine graph features with rules and supervised models; route high scores to the SIU; feed outcomes back as labels.</p>
+<p><strong>Deep answer:</strong> §5.7, §6.6.</p>
+<p><strong>Trade-offs I'd call out:</strong> False positives delay honest claims.</p>
+<p><strong>Follow-ups:</strong>
+1. Garages? → Outlier patterns.
+2. Photos? → Perceptual hashing.</p>
+<p><strong>Red flags:</strong> Only per-claim rules.</p>
+</details>
+<details class="question">
+<summary>Q12 [B3] How would AI-assisted motor claims work safely?</summary>
+<p><strong>30-second answer:</strong> Guided photo capture, metadata checks, part and damage detection models producing a repair estimate from parts catalogues and labour norms, confidence thresholds for auto-approval of small claims, surveys for the rest, and image-reuse and editing detection — with human override and monitoring.</p>
+<p><strong>Deep answer:</strong> §4.4, §6.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Speed vs leakage.</p>
+<p><strong>Follow-ups:</strong>
+1. Thresholds? → By value and confidence.
+2. Drift? → New car models.</p>
+<p><strong>Red flags:</strong> Fully automated high-value claims.</p>
+</details>
+<details class="question">
+<summary>Q13 [B3] How do you compute IBNR reserves, and what does the data platform provide?</summary>
+<p><strong>30-second answer:</strong> Actuaries use development triangles (accident vs development period) and methods like chain ladder or Bornhuetter–Ferguson to project ultimate claims; IBNR is ultimate minus reported; the data platform must produce clean, reconciled triangles per product and period.</p>
+<p><strong>Deep answer:</strong> §6.8, §7.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Method choice vs data maturity.</p>
+<p><strong>Follow-ups:</strong>
+1. Uncertainty? → Mack, bootstrap.
+2. Reconciliation? → With finance.</p>
+<p><strong>Red flags:</strong> Reserves from current open claims only.</p>
+</details>
+<details class="question">
+<summary>Q14 [B3] How do you audit hospital bills automatically?</summary>
+<p><strong>30-second answer:</strong> Map items to standard codes, compare against package tariffs and cost benchmarks by diagnosis and city, apply policy rules (room-rent limits, co-pays, non-payables lists), flag duplicates and length-of-stay outliers, and route exceptions to medical officers.</p>
+<p><strong>Deep answer:</strong> §6.7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Automation vs disputes with hospitals.</p>
+<p><strong>Follow-ups:</strong>
+1. Standards? → Coding and exchange formats.
+2. Timelines? → Regulatory limits.</p>
+<p><strong>Red flags:</strong> Manual review of every bill.</p>
+</details>
+<h3 id="architect-b4">Architect <span class="band b4">B4</span><a class="headerlink" href="#architect-b4" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q15 [B4] ⭐ Design a digital insurer's platform end to end.</summary>
+<p><strong>30-second answer:</strong> Channel APIs for app, agents and aggregators; product configurator driving rating, underwriting, policy and claims engines; bitemporal policy administration; billing with mandates; claims workflows with STP, fraud scoring and SIU; reinsurance; Kafka to a lakehouse with actuarial marts, finance and regulatory reporting; ML for pricing, underwriting, triage, fraud and images.</p>
+<p><strong>Deep answer:</strong> §3–§7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Buy core vs build.</p>
+<p><strong>Follow-ups:</strong>
+1. Biggest risk? → Data quality for pricing and reserves.
+2. Differentiation? → Claims experience.</p>
+<p><strong>Red flags:</strong> No actuarial data design.</p>
+</details>
+<details class="question">
+<summary>Q16 [B4] Buy an insurance core suite or build?</summary>
+<p><strong>30-second answer:</strong> Buy the heavily regulated, mature core when a suite fits; build the differentiating edges; insist on APIs, events and data access to avoid lock-in.</p>
+<p><strong>Deep answer:</strong> Evaluate product fit, regulatory features, total cost, vendor lock-in, configurability, APIs and data access; many insurers buy policy/billing/claims cores and build channels, rating services, fraud, data and customer experience around them.</p>
+<p><strong>Trade-offs I'd call out:</strong> Speed vs control.</p>
+<p><strong>Follow-ups:</strong>
+1. Migration? → Product by product.
+2. Customisation? → Configure, don't fork.</p>
+<p><strong>Red flags:</strong> Building everything from scratch.</p>
+</details>
+<details class="question">
+<summary>Q17 [B4] How would you migrate millions of in-force policies from a legacy system?</summary>
+<p><strong>30-second answer:</strong> Map product versions and rules carefully, migrate by product or cohort with parallel runs comparing premiums, renewals and claims calculations, reconcile financials, keep legacy read-only for history, and plan cut-over around renewal cycles.</p>
+<p><strong>Deep answer:</strong> <a href="../../03-production/28-schema-and-data-evolution/">Ch 28</a>, <a href="../../02-distributed-core/16-microservices-architecture/">Ch 16</a>.</p>
+<p><strong>Trade-offs I'd call out:</strong> Parallel run cost vs risk.</p>
+<p><strong>Follow-ups:</strong>
+1. Life policies? → Decades of history.
+2. Validation? → Automated comparisons.</p>
+<p><strong>Red flags:</strong> Big-bang migration.</p>
+</details>
+<details class="question">
+<summary>Q18 [B4] How do you prepare systems for a catastrophe event?</summary>
+<p><strong>30-second answer:</strong> Catastrophe mode with simplified self-survey flows, surge assignment of surveyors, event tagging of claims, per-event reserves and reinsurance notifications, capacity for claim intake and document uploads, and dashboards for regulators and management.</p>
+<p><strong>Deep answer:</strong> §10.</p>
+<p><strong>Trade-offs I'd call out:</strong> Speed vs fraud risk.</p>
+<p><strong>Follow-ups:</strong>
+1. Exposure analysis? → Geocoded policies.
+2. Communication? → Proactive outreach.</p>
+<p><strong>Red flags:</strong> Business as usual.</p>
+</details>
+<details class="question">
+<summary>Q19 [B4] How do regulations shape insurance systems in India?</summary>
+<p><strong>30-second answer:</strong> Product approvals and filed rates constrain pricing; policyholder protection sets free-look, claim and grievance timelines; KYC for all policies; distribution and commission rules; data protection; solvency and reporting (and accounting standards) requirements — so rules and timelines must be configurable and auditable (VERIFY current texts).</p>
+<p><strong>Deep answer:</strong> §9.</p>
+<p><strong>Trade-offs I'd call out:</strong> Agility vs compliance.</p>
+<p><strong>Follow-ups:</strong>
+1. Timelines as SLAs? → Workflow timers.
+2. Audit? → Decision logs.</p>
+<p><strong>Red flags:</strong> Compliance as an afterthought.</p>
+</details>
+<details class="question">
+<summary>Q20 [B4] What makes insurance data platforms harder than typical analytics platforms?</summary>
+<p><strong>30-second answer:</strong> Long-lived contracts with bitemporal history, earned vs written measures, development over years, reconciliation with finance, actuarial triangles, regulatory formats, and model governance — errors directly change prices, reserves and solvency.</p>
+<p><strong>Deep answer:</strong> §7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Rigor vs speed of insight.</p>
+<p><strong>Follow-ups:</strong>
+1. Earned premium? → Exposure over time.
+2. Restatements? → Versioned data.</p>
+<p><strong>Red flags:</strong> Treating it like clickstream analytics.</p>
+</details>
+<hr />
+<h2 id="13-summary">13. Summary<a class="headerlink" href="#13-summary" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>An insurer prices risk, administers contracts for years, pays claims and holds reserves.</strong> Each is a distinct system with its own correctness needs.</li>
+<li><strong>Configuration-driven products</strong> and a <strong>bitemporal policy model</strong> make changes safe over long lifetimes.</li>
+<li><strong>Claims are workflows:</strong> straight-through for simple cases, human expertise for the rest, fraud scoring and network analysis throughout.</li>
+<li><strong>Algorithms:</strong> GLM pricing, rules engines, underwriting scores, telematics, computer vision for damage, fraud graphs, bill audits, chain-ladder reserving.</li>
+<li><strong>The data platform</strong> serves pricing, reserving, finance and regulators. Data quality errors cost money directly.</li>
+</ol>
+<h3 id="related-chapters">Related chapters<a class="headerlink" href="#related-chapters" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="../i04-hospital-ehr-and-telemedicine/">I04 — Hospital EHR</a> · <a href="../../05-case-studies/45-payment-system/">Ch 45 — Payments</a> · <a href="../../02-distributed-core/13-distributed-transactions/">Ch 13 — Distributed Transactions</a> · <a href="../../03-production/21-data-at-scale/">Ch 21 — Data at Scale</a> · <a href="../../04-architect/36-compliance-governance-and-data-residency/">Ch 36 — Compliance</a></li>
+<li>Next in this tab: <a href="../i10-travel-and-railway-ticketing/">I10 — Travel &amp; Railway Ticketing</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../i08-stockbroking-platform/" class="md-footer__link md-footer__link--prev" aria-label="Previous: I08. Stockbroking Platform">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                I08. Stockbroking Platform
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../i10-travel-and-railway-ticketing/" class="md-footer__link md-footer__link--next" aria-label="Next: I10. Travel &amp; Railway Ticketing">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                I10. Travel & Railway Ticketing
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

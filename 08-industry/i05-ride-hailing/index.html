@@ -1,0 +1,6393 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Beginner to Architect — Java/Spring system design with production code, design documents and interview mastery">
+      
+      
+        <meta name="author" content="Ashish">
+      
+      
+      
+        <link rel="prev" href="../i04-hospital-ehr-and-telemedicine/">
+      
+      
+        <link rel="next" href="../i06-video-streaming-and-live-cricket/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>I05. Ride-Hailing - System Design Enterprise Handbook</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#i05-ride-hailing-platform" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-header__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            System Design Enterprise Handbook
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              I05. Ride-Hailing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Orientation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Foundations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../02-distributed-core/10-replication/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Distributed Core
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../03-production/21-data-at-scale/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Production
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../04-architect/31-architecture-decision-making/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architect
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Case Studies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Capstone
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Interview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Industry Designs
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../99-appendix/qa-index/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Appendix
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-nav__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    System Design Enterprise Handbook
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Orientation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Orientation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    00. How to Use This Handbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/01-what-system-design-is/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    01. What System Design Is
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    02. Back-of-the-Envelope Estimation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/03-networking-essentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    03. Networking Essentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/04-api-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    04. API Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/05-relational-databases-deep-dive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    05. Relational Databases Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/06-nosql-and-polyglot-persistence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    06. NoSQL & Polyglot Persistence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/07-caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    07. Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/08-load-balancing-proxies-and-gateways/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    08. Load Balancing, Proxies & Gateways
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/09-scalability-fundamentals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    09. Scalability Fundamentals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distributed Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/10-replication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    10. Replication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/11-partitioning-and-sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    11. Partitioning & Sharding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/12-consistency-time-and-consensus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    12. Consistency, Time & Consensus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/13-distributed-transactions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    13. Distributed Transactions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/14-messaging-and-event-streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    14. Messaging & Event Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/15-event-driven-architecture-cqrs-and-event-sourcing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    15. Event-Driven Architecture, CQRS & Event Sourcing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/16-microservices-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    16. Microservices Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/17-inter-service-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    17. Inter-Service Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/18-resilience-patterns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    18. Resilience Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/19-concurrency-at-scale-in-java/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    19. Concurrency at Scale in Java
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/20-idempotency-ids-and-distributed-locks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    20. Idempotency, IDs & Distributed Locks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Production
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/21-data-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    21. Data at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/22-search-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    22. Search Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/23-security-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    23. Security Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/24-observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    24. Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/25-performance-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    25. Performance Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/26-deployment-and-infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    26. Deployment & Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/27-reliability-and-disaster-recovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    27. Reliability & Disaster Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/28-schema-and-data-evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    28. Schema & Data Evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/29-testing-distributed-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    29. Testing Distributed Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/30-multi-tenancy-and-saas-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    30. Multi-Tenancy & SaaS Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architect
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architect
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/31-architecture-decision-making/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    31. Architecture Decision Making
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/32-design-documents-and-architecture-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    32. Design Documents & Architecture Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/33-domain-driven-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    33. Domain-Driven Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/34-modern-architecture-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    34. Modern Architecture Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/35-cost-engineering-and-finops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    35. Cost Engineering & FinOps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/36-compliance-governance-and-data-residency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    36. Compliance, Governance & Data Residency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/37-leading-architecture-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    37. Leading Architecture at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Case Studies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Case Studies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    38. URL Shortener & SMS Short Links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/39-distributed-rate-limiter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    39. Distributed Rate Limiter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/40-notification-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    40. Notification System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/41-chat-customer-rider-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    41. Chat — Customer–Rider Messaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/42-search-autocomplete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    42. Search Autocomplete (Typeahead)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/43-home-feed-and-recommendations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    43. Home Feed & Recommendations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/44-distributed-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    44. Distributed Cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/45-payment-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    45. Payment System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/46-grocery-checkout-and-inventory-reservation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    46. Grocery Checkout & Inventory Reservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    47. Delivery Dispatch & Live Tracking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/48-delivery-slot-booking-and-capacity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    48. Delivery Slot Booking & Capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/49-pricing-promotions-and-coupons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    49. Pricing, Promotions & Coupons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/50-distributed-job-scheduler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    50. Distributed Job Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/51-real-time-analytics-and-top-k/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    51. Real-time Analytics & Top-K
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/52-object-storage-and-media-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    52. Object Storage & Media Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/53-web-crawler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    53. Web Crawler (Price Monitoring)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/54-distributed-key-value-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    54. Distributed Key-Value Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/55-order-matching-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    55. Order Matching Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capstone
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Capstone
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    56. The Grocery Marketplace, End to End
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interview
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interview
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    57. The System Design Interview Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/58-level-expectations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    58. Level Expectations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/59-interview-qa-bank/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    59. Interview Q&A Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/60-mock-interviews/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    60. Mock Interviews
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/61-behavioral-and-leadership/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    61. Behavioural & Leadership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/qa-bank-starred/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ⭐ Drill Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Industry Designs
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Industry Designs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01-amazon-style-global-marketplace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01. Amazon-Style Global Marketplace
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01b-amazon-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01b. Amazon — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02-flipkart-style-sale-day-ecommerce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02. Flipkart-Style Sale-Day E-Commerce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02b-flipkart-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02b. Flipkart — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i03-core-banking-and-upi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I03. Core Banking & UPI Payments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i04-hospital-ehr-and-telemedicine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I04. Hospital EHR & Telemedicine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I05. Ride-Hailing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I05. Ride-Hailing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-what-the-platform-must-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 What the platform must do
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-main-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Main systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-scale-for-this-design-assumptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Scale for this design (assumptions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-it-works-journeys-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How It Works — Journeys End to End
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How It Works — Journeys End to End">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-journey-1-a-rider-books-a-sedan-in-bengaluru" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Journey 1: a rider books a sedan in Bengaluru
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-journey-2-a-drivers-day" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Journey 2: a driver's day
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-journey-3-a-surge-at-6-pm-in-the-rain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Journey 3: a surge at 6 pm in the rain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-journey-4-airport-pickup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Journey 4: airport pickup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-journey-5-a-shared-ride" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Journey 5: a shared ride
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-journey-6-a-safety-incident" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Journey 6: a safety incident
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-core-subsystems-in-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Core Subsystems in Depth
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Core Subsystems in Depth">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-geospatial-model-hexagonal-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Geospatial model — hexagonal cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-location-ingestion-and-the-live-supply-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Location ingestion and the live supply index
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-maps-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Maps platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-forecasting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Forecasting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-matching-and-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Matching and dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-pricing-upfront-fares-and-final-fares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Pricing: upfront fares and final fares
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-payments-ledger-and-payouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Payments, ledger and payouts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#58-incentives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.8 Incentives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#59-safety-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.9 Safety platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#510-fraud-and-risk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.10 Fraud and risk
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-nearest-driver-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Nearest-driver search
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-batched-matching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Batched matching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-routing-and-eta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Routing and ETA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-dynamic-pricing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Dynamic pricing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-map-matching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Map matching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-pooling-insertion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Pooling insertion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-supply-positioning-and-incentives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Supply positioning and incentives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-fraud-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Fraud detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-eta-and-fare-quality-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 ETA and fare quality monitoring
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-operational-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Operational stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-streaming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-lakehouse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Lakehouse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-real-time-olap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Real-time OLAP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-ml-platform-and-experimentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 ML platform and experimentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#76-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.6 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-privacy-safety-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Privacy, Safety &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i06-video-streaming-and-live-cricket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I06. Video Streaming & Live Cricket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i07-messaging-and-social-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I07. Messaging & Social Feed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i08-stockbroking-platform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I08. Stockbroking Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i09-insurance-policy-and-claims/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I09. Insurance Policy & Claims
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i10-travel-and-railway-ticketing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I10. Travel & Railway Ticketing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i11-telecom-billing-and-charging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I11. Telecom Billing & Charging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i12-logistics-and-supply-chain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I12. Logistics & Supply Chain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i13-online-exams-and-live-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I13. Online Exams & Live Classes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i14-national-digital-id-and-vaccination-registration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I14. National Digital ID & Vaccination Registration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i15-multiplayer-gaming-and-leaderboards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I15. Multiplayer Gaming & Leaderboards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i16-smart-metering-and-iot-telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I16. Smart Metering & IoT Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i17-hotel-and-homestay-booking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I17. Hotel & Homestay Booking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i18-food-delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I18. Food Delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Appendix
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Appendix
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/qa-index/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full Question Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/lab-catalogue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab Catalogue
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-what-the-platform-must-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 What the platform must do
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-main-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Main systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-scale-for-this-design-assumptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Scale for this design (assumptions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-it-works-journeys-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How It Works — Journeys End to End
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How It Works — Journeys End to End">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-journey-1-a-rider-books-a-sedan-in-bengaluru" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Journey 1: a rider books a sedan in Bengaluru
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-journey-2-a-drivers-day" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Journey 2: a driver's day
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-journey-3-a-surge-at-6-pm-in-the-rain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Journey 3: a surge at 6 pm in the rain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-journey-4-airport-pickup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Journey 4: airport pickup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-journey-5-a-shared-ride" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Journey 5: a shared ride
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-journey-6-a-safety-incident" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Journey 6: a safety incident
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-core-subsystems-in-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Core Subsystems in Depth
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Core Subsystems in Depth">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-geospatial-model-hexagonal-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Geospatial model — hexagonal cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-location-ingestion-and-the-live-supply-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Location ingestion and the live supply index
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-maps-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Maps platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-forecasting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Forecasting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-matching-and-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Matching and dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-pricing-upfront-fares-and-final-fares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Pricing: upfront fares and final fares
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-payments-ledger-and-payouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Payments, ledger and payouts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#58-incentives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.8 Incentives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#59-safety-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.9 Safety platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#510-fraud-and-risk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.10 Fraud and risk
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-nearest-driver-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Nearest-driver search
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-batched-matching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Batched matching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-routing-and-eta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Routing and ETA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-dynamic-pricing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Dynamic pricing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-map-matching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Map matching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-pooling-insertion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Pooling insertion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-supply-positioning-and-incentives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Supply positioning and incentives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-fraud-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Fraud detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-eta-and-fare-quality-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 ETA and fare quality monitoring
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-operational-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Operational stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-streaming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-lakehouse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Lakehouse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-real-time-olap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Real-time OLAP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-ml-platform-and-experimentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 ML platform and experimentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#76-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.6 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-privacy-safety-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Privacy, Safety &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="i05-ride-hailing-platform">I05. Ride-Hailing Platform<a class="headerlink" href="#i05-ride-hailing-platform" title="Permanent link">&para;</a></h1>
+<div class="admonition abstract">
+<p class="admonition-title">Chapter at a glance</p>
+<p><strong>Sector:</strong> Mobility · <strong>Format:</strong> system design walkthrough (no code) · <strong>Reader bands:</strong> B1 → B4 · <strong>Builds on:</strong> <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/">Ch 47</a> (dispatch, geo indexes, GPS ingestion), <a href="../../05-case-studies/45-payment-system/">Ch 45</a>, <a href="../../05-case-studies/41-chat-customer-rider-messaging/">Ch 41</a></p>
+<p><strong>What you get:</strong> the design of an Uber/Ola-style ride-hailing platform for Indian cities (cars, autos, bike taxis) and global markets. It covers:</p>
+<ul>
+<li><strong>the rider's trip</strong>, from opening the app to paying and rating, and the systems each step touches;</li>
+<li><strong>the driver's day:</strong> going online, positioning, accepting, navigating, earnings, incentives and payouts;</li>
+<li><strong>the core engines:</strong> geospatial indexing, supply–demand forecasting, <strong>matching</strong>, <strong>ETA</strong>, <strong>upfront and dynamic pricing</strong>, routing and map matching, ride sharing, airport queues;</li>
+<li><strong>safety and trust:</strong> identity, masked calls, trip sharing, SOS, route-deviation and crash detection, fraud (GPS spoofing, collusion);</li>
+<li><strong>the algorithms</strong> behind each engine;</li>
+<li><strong>the data platform:</strong> real-time streams, lakehouse, real-time OLAP, ML platform, experimentation;</li>
+<li><strong>the tech stack</strong>, with what Uber has published as open source or on its engineering blog kept separate from reference choices;</li>
+<li>Indian specifics: cash, UPI, autos and bike taxis, aggregator guidelines.</li>
+</ul>
+<p><strong>Reading time:</strong> 85 min.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Sources and honesty</p>
+<ul>
+<li>Uber has published a great deal about its systems: H3, Michelangelo, Cadence, Apache Hudi, Pinot usage, Schemaless/Docstore, Jaeger, M3, Ringpop, and many engineering blog posts. Those are marked as <strong>publicly described (VERIFY)</strong>.</li>
+<li>Ola and others have published less.</li>
+<li>Everything else is a <strong>reference design</strong>.</li>
+<li>Regulatory statements (e.g. India's Motor Vehicle Aggregator Guidelines and their fare and surge provisions) are marked <strong>VERIFY</strong>. Check the current texts and state rules.</li>
+</ul>
+</div>
+<hr />
+<h2 id="1-the-system-in-one-page">1. The System in One Page<a class="headerlink" href="#1-the-system-in-one-page" title="Permanent link">&para;</a></h2>
+<h3 id="11-what-the-platform-must-do">1.1 What the platform must do<a class="headerlink" href="#11-what-the-platform-must-do" title="Permanent link">&para;</a></h3>
+<p>A ride-hailing platform is a <strong>real-time two-sided market</strong>. Every few seconds, in every neighbourhood, it must:</p>
+<ul>
+<li><strong>see</strong> where riders want to go and where drivers are;</li>
+<li><strong>price</strong> each trip so riders accept and drivers are willing;</li>
+<li><strong>match</strong> riders to drivers so pickups are fast and the whole city stays efficient;</li>
+<li><strong>guide</strong> both to the pickup and the destination;</li>
+<li><strong>settle</strong> money correctly;</li>
+<li><strong>keep everyone safe.</strong></li>
+</ul>
+<p>Mistakes are visible immediately: a 12-minute pickup, a surge that feels unfair, a driver sent across a flyover with no U-turn, an unpaid cash trip.</p>
+<h3 id="12-main-systems">1.2 Main systems<a class="headerlink" href="#12-main-systems" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Rider app / Driver app</strong></td>
+<td>Booking, tracking, payment; driver shift, navigation, earnings</td>
+</tr>
+<tr>
+<td><strong>Location ingestion</strong></td>
+<td>Driver GPS every 1–4 s, map-matched to roads (<a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/">Ch 47</a>)</td>
+</tr>
+<tr>
+<td><strong>Geospatial index</strong></td>
+<td>Which drivers are near a point, now</td>
+</tr>
+<tr>
+<td><strong>Maps platform</strong></td>
+<td>Road graph, routing, ETA, map matching, pickup points, geofences</td>
+</tr>
+<tr>
+<td><strong>Marketplace: forecasting</strong></td>
+<td>Demand and supply per area per few minutes ahead</td>
+</tr>
+<tr>
+<td><strong>Marketplace: pricing</strong></td>
+<td>Upfront fares, dynamic (surge) multipliers, promotions</td>
+</tr>
+<tr>
+<td><strong>Marketplace: matching</strong></td>
+<td>Assign drivers to requests (batched optimisation)</td>
+</tr>
+<tr>
+<td><strong>Trip service</strong></td>
+<td>The trip state machine, from request to completion</td>
+</tr>
+<tr>
+<td><strong>Payments and ledger</strong></td>
+<td>Rider charges, driver earnings, commissions, payouts, cash handling</td>
+</tr>
+<tr>
+<td><strong>Incentives</strong></td>
+<td>Driver quests, guarantees, heat maps</td>
+</tr>
+<tr>
+<td><strong>Safety</strong></td>
+<td>Identity checks, SOS, trip sharing, anomaly detection, incident response</td>
+</tr>
+<tr>
+<td><strong>Risk and fraud</strong></td>
+<td>GPS spoofing, collusion, payment fraud, promo abuse</td>
+</tr>
+<tr>
+<td><strong>Communication</strong></td>
+<td>Masked calls, in-app chat (<a href="../../05-case-studies/41-chat-customer-rider-messaging/">Ch 41</a>), notifications</td>
+</tr>
+<tr>
+<td><strong>Support</strong></td>
+<td>Fare disputes, lost items, incidents</td>
+</tr>
+<tr>
+<td><strong>Data platform</strong></td>
+<td>Streams, lakehouse, real-time OLAP, ML platform, experiments</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13-scale-for-this-design-assumptions">1.3 Scale for this design (assumptions)<a class="headerlink" href="#13-scale-for-this-design-assumptions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cities</td>
+<td>100 (India + international)</td>
+</tr>
+<tr>
+<td>Trips per day</td>
+<td>5M; peak ~250 trips/s city-wide totals, ~2,000 requests/s including re-requests and fare checks</td>
+</tr>
+<tr>
+<td>Drivers online at peak</td>
+<td>600k</td>
+</tr>
+<tr>
+<td>Driver location updates</td>
+<td>600k drivers ÷ 4 s ≈ <strong>150k updates/s</strong></td>
+</tr>
+<tr>
+<td>Fare estimates ("where to?" typing)</td>
+<td>~20k/s at peak (many estimates per trip)</td>
+</tr>
+<tr>
+<td>Trip events</td>
+<td>~20 state events per trip → 100M/day</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Estimation highlights:</strong></p>
+<ul>
+<li><strong>Location updates dominate write volume.</strong> They are ephemeral: keep the latest position in memory and the history in the lake.</li>
+<li><strong>Fare estimates dominate read computation.</strong> Each needs a route, an ETA and a price.</li>
+<li><strong>Matching is CPU-bound per area,</strong> not throughput-bound globally, so it is partitioned by geography.</li>
+</ul>
+<hr />
+<h2 id="2-requirements">2. Requirements<a class="headerlink" href="#2-requirements" title="Permanent link">&para;</a></h2>
+<h3 id="21-functional">2.1 Functional<a class="headerlink" href="#21-functional" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Riders set pickup and destination, see fare and ETA per product (auto, bike, mini, sedan, premium, shared), request, track, pay (cash, UPI, cards, wallet), rate and tip.</li>
+<li>Drivers go online and offline, receive and accept or decline offers, navigate, start and end trips, collect cash or see digital payment, and see earnings, incentives and payouts.</li>
+<li>Dynamic pricing within regulatory limits (VERIFY per jurisdiction); promotions and passes.</li>
+<li>Scheduled rides, airport and railway-station queues, rentals (hourly), intercity.</li>
+<li>Shared rides (pooling) where offered.</li>
+<li>Safety features: verified identity, masked numbers, trip sharing, SOS, ride check-ins on anomalies.</li>
+<li>Support for disputes, refunds, lost items, incidents.</li>
+</ol>
+<h3 id="22-non-functional">2.2 Non-functional<a class="headerlink" href="#22-non-functional" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Latency</strong></td>
+<td>Fare estimate p95 &lt; 300 ms; a match decision within a few seconds of the request; location to rider screen &lt; 2 s</td>
+</tr>
+<tr>
+<td><strong>Availability</strong></td>
+<td>Request, match and trip ≥ 99.99% per city; a trip in progress must survive any single service failure</td>
+</tr>
+<tr>
+<td><strong>Correctness</strong></td>
+<td>A driver is never assigned two trips at once (unless pooled); every trip is billed exactly once; driver earnings are exact</td>
+</tr>
+<tr>
+<td><strong>Fairness</strong></td>
+<td>Transparent fares; no discrimination in matching; consistent surge rules</td>
+</tr>
+<tr>
+<td><strong>Privacy</strong></td>
+<td>Location data minimised and access-controlled; phone numbers masked</td>
+</tr>
+<tr>
+<td><strong>Safety</strong></td>
+<td>SOS reaches responders within seconds; incident data preserved</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-high-level-architecture">3. High-Level Architecture<a class="headerlink" href="#3-high-level-architecture" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart TB
+    subgraph Apps
+        RA[Rider app]
+        DA[Driver app]
+        OPS[Ops and support consoles]
+    end
+    subgraph Edge
+        GW[API gateway and push - persistent connections]
+    end
+    subgraph Realtime[Real-time marketplace - partitioned by city and area]
+        LOC[Location ingestion and map matching]
+        GEO[Geo index - live supply by cell]
+        FC[Demand and supply forecasting]
+        PRICE[Pricing - upfront fares, surge]
+        MATCH[Matching - batched assignment]
+        DISP[Offer dispatch to drivers]
+    end
+    subgraph Platform
+        MAPS[Maps - routing, ETA, pickup points]
+        TRIP[Trip service - state machine]
+        PAY[Payments, ledger, payouts]
+        INC[Incentives]
+        SAFE[Safety - SOS, anomaly detection]
+        RISK[Fraud and risk]
+        COMM[Masked calls, chat, notifications]
+        SUP[Support]
+    end
+    subgraph Data
+        K[Kafka]
+        LH[Lakehouse]
+        OLAP[Real-time OLAP]
+        ML[ML platform]
+    end
+    Apps --&gt; GW
+    GW --&gt; LOC --&gt; GEO
+    GW --&gt; PRICE
+    GW --&gt; TRIP
+    PRICE --&gt; MAPS
+    PRICE --&gt; FC
+    TRIP --&gt; MATCH
+    MATCH --&gt; GEO
+    MATCH --&gt; MAPS
+    MATCH --&gt; DISP --&gt; GW
+    TRIP --&gt; PAY
+    TRIP --&gt; SAFE
+    Realtime --&gt; K
+    Platform --&gt; K
+    K --&gt; LH
+    K --&gt; OLAP
+    LH --&gt; ML --&gt; Realtime</code></pre>
+<p><strong>Key architectural decisions:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Choice</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Partitioning</strong></td>
+<td>Marketplace services partitioned by <strong>city, then geo cells</strong>; cities are the unit of deployment and blast radius</td>
+<td>Supply and demand are local, and failures stay local</td>
+</tr>
+<tr>
+<td><strong>Location state</strong></td>
+<td>In-memory, sharded by cell; latest position only; history to the stream</td>
+<td>150k writes/s of ephemeral data (<a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/">Ch 47</a> L1–L2)</td>
+</tr>
+<tr>
+<td><strong>Trip state</strong></td>
+<td>Durable, strongly consistent per trip; a workflow engine for long-running steps</td>
+<td>Money and safety depend on it</td>
+</tr>
+<tr>
+<td><strong>Communication with apps</strong></td>
+<td>Persistent connections (WebSocket/MQTT/gRPC streams) for offers and live updates; push notifications as fallback</td>
+<td>Offers must arrive in &lt; 1 s</td>
+</tr>
+<tr>
+<td><strong>Geography model</strong></td>
+<td>Hexagonal hierarchical cells (H3)</td>
+<td>Uniform neighbours, multi-resolution aggregation (§5.1)</td>
+</tr>
+<tr>
+<td><strong>Pricing and matching</strong></td>
+<td>Separate engines sharing forecasts; ML-driven with guard rails</td>
+<td>Different time scales and owners</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-how-it-works-journeys-end-to-end">4. How It Works — Journeys End to End<a class="headerlink" href="#4-how-it-works-journeys-end-to-end" title="Permanent link">&para;</a></h2>
+<h3 id="41-journey-1-a-rider-books-a-sedan-in-bengaluru">4.1 Journey 1: a rider books a sedan in Bengaluru<a class="headerlink" href="#41-journey-1-a-rider-books-a-sedan-in-bengaluru" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Open the app.</strong> The app sends its location and receives nearby cars (for display, with coarse and jittered positions to protect driver privacy) and each product's ETA.<ul>
+<li>These come from the <strong>geo index</strong>: a count and nearest-driver query in the rider's cell and its neighbours.</li>
+</ul>
+</li>
+<li><strong>Choose the destination.</strong> As the rider types, the <strong>place search</strong> service autocompletes: a places index with popularity and personalisation (<a href="../../05-case-studies/42-search-autocomplete/">Ch 42</a>).<ul>
+<li>The <strong>pickup point</strong> is snapped to a safe, accessible spot: a gate or the correct side of the road, learned from past pickups.</li>
+</ul>
+</li>
+<li><strong>Fare estimate</strong> per product:<ul>
+<li><strong>Route and ETA:</strong> the maps service computes the route and <strong>trip ETA</strong>, a routing engine plus an ML correction for traffic (§6.3).</li>
+<li><strong>Upfront fare:</strong> pricing computes it from the base fare, per-km and per-minute components, estimated tolls and airport fees, and the <strong>dynamic multiplier</strong> for the pickup area and time (§6.4). It applies promotions and taxes.</li>
+<li><strong>Fare quote:</strong> the fare is shown with a <strong>quote ID</strong> valid for a few minutes. The quote is stored so the trip is billed at the quoted price, unless the route changes materially.</li>
+</ul>
+</li>
+<li><strong>Request.</strong> The trip service creates a trip in state <strong>REQUESTED</strong>, holding the quote, rider, pickup, destination, product and payment method.<ul>
+<li>An idempotency key prevents duplicate trips from double taps (<a href="../../02-distributed-core/20-idempotency-ids-and-distributed-locks/">Ch 20</a>).</li>
+<li>For digital payment, a small <strong>pre-authorisation</strong> or payment method check may run (VERIFY per method).</li>
+</ul>
+</li>
+<li><strong>Matching.</strong> The request joins the <strong>matching batch</strong> for its area. Every few seconds the matcher solves an assignment across all open requests and available drivers (§6.2), and chooses this rider's driver.<ul>
+<li><strong>Driver lock:</strong> the chosen driver is <strong>locked</strong> with a conditional update (available → offered), so no other request can take them.</li>
+</ul>
+</li>
+<li><strong>Offer.</strong> The offer goes to the driver's app over the persistent connection, showing pickup distance, rider rating and estimated earnings (VERIFY what regulations require drivers see).<ul>
+<li>The driver has ~10–15 s to accept.</li>
+<li><strong>Decline or timeout:</strong> the driver is released, and the request re-enters the next batch with a priority boost.</li>
+</ul>
+</li>
+<li><strong>Accepted.</strong> The trip becomes <strong>DRIVER_ASSIGNED</strong>. The rider sees the driver's name, photo, vehicle and plate, and the live position.<ul>
+<li>The driver's app switches to <strong>navigation to the pickup</strong>.</li>
+<li>Masked calling and chat are enabled between the two.</li>
+</ul>
+</li>
+<li><strong>Arriving.</strong> Geofence detection marks <strong>ARRIVED</strong> when the driver is within ~50 m of the pickup.<ul>
+<li>A <strong>waiting timer</strong> starts: free waiting, then a per-minute charge, VERIFY local rules.</li>
+</ul>
+</li>
+<li><strong>Start.</strong> The rider shares a <strong>4-digit PIN/OTP</strong>. The driver enters it, and the trip becomes <strong>ON_TRIP</strong>. This prevents wrong-rider pickups.</li>
+<li><strong>During the trip:</strong><ul>
+<li><strong>Locations:</strong> the driver's positions are map-matched and stream to the rider's app and trusted contacts (if shared).</li>
+<li><strong>Safety monitoring:</strong> watches for long unexpected stops, route deviation and possible crashes (§5.9).</li>
+<li><strong>Destination change:</strong> the rider can change the destination, which gets a new fare quote.</li>
+</ul>
+</li>
+<li><strong>End.</strong> The driver ends the trip at the destination and the trip becomes <strong>COMPLETED</strong>. The <strong>final fare</strong> is computed:<ul>
+<li>the upfront fare if the route matched;</li>
+<li>adjusted if there were stops, a destination change, significant detours, waiting or tolls (§5.6).</li>
+</ul>
+</li>
+<li><strong>Payment:</strong><ul>
+<li><strong>Digital:</strong> charged via the payment method (UPI collect/autopay, card, wallet).</li>
+<li><strong>Cash:</strong> the driver's app shows the amount, and the driver confirms receipt. The <strong>commission</strong> owed by the driver is debited from their earnings balance.</li>
+<li><strong>Ledger:</strong> the rider's charge, the driver's earnings, commission, taxes and promotions are all posted (§5.7).</li>
+</ul>
+</li>
+<li><strong>Afterwards:</strong><ul>
+<li><strong>Rating:</strong> both sides rate each other. Ratings feed quality systems (with bias controls), and tips go 100% to the driver.</li>
+<li><strong>Receipt:</strong> emailed and shown in the app. The trip data is final, and disputes open a support case referencing it.</li>
+</ul>
+</li>
+</ol>
+<h3 id="42-journey-2-a-drivers-day">4.2 Journey 2: a driver's day<a class="headerlink" href="#42-journey-2-a-drivers-day" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Going online:</strong><ul>
+<li>the driver passes periodic <strong>selfie identity checks</strong> (face match against the onboarded photo; VERIFY consent and regulations);</li>
+<li>document validity is checked (licence, permit, insurance, fitness certificate);</li>
+<li>the driver goes <strong>ONLINE</strong>.</li>
+</ul>
+</li>
+<li><strong>Positioning:</strong><ul>
+<li>the app shows a <strong>demand heat map</strong> (forecast demand vs supply) and active <strong>incentives</strong>, e.g. "complete 12 trips between 7–11 am for ₹300 extra";</li>
+<li>drivers may move to busier areas.</li>
+</ul>
+</li>
+<li><strong>Offers:</strong> offers arrive while online. The <strong>acceptance rate</strong> and <strong>cancellation rate</strong> are tracked. Excessive declines may reduce priority, a policy decision with fairness considerations.</li>
+<li><strong>Destination mode:</strong> the driver can set a home direction, and matching then prefers trips heading that way (limited uses per day).</li>
+<li><strong>Earnings:</strong><ul>
+<li>each trip's earnings (fare minus commission, plus tips and incentives) appear in real time;</li>
+<li>cash collected is netted against amounts owed to the platform;</li>
+<li>the driver balance may go negative with heavy cash trips, in which case the driver must top up or earnings are deducted.</li>
+</ul>
+</li>
+<li><strong>Payouts</strong> go to the driver's bank daily or weekly, with instant cash-out options (a payment rail such as IMPS/UPI; VERIFY) (<a href="../i03-core-banking-and-upi/">I03</a>).</li>
+<li><strong>Going offline:</strong> fatigue rules may force breaks after N hours online (VERIFY local rules).</li>
+</ol>
+<h3 id="43-journey-3-a-surge-at-6-pm-in-the-rain">4.3 Journey 3: a surge at 6 pm in the rain<a class="headerlink" href="#43-journey-3-a-surge-at-6-pm-in-the-rain" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>The spike:</strong> at 5:45 pm rain starts. Requests in the business district's cells jump 3× within minutes, while supply there stays flat, as drivers avoid rain or are stuck in traffic.</li>
+<li><strong>Forecasting:</strong><ul>
+<li>the <strong>real-time demand signal</strong> (app opens, fare checks, requests, unfulfilled requests per cell per minute) and the supply signal (open drivers, drivers finishing trips nearby) feed the <strong>forecaster</strong>;</li>
+<li>it predicts the next 15–30 minutes.</li>
+</ul>
+</li>
+<li><strong>Pricing</strong> computes a multiplier per area that balances expected demand with available and attracted supply (§6.4). Within guard rails:<ul>
+<li>smoothing over time;</li>
+<li>caps (including regulatory caps; VERIFY);</li>
+<li>consistency between neighbouring areas;</li>
+<li>no surges during declared emergencies (a policy decision; many platforms cap pricing in emergencies, VERIFY).</li>
+</ul>
+</li>
+<li><strong>Effects:</strong><ul>
+<li>some riders wait or choose cheaper products;</li>
+<li>drivers see the surge on the heat map and move in;</li>
+<li><strong>wait times recover</strong>;</li>
+<li>the multiplier decays as balance returns.</li>
+</ul>
+</li>
+<li><strong>Measurement:</strong> request completion rate, pickup ETAs and rider cancellations are measured per area. <strong>Experiments</strong> test pricing policies by region-time units, not by user (§7.5).</li>
+</ol>
+<h3 id="44-journey-4-airport-pickup">4.4 Journey 4: airport pickup<a class="headerlink" href="#44-journey-4-airport-pickup" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Arrival:</strong> the airport is a <strong>geofenced zone</strong> with a <strong>driver queue</strong>. Drivers entering the holding area join a FIFO queue per product.</li>
+<li><strong>Request:</strong> a rider requests from the terminal. The pickup point is fixed (a designated bay), and the <strong>first eligible driver in the queue</strong> is offered the trip, not the nearest one.</li>
+<li><strong>Fairness:</strong> drivers who leave the zone lose their place. Short trips may give the driver a "return to queue" priority to avoid penalising them (a policy choice; VERIFY local airport rules and fees).</li>
+<li><strong>Fees:</strong> airport fees are added to the fare as regulated.</li>
+</ol>
+<h3 id="45-journey-5-a-shared-ride">4.5 Journey 5: a shared ride<a class="headerlink" href="#45-journey-5-a-shared-ride" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Request:</strong> a rider requests "shared" and gets a lower fare with a wider arrival window.</li>
+<li><strong>Insertion:</strong> the pooling engine tries to <strong>insert</strong> the pickup and drop-off into existing trips' routes, where the added detour for existing riders is within limits (e.g. + 8 min) and seats are available (§6.6).</li>
+<li><strong>Update:</strong> if inserted, the existing riders' ETAs update and the driver's route re-plans. If not, a new pooled trip starts with this rider as the first passenger.</li>
+<li><strong>Fares</strong> are fixed upfront per rider. A pool that doesn't materialise still charges the shared fare, which is the incentive for accepting uncertainty.</li>
+</ol>
+<h3 id="46-journey-6-a-safety-incident">4.6 Journey 6: a safety incident<a class="headerlink" href="#46-journey-6-a-safety-incident" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Detection:</strong> during a night trip, the car stops for 12 minutes at an unscheduled location away from the route.<ul>
+<li>The <strong>safety monitor</strong> detects a long stop plus a route deviation, and triggers a <strong>ride check</strong> push to rider and driver: "Is everything OK?"</li>
+</ul>
+</li>
+<li><strong>Escalation:</strong> the rider presses <strong>SOS</strong>. The app:<ul>
+<li>calls the emergency number (112 in India; VERIFY integration requirements);</li>
+<li>shares the live location and trip details with the platform's safety team and the rider's trusted contacts.</li>
+</ul>
+</li>
+<li><strong>Response:</strong> the safety operations console shows a timeline of the trip (locations, events, driver history). Agents follow a playbook, and the event data is preserved (legal hold).</li>
+<li><strong>After the trip:</strong> an investigation, and account actions per policy. Data is shared with law enforcement only under lawful process (VERIFY).</li>
+</ol>
+<hr />
+<h2 id="5-core-subsystems-in-depth">5. Core Subsystems in Depth<a class="headerlink" href="#5-core-subsystems-in-depth" title="Permanent link">&para;</a></h2>
+<h3 id="51-geospatial-model-hexagonal-cells">5.1 Geospatial model — hexagonal cells<a class="headerlink" href="#51-geospatial-model-hexagonal-cells" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>H3</strong>, Uber's open-source hierarchical hexagonal grid (publicly described; VERIFY), divides the earth into hexagons at 16 resolutions:<ul>
+<li>at <strong>resolution 9</strong>, a hexagon is ~0.1 km² (edge ~170 m), good for local supply counts;</li>
+<li>at <strong>resolution 7</strong> (~5 km²), good for pricing areas.</li>
+</ul>
+</li>
+<li><strong>Why hexagons:</strong> every neighbour is the same distance away (squares have diagonal neighbours at a different distance), so "k-ring" neighbourhoods approximate circles well. Aggregation up the hierarchy is cheap.</li>
+<li><strong>Uses:</strong><ul>
+<li>live supply per cell;</li>
+<li>demand per cell;</li>
+<li>pricing zones (groups of cells);</li>
+<li>heat maps;</li>
+<li>geofences (airports, restricted areas, as sets of cells plus exact polygons);</li>
+<li>analytics.</li>
+</ul>
+</li>
+</ul>
+<h3 id="52-location-ingestion-and-the-live-supply-index">5.2 Location ingestion and the live supply index<a class="headerlink" href="#52-location-ingestion-and-the-live-supply-index" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Ingestion:</strong> driver apps send GPS every 1–4 s (adaptive by speed and trip state) over the persistent connection to <strong>location gateways</strong>. Gateways validate the points, filtering impossible jumps and spoofing indicators (§5.10).</li>
+<li><strong>Map matching</strong> (§6.5) snaps points to road segments, which gives heading and road position for ETA.</li>
+<li><strong>The live index</strong> is sharded by city and cell, in memory:<ul>
+<li><em>cell → drivers (id, status, product, position, heading, last seen)</em>, updated on each ping;</li>
+<li>drivers moving between cells are moved between buckets;</li>
+<li>drivers not seen for N seconds are marked stale and excluded from matching.</li>
+</ul>
+</li>
+<li><strong>Replication:</strong> replicas per shard give failover. A process restart rebuilds from the next pings in seconds, because the state is ephemeral by design.</li>
+<li><strong>History:</strong> every ping goes to Kafka, then the lake (for ETA training, safety investigations and disputes), with retention and access limits.</li>
+</ul>
+<p>Details and measured trade-offs of geo indexes and ingestion are in <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/">Ch 47</a> L1–L2.</p>
+<h3 id="53-maps-platform">5.3 Maps platform<a class="headerlink" href="#53-maps-platform" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Road graph:</strong> road segments with attributes (one-way, turn restrictions, speed classes, U-turn permissions), from licensed or open map data (OpenStreetMap plus a commercial provider) and <strong>corrected by driver trace mining</strong> (new roads, closures, wrong turn restrictions).</li>
+<li><strong>Routing:</strong> shortest-time paths. At city scale, <strong>contraction hierarchies</strong> or similar precomputation make queries milliseconds, instead of Dijkstra over millions of nodes (§6.3).</li>
+<li><strong>Traffic:</strong> live segment speeds are computed from driver traces, a stream aggregation of speeds per segment per minute, and blended with historical profiles by time of day.</li>
+<li><strong>ETA service:</strong> route time from the graph, then an <strong>ML correction model</strong>. Uber has published work on deep-learning ETA post-processing (VERIFY "DeepETA").</li>
+<li><strong>Pickup points:</strong> clustering historical pickup locations per place to suggest the best pickup spots.</li>
+</ul>
+<h3 id="54-forecasting">5.4 Forecasting<a class="headerlink" href="#54-forecasting" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>What is predicted:</strong> demand (requests) and supply (drivers available) per cell group for the next 5–60 minutes.</li>
+<li><strong>Features:</strong> recent history, time of day and week, weather, events (concerts, cricket matches), holidays, airport flight arrivals and train arrivals.</li>
+<li><strong>Models:</strong> gradient-boosted trees or neural sequence models, with separate short-horizon and longer-horizon models.</li>
+<li><strong>Consumers:</strong> pricing (§6.4), incentives design, heat maps, and <strong>matching look-ahead</strong>, which avoids sending the last driver out of an area about to be busy.</li>
+</ul>
+<h3 id="55-matching-and-dispatch">5.5 Matching and dispatch<a class="headerlink" href="#55-matching-and-dispatch" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Why batch?</strong> Assigning each request immediately to its nearest driver is greedy and makes the city worse.<ul>
+<li>Example: a driver 2 minutes from rider A and 3 minutes from rider B gets A. B then waits 9 minutes for the next driver, when giving the driver to B and another driver to A would have made both waits 4 minutes.</li>
+</ul>
+</li>
+<li><strong>The batch:</strong> every 2–5 seconds per area, the matcher collects open requests and available drivers (including those about to finish trips nearby) and solves a <strong>minimum-cost bipartite matching</strong> (§6.2).</li>
+<li><strong>The cost:</strong> pickup ETA (from maps), plus penalties such as heading, driver's destination mode, product compatibility, driver fairness and rider priority after previous declines.</li>
+<li><strong>Constraints:</strong> product (auto vs sedan), accessibility, EV range, airport queue rules, driver preferences.</li>
+<li><strong>After solving</strong>, dispatch sends offers. Acceptance and timeouts feed back into the next batch.</li>
+<li><strong>Consistency:</strong><ul>
+<li>driver state transitions (available → offered → assigned) are <strong>compare-and-set</strong> operations on the driver's state, so two matchers can never assign one driver twice;</li>
+<li>matchers are partitioned by area, with cross-boundary drivers handled by the area owning the request (with neighbour reads).</li>
+</ul>
+</li>
+</ul>
+<h3 id="56-pricing-upfront-fares-and-final-fares">5.6 Pricing: upfront fares and final fares<a class="headerlink" href="#56-pricing-upfront-fares-and-final-fares" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong>The upfront fare</strong> is quoted before the request:</p>
+<blockquote>
+<p>base + per-km × route distance + per-min × route time + fees + tolls, × dynamic multiplier, − promotions, + taxes</p>
+</blockquote>
+<p>It is rounded per the rules. The quote is stored with its inputs.
+- <strong>The final fare</strong> equals the quote, unless:
+- the destination changed (re-quote);
+- stops were added;
+- waiting exceeded the free period;
+- tolls differed;
+- the actual route diverged significantly <em>because of the rider</em>.</p>
+<p>A <strong>reconciliation job</strong> compares the actual trip with the quote, and support rules auto-resolve common disputes.
+- <strong>Regulatory limits:</strong> in India, the aggregator guidelines set rules on fare structure and on surge relative to base fares, and states may notify their own fares (VERIFY the current guidelines and state rules). The pricing engine enforces <strong>per-jurisdiction caps</strong> as hard constraints.
+- <strong>Promotions:</strong> rider discounts, passes and subscriptions. Driver-side incentives are separate (§5.8).</p>
+</li>
+</ul>
+<h3 id="57-payments-ledger-and-payouts">5.7 Payments, ledger and payouts<a class="headerlink" href="#57-payments-ledger-and-payouts" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Rider payments:</strong><ul>
+<li>UPI (collect, intent or autopay mandates), cards (tokenised), wallets, corporate accounts, <strong>cash</strong>;</li>
+<li>payment happens after the trip, with retries and fallback to a secondary method;</li>
+<li><strong>unpaid balances</strong> block the next request until settled (<a href="../../05-case-studies/45-payment-system/">Ch 45</a>).</li>
+</ul>
+</li>
+<li><strong>The ledger:</strong> double-entry accounts for rider payable, driver earnings, platform commission, taxes, promotions and tips.<ul>
+<li><strong>Cash trips:</strong> the platform's commission becomes a receivable from the driver.</li>
+<li><strong>Digital trips:</strong> the driver's share becomes a payable to the driver.</li>
+</ul>
+</li>
+<li><strong>Payouts:</strong> scheduled or instant transfers to drivers' bank accounts, with daily reconciliation against bank statements (<a href="../i03-core-banking-and-upi/">I03</a>).</li>
+<li><strong>Tax:</strong> GST on the platform's services and TDS/TCS obligations for drivers' earnings as applicable (VERIFY).</li>
+</ul>
+<h3 id="58-incentives">5.8 Incentives<a class="headerlink" href="#58-incentives" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Types:</strong><ul>
+<li>quests (N trips in a window → bonus);</li>
+<li>area boosts (extra per trip in a zone and time);</li>
+<li>guarantees (minimum hourly earnings when online in a zone).</li>
+</ul>
+</li>
+<li><strong>Design:</strong> incentives are budgeted by the forecast supply gap, with targeting by driver segment. Uplift is measured by experiments against a control group.</li>
+<li><strong>Accounting:</strong> incentive payouts are ledger entries with the same rigour as fares.</li>
+</ul>
+<h3 id="59-safety-platform">5.9 Safety platform<a class="headerlink" href="#59-safety-platform" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Onboarding checks:</strong> identity and document verification, background verification where required (VERIFY rules), vehicle checks.</li>
+<li><strong>In-trip features:</strong> a PIN to start, masked calls, share trip, SOS, and <strong>ride check</strong> on anomalies.</li>
+<li>
+<p><strong>Anomaly detection:</strong></p>
+<ul>
+<li><strong>long unexpected stops</strong>;</li>
+<li><strong>route deviation</strong> (distance from the planned route beyond a threshold for a sustained time);</li>
+<li><strong>possible crash</strong> (sudden deceleration from phone sensors followed by a stop);</li>
+<li>unexpected trip end far from the destination.</li>
+</ul>
+<p>Each has thresholds tuned to limit false alarms.
+- <strong>Safety operations:</strong> a 24×7 team with prioritised queues and trip replay tools. Evidence is preserved.
+- <strong>Women-safety and night features</strong> in some markets (VERIFY features by market).</p>
+</li>
+</ul>
+<h3 id="510-fraud-and-risk">5.10 Fraud and risk<a class="headerlink" href="#510-fraud-and-risk" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Fraud</th>
+<th>Signal</th>
+<th>Response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>GPS spoofing</strong> (fake location apps, emulators)</td>
+<td>Mock-location flags, impossible speeds, inconsistent sensors, cell tower vs GPS mismatch</td>
+<td>Block trips, suspend accounts</td>
+</tr>
+<tr>
+<td><strong>Collusion</strong> (driver and "rider" fake trips for incentives)</td>
+<td>Repeated pairs, short trips with no real movement, shared devices/payment</td>
+<td>Withhold incentives, ban</td>
+</tr>
+<tr>
+<td><strong>Payment fraud</strong></td>
+<td>Stolen cards, chargebacks, unpaid cash balances</td>
+<td>Risk scoring at request, payment method checks</td>
+</tr>
+<tr>
+<td><strong>Promo abuse</strong></td>
+<td>Many new accounts on one device or payment</td>
+<td>Device fingerprinting, graph analysis</td>
+</tr>
+<tr>
+<td><strong>Fare inflation by drivers</strong></td>
+<td>Detours, waiting manipulation</td>
+<td>Route vs plan checks, auto refunds</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-algorithms">6. Algorithms<a class="headerlink" href="#6-algorithms" title="Permanent link">&para;</a></h2>
+<h3 id="61-nearest-driver-search">6.1 Nearest-driver search<a class="headerlink" href="#61-nearest-driver-search" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>k-ring search on H3:</strong> look up the rider's cell, then rings 1, 2, 3… until enough candidates are found. Compute exact straight-line distance, then <strong>route ETA</strong> for the top candidates only, because ETA is expensive.</li>
+<li><strong>Alternatives:</strong> geohash prefix search, quadtrees, R-trees; compared in <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/">Ch 47</a> L1.</li>
+</ul>
+<h3 id="62-batched-matching">6.2 Batched matching<a class="headerlink" href="#62-batched-matching" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Model:</strong> a bipartite graph of requests × drivers, with edges where the pickup ETA is under a maximum and constraints are satisfied. The edge cost is ETA plus penalties.</li>
+<li>
+<p><strong>Solving:</strong></p>
+<ul>
+<li><strong>the Hungarian algorithm</strong> (O(n³)) for small batches;</li>
+<li>for larger batches, <strong>min-cost flow</strong> or auction algorithms, or greedy with local improvements when time-bounded.</li>
+</ul>
+<p>Batches are per area, so n stays small (tens to hundreds).
+- <strong>Batch window trade-off:</strong> longer windows give better global matches but add waiting. 2–5 s is typical, tuned per city by experiment.
+- <strong>Look-ahead:</strong> include drivers finishing trips within ~2 min near the request. Their "availability time" is added to the ETA.
+- <strong>Fairness terms:</strong> spread offers among waiting drivers (idle time bonus) to avoid starving some.</p>
+</li>
+</ul>
+<h3 id="63-routing-and-eta">6.3 Routing and ETA<a class="headerlink" href="#63-routing-and-eta" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Shortest paths:</strong> Dijkstra and A* are the basis.<ul>
+<li><strong>Contraction hierarchies</strong> add shortcut edges in preprocessing so queries explore only "upward" nodes. That is millisecond queries on city graphs.</li>
+<li>Customisable variants (CCH/CRP) allow traffic weight updates without full re-preprocessing.</li>
+</ul>
+</li>
+<li><strong>Traffic weights:</strong> per-segment speed estimates from recent traces (streaming aggregation), blended with the historical time-of-day profile.</li>
+<li><strong>ETA correction:</strong> a model predicts the residual between routing-engine ETA and actual time. Features: route, time, weather, pickup/drop-off type, city. It is trained on completed trips.</li>
+</ul>
+<h3 id="64-dynamic-pricing">6.4 Dynamic pricing<a class="headerlink" href="#64-dynamic-pricing" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The goal</strong> is to keep the market in balance: requests fulfilled with reasonable pickup times.</li>
+<li><strong>A simple, explainable version:</strong><ul>
+<li>per pricing zone, compute <em>imbalance = forecast demand / available supply</em> over the next minutes;</li>
+<li>map imbalance to a multiplier through a monotonic curve with caps;</li>
+<li><strong>smooth</strong> it over time (exponential smoothing or rate limits) and space (neighbour averaging), to avoid flicker and zone-boundary gaming.</li>
+</ul>
+</li>
+<li><strong>More advanced versions:</strong><ul>
+<li>estimate <strong>demand elasticity</strong> (how many riders still request at each price) and <strong>supply elasticity</strong> (how many drivers move or stay online);</li>
+<li>choose prices to maximise completed trips or a welfare objective, subject to caps and fairness constraints.</li>
+</ul>
+</li>
+<li><strong>Guard rails:</strong> regulatory caps (VERIFY), emergency overrides, consistency between quote and charge, and audit logs of every multiplier.</li>
+<li><strong>Evaluation:</strong><ul>
+<li><strong>switchback experiments</strong> (alternate policies over time slots per city) avoid interference between treatment and control riders, who share the same drivers;</li>
+<li>metrics: completion rate, wait time, cancellations, earnings per hour.</li>
+</ul>
+</li>
+</ul>
+<h3 id="65-map-matching">6.5 Map matching<a class="headerlink" href="#65-map-matching" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The problem:</strong> raw GPS points are noisy (±10–30 m in cities, worse near tall buildings). The trip must be placed on the actual road sequence.</li>
+<li><strong>Hidden Markov model:</strong><ul>
+<li><strong>hidden states:</strong> candidate road segments near each point;</li>
+<li><strong>emission probability:</strong> Gaussian on the distance from point to segment;</li>
+<li><strong>transition probability:</strong> how plausible the move between segments is, comparing route distance with straight-line distance;</li>
+<li><strong>solving:</strong> the <strong>Viterbi</strong> algorithm finds the most likely segment sequence.</li>
+</ul>
+</li>
+<li><strong>Outputs:</strong> accurate distance for fares, road positions for ETA and traffic, and detection of detours.</li>
+</ul>
+<h3 id="66-pooling-insertion">6.6 Pooling insertion<a class="headerlink" href="#66-pooling-insertion" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong>Insertion:</strong> for a new shared request, for each candidate trip, try inserting the pickup at position i and the drop-off at position j &gt; i in the stop sequence. Check that:</p>
+<ul>
+<li>capacity is respected;</li>
+<li>every existing rider's detour is within limits;</li>
+<li>time windows are met.</li>
+</ul>
+<p>Choose the insertion with the smallest added cost. This is <strong>insertion heuristics</strong> for the dial-a-ride problem, with local search to improve sequences.
+- <strong>Pruning:</strong> only trips whose route passes near the new pickup, found by a geo index on route corridors.</p>
+</li>
+</ul>
+<h3 id="67-supply-positioning-and-incentives">6.7 Supply positioning and incentives<a class="headerlink" href="#67-supply-positioning-and-incentives" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Heat maps</strong> show forecast demand minus supply per cell.</li>
+<li><strong>Incentive targeting:</strong> allocate budget to zones and times with the largest forecast gaps and the highest expected response. Uplift is modelled from experiments.</li>
+<li><strong>Repositioning suggestions:</strong> each idle driver gets a short list of nearby cells with the best expected earnings per hour. Suggestions are <strong>randomised</strong> across drivers, so everyone doesn't converge on the same cell.</li>
+</ul>
+<h3 id="68-fraud-detection">6.8 Fraud detection<a class="headerlink" href="#68-fraud-detection" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>GPS spoofing:</strong> rules on physics (speed, acceleration), consistency (GPS vs network location, sensor data), and device integrity attestations.</li>
+<li><strong>Collusion:</strong> a graph of rider–driver pairs, devices and payment instruments; clusters with unusual repeated interactions and incentive-heavy patterns. Community detection (e.g. connected components, Louvain) plus supervised models.</li>
+</ul>
+<h3 id="69-eta-and-fare-quality-monitoring">6.9 ETA and fare quality monitoring<a class="headerlink" href="#69-eta-and-fare-quality-monitoring" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Accuracy tracking:</strong> ETA error distributions per city and hour; fare quote vs final fare differences.</li>
+<li><strong>Alerting:</strong> alerts when error drifts, which may indicate map data issues, traffic feed failures or model drift.</li>
+</ul>
+<hr />
+<h2 id="7-data-architecture">7. Data Architecture<a class="headerlink" href="#7-data-architecture" title="Permanent link">&para;</a></h2>
+<h3 id="71-operational-stores">7.1 Operational stores<a class="headerlink" href="#71-operational-stores" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Store (reference)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Live driver locations and status</td>
+<td>In-memory sharded service (Redis Cluster or custom)</td>
+<td>Ephemeral; rebuilt from pings</td>
+</tr>
+<tr>
+<td>Trips</td>
+<td>Sharded relational (MySQL/PostgreSQL, Vitess/Citus) or a distributed SQL database</td>
+<td>Per-trip strong consistency; sharded by city or trip id</td>
+</tr>
+<tr>
+<td>Riders, drivers, vehicles, documents</td>
+<td>Relational + object storage for documents</td>
+<td>PII encrypted</td>
+</tr>
+<tr>
+<td>Ledger</td>
+<td>Relational with double-entry constraints</td>
+<td><a href="../../05-case-studies/45-payment-system/">Ch 45</a>, <a href="../i03-core-banking-and-upi/">I03</a></td>
+</tr>
+<tr>
+<td>Fare quotes</td>
+<td>Key-value with TTL</td>
+<td>Quote IDs referenced by trips</td>
+</tr>
+<tr>
+<td>Maps and routing data</td>
+<td>In-memory routing engine instances; object storage for map versions</td>
+<td>Versioned map releases</td>
+</tr>
+<tr>
+<td>Places search</td>
+<td>OpenSearch</td>
+<td>Autocomplete, POIs</td>
+</tr>
+</tbody>
+</table>
+<p>Publicly described (VERIFY): Uber built <strong>Schemaless</strong>, a MySQL-backed append-only store, and later <strong>Docstore</strong>, and used <strong>Cassandra</strong> for some workloads. Its <strong>Ringpop</strong> library provided consistent hashing for sharded services.</p>
+<h3 id="72-streaming">7.2 Streaming<a class="headerlink" href="#72-streaming" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Kafka</strong> carries driver locations, app events, trip state changes, pricing decisions, match decisions, payments and safety events.<ul>
+<li>Uber has described running one of the largest Kafka deployments (VERIFY).</li>
+</ul>
+</li>
+<li><strong>Stream processing:</strong><ul>
+<li><strong>Apache Flink</strong> computes per-cell supply and demand, segment speeds, surge inputs, fraud features and real-time dashboards;</li>
+<li>Uber has described Flink-based platforms for real-time features (VERIFY).</li>
+</ul>
+</li>
+</ul>
+<h3 id="73-lakehouse">7.3 Lakehouse<a class="headerlink" href="#73-lakehouse" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Storage:</strong><ul>
+<li>all streams and CDC land in a lakehouse on distributed storage (HDFS or object storage);</li>
+<li><strong>Apache Hudi</strong>, created at Uber for incremental upserts on the lake (publicly described; VERIFY), handles <strong>late updates</strong> such as trip corrections and fare adjustments;</li>
+<li>Iceberg or Delta are alternatives.</li>
+</ul>
+</li>
+<li><strong>Processing and query:</strong> Spark for batch; <strong>Presto/Trino</strong> for interactive SQL (Uber has described large Presto deployments; VERIFY).</li>
+<li><strong>Models:</strong><ul>
+<li><strong>facts:</strong> trips, requests (including unfulfilled), offers (accepted/declined/timeout), price quotes, payments, incentives, safety incidents, location aggregates;</li>
+<li><strong>dimensions:</strong> city, zone and cell (H3), driver, rider (pseudonymised), vehicle, product, time.</li>
+</ul>
+</li>
+<li><strong>Governance:</strong> location data is highly sensitive. Access is restricted by purpose, precise traces are retained only as long as needed, and aggregates are used for most analysis.</li>
+</ul>
+<h3 id="74-real-time-olap">7.4 Real-time OLAP<a class="headerlink" href="#74-real-time-olap" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Apache Pinot</strong>, which Uber has described using heavily for real-time analytics (VERIFY), or ClickHouse or Druid, powers:<ul>
+<li>city operations dashboards (requests, completion, ETAs per zone per minute);</li>
+<li>surge monitoring;</li>
+<li>driver earnings views;</li>
+<li>restaurant or merchant dashboards in adjacent businesses.</li>
+</ul>
+</li>
+<li><strong>Why:</strong> a sub-second query over fresh data (seconds old) that the batch warehouse cannot provide.</li>
+</ul>
+<h3 id="75-ml-platform-and-experimentation">7.5 ML platform and experimentation<a class="headerlink" href="#75-ml-platform-and-experimentation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>ML platform:</strong> Uber's publicly described <strong>Michelangelo</strong> covers feature management, training, deployment and monitoring (VERIFY).<ul>
+<li><strong>Reference:</strong> a feature store (offline in the lake, online in a low-latency store), training on Spark or GPUs, model registry, online serving with shadow and canary deployment, drift monitoring.</li>
+</ul>
+</li>
+<li><strong>Models:</strong> ETA correction, demand and supply forecasts, pricing elasticity, fraud, safety anomaly scoring, destination prediction, pickup point suggestion, support ticket routing.</li>
+<li><strong>Experimentation:</strong><ul>
+<li>A/B tests randomised by user for UI changes;</li>
+<li><strong>switchback</strong> and <strong>geo-randomised</strong> designs for marketplace changes (pricing, matching, incentives), because riders and drivers interact;</li>
+<li>a central platform computes metrics with variance reduction.</li>
+</ul>
+</li>
+</ul>
+<h3 id="76-data-flow">7.6 Data flow<a class="headerlink" href="#76-data-flow" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>flowchart LR
+    APPS[Rider and driver apps] --&gt; GW[Gateways]
+    GW --&gt; K[Kafka]
+    SVC[Trip, pricing, matching, payments] --&gt; K
+    K --&gt; FL[Flink - supply demand, speeds, features]
+    FL --&gt; RT[Marketplace engines]
+    FL --&gt; OLAP[Real-time OLAP - Pinot]
+    K --&gt; HUDI[Lakehouse - Hudi tables]
+    HUDI --&gt; SQL[Presto or Trino, Spark]
+    SQL --&gt; BI[BI and finance]
+    HUDI --&gt; FS[Feature store offline]
+    FL --&gt; FSO[Feature store online]
+    FS --&gt; TRAIN[Model training]
+    TRAIN --&gt; SERVE[Model serving]
+    FSO --&gt; SERVE
+    SERVE --&gt; RT</code></pre>
+<hr />
+<h2 id="8-tech-stack">8. Tech Stack<a class="headerlink" href="#8-tech-stack" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Publicly described by Uber (VERIFY each)</th>
+<th>Reference choice</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Services</td>
+<td>Go and Java microservices (thousands of services)</td>
+<td>Go or Java/Kotlin (Spring Boot), gRPC</td>
+</tr>
+<tr>
+<td>Service discovery and sharding</td>
+<td>Ringpop (consistent hashing, historical)</td>
+<td>Kubernetes services, consistent hashing libraries</td>
+</tr>
+<tr>
+<td>Workflows</td>
+<td><strong>Cadence</strong> (open source; Temporal is a fork)</td>
+<td>Temporal</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>Schemaless / Docstore on MySQL; Cassandra; Redis</td>
+<td>MySQL/PostgreSQL sharded (Vitess), Redis, Cassandra</td>
+</tr>
+<tr>
+<td>Streaming</td>
+<td>Kafka; Flink</td>
+<td>Kafka; Flink</td>
+</tr>
+<tr>
+<td>Lakehouse</td>
+<td><strong>Apache Hudi</strong> on HDFS/object storage; Spark; Presto</td>
+<td>Hudi/Iceberg on object storage; Spark; Trino</td>
+</tr>
+<tr>
+<td>Real-time OLAP</td>
+<td><strong>Apache Pinot</strong></td>
+<td>Pinot or ClickHouse</td>
+</tr>
+<tr>
+<td>ML</td>
+<td><strong>Michelangelo</strong></td>
+<td>Feature store (Feast), MLflow, Ray/Spark, KServe</td>
+</tr>
+<tr>
+<td>Geospatial</td>
+<td><strong>H3</strong></td>
+<td>H3 (open source)</td>
+</tr>
+<tr>
+<td>Tracing and metrics</td>
+<td><strong>Jaeger</strong> (created at Uber), <strong>M3</strong> (metrics)</td>
+<td>OpenTelemetry + Jaeger/Tempo, Prometheus/M3/Mimir</td>
+</tr>
+<tr>
+<td>Maps</td>
+<td>Internal maps stack plus providers</td>
+<td>OSRM/Valhalla/GraphHopper (open source routing) + commercial map data</td>
+</tr>
+<tr>
+<td>Mobile</td>
+<td>Native iOS/Android; RIBs architecture (open source)</td>
+<td>Native Kotlin/Swift</td>
+</tr>
+<tr>
+<td>Communication</td>
+<td>Persistent connections; push</td>
+<td>WebSockets/gRPC streams, FCM/APNs, a CPaaS for masked calls</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-security-privacy-safety-compliance">9. Security, Privacy, Safety &amp; Compliance<a class="headerlink" href="#9-security-privacy-safety-compliance" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Location privacy:</strong><ul>
+<li>precise traces are restricted to purposes (trip, safety, disputes);</li>
+<li>access is logged;</li>
+<li>retention is limited, with aggregates for analytics;</li>
+<li>riders see drivers' approximate positions before the trip and exact positions only during their trip.</li>
+</ul>
+</li>
+<li><strong>Personal data:</strong> masked phone numbers (a CPaaS proxy), minimal data shared between rider and driver, DPDP Act obligations in India (VERIFY) and GDPR where applicable.</li>
+<li><strong>Aggregator regulation (India):</strong> licensing, driver verification, vehicle fitness, fare and surge rules, grievance redressal, safety features and data localisation provisions in the Motor Vehicle Aggregator Guidelines and state rules (VERIFY current texts; state rules vary).</li>
+<li><strong>Payments:</strong> PCI scope reduction by tokenisation; RBI rules for card storage and payment aggregators (VERIFY).</li>
+<li><strong>Safety data:</strong> incident data preserved and access-controlled; lawful process for law enforcement requests.</li>
+</ul>
+<hr />
+<h2 id="10-reliability-operations">10. Reliability &amp; Operations<a class="headerlink" href="#10-reliability-operations" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>City isolation:</strong> each city's marketplace runs in its own partitions, so a bad deploy or a runaway surge bug affects one city. Deploys roll out city by city (cells; <a href="../../04-architect/34-modern-architecture-styles/">Ch 34</a>).</li>
+<li><strong>Trips in progress must survive:</strong><ul>
+<li>the trip service is strongly consistent and replicated;</li>
+<li>apps cache the trip state and continue navigation offline;</li>
+<li>fare computation can happen after reconnection from buffered GPS.</li>
+</ul>
+</li>
+<li><strong>Degradation order:</strong><ol>
+<li>Heat maps and non-critical features go first.</li>
+<li>Then pooling, falling back to single rides.</li>
+<li>Then <strong>dynamic pricing falls back to a fixed multiplier</strong>.</li>
+<li>Matching falls back to greedy nearest-driver if the optimiser is slow.</li>
+</ol>
+</li>
+<li><strong>Multi-region:</strong> active-active across regions for stateless services; the trip store is replicated with failover; driver and rider connections reconnect to the healthy region.</li>
+<li><strong>Observability:</strong> per-city dashboards of request → match → pickup → complete funnel, ETA error, match latency, offer acceptance, payment success, and SOS response times.</li>
+<li><strong>Peak events</strong> (New Year's Eve, cricket finals, festivals): forecasts feed pre-scaling and incentive plans, and operations teams are on standby.</li>
+</ul>
+<hr />
+<h2 id="11-key-trade-offs">11. Key Trade-offs<a class="headerlink" href="#11-key-trade-offs" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Chosen</th>
+<th>Accepted cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Matching</td>
+<td>Batched optimisation (2–5 s windows)</td>
+<td>A few seconds of extra waiting per request</td>
+</tr>
+<tr>
+<td>Geography</td>
+<td>H3 hexagons</td>
+<td>Learning curve; exact polygons still needed for legal boundaries</td>
+</tr>
+<tr>
+<td>Location state</td>
+<td>In-memory, ephemeral</td>
+<td>Brief rebuild after failover</td>
+</tr>
+<tr>
+<td>Pricing</td>
+<td>Upfront fares with reconciliation</td>
+<td>Risk of quote vs actual mismatch; needs dispute rules</td>
+</tr>
+<tr>
+<td>Surge</td>
+<td>Smoothed, capped, experiment-tested</td>
+<td>Slower reaction to sudden spikes</td>
+</tr>
+<tr>
+<td>Trip store</td>
+<td>Strong consistency per trip</td>
+<td>Higher write latency than eventual stores</td>
+</tr>
+<tr>
+<td>Experiments</td>
+<td>Switchbacks for the marketplace</td>
+<td>Longer experiments, more complex analysis</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-interview-qa">12. Interview Q&amp;A<a class="headerlink" href="#12-interview-qa" title="Permanent link">&para;</a></h2>
+<h3 id="beginner-b1">Beginner <span class="band b1">B1</span><a class="headerlink" href="#beginner-b1" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q1 [B1] ⭐ Walk me through what happens when a rider requests a ride.</summary>
+<p><strong>30-second answer:</strong> Fare estimate (route, ETA, price with multiplier) → request creates a trip with the quote → matching assigns a driver in the next batch, locking the driver → offer to driver → accept → navigation to pickup, arrival, PIN to start → live tracking → end and final fare → payment, ledger, ratings.</p>
+<p><strong>Deep answer:</strong> §4.1.</p>
+<p><strong>Trade-offs I'd call out:</strong> Batching delay vs better matches.</p>
+<p><strong>Follow-ups:</strong>
+1. Driver declines? → Back into next batch with priority.
+2. Double tap? → Idempotency key.</p>
+<p><strong>Red flags:</strong> "Send the request to the nearest driver."</p>
+</details>
+<details class="question">
+<summary>Q2 [B1] How do you find drivers near a rider?</summary>
+<p><strong>30-second answer:</strong> Keep live driver positions in an in-memory geo index sharded by cell (e.g. H3 hexagons); search the rider's cell and neighbouring rings, then compute route ETAs for the closest candidates only.</p>
+<p><strong>Deep answer:</strong> §5.1, §5.2, §6.1; <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/">Ch 47</a>.</p>
+<p><strong>Trade-offs I'd call out:</strong> Cell size vs search cost.</p>
+<p><strong>Follow-ups:</strong>
+1. Stale drivers? → Last-seen cutoff.
+2. Why hexagons? → Uniform neighbours.</p>
+<p><strong>Red flags:</strong> SQL distance query over all drivers.</p>
+</details>
+<details class="question">
+<summary>Q3 [B1] How does the app show the car moving on the map?</summary>
+<p><strong>30-second answer:</strong> The driver app sends GPS every few seconds; the server map-matches it to roads and pushes it to the rider over a persistent connection; the rider app animates between points.</p>
+<p><strong>Deep answer:</strong> §5.2, §6.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Update frequency vs battery and data.</p>
+<p><strong>Follow-ups:</strong>
+1. Tunnel? → Dead reckoning.
+2. Privacy before trip? → Approximate positions.</p>
+<p><strong>Red flags:</strong> Polling every second from the rider app.</p>
+</details>
+<details class="question">
+<summary>Q4 [B1] Why does the driver ask for a PIN at the start?</summary>
+<p><strong>30-second answer:</strong> To confirm the right rider got into the right car — preventing wrong pickups and some fraud — and to mark the trip start reliably.</p>
+<p><strong>Deep answer:</strong> §4.1 step 9, §5.9.</p>
+<p><strong>Trade-offs I'd call out:</strong> Small friction vs safety.</p>
+<p><strong>Follow-ups:</strong>
+1. Rider can't show? → Support flow.
+2. Other checks? → Photo, plate.</p>
+<p><strong>Red flags:</strong> No start verification.</p>
+</details>
+<h3 id="intermediate-b2">Intermediate <span class="band b2">B2</span><a class="headerlink" href="#intermediate-b2" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q5 [B2] ⭐ How would you design surge pricing?</summary>
+<p><strong>30-second answer:</strong> Forecast demand and supply per zone for the next minutes, map the imbalance to a multiplier with a monotonic curve, smooth over time and space, apply caps (including regulatory ones) and emergency overrides, show it in the upfront fare, and evaluate with switchback experiments.</p>
+<p><strong>Deep answer:</strong> §4.3, §6.4.</p>
+<p><strong>Trade-offs I'd call out:</strong> Responsiveness vs flicker and fairness.</p>
+<p><strong>Follow-ups:</strong>
+1. Zone boundary gaming? → Spatial smoothing.
+2. Why switchbacks? → Shared supply interference.</p>
+<p><strong>Red flags:</strong> Unbounded multipliers.</p>
+</details>
+<details class="question">
+<summary>Q6 [B2] How are upfront fares calculated and kept honest?</summary>
+<p><strong>30-second answer:</strong> From route distance and time, fees, tolls, multiplier, promotions and taxes; stored as a quote with inputs; the final fare equals the quote unless the rider changed the trip (destination, stops, waiting) — reconciliation compares actual vs quote and auto-resolves disputes.</p>
+<p><strong>Deep answer:</strong> §5.6.</p>
+<p><strong>Trade-offs I'd call out:</strong> Platform bears route risk.</p>
+<p><strong>Follow-ups:</strong>
+1. Driver detour? → Rider charged the quote.
+2. Quote expiry? → Minutes.</p>
+<p><strong>Red flags:</strong> Metered fare with no quote.</p>
+</details>
+<details class="question">
+<summary>Q7 [B2] How do you prevent a driver from being assigned two trips?</summary>
+<p><strong>30-second answer:</strong> Driver state is changed only with compare-and-set (available → offered → assigned) in a strongly consistent store; matchers are partitioned by area; offers time out and release the driver explicitly.</p>
+<p><strong>Deep answer:</strong> §5.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Extra round trip vs correctness.</p>
+<p><strong>Follow-ups:</strong>
+1. Matcher crash? → Offer timeout releases.
+2. Pooling? → Seat capacity instead of boolean.</p>
+<p><strong>Red flags:</strong> Reading status then writing.</p>
+</details>
+<details class="question">
+<summary>Q8 [B2] How do cash trips work in the ledger?</summary>
+<p><strong>30-second answer:</strong> The rider pays the driver; the driver confirms; the platform's commission becomes a receivable from the driver, netted against digital earnings or collected via top-up; everything posts as double-entry.</p>
+<p><strong>Deep answer:</strong> §5.7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Collection risk.</p>
+<p><strong>Follow-ups:</strong>
+1. Negative balance? → Limits, blocking.
+2. Tips? → Separate lines.</p>
+<p><strong>Red flags:</strong> Commission tracked in a spreadsheet.</p>
+</details>
+<details class="question">
+<summary>Q9 [B2] How do airport queues differ from normal matching?</summary>
+<p><strong>30-second answer:</strong> The airport is a geofenced zone with a FIFO driver queue per product; requests from the terminal go to the first eligible driver in the queue, not the nearest; leaving the zone forfeits the place; short trips may get queue priority on return.</p>
+<p><strong>Deep answer:</strong> §4.4.</p>
+<p><strong>Trade-offs I'd call out:</strong> Fairness vs efficiency.</p>
+<p><strong>Follow-ups:</strong>
+1. Queue gaming? → GPS checks.
+2. Fees? → Added per rules.</p>
+<p><strong>Red flags:</strong> Nearest-driver at airports.</p>
+</details>
+<h3 id="senior-b3">Senior <span class="band b3">B3</span><a class="headerlink" href="#senior-b3" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q10 [B3] ⭐ Why batch matching instead of nearest driver, and how does it work?</summary>
+<p><strong>30-second answer:</strong> Greedy nearest-driver is locally optimal but globally poor; batching requests and drivers every few seconds and solving a min-cost bipartite matching (Hungarian or min-cost flow) on ETA plus penalties lowers average pickup times; include drivers finishing trips nearby; tune the window per city.</p>
+<p><strong>Deep answer:</strong> §5.5, §6.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Batch wait vs match quality.</p>
+<p><strong>Follow-ups:</strong>
+1. Batch size? → Per area, small n.
+2. Fairness? → Idle time terms.</p>
+<p><strong>Red flags:</strong> Global single matcher.</p>
+</details>
+<details class="question">
+<summary>Q11 [B3] ⭐ How do you compute accurate ETAs?</summary>
+<p><strong>30-second answer:</strong> A road graph with turn restrictions, live segment speeds from driver traces blended with historical profiles, fast shortest paths (contraction hierarchies), and an ML model that corrects the routing ETA using features like time, weather and pickup type — monitored for error drift.</p>
+<p><strong>Deep answer:</strong> §5.3, §6.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Model complexity vs latency.</p>
+<p><strong>Follow-ups:</strong>
+1. Map errors? → Trace mining.
+2. Latency budget? → Milliseconds per route.</p>
+<p><strong>Red flags:</strong> Straight-line distance / average speed.</p>
+</details>
+<details class="question">
+<summary>Q12 [B3] How does map matching work?</summary>
+<p><strong>30-second answer:</strong> A hidden Markov model: candidate road segments near each GPS point are states, emission probabilities come from distance to segment, transition probabilities from route vs straight-line distance, and Viterbi finds the most likely road sequence.</p>
+<p><strong>Deep answer:</strong> §6.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Accuracy vs compute per point.</p>
+<p><strong>Follow-ups:</strong>
+1. Uses? → Fares, ETA, traffic, detours.
+2. Sparse points? → Larger transitions.</p>
+<p><strong>Red flags:</strong> Snapping each point independently.</p>
+</details>
+<details class="question">
+<summary>Q13 [B3] How would you implement shared rides?</summary>
+<p><strong>30-second answer:</strong> For a new request, find candidate trips whose routes pass near the pickup, try insertion positions for pickup and drop-off, check capacity, detour limits and time windows, and choose the cheapest insertion; fix each rider's fare upfront; re-plan the driver's route.</p>
+<p><strong>Deep answer:</strong> §4.5, §6.6.</p>
+<p><strong>Trade-offs I'd call out:</strong> Efficiency vs rider experience.</p>
+<p><strong>Follow-ups:</strong>
+1. Detour limit? → Per rider.
+2. Pool fails? → Still shared fare.</p>
+<p><strong>Red flags:</strong> Re-optimising all trips from scratch each time.</p>
+</details>
+<details class="question">
+<summary>Q14 [B3] How do you detect GPS spoofing and collusion?</summary>
+<p><strong>30-second answer:</strong> Spoofing via physics checks (speed, jumps), mock-location and device integrity signals, GPS vs network location consistency; collusion via graphs of rider–driver pairs, devices and payments with community detection plus supervised models; act on incentives and accounts.</p>
+<p><strong>Deep answer:</strong> §5.10, §6.8.</p>
+<p><strong>Trade-offs I'd call out:</strong> False positives hit honest drivers.</p>
+<p><strong>Follow-ups:</strong>
+1. Appeals? → Human review.
+2. Real-time? → Streaming features.</p>
+<p><strong>Red flags:</strong> Trusting client GPS blindly.</p>
+</details>
+<h3 id="architect-b4">Architect <span class="band b4">B4</span><a class="headerlink" href="#architect-b4" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q15 [B4] ⭐ Design the data platform for a ride-hailing company.</summary>
+<p><strong>30-second answer:</strong> Kafka for all events; Flink for real-time features and aggregates feeding marketplace engines and a real-time OLAP store (Pinot) for ops dashboards; a Hudi/Iceberg lakehouse for trips, offers, quotes and payments with late updates; Presto/Trino and Spark for analysis; a feature store and ML platform; strict governance for location data.</p>
+<p><strong>Deep answer:</strong> §7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Real-time complexity vs freshness.</p>
+<p><strong>Follow-ups:</strong>
+1. Why Hudi? → Upserts for late corrections.
+2. Location retention? → Purpose-limited.</p>
+<p><strong>Red flags:</strong> Dashboards from the trips database.</p>
+</details>
+<details class="question">
+<summary>Q16 [B4] How do you experiment on pricing or matching fairly?</summary>
+<p><strong>30-second answer:</strong> Riders and drivers share one market, so user-level A/B tests interfere; use switchback designs (alternate policies across time slots per city) or geo-randomisation, with enough slots, pre-registered metrics (completion, wait, cancellations, driver earnings) and variance reduction.</p>
+<p><strong>Deep answer:</strong> §6.4, §7.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Longer experiments.</p>
+<p><strong>Follow-ups:</strong>
+1. Carryover effects? → Buffer periods.
+2. Guard rails? → Caps.</p>
+<p><strong>Red flags:</strong> 50/50 user split for surge.</p>
+</details>
+<details class="question">
+<summary>Q17 [B4] How would you make a city's marketplace resilient to failures?</summary>
+<p><strong>30-second answer:</strong> Partition by city with independent deployments, strongly consistent replicated trip store, apps that continue trips offline, graceful fallbacks (fixed multiplier, greedy matching, no pooling), multi-region failover for connections, and per-city funnel monitoring.</p>
+<p><strong>Deep answer:</strong> §10.</p>
+<p><strong>Trade-offs I'd call out:</strong> Duplication per city.</p>
+<p><strong>Follow-ups:</strong>
+1. Matching optimiser down? → Greedy fallback.
+2. Payments down? → Complete trips, charge later.</p>
+<p><strong>Red flags:</strong> One global marketplace service.</p>
+</details>
+<details class="question">
+<summary>Q18 [B4] How do regulations shape a ride-hailing platform in India?</summary>
+<p><strong>30-second answer:</strong> Aggregator licensing and guidelines set rules on driver verification, vehicle fitness, fare structure and surge limits, safety features, grievance handling and data localisation, with state-level variations — so pricing caps, onboarding checks and data residency must be configurable per jurisdiction (VERIFY current texts).</p>
+<p><strong>Deep answer:</strong> §5.6, §9.</p>
+<p><strong>Trade-offs I'd call out:</strong> Configuration complexity.</p>
+<p><strong>Follow-ups:</strong>
+1. Surge cap enforcement? → Hard constraint in pricing.
+2. Audits? → Logs of multipliers.</p>
+<p><strong>Red flags:</strong> One global pricing policy.</p>
+</details>
+<details class="question">
+<summary>Q19 [B4] How would you design driver incentives without wasting budget?</summary>
+<p><strong>30-second answer:</strong> Target incentives to forecast supply gaps by zone and time, segment drivers by expected response, measure uplift against control groups, cap budgets, randomise repositioning suggestions to avoid herding, and account for incentives in the ledger.</p>
+<p><strong>Deep answer:</strong> §5.8, §6.7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Short-term supply vs cost.</p>
+<p><strong>Follow-ups:</strong>
+1. Collusion? → Fraud checks.
+2. Measuring? → Uplift experiments.</p>
+<p><strong>Red flags:</strong> Blanket bonuses.</p>
+</details>
+<details class="question">
+<summary>Q20 [B4] Compare ride-hailing dispatch with food or grocery delivery dispatch.</summary>
+<p><strong>30-second answer:</strong> Both match moving couriers to jobs with ETAs; rides have a single pickup-drop-off with the customer present and price elasticity at request time, while delivery adds preparation time uncertainty, batching multiple orders per courier and store-side waits — so delivery dispatch optimises over longer horizons with batching (Ch 47).</p>
+<p><strong>Deep answer:</strong> <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/">Ch 47</a> vs this chapter.</p>
+<p><strong>Trade-offs I'd call out:</strong> Batching benefits vs promise times.</p>
+<p><strong>Follow-ups:</strong>
+1. Shared components? → Geo, maps, location.
+2. Different? → Pricing and pooling.</p>
+<p><strong>Red flags:</strong> Treating them as identical.</p>
+</details>
+<hr />
+<h2 id="13-summary">13. Summary<a class="headerlink" href="#13-summary" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Ride-hailing is a real-time, local market:</strong> partitioned by city and hexagonal cell, with ephemeral in-memory location state and durable trip state.</li>
+<li><strong>Matching is batched optimisation, not nearest-driver.</strong> Pricing balances the market with smoothed, capped multipliers tested by switchbacks.</li>
+<li><strong>Maps are the hidden core:</strong> road graphs, fast routing, live traffic from driver traces, ML-corrected ETAs, HMM map matching.</li>
+<li><strong>Money and safety need strong guarantees:</strong> idempotent trips, a double-entry ledger with cash receivables, SOS and anomaly detection, fraud graphs.</li>
+<li><strong>The data platform:</strong> Kafka → Flink → real-time OLAP for operations; lakehouse (Hudi) → SQL and ML for everything else; strict location privacy.</li>
+</ol>
+<h3 id="related-chapters">Related chapters<a class="headerlink" href="#related-chapters" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/">Ch 47 — Delivery Dispatch &amp; Live Tracking</a> · <a href="../../05-case-studies/45-payment-system/">Ch 45 — Payments</a> · <a href="../../05-case-studies/41-chat-customer-rider-messaging/">Ch 41 — Chat</a> · <a href="../../03-production/21-data-at-scale/">Ch 21 — Data at Scale</a> · <a href="../i03-core-banking-and-upi/">I03 — Core Banking &amp; UPI</a></li>
+<li>Next in this tab: <a href="../i06-video-streaming-and-live-cricket/">I06 — Video Streaming &amp; Live Cricket</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../i04-hospital-ehr-and-telemedicine/" class="md-footer__link md-footer__link--prev" aria-label="Previous: I04. Hospital EHR &amp; Telemedicine">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                I04. Hospital EHR & Telemedicine
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../i06-video-streaming-and-live-cricket/" class="md-footer__link md-footer__link--next" aria-label="Next: I06. Video Streaming &amp; Live Cricket">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                I06. Video Streaming & Live Cricket
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

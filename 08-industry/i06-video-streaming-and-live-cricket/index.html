@@ -1,0 +1,6387 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Beginner to Architect — Java/Spring system design with production code, design documents and interview mastery">
+      
+      
+        <meta name="author" content="Ashish">
+      
+      
+      
+        <link rel="prev" href="../i05-ride-hailing/">
+      
+      
+        <link rel="next" href="../i07-messaging-and-social-feed/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>I06. Video Streaming & Live Cricket - System Design Enterprise Handbook</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#i06-video-streaming-live-cricket" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-header__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            System Design Enterprise Handbook
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              I06. Video Streaming & Live Cricket
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Orientation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Foundations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../02-distributed-core/10-replication/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Distributed Core
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../03-production/21-data-at-scale/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Production
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../04-architect/31-architecture-decision-making/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architect
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Case Studies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Capstone
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Interview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Industry Designs
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../99-appendix/qa-index/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Appendix
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-nav__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    System Design Enterprise Handbook
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Orientation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Orientation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    00. How to Use This Handbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/01-what-system-design-is/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    01. What System Design Is
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    02. Back-of-the-Envelope Estimation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/03-networking-essentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    03. Networking Essentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/04-api-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    04. API Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/05-relational-databases-deep-dive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    05. Relational Databases Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/06-nosql-and-polyglot-persistence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    06. NoSQL & Polyglot Persistence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/07-caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    07. Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/08-load-balancing-proxies-and-gateways/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    08. Load Balancing, Proxies & Gateways
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/09-scalability-fundamentals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    09. Scalability Fundamentals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distributed Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/10-replication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    10. Replication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/11-partitioning-and-sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    11. Partitioning & Sharding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/12-consistency-time-and-consensus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    12. Consistency, Time & Consensus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/13-distributed-transactions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    13. Distributed Transactions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/14-messaging-and-event-streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    14. Messaging & Event Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/15-event-driven-architecture-cqrs-and-event-sourcing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    15. Event-Driven Architecture, CQRS & Event Sourcing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/16-microservices-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    16. Microservices Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/17-inter-service-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    17. Inter-Service Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/18-resilience-patterns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    18. Resilience Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/19-concurrency-at-scale-in-java/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    19. Concurrency at Scale in Java
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/20-idempotency-ids-and-distributed-locks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    20. Idempotency, IDs & Distributed Locks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Production
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/21-data-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    21. Data at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/22-search-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    22. Search Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/23-security-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    23. Security Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/24-observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    24. Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/25-performance-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    25. Performance Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/26-deployment-and-infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    26. Deployment & Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/27-reliability-and-disaster-recovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    27. Reliability & Disaster Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/28-schema-and-data-evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    28. Schema & Data Evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/29-testing-distributed-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    29. Testing Distributed Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/30-multi-tenancy-and-saas-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    30. Multi-Tenancy & SaaS Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architect
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architect
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/31-architecture-decision-making/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    31. Architecture Decision Making
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/32-design-documents-and-architecture-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    32. Design Documents & Architecture Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/33-domain-driven-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    33. Domain-Driven Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/34-modern-architecture-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    34. Modern Architecture Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/35-cost-engineering-and-finops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    35. Cost Engineering & FinOps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/36-compliance-governance-and-data-residency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    36. Compliance, Governance & Data Residency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/37-leading-architecture-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    37. Leading Architecture at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Case Studies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Case Studies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    38. URL Shortener & SMS Short Links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/39-distributed-rate-limiter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    39. Distributed Rate Limiter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/40-notification-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    40. Notification System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/41-chat-customer-rider-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    41. Chat — Customer–Rider Messaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/42-search-autocomplete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    42. Search Autocomplete (Typeahead)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/43-home-feed-and-recommendations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    43. Home Feed & Recommendations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/44-distributed-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    44. Distributed Cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/45-payment-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    45. Payment System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/46-grocery-checkout-and-inventory-reservation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    46. Grocery Checkout & Inventory Reservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    47. Delivery Dispatch & Live Tracking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/48-delivery-slot-booking-and-capacity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    48. Delivery Slot Booking & Capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/49-pricing-promotions-and-coupons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    49. Pricing, Promotions & Coupons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/50-distributed-job-scheduler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    50. Distributed Job Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/51-real-time-analytics-and-top-k/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    51. Real-time Analytics & Top-K
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/52-object-storage-and-media-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    52. Object Storage & Media Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/53-web-crawler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    53. Web Crawler (Price Monitoring)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/54-distributed-key-value-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    54. Distributed Key-Value Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/55-order-matching-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    55. Order Matching Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capstone
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Capstone
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    56. The Grocery Marketplace, End to End
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interview
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interview
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    57. The System Design Interview Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/58-level-expectations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    58. Level Expectations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/59-interview-qa-bank/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    59. Interview Q&A Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/60-mock-interviews/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    60. Mock Interviews
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/61-behavioral-and-leadership/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    61. Behavioural & Leadership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/qa-bank-starred/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ⭐ Drill Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Industry Designs
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Industry Designs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01-amazon-style-global-marketplace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01. Amazon-Style Global Marketplace
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01b-amazon-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01b. Amazon — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02-flipkart-style-sale-day-ecommerce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02. Flipkart-Style Sale-Day E-Commerce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02b-flipkart-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02b. Flipkart — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i03-core-banking-and-upi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I03. Core Banking & UPI Payments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i04-hospital-ehr-and-telemedicine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I04. Hospital EHR & Telemedicine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i05-ride-hailing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I05. Ride-Hailing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I06. Video Streaming & Live Cricket
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I06. Video Streaming & Live Cricket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-two-products-on-one-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 Two products on one platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-main-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Main systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-scale-for-this-design-assumptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Scale for this design (assumptions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-it-works-journeys-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How It Works — Journeys End to End
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How It Works — Journeys End to End">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-journey-1-a-new-series-goes-from-master-file-to-playable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Journey 1: a new series goes from master file to playable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-journey-2-pressing-play-on-vod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Journey 2: pressing Play on VOD
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-journey-3-a-cricket-final-from-the-stadium-to-40-million-phones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Journey 3: a cricket final, from the stadium to 40 million phones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-journey-4-subscribing-with-upi-autopay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Journey 4: subscribing with UPI autopay
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-journey-5-downloading-an-episode-for-a-train-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Journey 5: downloading an episode for a train journey
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-core-subsystems-in-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Core Subsystems in Depth
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Core Subsystems in Depth">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-the-vod-encoding-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 The VOD encoding pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-packaging-manifests-and-drm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Packaging, manifests and DRM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-playback-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Playback service
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-cdn-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 CDN strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-the-player-and-abr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 The player and ABR
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-handling-live-concurrency-the-data-plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Handling live concurrency — the data plane
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-handling-live-concurrency-the-control-plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Handling live concurrency — the control plane
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#58-ads-server-side-insertion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.8 Ads: server-side insertion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#59-live-experience-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.9 Live experience features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#510-catalogue-personalisation-and-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.10 Catalogue, personalisation and search
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#511-content-protection-and-piracy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.11 Content protection and piracy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-encoding-ladder-optimisation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Encoding ladder optimisation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-perceptual-quality-vmaf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Perceptual quality (VMAF)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-adaptive-bitrate-abr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Adaptive bitrate (ABR)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-cdn-steering-and-request-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 CDN steering and request routing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-cache-fill-and-eviction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Cache fill and eviction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-recommendations-and-artwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Recommendations and artwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-concurrency-forecasting-for-live-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Concurrency forecasting for live events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-real-time-aggregation-at-scale-reactions-telemetry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Real-time aggregation at scale (reactions, telemetry)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-ad-decisioning-and-pacing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 Ad decisioning and pacing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#610-anomaly-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.10 Anomaly detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-operational-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Operational stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-telemetry-and-streaming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Telemetry and streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-lakehouse-and-warehouse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Lakehouse and warehouse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-ml-platform-and-experimentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 ML platform and experimentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-rights-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Rights &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i07-messaging-and-social-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I07. Messaging & Social Feed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i08-stockbroking-platform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I08. Stockbroking Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i09-insurance-policy-and-claims/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I09. Insurance Policy & Claims
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i10-travel-and-railway-ticketing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I10. Travel & Railway Ticketing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i11-telecom-billing-and-charging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I11. Telecom Billing & Charging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i12-logistics-and-supply-chain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I12. Logistics & Supply Chain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i13-online-exams-and-live-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I13. Online Exams & Live Classes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i14-national-digital-id-and-vaccination-registration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I14. National Digital ID & Vaccination Registration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i15-multiplayer-gaming-and-leaderboards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I15. Multiplayer Gaming & Leaderboards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i16-smart-metering-and-iot-telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I16. Smart Metering & IoT Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i17-hotel-and-homestay-booking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I17. Hotel & Homestay Booking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i18-food-delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I18. Food Delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Appendix
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Appendix
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/qa-index/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full Question Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/lab-catalogue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab Catalogue
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-two-products-on-one-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 Two products on one platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-main-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Main systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-scale-for-this-design-assumptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Scale for this design (assumptions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-it-works-journeys-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How It Works — Journeys End to End
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How It Works — Journeys End to End">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-journey-1-a-new-series-goes-from-master-file-to-playable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Journey 1: a new series goes from master file to playable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-journey-2-pressing-play-on-vod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Journey 2: pressing Play on VOD
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-journey-3-a-cricket-final-from-the-stadium-to-40-million-phones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Journey 3: a cricket final, from the stadium to 40 million phones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-journey-4-subscribing-with-upi-autopay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Journey 4: subscribing with UPI autopay
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-journey-5-downloading-an-episode-for-a-train-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Journey 5: downloading an episode for a train journey
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-core-subsystems-in-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Core Subsystems in Depth
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Core Subsystems in Depth">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-the-vod-encoding-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 The VOD encoding pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-packaging-manifests-and-drm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Packaging, manifests and DRM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-playback-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Playback service
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-cdn-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 CDN strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-the-player-and-abr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 The player and ABR
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-handling-live-concurrency-the-data-plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Handling live concurrency — the data plane
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-handling-live-concurrency-the-control-plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Handling live concurrency — the control plane
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#58-ads-server-side-insertion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.8 Ads: server-side insertion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#59-live-experience-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.9 Live experience features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#510-catalogue-personalisation-and-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.10 Catalogue, personalisation and search
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#511-content-protection-and-piracy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.11 Content protection and piracy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-encoding-ladder-optimisation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Encoding ladder optimisation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-perceptual-quality-vmaf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Perceptual quality (VMAF)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-adaptive-bitrate-abr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Adaptive bitrate (ABR)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-cdn-steering-and-request-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 CDN steering and request routing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-cache-fill-and-eviction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Cache fill and eviction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-recommendations-and-artwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Recommendations and artwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-concurrency-forecasting-for-live-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Concurrency forecasting for live events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-real-time-aggregation-at-scale-reactions-telemetry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Real-time aggregation at scale (reactions, telemetry)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-ad-decisioning-and-pacing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 Ad decisioning and pacing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#610-anomaly-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.10 Anomaly detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-operational-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Operational stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-telemetry-and-streaming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Telemetry and streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-lakehouse-and-warehouse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Lakehouse and warehouse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-ml-platform-and-experimentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 ML platform and experimentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-rights-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Rights &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="i06-video-streaming-live-cricket">I06. Video Streaming &amp; Live Cricket<a class="headerlink" href="#i06-video-streaming-live-cricket" title="Permanent link">&para;</a></h1>
+<div class="admonition abstract">
+<p class="admonition-title">Chapter at a glance</p>
+<p><strong>Sector:</strong> Media and entertainment · <strong>Format:</strong> system design walkthrough (no code) · <strong>Reader bands:</strong> B1 → B4 · <strong>Builds on:</strong> <a href="../../05-case-studies/52-object-storage-and-media-pipeline/">Ch 52</a> (object storage, CDN), <a href="../../03-production/25-performance-engineering/">Ch 25</a>, <a href="../../05-case-studies/43-home-feed-and-recommendations/">Ch 43</a>, <a href="../../05-case-studies/51-real-time-analytics-and-top-k/">Ch 51</a></p>
+<p><strong>What you get:</strong> the design of a streaming platform that does two very different things:</p>
+<ul>
+<li><strong>video on demand (VOD)</strong>: films and series, Netflix-style;</li>
+<li><strong>live sport at extreme concurrency</strong>: a cricket final watched by tens of millions of people at the same moment, Hotstar/JioCinema-style.</li>
+</ul>
+<p>It covers:</p>
+<ul>
+<li><strong>the VOD pipeline:</strong> ingest, per-title encoding, quality measurement, packaging, DRM, CDN placement, playback, adaptive bitrate;</li>
+<li><strong>the live pipeline:</strong> camera to phone in seconds, redundant encoders, low-latency packaging, multi-CDN, ads inserted into the stream, and the "everyone joins at the toss" problem;</li>
+<li><strong>the product around the video:</strong> catalogue, personalisation (including artwork), search, subscriptions and entitlements, ads, downloads, reactions and live scores;</li>
+<li><strong>the algorithms:</strong> bitrate ladders, VMAF, ABR, CDN steering and cache fill, recommendations, concurrency forecasting, ad decisioning;</li>
+<li><strong>the data platform:</strong> playback telemetry at millions of events per second, real-time quality-of-experience dashboards, the lakehouse, experimentation;</li>
+<li><strong>the tech stack:</strong> what Netflix and Hotstar have published, and a reference choice.</li>
+</ul>
+<p><strong>Reading time:</strong> 85 min.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Sources and honesty</p>
+<ul>
+<li>Netflix has published extensively about Open Connect, per-title and shot-based encoding, VMAF, Zuul, Eureka, Hystrix, EVCache, Chaos Monkey, Spinnaker, Keystone, Maestro and Apache Iceberg. These are marked <strong>publicly described (VERIFY)</strong>.</li>
+<li>Disney+ Hotstar engineers have given public talks about scaling for IPL concurrency. Concurrency records quoted in the press vary by source and year (<strong>VERIFY</strong>).</li>
+<li>Everything else is a <strong>reference design</strong>.</li>
+<li>Broadcasting and content regulations are marked <strong>VERIFY</strong>.</li>
+</ul>
+</div>
+<hr />
+<h2 id="1-the-system-in-one-page">1. The System in One Page<a class="headerlink" href="#1-the-system-in-one-page" title="Permanent link">&para;</a></h2>
+<h3 id="11-two-products-on-one-platform">1.1 Two products on one platform<a class="headerlink" href="#11-two-products-on-one-platform" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>VOD (films, series)</th>
+<th>Live (cricket match)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Content</strong></td>
+<td>Known in advance, watched over months</td>
+<td>Created now, watched now</td>
+</tr>
+<tr>
+<td><strong>Encoding</strong></td>
+<td>Hours of compute per title is fine; optimise quality per bit</td>
+<td>Must keep up with real time; seconds of delay budget</td>
+</tr>
+<tr>
+<td><strong>Traffic shape</strong></td>
+<td>Smooth daily curve, evening peak</td>
+<td>A cliff: millions join within minutes at the toss, spikes at wickets and the last over</td>
+</tr>
+<tr>
+<td><strong>CDN strategy</strong></td>
+<td>Pre-position popular titles in caches overnight</td>
+<td>Every viewer wants the same few seconds of video at once; the origin must be shielded</td>
+</tr>
+<tr>
+<td><strong>Failure impact</strong></td>
+<td>One title or region degraded</td>
+<td>Everyone, during the most valuable minutes of the year</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12-main-systems">1.2 Main systems<a class="headerlink" href="#12-main-systems" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Content ingest</strong></td>
+<td>Receives masters (mezzanine files) and live feeds</td>
+</tr>
+<tr>
+<td><strong>Encoding and transcoding</strong></td>
+<td>Produces renditions at many resolutions and bitrates</td>
+</tr>
+<tr>
+<td><strong>Packaging and DRM</strong></td>
+<td>HLS/DASH manifests, CMAF segments, encryption, licences</td>
+</tr>
+<tr>
+<td><strong>Origin and CDN</strong></td>
+<td>Stores and delivers segments close to viewers</td>
+</tr>
+<tr>
+<td><strong>Playback service</strong></td>
+<td>Decides what a device may play and where to fetch it; issues manifests, licence tokens, CDN choice</td>
+</tr>
+<tr>
+<td><strong>Player (client)</strong></td>
+<td>Downloads segments, adapts bitrate (ABR), reports telemetry</td>
+</tr>
+<tr>
+<td><strong>Catalogue and metadata</strong></td>
+<td>Titles, episodes, rights windows, languages, artwork</td>
+</tr>
+<tr>
+<td><strong>Personalisation and search</strong></td>
+<td>Home rows, recommendations, artwork, search</td>
+</tr>
+<tr>
+<td><strong>Identity, subscriptions, entitlements</strong></td>
+<td>Accounts, profiles, plans, payments, device limits</td>
+</tr>
+<tr>
+<td><strong>Ads</strong></td>
+<td>Ad decisioning and server-side ad insertion</td>
+</tr>
+<tr>
+<td><strong>Live experience</strong></td>
+<td>Scores, key moments, reactions, multi-language commentary feeds</td>
+</tr>
+<tr>
+<td><strong>Telemetry and QoE</strong></td>
+<td>Start time, rebuffering, bitrate, errors, per viewer, in real time</td>
+</tr>
+<tr>
+<td><strong>Data platform</strong></td>
+<td>Lakehouse, warehouse, ML, experimentation</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13-scale-for-this-design-assumptions">1.3 Scale for this design (assumptions)<a class="headerlink" href="#13-scale-for-this-design-assumptions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Subscribers / monthly active users</td>
+<td>60M / 150M (with a free tier)</td>
+</tr>
+<tr>
+<td>VOD catalogue</td>
+<td>100k titles, ~1M hours after episodes</td>
+</tr>
+<tr>
+<td>VOD peak concurrent streams</td>
+<td>8M</td>
+</tr>
+<tr>
+<td><strong>Live final peak concurrency</strong></td>
+<td><strong>40M+ concurrent viewers</strong> (records reported for Indian cricket streams have been in the tens of millions; VERIFY current records)</td>
+</tr>
+<tr>
+<td>Average live bitrate delivered</td>
+<td>~1.5 Mbps (mostly mobile)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Estimation — why live cricket is extreme:</strong></p>
+<ul>
+<li><strong>Egress:</strong> 40M × 1.5 Mbps ≈ <strong>60 Tbps</strong> of delivery at the peak. That only works with multiple CDNs and ISP-embedded caches.</li>
+<li><strong>Segment requests:</strong> with 4-second segments, each viewer requests a new video segment every 4 s, plus audio and manifest refreshes. That is roughly <strong>20–30M HTTP requests per second</strong> at the CDN edges.</li>
+<li><strong>Origin load:</strong> the origin must see only a tiny fraction of that. Shielding and request coalescing are mandatory (§5.6).</li>
+<li><strong>Telemetry:</strong> 40M players sending a heartbeat every 30 s is <strong>~1.3M events/s</strong>, more with per-segment events.</li>
+<li><strong>Joins:</strong> if 20M people join within 10 minutes of the toss, that is ~33k joins/s. Each join means login/token checks, entitlement, playback session creation and a manifest. <strong>The API tier, not the video, is usually what breaks first.</strong></li>
+</ul>
+<hr />
+<h2 id="2-requirements">2. Requirements<a class="headerlink" href="#2-requirements" title="Permanent link">&para;</a></h2>
+<h3 id="21-functional">2.1 Functional<a class="headerlink" href="#21-functional" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Browse, search and get recommendations; watch VOD with resume across devices; download for offline viewing (within licence rules).</li>
+<li>Watch live matches with multiple feeds: languages, camera angles, commentary; with DVR (pause, rewind within a window) and "go live".</li>
+<li>Subscriptions and free tiers with ads; plans by device count and quality; payments including UPI autopay mandates (VERIFY mandate rules).</li>
+<li>Profiles, parental controls, content ratings.</li>
+<li>Ads: pre-roll for VOD on ad tiers; ad breaks in live matches (between overs), targeted per viewer.</li>
+<li>Live companion features: scorecard, key moments, reactions, polls.</li>
+<li>Rights enforcement: territories, windows, device types, concurrent streams.</li>
+</ol>
+<h3 id="22-non-functional">2.2 Non-functional<a class="headerlink" href="#22-non-functional" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Start time</strong></td>
+<td>Video starts in &lt; 2 s (p50) and &lt; 5 s (p95) on mobile networks</td>
+</tr>
+<tr>
+<td><strong>Rebuffering</strong></td>
+<td>Rebuffer ratio &lt; 0.5% of watch time</td>
+</tr>
+<tr>
+<td><strong>Live latency</strong></td>
+<td>Glass-to-glass 10–30 s standard, 3–8 s low-latency mode (TV broadcast is also delayed)</td>
+</tr>
+<tr>
+<td><strong>Availability</strong></td>
+<td>Live playback ≥ 99.99% during matches; no single point of failure from camera to CDN</td>
+</tr>
+<tr>
+<td><strong>Scale</strong></td>
+<td>Absorb 40M concurrent viewers and joins of tens of thousands per second</td>
+</tr>
+<tr>
+<td><strong>Security</strong></td>
+<td>DRM for premium content; token-authenticated URLs; forensic watermarking for high-value live</td>
+</tr>
+<tr>
+<td><strong>Efficiency</strong></td>
+<td>Minimise bits per quality (encoding) and origin egress (caching)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-high-level-architecture">3. High-Level Architecture<a class="headerlink" href="#3-high-level-architecture" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+    subgraph Contribution[Live contribution]
+        CAM[Stadium cameras and production]
+        ENC1[Contribution encoders - primary]
+        ENC2[Contribution encoders - backup]
+    end
+    subgraph Cloud[Media processing]
+        LT[Live transcoders - ABR ladder, redundant]
+        PKG[Packager - CMAF, HLS, DASH, DRM]
+        VODENC[VOD encoding farm - per-title, shot-based]
+        ORIG[Origin storage and origin shield]
+    end
+    subgraph Delivery
+        OCA[ISP-embedded caches]
+        CDN1[CDN A]
+        CDN2[CDN B]
+    end
+    subgraph Services[Control plane]
+        API[API gateway - edge]
+        AUTH[Identity and entitlements]
+        PLAY[Playback service - manifests, licences, CDN steering]
+        CAT[Catalogue and personalisation]
+        ADS[Ad decisioning and SSAI]
+        LIVEX[Live experience - scores, reactions]
+    end
+    subgraph DataP[Data]
+        TEL[Telemetry ingest]
+        RTQ[Real-time QoE analytics]
+        LAKE[Lakehouse and ML]
+    end
+    PLAYER[Player on phone, TV, web]
+    CAM --&gt; ENC1 --&gt; LT
+    CAM --&gt; ENC2 --&gt; LT
+    LT --&gt; PKG --&gt; ORIG
+    VODENC --&gt; PKG
+    ORIG --&gt; OCA
+    ORIG --&gt; CDN1
+    ORIG --&gt; CDN2
+    PLAYER --&gt; API --&gt; AUTH
+    API --&gt; PLAY
+    API --&gt; CAT
+    PLAY --&gt; ADS
+    PLAYER --&gt; OCA
+    PLAYER --&gt; CDN1
+    PLAYER --&gt; CDN2
+    PLAYER --&gt; TEL --&gt; RTQ --&gt; PLAY
+    TEL --&gt; LAKE
+    API --&gt; LIVEX</code></pre>
+<p><strong>Two planes:</strong></p>
+<ul>
+<li><strong>The data plane</strong> (video bytes: encoders → packager → origin → CDN → player) must be simple, redundant and cacheable.</li>
+<li><strong>The control plane</strong> (who can watch what, from where, at what quality, with which ads) is where most application logic lives. At join time it must scale like an e-commerce flash sale (<a href="../../05-case-studies/46-grocery-checkout-and-inventory-reservation/">Ch 46</a>).</li>
+</ul>
+<hr />
+<h2 id="4-how-it-works-journeys-end-to-end">4. How It Works — Journeys End to End<a class="headerlink" href="#4-how-it-works-journeys-end-to-end" title="Permanent link">&para;</a></h2>
+<h3 id="41-journey-1-a-new-series-goes-from-master-file-to-playable">4.1 Journey 1: a new series goes from master file to playable<a class="headerlink" href="#41-journey-1-a-new-series-goes-from-master-file-to-playable" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Ingest:</strong> the studio delivers a <strong>mezzanine master</strong>: very high bitrate video, multichannel audio, subtitle files and artwork.<ul>
+<li>Automated checks: format, corrupt frames, audio sync, loudness, subtitle timing. Failures return to the studio.</li>
+</ul>
+</li>
+<li><strong>Analysis:</strong> the video is split into <strong>shots</strong>, using scene-change detection. Complexity is measured per shot, because a dark, static dialogue scene needs far fewer bits than a stadium crowd.</li>
+<li>
+<p><strong>Encoding:</strong></p>
+<ul>
+<li>each shot is encoded at many <strong>resolution × bitrate (or quality) points</strong>, in parallel on a large compute farm;</li>
+<li>the <strong>per-title or shot-based optimisation</strong> picks the most efficient combinations (§6.1);</li>
+<li>multiple codecs are produced for different devices: H.264 for compatibility, HEVC/VP9/AV1 for efficiency on supporting devices.</li>
+</ul>
+<p>Netflix has described per-title encoding (2015) and shot-based dynamic optimisation (2018) publicly (VERIFY).
+4. <strong>Quality measurement:</strong> every encode is scored with <strong>VMAF</strong>, a perceptual quality metric Netflix open-sourced (VERIFY), so the ladder is chosen by perceived quality, not bitrate alone.
+5. <strong>Packaging:</strong>
+- encodes are cut into segments of a few seconds each, in <strong>CMAF</strong> (fragmented MP4);
+- <strong>HLS</strong> and <strong>DASH</strong> manifests list the renditions;
+- audio tracks per language, and subtitles as separate tracks.
+6. <strong>DRM:</strong> segments are encrypted (common encryption) with content keys stored in a key management service. Licences are issued at playback by the right DRM system per device: Widevine (Android, Chrome), FairPlay (Apple), PlayReady (Windows, TVs).
+7. <strong>Publishing:</strong>
+- packaged files go to the <strong>origin</strong> (object storage);
+- the catalogue record goes live when the rights window opens, per territory;
+- artwork variants are generated for personalisation (§6.6).
+8. <strong>Pre-positioning:</strong>
+- popularity is predicted per region;
+- popular titles are <strong>filled into ISP-embedded caches overnight</strong>, during off-peak hours, so peak-time viewing rarely touches the backbone;
+- Netflix's <strong>Open Connect</strong> appliances in ISP networks are the public example (VERIFY).</p>
+</li>
+</ol>
+<h3 id="42-journey-2-pressing-play-on-vod">4.2 Journey 2: pressing Play on VOD<a class="headerlink" href="#42-journey-2-pressing-play-on-vod" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Request:</strong> the app calls the <strong>playback service</strong> with the title, device capabilities (codecs, DRM, resolution, HDR) and network hints.</li>
+<li><strong>Checks:</strong><ul>
+<li><strong>entitlement:</strong> is the subscription active, and does the plan allow this quality and the number of concurrent streams?</li>
+<li><strong>rights:</strong> is the title available in this territory now?</li>
+<li><strong>device limits.</strong></li>
+</ul>
+</li>
+<li><strong>The playback service returns:</strong><ul>
+<li>a <strong>manifest</strong>, tailored to the device: only playable codecs and resolutions, possibly personalised to start at a sensible bitrate;</li>
+<li><strong>CDN URLs:</strong> the best cache for this client, chosen by <strong>steering</strong> (§6.4). The URLs are token-authenticated and expire;</li>
+<li>a <strong>licence request token</strong> for DRM.</li>
+</ul>
+</li>
+<li><strong>Licence:</strong> the player requests a DRM licence from the licence service, which checks the token and policy (offline allowed? HDCP required for 4K?).</li>
+<li><strong>Buffering:</strong> the player fetches the first segments at a conservative bitrate, starts playback once a small buffer is built, then <strong>adapts</strong> bitrate (§6.3).</li>
+<li><strong>Resume:</strong> the playback position is saved every few seconds, so another device resumes from the same point.</li>
+<li><strong>Telemetry:</strong> start time, bitrate switches, rebuffer events, errors and CDN used are sent to the telemetry pipeline (§7).</li>
+</ol>
+<h3 id="43-journey-3-a-cricket-final-from-the-stadium-to-40-million-phones">4.3 Journey 3: a cricket final, from the stadium to 40 million phones<a class="headerlink" href="#43-journey-3-a-cricket-final-from-the-stadium-to-40-million-phones" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Production:</strong> the broadcaster's production (tens of cameras, graphics, commentary) outputs <strong>program feeds</strong>: a world feed plus language commentary feeds, and sometimes extra camera angles.</li>
+<li>
+<p><strong>Contribution:</strong></p>
+<ul>
+<li>feeds are encoded at high quality and sent over <strong>two independent paths</strong> (fibre and satellite, or two ISPs) to two cloud regions;</li>
+<li>reliable streaming protocols (SRT, RIST, or dedicated links) survive packet loss.</li>
+</ul>
+<p>The <strong>1+1 redundancy</strong> starts here.
+3. <strong>Live transcoding:</strong> in each region, live transcoders produce the <strong>ABR ladder</strong>, e.g. 240p at 200 kbps up to 1080p at 6 Mbps, plus audio per language.
+- Encoding runs with a latency budget of a second or two.
+- Transcoders run in <strong>pairs</strong>, time-aligned, so the packager can switch between them without a visible glitch.
+4. <strong>Packaging:</strong> the live packager produces <strong>CMAF segments</strong> (e.g. 4 s, or 2 s with partial segments for low latency), updates manifests every segment, encrypts with DRM if required, and writes to the <strong>origin</strong>.
+- A <strong>DVR window</strong> (e.g. the whole match) stays available for rewind.
+5. <strong>Origin shield and CDNs:</strong>
+- CDNs fetch from an <strong>origin shield layer</strong>, a tier of caches in front of the origin, not from the origin directly;
+- every segment is requested from the origin <strong>once per shield node</strong>. Millions of viewer requests collapse into a handful of origin fetches through <strong>request coalescing</strong> (§5.6);
+- <strong>multiple CDNs</strong> and ISP-embedded caches share the load.
+6. <strong>Joining:</strong> millions of viewers open the app before the toss. The join path is:
+- home page (cached, mostly static);
+- match page;
+- <strong>playback session</strong>: entitlement, device check, ad profile, CDN assignment;
+- manifest;
+- segments.</p>
+<p>The control plane is <strong>pre-scaled</strong> for the expected join rate. Non-essential calls are deferred (§5.7).
+7. <strong>Watching:</strong> the player fetches segments and adapts bitrate. On congested mobile networks it may settle at 360p–480p. Telemetry flows every few seconds.
+8. <strong>Ad breaks between overs:</strong>
+- the production signals an ad break with <strong>SCTE-35 markers</strong> in the stream;
+- the <strong>server-side ad insertion (SSAI)</strong> service asks ad decisioning which ads to show each viewer or viewer segment, then splices ad segments into the manifest;
+- viewers see personalised ads seamlessly, and ad blockers can't easily strip them (§5.8).
+9. <strong>Spikes:</strong> at a wicket, social media sends a wave of new joins. At the last over, concurrency peaks.
+- <strong>Real-time QoE dashboards</strong> watch rebuffer ratio per CDN, ISP and region.
+- <strong>Steering</strong> shifts new sessions away from a struggling CDN within a minute.
+10. <strong>After the match:</strong> viewers leave within minutes. Highlights (auto-clipped key moments, §5.9) are published as VOD within minutes. Capacity is scaled down.</p>
+</li>
+</ol>
+<h3 id="44-journey-4-subscribing-with-upi-autopay">4.4 Journey 4: subscribing with UPI autopay<a class="headerlink" href="#44-journey-4-subscribing-with-upi-autopay" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Plan choice:</strong> the user picks a plan (mobile-only, super, premium).</li>
+<li><strong>Mandate:</strong> the payment service creates a <strong>recurring mandate</strong> (UPI AutoPay or card e-mandate), subject to RBI rules on recurring payments and pre-debit notifications (VERIFY).</li>
+<li><strong>Entitlement:</strong> on success, the <strong>entitlements service</strong> grants the plan's rights: device count, max resolution, ad-free or not, live sports access. The rights are cached at the edge for playback checks.</li>
+<li><strong>Renewals</strong> run on a schedule, with pre-debit notifications as required. <strong>Failed renewals</strong> get retries and a grace period before downgrade, so dunning never cuts a viewer off mid-match (a policy choice).</li>
+<li><strong>Password sharing:</strong> concurrent stream limits are enforced per account by a <strong>session counter</strong>. Sharing detection uses devices and locations (VERIFY policies per market).</li>
+</ol>
+<h3 id="45-journey-5-downloading-an-episode-for-a-train-journey">4.5 Journey 5: downloading an episode for a train journey<a class="headerlink" href="#45-journey-5-downloading-an-episode-for-a-train-journey" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Request:</strong> the user downloads an episode at a chosen quality. The licence service issues an <strong>offline licence</strong> with an expiry, and download count limits per the content licence.</li>
+<li><strong>Download:</strong> the device downloads encrypted segments for one rendition. Playback works offline until the licence expires. The licence renews when the device is online.</li>
+</ol>
+<hr />
+<h2 id="5-core-subsystems-in-depth">5. Core Subsystems in Depth<a class="headerlink" href="#5-core-subsystems-in-depth" title="Permanent link">&para;</a></h2>
+<h3 id="51-the-vod-encoding-pipeline">5.1 The VOD encoding pipeline<a class="headerlink" href="#51-the-vod-encoding-pipeline" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong>A workflow of many small tasks:</strong></p>
+<ul>
+<li>split into chunks or shots;</li>
+<li>encode each chunk × each ladder point × each codec, in parallel on thousands of machines (spot capacity is fine, because a lost task just retries);</li>
+<li>measure quality;</li>
+<li>assemble;</li>
+<li>package.</li>
+</ul>
+<p>It is orchestrated by a workflow engine with retries and idempotent tasks (<a href="../../05-case-studies/50-distributed-job-scheduler/">Ch 50</a>). Netflix has described its media pipeline platform publicly (VERIFY).
+- <strong>Economics:</strong> AV1 or HEVC encoding costs far more compute than H.264, but saves bandwidth on every view. So it pays for <strong>popular titles</strong> first, and the codec set per title depends on predicted views.
+- <strong>Re-encoding:</strong> when better encoders arrive, the back catalogue is re-encoded in priority order of expected bandwidth savings.</p>
+</li>
+</ul>
+<h3 id="52-packaging-manifests-and-drm">5.2 Packaging, manifests and DRM<a class="headerlink" href="#52-packaging-manifests-and-drm" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>CMAF</strong> lets HLS and DASH share the same media segments, which halves storage and cache footprint.</li>
+<li>
+<p><strong>Manifests are generated per request</strong> (or per device class) from templates, so they can:</p>
+<ul>
+<li>filter renditions by device;</li>
+<li>add CDN tokens;</li>
+<li>insert ads (SSAI).</li>
+</ul>
+<p>Manifest generation must be very fast and cacheable per class.
+- <strong>DRM:</strong>
+- one set of encrypted segments (CENC; CBCS mode covers all modern DRMs);
+- licence servers per DRM system;
+- keys in an HSM-backed key service;
+- <strong>key rotation</strong> for live;
+- licence policies (HDCP, offline, security level) enforce studio and sports-rights requirements.</p>
+</li>
+</ul>
+<h3 id="53-playback-service">5.3 Playback service<a class="headerlink" href="#53-playback-service" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>One decision point</strong> for "may this viewer watch this now, how, and from where". It combines:<ul>
+<li>entitlements and rights (territory, window);</li>
+<li>device capabilities;</li>
+<li>concurrent-stream counts;</li>
+<li>experiment assignments (e.g. a new ABR);</li>
+<li><strong>CDN steering</strong> (§6.4).</li>
+</ul>
+</li>
+<li><strong>It is the most critical control-plane service during live events.</strong> Precompute and cache what can be cached, e.g. rights per title per territory, and keep the per-request work to token signing and steering.</li>
+</ul>
+<h3 id="54-cdn-strategy">5.4 CDN strategy<a class="headerlink" href="#54-cdn-strategy" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ISP-embedded caches</strong> (own appliances inside ISPs)</td>
+<td>Serve most VOD peak traffic locally; filled off-peak; cheapest per GB at scale</td>
+</tr>
+<tr>
+<td><strong>Commercial CDNs</strong> (several)</td>
+<td>Burst capacity for live, geographic coverage, redundancy</td>
+</tr>
+<tr>
+<td><strong>Origin shield</strong></td>
+<td>Collapses cache misses from many edges into few origin fetches</td>
+</tr>
+<tr>
+<td><strong>Steering service</strong></td>
+<td>Chooses a CDN per session (and can switch mid-session) based on real-time QoE and cost</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>VOD:</strong> the cache holds a popular subset. Fill is planned: which titles and renditions go to which cache, overnight, from popularity forecasts.</li>
+<li><strong>Live:</strong><ul>
+<li>every edge needs the <em>same</em> newest segment at the <em>same</em> time;</li>
+<li>edges must coalesce concurrent misses into one upstream request;</li>
+<li>manifests have short TTLs (≈ the segment duration);</li>
+<li>segments have long TTLs once published.</li>
+</ul>
+</li>
+</ul>
+<h3 id="55-the-player-and-abr">5.5 The player and ABR<a class="headerlink" href="#55-the-player-and-abr" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The player's control loop:</strong><ul>
+<li>estimate bandwidth;</li>
+<li>track buffer level;</li>
+<li>choose the next segment's rendition;</li>
+<li>handle errors: retry on another CDN URL, skip a bad segment.</li>
+</ul>
+</li>
+<li><strong>The ABR algorithm</strong> (§6.3) balances three goals: high quality, no rebuffering, and few switches.</li>
+<li><strong>Live players</strong> also manage <strong>latency</strong>: they target a buffer that keeps them close to the live edge, speeding playback slightly (e.g. 1.05×) to catch up after stalls.</li>
+<li><strong>Telemetry:</strong> the player reports every session's key events, which feeds QoE analytics and steering.</li>
+</ul>
+<h3 id="56-handling-live-concurrency-the-data-plane">5.6 Handling live concurrency — the data plane<a class="headerlink" href="#56-handling-live-concurrency-the-data-plane" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Segment request coalescing:</strong> when 100k viewers on one edge ask for segment #1832 at the same second, the edge sends <strong>one</strong> request upstream and serves all waiters from the result. The shield does the same towards the origin (<a href="../../01-foundations/07-caching/">Ch 07</a> stampede protection).</li>
+<li><strong>Manifest caching:</strong> live manifests change every segment. Cache them for about half a segment duration at the edge, so manifest requests don't all hit the origin.</li>
+<li><strong>Capacity reservation:</strong><ul>
+<li>CDN capacity is reserved per match, per region, weeks in advance, from concurrency forecasts;</li>
+<li>ISP caches are pre-warmed;</li>
+<li>peering links are checked.</li>
+</ul>
+</li>
+<li><strong>Bitrate capping under stress:</strong> if total demand approaches delivery capacity, the steering service caps the <strong>maximum bitrate</strong> for new sessions or for mobile. A little less quality for everyone beats rebuffering for many.</li>
+</ul>
+<h3 id="57-handling-live-concurrency-the-control-plane">5.7 Handling live concurrency — the control plane<a class="headerlink" href="#57-handling-live-concurrency-the-control-plane" title="Permanent link">&para;</a></h3>
+<p>Public talks from Hotstar engineers on IPL-scale traffic describe these patterns (VERIFY):</p>
+<ul>
+<li><strong>Pre-scaling,</strong> not reactive autoscaling. Capacity is scaled ahead of the toss from concurrency forecasts, because autoscaling can't add capacity fast enough for the join spike.</li>
+<li>
+<p><strong>Degradation switches ("panic mode"):</strong> under extreme load, turn off non-essential features, such as:</p>
+<ul>
+<li>personalised recommendations (serve a static popular row);</li>
+<li>watch history writes (batch them later);</li>
+<li>some API calls (serve cached responses).</li>
+</ul>
+<p>This protects the join and playback path.
+- <strong>Static, cacheable responses</strong> for the match page and home page during the event, served from the CDN.
+- <strong>Authentication:</strong> token validation at the edge without calling the identity service per request; long-lived tokens refreshed lazily.
+- <strong>Retry discipline in clients:</strong> exponential backoff with jitter, and server-provided retry-after. A synchronised retry storm from 30M apps can take down anything (<a href="../../02-distributed-core/18-resilience-patterns/">Ch 18</a>).
+- <strong>Load testing</strong> at the expected peak with realistic join curves before the season, and game days.</p>
+</li>
+</ul>
+<h3 id="58-ads-server-side-insertion">5.8 Ads: server-side insertion<a class="headerlink" href="#58-ads-server-side-insertion" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Signals:</strong> SCTE-35 markers in the live stream mark ad break start and duration.</li>
+<li><strong>SSAI flow:</strong><ol>
+<li>When a viewer's manifest reaches a break, the SSAI service calls <strong>ad decisioning</strong> with the viewer's profile (segment, location, device, frequency caps).</li>
+<li>It receives ads (standard VAST responses).</li>
+<li>It <strong>stitches ad segments</strong> into that viewer's manifest.</li>
+<li>Ads are pre-transcoded to match the content ladder, so switching is seamless.</li>
+</ol>
+</li>
+<li><strong>Scale trick:</strong><ul>
+<li>personalising every manifest for 40M viewers at the same break is expensive;</li>
+<li>so viewers are grouped into <strong>cohorts</strong> (hundreds to thousands of cohorts), each with a personalised ad pod;</li>
+<li>manifests are then cached per cohort.</li>
+</ul>
+</li>
+<li><strong>Ad decisioning:</strong><ul>
+<li>campaigns with targeting, budgets and pacing;</li>
+<li><strong>frequency caps</strong> (the same ad not more than N times per match);</li>
+<li>competitive separation (no two competing brands back-to-back);</li>
+<li>an auction for programmatic demand.</li>
+</ul>
+</li>
+<li><strong>Measurement:</strong> impression beacons from the player, or server-side beacons, reconciled for billing. Viewability and completion rates.</li>
+</ul>
+<h3 id="59-live-experience-features">5.9 Live experience features<a class="headerlink" href="#59-live-experience-features" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Scorecard and ball-by-ball data</strong> come from a sports data provider or official scoring feed.<ul>
+<li>A <strong>low-latency pub/sub</strong> fan-out pushes updates to apps over persistent connections, or apps poll a CDN-cached JSON with a short TTL.</li>
+<li>The cached approach scales trivially to tens of millions.</li>
+</ul>
+</li>
+<li><strong>Key moments:</strong> wickets, sixes and milestones from the scoring feed trigger <strong>auto-clipping</strong> (cut the live DVR around the moment, package it as a clip) for highlights and notifications.</li>
+<li><strong>Reactions and polls:</strong><ul>
+<li>millions of emoji taps per second;</li>
+<li>aggregate them at the edge or ingestion tier into counts per second per emoji;</li>
+<li>broadcast only aggregated counts back;</li>
+<li>never store every tap individually for real-time display (§6.8).</li>
+</ul>
+</li>
+<li><strong>Multi-language commentary</strong> as separate audio tracks or separate streams, with language chosen at the start and switchable.</li>
+</ul>
+<h3 id="510-catalogue-personalisation-and-search">5.10 Catalogue, personalisation and search<a class="headerlink" href="#510-catalogue-personalisation-and-search" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Catalogue:</strong> titles, seasons and episodes, cast, genres, languages, maturity ratings, and <strong>rights windows per territory and platform</strong>. Its change events feed search indexes and the playback service's rights cache.</li>
+<li><strong>Home page:</strong> rows ("Continue watching", "Because you watched…", "Top 10 in India today", "Live now") chosen and ordered per profile.<ul>
+<li><strong>Row selection and ranking</strong> are learned (§6.6).</li>
+<li><strong>Artwork per title is personalised:</strong> the same film shown with a different image to different viewers. Netflix has written about this (VERIFY).</li>
+</ul>
+</li>
+<li><strong>Search:</strong> titles, people and genres, with multilingual and transliterated queries (<a href="../../03-production/22-search-systems/">Ch 22</a>, <a href="../../05-case-studies/42-search-autocomplete/">Ch 42</a>), and "not available" handling for titles outside the catalogue.</li>
+</ul>
+<h3 id="511-content-protection-and-piracy">5.11 Content protection and piracy<a class="headerlink" href="#511-content-protection-and-piracy" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>DRM</strong> for encryption and licence policies.</li>
+<li><strong>Token-authenticated URLs</strong> with short expiry and binding to session/IP ranges where feasible.</li>
+<li><strong>Forensic watermarking</strong> for live sport: invisible per-session marks let the platform identify the leaking account of a pirated restream.<ul>
+<li>It is implemented by A/B segment variants: each viewer's manifest selects a unique sequence of variant segments.</li>
+</ul>
+</li>
+<li><strong>Monitoring</strong> of piracy sites, and takedown workflows.</li>
+</ul>
+<hr />
+<h2 id="6-algorithms">6. Algorithms<a class="headerlink" href="#6-algorithms" title="Permanent link">&para;</a></h2>
+<h3 id="61-encoding-ladder-optimisation">6.1 Encoding ladder optimisation<a class="headerlink" href="#61-encoding-ladder-optimisation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The problem:</strong> choose the set of (resolution, bitrate) renditions that give the best quality for each bandwidth level, per title or per shot.</li>
+<li>
+<p><strong>Method:</strong></p>
+<ol>
+<li>Encode sample points across resolutions and bitrates. Measure quality (VMAF) vs bitrate for each resolution.</li>
+<li>The <strong>convex hull</strong> of the quality–bitrate points across all resolutions gives the most efficient choices.</li>
+<li>Pick ladder rungs along the hull at target bitrate or quality steps.</li>
+</ol>
+<p>Easy content (animation) reaches high quality at low bitrate. Complex content (sport, grain) needs more.
+- <strong>Shot-based optimisation:</strong> choose encoding parameters per shot along the hull to minimise total bits for a target quality, or to maximise quality for a bit budget (a Lagrangian-style trade-off across shots).</p>
+</li>
+</ul>
+<h3 id="62-perceptual-quality-vmaf">6.2 Perceptual quality (VMAF)<a class="headerlink" href="#62-perceptual-quality-vmaf" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Why not PSNR/SSIM:</strong> they correlate poorly with what viewers perceive.</li>
+<li><strong>VMAF</strong> fuses several elementary metrics (visual information fidelity, detail loss, motion) with a machine-learned model trained on human ratings, producing a 0–100 score.</li>
+<li><strong>Uses:</strong> ladder selection, encoder comparisons, and regression tests for encoder changes.</li>
+</ul>
+<h3 id="63-adaptive-bitrate-abr">6.3 Adaptive bitrate (ABR)<a class="headerlink" href="#63-adaptive-bitrate-abr" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Idea</th>
+<th>Weakness</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Throughput-based</strong></td>
+<td>Pick the highest bitrate below the estimated bandwidth × safety factor</td>
+<td>Noisy estimates on mobile; oscillation</td>
+</tr>
+<tr>
+<td><strong>Buffer-based (BBA)</strong></td>
+<td>Map buffer level to bitrate: low buffer → low bitrate, high buffer → high</td>
+<td>Slow start; ignores throughput info</td>
+</tr>
+<tr>
+<td><strong>BOLA</strong></td>
+<td>Lyapunov optimisation on buffer, maximising a utility of quality minus rebuffer risk</td>
+<td>Tuning for live latency</td>
+</tr>
+<tr>
+<td><strong>Model predictive (MPC)</strong></td>
+<td>Predict throughput over the next few segments, choose the plan maximising quality − rebuffer penalty − switch penalty</td>
+<td>More compute; depends on predictions</td>
+</tr>
+<tr>
+<td><strong>Learned (RL-based)</strong></td>
+<td>Train a policy on network traces</td>
+<td>Generalisation, explainability</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Practice:</strong> a hybrid, with throughput estimates for the start and buffer-based control in steady state. It is tuned per device class and network type through A/B tests, measuring start time, rebuffer ratio, average bitrate and switches.</p>
+<h3 id="64-cdn-steering-and-request-routing">6.4 CDN steering and request routing<a class="headerlink" href="#64-cdn-steering-and-request-routing" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Mechanisms:</strong><ul>
+<li><strong>DNS-based</strong> routing (coarse);</li>
+<li><strong>HTTP redirect / manifest URL choice</strong> by the playback service (per session);</li>
+<li><strong>client-side switching</strong> on errors.</li>
+</ul>
+</li>
+<li><strong>Decision:</strong> for each (ISP, region, device) group, maintain real-time QoE per CDN (rebuffer ratio, start time, error rate, throughput) from telemetry. Assign new sessions to the best CDN subject to:<ul>
+<li>capacity commitments;</li>
+<li>cost (committed volumes per CDN);</li>
+<li>exploration: send a small share to each CDN to keep measurements fresh, <strong>a multi-armed bandit</strong> approach.</li>
+</ul>
+</li>
+<li><strong>Reaction time:</strong> QoE is aggregated per minute, and bad CDNs are drained from new sessions within a minute or two.</li>
+</ul>
+<h3 id="65-cache-fill-and-eviction">6.5 Cache fill and eviction<a class="headerlink" href="#65-cache-fill-and-eviction" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>VOD fill:</strong> predict per-title, per-region popularity for the next day (time series + release calendars). Solve a knapsack-like selection of title renditions to maximise the expected bytes served from cache, subject to cache capacity.</li>
+<li><strong>Eviction:</strong> LRU is often worse than popularity-aware policies for video. Use frequency-aware policies (e.g. LFU with aging, or admission filters such as TinyLFU) so one-off views don't evict popular content.</li>
+<li><strong>Live:</strong> tiny working sets (the latest segments); correctness of TTLs and coalescing matters more than eviction policy.</li>
+</ul>
+<h3 id="66-recommendations-and-artwork">6.6 Recommendations and artwork<a class="headerlink" href="#66-recommendations-and-artwork" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Candidate generation:</strong> collaborative filtering (matrix factorisation of viewing), content similarity (genre, cast, language embeddings), trending, continue watching.</li>
+<li><strong>Ranking:</strong> gradient-boosted or neural models predicting the probability that a profile plays and <strong>keeps watching</strong> (not just clicks). Features: history, time, device, language.</li>
+<li><strong>Page construction:</strong> choose rows and order them with diversity constraints. Row-level and page-level models.</li>
+<li><strong>Artwork personalisation:</strong> a <strong>contextual bandit</strong>. For each title, choose among artwork variants using the profile context. Explore occasionally and learn from plays (VERIFY Netflix's published approach).</li>
+<li><strong>Evaluation:</strong> offline metrics plus online A/B tests on retention and hours streamed.</li>
+</ul>
+<h3 id="67-concurrency-forecasting-for-live-events">6.7 Concurrency forecasting for live events<a class="headerlink" href="#67-concurrency-forecasting-for-live-events" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Inputs:</strong> teams playing, stage of tournament, time slot, day of week, match closeness, star players, competing events, historical curves for similar matches.</li>
+<li><strong>Output:</strong> peak concurrency and <strong>join-rate curves</strong> (joins per second around toss, innings break, last overs), with confidence intervals.</li>
+<li><strong>Uses:</strong> CDN reservation, control-plane pre-scaling, ad inventory estimates, operations staffing.</li>
+<li><strong>In-match updating:</strong> the forecast is re-estimated during the match as real concurrency arrives, e.g. a close finish raises the expected peak.</li>
+</ul>
+<h3 id="68-real-time-aggregation-at-scale-reactions-telemetry">6.8 Real-time aggregation at scale (reactions, telemetry)<a class="headerlink" href="#68-real-time-aggregation-at-scale-reactions-telemetry" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Reactions:</strong> clients batch taps (e.g. send once per second with counts), and ingestion nodes aggregate per emoji per second locally. A second tier sums across nodes, and results are broadcast. Counts can be approximate, but the aggregation must never create hot keys (<a href="../../05-case-studies/51-real-time-analytics-and-top-k/">Ch 51</a>).</li>
+<li><strong>Telemetry QoE:</strong> streaming aggregations per (CDN, ISP, region, device) per minute, using approximate distinct counts (HyperLogLog) for viewers and percentile sketches (t-digest/DDSketch) for start times.</li>
+</ul>
+<h3 id="69-ad-decisioning-and-pacing">6.9 Ad decisioning and pacing<a class="headerlink" href="#69-ad-decisioning-and-pacing" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Selection:</strong> eligible campaigns filtered by targeting and frequency caps, ranked by price × predicted completion or relevance, with competitive separation.</li>
+<li><strong>Pacing:</strong> throttle each campaign so its budget is spent evenly across the match. A PID-style controller adjusts participation probability (<a href="../../05-case-studies/49-pricing-promotions-and-coupons/">Ch 49</a> L3).</li>
+<li><strong>Forecasting:</strong> inventory (impressions per break) estimated from the concurrency forecast, to sell guaranteed campaigns.</li>
+</ul>
+<h3 id="610-anomaly-detection">6.10 Anomaly detection<a class="headerlink" href="#610-anomaly-detection" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>QoE anomalies:</strong> rebuffer spikes per ISP or CDN, detected by seasonal baselines and control charts.</li>
+<li><strong>Fraud:</strong> credential stuffing, account sharing beyond plan rules, ad fraud (invalid traffic).</li>
+</ul>
+<hr />
+<h2 id="7-data-architecture">7. Data Architecture<a class="headerlink" href="#7-data-architecture" title="Permanent link">&para;</a></h2>
+<h3 id="71-operational-stores">7.1 Operational stores<a class="headerlink" href="#71-operational-stores" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Store (reference)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Accounts, profiles, subscriptions</td>
+<td>Relational (PostgreSQL/MySQL, sharded)</td>
+<td>Transactions for billing</td>
+</tr>
+<tr>
+<td>Entitlements (read path)</td>
+<td>Key-value cache (Redis/EVCache) replicated to edges</td>
+<td>Read-heavy, latency-critical</td>
+</tr>
+<tr>
+<td>Viewing history, resume points</td>
+<td>Wide-column (Cassandra)</td>
+<td>High write volume, per-profile partitions</td>
+</tr>
+<tr>
+<td>Catalogue and metadata</td>
+<td>Document store + search index</td>
+<td>Versioned; events to downstream</td>
+</tr>
+<tr>
+<td>Live session counters</td>
+<td>Sharded in-memory counters</td>
+<td>Concurrent stream limits, concurrency metrics</td>
+</tr>
+<tr>
+<td>Media assets</td>
+<td>Object storage (origin), CDN caches</td>
+<td>Petabytes</td>
+</tr>
+<tr>
+<td>Keys</td>
+<td>HSM-backed key service</td>
+<td>DRM content keys</td>
+</tr>
+</tbody>
+</table>
+<p>Publicly described (VERIFY): Netflix uses <strong>Cassandra</strong> widely, and <strong>EVCache</strong> (memcached-based) for caching.</p>
+<h3 id="72-telemetry-and-streaming">7.2 Telemetry and streaming<a class="headerlink" href="#72-telemetry-and-streaming" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Players</strong> send session start, heartbeats, bitrate switches, rebuffers, errors, CDN used and ad beacons. Events are batched on the device and compressed.</li>
+<li><strong>Ingestion:</strong> edge collectors → <strong>Kafka</strong> → <strong>Flink</strong> for real-time aggregates. Netflix has described its <strong>Keystone</strong> real-time pipeline (VERIFY).</li>
+<li><strong>Real-time stores:</strong> <strong>Druid, Pinot or ClickHouse</strong> hold per-minute QoE dimensions for dashboards and steering decisions.</li>
+</ul>
+<h3 id="73-lakehouse-and-warehouse">7.3 Lakehouse and warehouse<a class="headerlink" href="#73-lakehouse-and-warehouse" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Storage:</strong> all events and CDC land in <strong>Apache Iceberg</strong> tables on object storage. Iceberg was created at Netflix (publicly described; VERIFY).</li>
+<li><strong>Processing and query:</strong> Spark for batch, Trino/Presto for SQL, and a workflow orchestrator. Netflix open-sourced <strong>Maestro</strong> (VERIFY); Airflow is the reference.</li>
+<li><strong>Models:</strong><ul>
+<li><strong>facts:</strong> playback sessions (start time, watch duration, bitrate, rebuffer), viewing (title, profile, completion), subscriptions and payments, ad impressions, live concurrency per minute;</li>
+<li><strong>dimensions:</strong> title/episode, profile (pseudonymised), device, ISP, region, CDN, plan, date.</li>
+</ul>
+</li>
+<li><strong>Key metrics:</strong><ul>
+<li>hours streamed, and retention cohorts;</li>
+<li>QoE: start time, rebuffer ratio, bitrate;</li>
+<li>peak concurrency;</li>
+<li>ad fill rate and completion;</li>
+<li>churn prediction inputs;</li>
+<li>content performance (completion rates, value per title).</li>
+</ul>
+</li>
+</ul>
+<h3 id="74-ml-platform-and-experimentation">7.4 ML platform and experimentation<a class="headerlink" href="#74-ml-platform-and-experimentation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Feature pipelines</strong> in the lake; online features for ranking in a low-latency store.</li>
+<li><strong>Models:</strong> recommendations, artwork, search ranking, ABR tuning, concurrency forecasts, CDN steering, churn, ad targeting, fraud.</li>
+<li><strong>Experimentation:</strong><ul>
+<li>A/B testing across UI, recommendations, ABR and encoding;</li>
+<li>Netflix has written extensively about its experimentation platform (VERIFY);</li>
+<li>live events need care, because treatment and control share CDNs and match dynamics.</li>
+</ul>
+</li>
+</ul>
+<h3 id="75-data-flow">7.5 Data flow<a class="headerlink" href="#75-data-flow" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>flowchart LR
+    P[Players] --&gt; COL[Edge collectors]
+    COL --&gt; K[Kafka]
+    SVC[Control-plane services] --&gt; K
+    K --&gt; FL[Flink - QoE aggregates per minute]
+    FL --&gt; RT[Real-time OLAP - Druid or Pinot]
+    RT --&gt; STEER[CDN steering and ops dashboards]
+    K --&gt; ICE[Iceberg lakehouse]
+    ICE --&gt; SPARK[Spark and Trino]
+    SPARK --&gt; BI[Business and content analytics]
+    ICE --&gt; FEAT[Features]
+    FEAT --&gt; MODELS[Recommendation, forecasting, ads models]
+    MODELS --&gt; SVC</code></pre>
+<hr />
+<h2 id="8-tech-stack">8. Tech Stack<a class="headerlink" href="#8-tech-stack" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Publicly described (VERIFY each)</th>
+<th>Reference choice</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Edge gateway</td>
+<td>Netflix <strong>Zuul</strong></td>
+<td>Envoy, Kong or Spring Cloud Gateway</td>
+</tr>
+<tr>
+<td>Service discovery / resilience</td>
+<td>Netflix <strong>Eureka</strong>, <strong>Hystrix</strong> (now in maintenance; Resilience4j recommended)</td>
+<td>Kubernetes services, Resilience4j</td>
+</tr>
+<tr>
+<td>Services</td>
+<td>Java (Spring Boot at Netflix), Go</td>
+<td>Java/Kotlin or Go microservices</td>
+</tr>
+<tr>
+<td>Caching</td>
+<td><strong>EVCache</strong></td>
+<td>Redis/memcached</td>
+</tr>
+<tr>
+<td>Databases</td>
+<td><strong>Cassandra</strong>, MySQL/CockroachDB for some</td>
+<td>Cassandra/ScyllaDB, PostgreSQL</td>
+</tr>
+<tr>
+<td>Streaming</td>
+<td>Kafka (<strong>Keystone</strong>), Flink</td>
+<td>Kafka, Flink</td>
+</tr>
+<tr>
+<td>Lakehouse</td>
+<td><strong>Apache Iceberg</strong>, Spark, Trino/Presto</td>
+<td>Iceberg, Spark, Trino</td>
+</tr>
+<tr>
+<td>Orchestration</td>
+<td><strong>Maestro</strong>; previously Meson</td>
+<td>Airflow, Temporal for media workflows</td>
+</tr>
+<tr>
+<td>Deployment</td>
+<td><strong>Spinnaker</strong></td>
+<td>Argo CD / Spinnaker</td>
+</tr>
+<tr>
+<td>Chaos</td>
+<td><strong>Chaos Monkey</strong> / Simian Army</td>
+<td>Chaos Mesh, Litmus, game days</td>
+</tr>
+<tr>
+<td>CDN</td>
+<td><strong>Open Connect</strong> (own appliances)</td>
+<td>Multi-CDN + ISP cache partnerships</td>
+</tr>
+<tr>
+<td>Encoding</td>
+<td>FFmpeg-based pipelines; <strong>VMAF</strong></td>
+<td>FFmpeg, x264/x265/SVT-AV1, VMAF</td>
+</tr>
+<tr>
+<td>Packaging and DRM</td>
+<td>—</td>
+<td>Shaka Packager / Bento4; Widevine, FairPlay, PlayReady via a multi-DRM provider</td>
+</tr>
+<tr>
+<td>Live contribution</td>
+<td>—</td>
+<td>SRT/RIST, redundant cloud live encoders (e.g. AWS Elemental MediaLive or open-source)</td>
+</tr>
+<tr>
+<td>Real-time OLAP</td>
+<td>Druid (Netflix has described use)</td>
+<td>Druid, Pinot, ClickHouse</td>
+</tr>
+<tr>
+<td>Players</td>
+<td>ExoPlayer/Media3 on Android, AVPlayer on iOS, Shaka/hls.js on web</td>
+<td>Same</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Disney+ Hotstar</strong> has spoken publicly about Kubernetes-based scaling, custom autoscaling ahead of events, and load testing at extreme concurrency (VERIFY details).</p>
+<hr />
+<h2 id="9-security-rights-compliance">9. Security, Rights &amp; Compliance<a class="headerlink" href="#9-security-rights-compliance" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Rights:</strong> territorial and time windows per title and platform, enforced in the playback service. Sports rights may differ for TV and digital.</li>
+<li><strong>DRM and watermarking:</strong> as §5.11. Studio and league security requirements are contractual.</li>
+<li><strong>Privacy:</strong><ul>
+<li>viewing history is personal data;</li>
+<li>profiles for children have restrictions;</li>
+<li>ad targeting needs consent and choice where required;</li>
+<li>DPDP Act obligations in India (VERIFY).</li>
+</ul>
+</li>
+<li><strong>Content regulation:</strong> age ratings and content codes for online curated content (India's IT Rules 2021 digital media ethics code; VERIFY current status). Broadcasting rules for live sport may apply (VERIFY).</li>
+<li><strong>Payments:</strong> recurring payment rules (RBI e-mandate framework, VERIFY), tokenised cards.</li>
+</ul>
+<hr />
+<h2 id="10-reliability-operations">10. Reliability &amp; Operations<a class="headerlink" href="#10-reliability-operations" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Live data plane redundancy:</strong><ul>
+<li>two contribution paths, two cloud regions, paired encoders, redundant packagers;</li>
+<li>multiple CDNs;</li>
+<li>automatic failover at each hop, rehearsed before the season.</li>
+</ul>
+</li>
+<li><strong>Control plane:</strong> multi-region active-active for stateless services. Netflix has described running active-active across regions and evacuating regions (VERIFY). Entitlements are cached at the edge, so an identity outage doesn't stop playback for already-authenticated viewers.</li>
+<li><strong>Chaos engineering:</strong><ul>
+<li>kill instances and dependencies in production in controlled ways;</li>
+<li>regional evacuation drills;</li>
+<li>game days before big matches.</li>
+</ul>
+</li>
+<li><strong>Event runbook:</strong><ol>
+<li>Pre-scale at T−2 h.</li>
+<li>Freeze changes.</li>
+<li>A war room with QoE dashboards per CDN/ISP.</li>
+<li>Degradation switches ready.</li>
+<li>Decision owners for bitrate caps and CDN shifts.</li>
+<li>Communication templates.</li>
+</ol>
+</li>
+<li><strong>Graceful degradation order:</strong> recommendations → watch-history writes → reactions → high bitrates. Never the join path or segment delivery.</li>
+<li><strong>Observability:</strong> per-minute QoE, join success rate and latency, playback errors by code, CDN health, ad decisioning latency, licence server errors.</li>
+</ul>
+<hr />
+<h2 id="11-key-trade-offs">11. Key Trade-offs<a class="headerlink" href="#11-key-trade-offs" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Chosen</th>
+<th>Accepted cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Encoding</td>
+<td>Per-title/shot-based, multiple codecs for popular titles</td>
+<td>Much more compute per title</td>
+</tr>
+<tr>
+<td>Packaging</td>
+<td>CMAF shared by HLS and DASH</td>
+<td>Older devices need fallbacks</td>
+</tr>
+<tr>
+<td>Delivery</td>
+<td>ISP caches for VOD + multi-CDN for live</td>
+<td>Operating appliances; multi-vendor complexity</td>
+</tr>
+<tr>
+<td>Live latency</td>
+<td>10–30 s default, low-latency mode optional</td>
+<td>Not as live as broadcast for some users</td>
+</tr>
+<tr>
+<td>Ads in live</td>
+<td>SSAI with cohort personalisation</td>
+<td>Less precise targeting than per-viewer</td>
+</tr>
+<tr>
+<td>Control plane</td>
+<td>Pre-scaled, static fallbacks, degradation switches</td>
+<td>Idle capacity cost before matches</td>
+</tr>
+<tr>
+<td>Reactions</td>
+<td>Approximate aggregated counts</td>
+<td>Not exact</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-interview-qa">12. Interview Q&amp;A<a class="headerlink" href="#12-interview-qa" title="Permanent link">&para;</a></h2>
+<h3 id="beginner-b1">Beginner <span class="band b1">B1</span><a class="headerlink" href="#beginner-b1" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q1 [B1] ⭐ What happens between pressing Play and seeing video?</summary>
+<p><strong>30-second answer:</strong> The app asks the playback service, which checks entitlement, rights and device; returns a device-specific manifest, signed CDN URLs and a DRM licence token; the player gets a licence, downloads the first segments at a safe bitrate, starts playback, and adapts bitrate while sending telemetry.</p>
+<p><strong>Deep answer:</strong> §4.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Start time vs initial quality.</p>
+<p><strong>Follow-ups:</strong>
+1. Why segments? → Adaptation and caching.
+2. Why DRM? → Content licences.</p>
+<p><strong>Red flags:</strong> Streaming one big file.</p>
+</details>
+<details class="question">
+<summary>Q2 [B1] What is adaptive bitrate streaming?</summary>
+<p><strong>30-second answer:</strong> Video is encoded at several quality levels and cut into short segments; the player picks each segment's quality based on measured bandwidth and buffer, so it can switch down instead of stalling.</p>
+<p><strong>Deep answer:</strong> §5.5, §6.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Quality vs rebuffer risk vs switching.</p>
+<p><strong>Follow-ups:</strong>
+1. Segment length? → 2–6 s.
+2. Manifest? → Lists renditions.</p>
+<p><strong>Red flags:</strong> Fixed quality per user.</p>
+</details>
+<details class="question">
+<summary>Q3 [B1] Why do streaming services use CDNs?</summary>
+<p><strong>30-second answer:</strong> Video is huge; serving it from one place would overload the origin and add latency; CDNs cache segments near viewers, and ISP-embedded caches keep traffic inside the viewer's network.</p>
+<p><strong>Deep answer:</strong> §5.4.</p>
+<p><strong>Trade-offs I'd call out:</strong> Cost vs control.</p>
+<p><strong>Follow-ups:</strong>
+1. Multi-CDN? → Resilience and capacity.
+2. Cache misses? → Origin shield.</p>
+<p><strong>Red flags:</strong> Serving video from application servers.</p>
+</details>
+<details class="question">
+<summary>Q4 [B1] How do live streams differ from VOD technically?</summary>
+<p><strong>30-second answer:</strong> Live is encoded and packaged in real time with a seconds-level delay budget, manifests change every segment, everyone watches the same moment (so caching must coalesce requests), and traffic arrives in sudden spikes rather than a smooth curve.</p>
+<p><strong>Deep answer:</strong> §1.1, §4.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Latency vs stability.</p>
+<p><strong>Follow-ups:</strong>
+1. Redundancy? → 1+1 pipelines.
+2. DVR? → Window on origin.</p>
+<p><strong>Red flags:</strong> Same pipeline assumptions.</p>
+</details>
+<h3 id="intermediate-b2">Intermediate <span class="band b2">B2</span><a class="headerlink" href="#intermediate-b2" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q5 [B2] ⭐ How do you build the encoding ladder for a title?</summary>
+<p><strong>30-second answer:</strong> Encode sample points across resolutions and bitrates, score them with a perceptual metric like VMAF, take the convex hull of quality vs bitrate, and pick rungs along it — per title or per shot, so simple content uses fewer bits.</p>
+<p><strong>Deep answer:</strong> §6.1, §6.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Compute cost vs bandwidth saved.</p>
+<p><strong>Follow-ups:</strong>
+1. Codecs? → Popular titles get more.
+2. Re-encode? → By expected savings.</p>
+<p><strong>Red flags:</strong> One fixed ladder for all content.</p>
+</details>
+<details class="question">
+<summary>Q6 [B2] How do you protect premium content from piracy?</summary>
+<p><strong>30-second answer:</strong> DRM encryption with device-appropriate licence servers and policies, short-lived token-authenticated URLs, forensic watermarking per session for live sport, and monitoring with takedowns.</p>
+<p><strong>Deep answer:</strong> §5.2, §5.11.</p>
+<p><strong>Trade-offs I'd call out:</strong> Device compatibility and cost.</p>
+<p><strong>Follow-ups:</strong>
+1. Watermark method? → A/B segment variants.
+2. Screen recording? → Watermark traces leaks.</p>
+<p><strong>Red flags:</strong> Obscure URLs as protection.</p>
+</details>
+<details class="question">
+<summary>Q7 [B2] How are ads inserted into a live match?</summary>
+<p><strong>30-second answer:</strong> SCTE-35 markers signal breaks; at each break the SSAI service asks ad decisioning for each viewer cohort's ad pod and stitches pre-transcoded ad segments into the manifest; the player plays them seamlessly; impressions are beaconed and reconciled.</p>
+<p><strong>Deep answer:</strong> §5.8, §6.9.</p>
+<p><strong>Trade-offs I'd call out:</strong> Personalisation vs manifest cost.</p>
+<p><strong>Follow-ups:</strong>
+1. Why server-side? → Seamless, blocker-resistant.
+2. Frequency caps? → Per viewer.</p>
+<p><strong>Red flags:</strong> Client-side ads with buffering.</p>
+</details>
+<details class="question">
+<summary>Q8 [B2] How are subscriptions and entitlements enforced at playback?</summary>
+<p><strong>30-second answer:</strong> Payments create or renew subscriptions; the entitlements service maps plans to rights (quality, devices, ad-free, sports); the playback service checks cached entitlements, rights windows and concurrent-stream counters on every play.</p>
+<p><strong>Deep answer:</strong> §4.4, §5.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Cache freshness vs availability.</p>
+<p><strong>Follow-ups:</strong>
+1. Payment failure mid-match? → Grace period.
+2. Sharing? → Session limits.</p>
+<p><strong>Red flags:</strong> Checking billing DB on every segment.</p>
+</details>
+<details class="question">
+<summary>Q9 [B2] How would you show live scores and reactions to 40M viewers?</summary>
+<p><strong>30-second answer:</strong> Scores from the official feed published as small CDN-cached JSON with short TTL (or pushed over persistent connections); reactions batched on clients, aggregated per second at ingestion tiers, and only aggregated counts broadcast.</p>
+<p><strong>Deep answer:</strong> §5.9, §6.8.</p>
+<p><strong>Trade-offs I'd call out:</strong> Freshness vs load.</p>
+<p><strong>Follow-ups:</strong>
+1. Exact counts? → Not needed.
+2. Key moments? → Auto-clips.</p>
+<p><strong>Red flags:</strong> Writing every tap to a database.</p>
+</details>
+<h3 id="senior-b3">Senior <span class="band b3">B3</span><a class="headerlink" href="#senior-b3" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q10 [B3] ⭐ How would you handle 40 million concurrent viewers for a cricket final?</summary>
+<p><strong>30-second answer:</strong> Data plane: redundant contribution and encoding, CMAF packaging, origin shield with request coalescing, multi-CDN plus ISP caches with reserved capacity, bitrate caps under stress. Control plane: forecast joins, pre-scale, static cacheable pages, edge token validation, degradation switches, client backoff with jitter, and a war room steering CDNs by real-time QoE.</p>
+<p><strong>Deep answer:</strong> §4.3, §5.6, §5.7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Idle capacity cost vs failure during peak.</p>
+<p><strong>Follow-ups:</strong>
+1. What breaks first? → Join APIs.
+2. Egress? → ~60 Tbps estimate.</p>
+<p><strong>Red flags:</strong> "Autoscaling will handle it."</p>
+</details>
+<details class="question">
+<summary>Q11 [B3] Compare ABR algorithms.</summary>
+<p><strong>30-second answer:</strong> Throughput-based reacts to bandwidth but oscillates; buffer-based is stable but slow to start; BOLA optimises utility with buffer; MPC plans a few segments ahead with predicted throughput; learned policies adapt but are harder to explain — production players blend throughput at start with buffer-based control and tune by A/B tests.</p>
+<p><strong>Deep answer:</strong> §6.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Quality vs rebuffer vs switches.</p>
+<p><strong>Follow-ups:</strong>
+1. Live latency? → Catch-up speed.
+2. Metrics? → Start time, rebuffer ratio.</p>
+<p><strong>Red flags:</strong> Always max bitrate.</p>
+</details>
+<details class="question">
+<summary>Q12 [B3] How does CDN steering work?</summary>
+<p><strong>30-second answer:</strong> Aggregate per-minute QoE per CDN, ISP and region from player telemetry; assign new sessions to the best CDN subject to capacity and cost commitments, keep a small exploration share per CDN (bandit), and let players switch on errors mid-session.</p>
+<p><strong>Deep answer:</strong> §6.4.</p>
+<p><strong>Trade-offs I'd call out:</strong> Cost commitments vs quality.</p>
+<p><strong>Follow-ups:</strong>
+1. Reaction time? → Minutes.
+2. Mechanism? → Manifest URLs, DNS, redirects.</p>
+<p><strong>Red flags:</strong> Static CDN assignment.</p>
+</details>
+<details class="question">
+<summary>Q13 [B3] How do you make the live pipeline fault-tolerant?</summary>
+<p><strong>30-second answer:</strong> 1+1 at every hop — two contribution paths, two regions, time-aligned paired encoders, redundant packagers and origins, multiple CDNs — with automatic switchover and rehearsed failovers before the season.</p>
+<p><strong>Deep answer:</strong> §4.3, §10.</p>
+<p><strong>Trade-offs I'd call out:</strong> Doubled cost.</p>
+<p><strong>Follow-ups:</strong>
+1. Seamless switch? → Aligned timestamps.
+2. Testing? → Game days.</p>
+<p><strong>Red flags:</strong> Single encoder.</p>
+</details>
+<details class="question">
+<summary>Q14 [B3] How do you design the recommendation home page?</summary>
+<p><strong>30-second answer:</strong> Candidate sources (collaborative filtering, content similarity, trending, continue watching), a ranking model predicting play-and-keep-watching, page construction with row selection and diversity, personalised artwork via contextual bandits, and A/B testing on retention and hours.</p>
+<p><strong>Deep answer:</strong> §5.10, §6.6.</p>
+<p><strong>Trade-offs I'd call out:</strong> Exploration vs short-term engagement.</p>
+<p><strong>Follow-ups:</strong>
+1. Cold start? → Popular by language.
+2. Live event? → Static rows under load.</p>
+<p><strong>Red flags:</strong> Optimising clicks only.</p>
+</details>
+<h3 id="architect-b4">Architect <span class="band b4">B4</span><a class="headerlink" href="#architect-b4" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q15 [B4] ⭐ Design the telemetry and QoE analytics platform.</summary>
+<p><strong>30-second answer:</strong> Players batch events to edge collectors → Kafka → Flink computing per-minute QoE aggregates with sketches (HLL, t-digest) into a real-time OLAP store for dashboards and CDN steering; raw events into an Iceberg lakehouse for analysis, ML and experiments; sampling and retention tiers to control cost.</p>
+<p><strong>Deep answer:</strong> §7.2–7.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Granularity vs cost.</p>
+<p><strong>Follow-ups:</strong>
+1. Volume? → ~1M+ events/s.
+2. Privacy? → Pseudonymised IDs.</p>
+<p><strong>Red flags:</strong> Logging to a relational DB.</p>
+</details>
+<details class="question">
+<summary>Q16 [B4] Build your own CDN appliances or use commercial CDNs?</summary>
+<p><strong>30-second answer:</strong> At very large VOD scale, ISP-embedded caches filled off-peak cut cost and improve quality; commercial CDNs add burst capacity and coverage, especially for live; most large services combine both with a steering layer.</p>
+<p><strong>Deep answer:</strong> §5.4.</p>
+<p><strong>Trade-offs I'd call out:</strong> Operating hardware vs vendor costs.</p>
+<p><strong>Follow-ups:</strong>
+1. Breakeven? → Volume-dependent.
+2. Live? → Multi-CDN.</p>
+<p><strong>Red flags:</strong> One CDN only.</p>
+</details>
+<details class="question">
+<summary>Q17 [B4] How would you forecast and prepare capacity for a tournament?</summary>
+<p><strong>30-second answer:</strong> Model peak concurrency and join curves per match from teams, stage, slot and history; reserve CDN capacity and pre-scale control planes per match; load test the join curve; update forecasts in-match; align ad inventory and ops staffing to the forecast.</p>
+<p><strong>Deep answer:</strong> §6.7, §10.</p>
+<p><strong>Trade-offs I'd call out:</strong> Over-provision cost vs outage risk.</p>
+<p><strong>Follow-ups:</strong>
+1. Uncertainty? → Plan to upper bound.
+2. In-match surprise? → Degradation switches.</p>
+<p><strong>Red flags:</strong> Planning from last year's average.</p>
+</details>
+<details class="question">
+<summary>Q18 [B4] What is the economics of encoding choices?</summary>
+<p><strong>30-second answer:</strong> Better codecs and per-title optimisation cost compute once but save bandwidth on every view; prioritise by expected views and device support, re-encode the back catalogue by expected savings, and measure quality with VMAF to avoid regressions.</p>
+<p><strong>Deep answer:</strong> §5.1, §6.1.</p>
+<p><strong>Trade-offs I'd call out:</strong> Compute vs egress; device fragmentation.</p>
+<p><strong>Follow-ups:</strong>
+1. AV1 adoption? → Device support.
+2. Storage? → More renditions.</p>
+<p><strong>Red flags:</strong> Encode everything in every codec.</p>
+</details>
+<details class="question">
+<summary>Q19 [B4] How do you use chaos engineering for a streaming platform?</summary>
+<p><strong>30-second answer:</strong> Randomly terminate instances and inject dependency failures in production under controls, rehearse regional evacuation, verify degradation switches and fallbacks, and run game days before major events — with abort criteria and observability.</p>
+<p><strong>Deep answer:</strong> §10; <a href="../../03-production/27-reliability-and-disaster-recovery/">Ch 27</a>.</p>
+<p><strong>Trade-offs I'd call out:</strong> Controlled risk vs unknown failures.</p>
+<p><strong>Follow-ups:</strong>
+1. During a final? → No experiments.
+2. Evidence? → Failure drills logs.</p>
+<p><strong>Red flags:</strong> Chaos without monitoring.</p>
+</details>
+<details class="question">
+<summary>Q20 [B4] What are the main differences between designing a VOD service and a live sports service?</summary>
+<p><strong>30-second answer:</strong> VOD optimises bits per quality and caches pre-positioned popular content with smooth demand; live optimises real-time redundancy, latency, request coalescing and survives synchronised join spikes — so live's hardest problems are the control plane and delivery capacity, not encoding efficiency.</p>
+<p><strong>Deep answer:</strong> §1.1, §4.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Shared platform vs specialised paths.</p>
+<p><strong>Follow-ups:</strong>
+1. Shared components? → Player, DRM, CDN, entitlements.
+2. Different? → Contribution, SSAI, peaks.</p>
+<p><strong>Red flags:</strong> Treating them as the same.</p>
+</details>
+<hr />
+<h2 id="13-summary">13. Summary<a class="headerlink" href="#13-summary" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Two planes:</strong> a simple, redundant, cacheable <strong>data plane</strong> for video, and a <strong>control plane</strong> for rights, entitlements, ads and steering that must survive flash-sale-like join spikes.</li>
+<li><strong>VOD</strong> wins on encoding efficiency (per-title and shot-based ladders, VMAF, modern codecs) and on pre-positioning in ISP caches.</li>
+<li><strong>Live</strong> wins on redundancy (1+1 everywhere), request coalescing, multi-CDN steering by real-time QoE, pre-scaling and degradation switches.</li>
+<li><strong>Algorithms</strong> run everything: convex-hull ladders, ABR control, bandit-based CDN and artwork choice, popularity-aware caching, concurrency forecasting, ad pacing.</li>
+<li><strong>Telemetry is the nervous system:</strong> millions of events per second, turned into per-minute QoE for steering, and into the lakehouse for product, content and ML decisions.</li>
+</ol>
+<h3 id="related-chapters">Related chapters<a class="headerlink" href="#related-chapters" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="../../05-case-studies/52-object-storage-and-media-pipeline/">Ch 52 — Object Storage &amp; Media Pipeline</a> · <a href="../../05-case-studies/43-home-feed-and-recommendations/">Ch 43 — Home Feed &amp; Recommendations</a> · <a href="../../05-case-studies/51-real-time-analytics-and-top-k/">Ch 51 — Real-time Analytics</a> · <a href="../../02-distributed-core/18-resilience-patterns/">Ch 18 — Resilience</a> · <a href="../../05-case-studies/46-grocery-checkout-and-inventory-reservation/">Ch 46 — Flash-sale admission</a></li>
+<li>Next in this tab: <a href="../i07-messaging-and-social-feed/">I07 — Messaging &amp; Social Feed</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../i05-ride-hailing/" class="md-footer__link md-footer__link--prev" aria-label="Previous: I05. Ride-Hailing">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                I05. Ride-Hailing
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../i07-messaging-and-social-feed/" class="md-footer__link md-footer__link--next" aria-label="Next: I07. Messaging &amp; Social Feed">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                I07. Messaging & Social Feed
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

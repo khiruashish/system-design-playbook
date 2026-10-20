@@ -1,0 +1,6287 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Beginner to Architect — Java/Spring system design with production code, design documents and interview mastery">
+      
+      
+        <meta name="author" content="Ashish">
+      
+      
+      
+        <link rel="prev" href="../i15-multiplayer-gaming-and-leaderboards/">
+      
+      
+        <link rel="next" href="../i17-hotel-and-homestay-booking/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>I16. Smart Metering & IoT Telemetry - System Design Enterprise Handbook</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#i16-smart-metering-iot-telemetry" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-header__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            System Design Enterprise Handbook
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              I16. Smart Metering & IoT Telemetry
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Orientation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Foundations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../02-distributed-core/10-replication/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Distributed Core
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../03-production/21-data-at-scale/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Production
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../04-architect/31-architecture-decision-making/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architect
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Case Studies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Capstone
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Interview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Industry Designs
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../99-appendix/qa-index/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Appendix
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-nav__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    System Design Enterprise Handbook
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Orientation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Orientation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    00. How to Use This Handbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/01-what-system-design-is/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    01. What System Design Is
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    02. Back-of-the-Envelope Estimation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/03-networking-essentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    03. Networking Essentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/04-api-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    04. API Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/05-relational-databases-deep-dive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    05. Relational Databases Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/06-nosql-and-polyglot-persistence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    06. NoSQL & Polyglot Persistence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/07-caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    07. Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/08-load-balancing-proxies-and-gateways/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    08. Load Balancing, Proxies & Gateways
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/09-scalability-fundamentals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    09. Scalability Fundamentals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distributed Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/10-replication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    10. Replication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/11-partitioning-and-sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    11. Partitioning & Sharding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/12-consistency-time-and-consensus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    12. Consistency, Time & Consensus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/13-distributed-transactions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    13. Distributed Transactions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/14-messaging-and-event-streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    14. Messaging & Event Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/15-event-driven-architecture-cqrs-and-event-sourcing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    15. Event-Driven Architecture, CQRS & Event Sourcing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/16-microservices-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    16. Microservices Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/17-inter-service-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    17. Inter-Service Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/18-resilience-patterns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    18. Resilience Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/19-concurrency-at-scale-in-java/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    19. Concurrency at Scale in Java
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/20-idempotency-ids-and-distributed-locks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    20. Idempotency, IDs & Distributed Locks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Production
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/21-data-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    21. Data at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/22-search-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    22. Search Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/23-security-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    23. Security Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/24-observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    24. Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/25-performance-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    25. Performance Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/26-deployment-and-infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    26. Deployment & Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/27-reliability-and-disaster-recovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    27. Reliability & Disaster Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/28-schema-and-data-evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    28. Schema & Data Evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/29-testing-distributed-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    29. Testing Distributed Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/30-multi-tenancy-and-saas-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    30. Multi-Tenancy & SaaS Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architect
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architect
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/31-architecture-decision-making/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    31. Architecture Decision Making
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/32-design-documents-and-architecture-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    32. Design Documents & Architecture Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/33-domain-driven-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    33. Domain-Driven Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/34-modern-architecture-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    34. Modern Architecture Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/35-cost-engineering-and-finops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    35. Cost Engineering & FinOps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/36-compliance-governance-and-data-residency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    36. Compliance, Governance & Data Residency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/37-leading-architecture-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    37. Leading Architecture at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Case Studies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Case Studies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    38. URL Shortener & SMS Short Links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/39-distributed-rate-limiter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    39. Distributed Rate Limiter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/40-notification-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    40. Notification System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/41-chat-customer-rider-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    41. Chat — Customer–Rider Messaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/42-search-autocomplete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    42. Search Autocomplete (Typeahead)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/43-home-feed-and-recommendations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    43. Home Feed & Recommendations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/44-distributed-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    44. Distributed Cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/45-payment-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    45. Payment System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/46-grocery-checkout-and-inventory-reservation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    46. Grocery Checkout & Inventory Reservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    47. Delivery Dispatch & Live Tracking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/48-delivery-slot-booking-and-capacity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    48. Delivery Slot Booking & Capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/49-pricing-promotions-and-coupons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    49. Pricing, Promotions & Coupons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/50-distributed-job-scheduler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    50. Distributed Job Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/51-real-time-analytics-and-top-k/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    51. Real-time Analytics & Top-K
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/52-object-storage-and-media-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    52. Object Storage & Media Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/53-web-crawler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    53. Web Crawler (Price Monitoring)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/54-distributed-key-value-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    54. Distributed Key-Value Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/55-order-matching-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    55. Order Matching Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capstone
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Capstone
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    56. The Grocery Marketplace, End to End
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interview
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interview
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    57. The System Design Interview Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/58-level-expectations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    58. Level Expectations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/59-interview-qa-bank/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    59. Interview Q&A Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/60-mock-interviews/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    60. Mock Interviews
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/61-behavioral-and-leadership/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    61. Behavioural & Leadership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/qa-bank-starred/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ⭐ Drill Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Industry Designs
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Industry Designs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01-amazon-style-global-marketplace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01. Amazon-Style Global Marketplace
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01b-amazon-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01b. Amazon — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02-flipkart-style-sale-day-ecommerce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02. Flipkart-Style Sale-Day E-Commerce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02b-flipkart-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02b. Flipkart — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i03-core-banking-and-upi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I03. Core Banking & UPI Payments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i04-hospital-ehr-and-telemedicine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I04. Hospital EHR & Telemedicine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i05-ride-hailing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I05. Ride-Hailing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i06-video-streaming-and-live-cricket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I06. Video Streaming & Live Cricket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i07-messaging-and-social-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I07. Messaging & Social Feed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i08-stockbroking-platform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I08. Stockbroking Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i09-insurance-policy-and-claims/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I09. Insurance Policy & Claims
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i10-travel-and-railway-ticketing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I10. Travel & Railway Ticketing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i11-telecom-billing-and-charging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I11. Telecom Billing & Charging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i12-logistics-and-supply-chain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I12. Logistics & Supply Chain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i13-online-exams-and-live-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I13. Online Exams & Live Classes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i14-national-digital-id-and-vaccination-registration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I14. National Digital ID & Vaccination Registration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i15-multiplayer-gaming-and-leaderboards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I15. Multiplayer Gaming & Leaderboards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I16. Smart Metering & IoT Telemetry
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I16. Smart Metering & IoT Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-what-a-smart-meter-platform-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 What a smart meter platform does
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-main-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Main systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-scale-for-this-design-assumptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Scale for this design (assumptions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-it-works-end-to-end-journeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How It Works — End-to-End Journeys
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How It Works — End-to-End Journeys">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-journey-1-a-day-of-meter-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Journey 1: a day of meter data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-journey-2-a-prepaid-recharge-and-reconnection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Journey 2: a prepaid recharge and reconnection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-journey-3-daily-prepaid-deduction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Journey 3: daily prepaid deduction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-journey-4-a-transformer-trips-in-a-storm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Journey 4: a transformer trips in a storm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-journey-5-catching-electricity-theft" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Journey 5: catching electricity theft
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-journey-6-a-firmware-update-to-2-million-meters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Journey 6: a firmware update to 2 million meters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-core-subsystems-in-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Core Subsystems in Depth
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Core Subsystems in Depth">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-head-end-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Head-End System
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-mdm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 MDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-time-series-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Time-series storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-prepaid-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Prepaid engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-command-manager-safety-critical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Command manager (safety-critical)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-outage-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Outage management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-device-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Device management
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-vee-validation-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 VEE validation rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-estimation-of-missing-or-invalid-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Estimation of missing or invalid data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-tariff-rating-with-time-of-day-and-slabs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Tariff rating with time-of-day and slabs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-prepaid-balance-projection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Prepaid balance projection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-outage-inference-from-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Outage inference from events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-theft-and-anomaly-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Theft and anomaly detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-energy-accounting-and-technical-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Energy accounting and technical loss
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-read-scheduling-under-network-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Read scheduling under network constraints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-staged-ota-rollout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 Staged OTA rollout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#610-load-forecasting-and-demand-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.10 Load forecasting and demand response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-operational-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Operational stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-analytics-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Analytics platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack-reference-choice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack (reference choice)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-privacy-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Privacy &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i17-hotel-and-homestay-booking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I17. Hotel & Homestay Booking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i18-food-delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I18. Food Delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Appendix
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Appendix
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/qa-index/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full Question Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/lab-catalogue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab Catalogue
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-what-a-smart-meter-platform-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 What a smart meter platform does
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-main-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Main systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-scale-for-this-design-assumptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Scale for this design (assumptions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-it-works-end-to-end-journeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How It Works — End-to-End Journeys
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How It Works — End-to-End Journeys">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-journey-1-a-day-of-meter-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Journey 1: a day of meter data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-journey-2-a-prepaid-recharge-and-reconnection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Journey 2: a prepaid recharge and reconnection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-journey-3-daily-prepaid-deduction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Journey 3: daily prepaid deduction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-journey-4-a-transformer-trips-in-a-storm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Journey 4: a transformer trips in a storm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-journey-5-catching-electricity-theft" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Journey 5: catching electricity theft
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-journey-6-a-firmware-update-to-2-million-meters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Journey 6: a firmware update to 2 million meters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-core-subsystems-in-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Core Subsystems in Depth
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Core Subsystems in Depth">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-head-end-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Head-End System
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-mdm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 MDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-time-series-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Time-series storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-prepaid-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Prepaid engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-command-manager-safety-critical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Command manager (safety-critical)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-outage-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Outage management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-device-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Device management
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-vee-validation-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 VEE validation rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-estimation-of-missing-or-invalid-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Estimation of missing or invalid data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-tariff-rating-with-time-of-day-and-slabs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Tariff rating with time-of-day and slabs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-prepaid-balance-projection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Prepaid balance projection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-outage-inference-from-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Outage inference from events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-theft-and-anomaly-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Theft and anomaly detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-energy-accounting-and-technical-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Energy accounting and technical loss
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-read-scheduling-under-network-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Read scheduling under network constraints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-staged-ota-rollout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 Staged OTA rollout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#610-load-forecasting-and-demand-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.10 Load forecasting and demand response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-operational-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Operational stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-analytics-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Analytics platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack-reference-choice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack (reference choice)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-privacy-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Privacy &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="i16-smart-metering-iot-telemetry">I16. Smart Metering &amp; IoT Telemetry<a class="headerlink" href="#i16-smart-metering-iot-telemetry" title="Permanent link">&para;</a></h1>
+<div class="admonition abstract">
+<p class="admonition-title">Chapter at a glance</p>
+<p><strong>Sector:</strong> energy and utilities (electricity distribution), and IoT telemetry more generally. <strong>Format:</strong> a system design walkthrough with no code. <strong>Reader bands:</strong> B1 → B4.</p>
+<p><strong>Builds on:</strong></p>
+<ul>
+<li><a href="../i11-telecom-billing-and-charging/">I11</a>: rating, charging and prepaid balances</li>
+<li><a href="../i12-logistics-and-supply-chain/">I12</a>: forecasting</li>
+<li><a href="../../05-case-studies/51-real-time-analytics-and-top-k/">Ch 51</a>: streaming aggregation</li>
+<li><a href="../../05-case-studies/50-distributed-job-scheduler/">Ch 50</a>: schedulers</li>
+</ul>
+<p><strong>What you get:</strong> an <strong>Advanced Metering Infrastructure (AMI)</strong> platform for a power distribution company (DISCOM) with 25 million smart meters, most of them <strong>prepaid</strong>. The chapter covers:</p>
+<ul>
+<li>meter connectivity: RF mesh, cellular NB-IoT/4G and PLC;</li>
+<li>the <strong>Head-End System (HES)</strong>, which talks DLMS/COSEM to meters;</li>
+<li>the <strong>Meter Data Management (MDM)</strong> system, with validation, estimation and editing (VEE);</li>
+<li>billing and <strong>prepaid balance with remote disconnect and reconnect</strong>;</li>
+<li>outage detection, power quality and <strong>theft detection</strong>;</li>
+<li>firmware-over-the-air (FOTA) updates;</li>
+<li>load forecasting and demand response;</li>
+<li>an energy-accounting data platform.</li>
+</ul>
+<p>It also explains the <strong>algorithms</strong>: interval data validation and gap estimation, time-of-day tariff rating, prepaid balance projection, outage inference, theft and anomaly detection, transformer energy balancing, load forecasting, staged OTA rollout and read scheduling. It closes with the <strong>tech stack</strong>.</p>
+<p><strong>Reading time:</strong> 80 min.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Sources and honesty</p>
+<p>The following are marked <strong>VERIFY</strong> and should be checked against current official documents before you rely on them:</p>
+<ul>
+<li>India's smart meter programme under the <strong>Revamped Distribution Sector Scheme (RDSS)</strong> and the <strong>AMISP</strong> (AMI Service Provider) model</li>
+<li>Standards such as <strong>IS 16444</strong> (smart meters) and <strong>IS 15959</strong> (DLMS companion spec)</li>
+<li>CEA regulations and state electricity regulatory commission (SERC) supply codes, which set rules on prepaid disconnection timing</li>
+</ul>
+<p>Everything else is a <strong>reference design</strong>.</p>
+</div>
+<hr />
+<h2 id="1-the-system-in-one-page">1. The System in One Page<a class="headerlink" href="#1-the-system-in-one-page" title="Permanent link">&para;</a></h2>
+<h3 id="11-what-a-smart-meter-platform-does">1.1 What a smart meter platform does<a class="headerlink" href="#11-what-a-smart-meter-platform-does" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A traditional meter is read by a person once a month.</li>
+<li>A <strong>smart meter</strong>:<ul>
+<li>records energy every <strong>15 or 30 minutes</strong> (load profile);</li>
+<li>records voltage, current, power factor and events (tamper, power fail, cover open);</li>
+<li>sends all of this to the utility <strong>automatically</strong>;</li>
+<li>can be <strong>disconnected or reconnected remotely</strong> through a built-in relay;</li>
+<li>supports <strong>prepaid</strong> mode, where the consumer recharges like a mobile SIM and supply is cut when the balance runs out (with rules about when).</li>
+</ul>
+</li>
+<li>For the utility this means:<ul>
+<li>accurate billing without meter readers;</li>
+<li>fewer billing disputes;</li>
+<li>faster detection of outages and theft;</li>
+<li>better collections through prepaid;</li>
+<li>energy accounting per transformer and feeder to find <strong>AT&amp;C losses</strong> (aggregate technical and commercial losses).</li>
+</ul>
+</li>
+</ul>
+<h3 id="12-main-systems">1.2 Main systems<a class="headerlink" href="#12-main-systems" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Smart meters</strong></td>
+<td>Measure and store interval data and events. Relay for connect/disconnect. Communication module</td>
+</tr>
+<tr>
+<td><strong>Network</strong></td>
+<td>RF mesh with data concentrator units (DCUs)/gateways, or direct cellular (NB-IoT/4G), or PLC</td>
+</tr>
+<tr>
+<td><strong>Head-End System (HES)</strong></td>
+<td>Manages meter communications: schedules reads, sends commands (disconnect, tariff update, time sync), receives pushed events, manages keys</td>
+</tr>
+<tr>
+<td><strong>Meter Data Management (MDM)</strong></td>
+<td>Stores and <strong>validates</strong> interval data, estimates gaps, aggregates for billing, maintains meter–consumer–transformer relationships</td>
+</tr>
+<tr>
+<td><strong>Billing and CIS</strong></td>
+<td>Customer information system: accounts, tariffs, postpaid bills, payments</td>
+</tr>
+<tr>
+<td><strong>Prepaid engine</strong></td>
+<td>Real-time balance, deductions, low-balance alerts, disconnect/reconnect decisions</td>
+</tr>
+<tr>
+<td><strong>Recharge channels</strong></td>
+<td>App, UPI, wallets, BBPS, counters</td>
+</tr>
+<tr>
+<td><strong>Outage management (OMS)</strong></td>
+<td>Detects outages from "last gasp" events, groups them, dispatches crews</td>
+</tr>
+<tr>
+<td><strong>Network model (GIS)</strong></td>
+<td>Feeders, transformers, consumers. The connectivity used for energy accounting</td>
+</tr>
+<tr>
+<td><strong>Analytics</strong></td>
+<td>Losses, theft, forecasting, consumer insights, regulatory reports</td>
+</tr>
+<tr>
+<td><strong>Device management</strong></td>
+<td>Firmware versions, OTA campaigns, configuration, inventory</td>
+</tr>
+<tr>
+<td><strong>Consumer app</strong></td>
+<td>Daily usage, balance, recharge, alerts, complaints</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13-scale-for-this-design-assumptions">1.3 Scale for this design (assumptions)<a class="headerlink" href="#13-scale-for-this-design-assumptions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Meters</td>
+<td>25M (mostly single-phase residential); 50k DCUs; 200k distribution transformers (DT meters); 5k feeder meters</td>
+</tr>
+<tr>
+<td>Interval data</td>
+<td>15-minute load profile → 96 intervals/day per meter, several channels each (kWh import/export, voltage, current)</td>
+</tr>
+<tr>
+<td>Daily readings</td>
+<td>25M × 96 × ~4 channels ≈ <strong>10B values/day</strong></td>
+</tr>
+<tr>
+<td>Daily billing snapshots</td>
+<td>25M midnight registers</td>
+</tr>
+<tr>
+<td>Events</td>
+<td>Power fail/restore, tamper, relay operations: tens of millions per day, with bursts during storms</td>
+</tr>
+<tr>
+<td>Prepaid recharges</td>
+<td>~1M/day, with peaks around month start and evenings</td>
+</tr>
+<tr>
+<td>Commands</td>
+<td>Disconnect/reconnect: hundreds of thousands a day at peak (VERIFY rules on timing)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Estimation highlights:</strong></p>
+<ul>
+<li><strong>Ingest rate.</strong> 10B values per day is about 115k values per second on average. Reads are <strong>scheduled in batches</strong> (e.g. hourly or four times a day), so peaks are 5–10× higher.</li>
+<li><strong>Storage.</strong><ul>
+<li>At ~12 bytes per compressed value, the raw volume is ~120 GB/day, or ~44 TB/year before replication.</li>
+<li>Time-series compression (delta-of-delta, Gorilla-style) reduces this further.</li>
+<li>Retain detailed data for several years, because regulators often require it (VERIFY).</li>
+</ul>
+</li>
+<li><strong>Storm events.</strong><ul>
+<li>When a feeder trips, every meter on it sends a "last gasp" power-fail event at the same instant: 10k events in a second from one feeder.</li>
+<li>A regional storm can produce millions of events in minutes.</li>
+<li>The event pipeline must absorb these bursts and <strong>correlate</strong> them rather than create a million outage tickets.</li>
+</ul>
+</li>
+<li><strong>Network constraints.</strong><ul>
+<li>RF mesh bandwidth is small, often tens of kbps shared across a DCU's meters.</li>
+<li>Reading 1,000 meters' full load profile through one DCU must be scheduled carefully.</li>
+<li>You cannot poll everything every minute.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="2-requirements">2. Requirements<a class="headerlink" href="#2-requirements" title="Permanent link">&para;</a></h2>
+<h3 id="21-functional">2.1 Functional<a class="headerlink" href="#21-functional" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Meter data collection.</strong><ul>
+<li>Daily billing profile (midnight registers).</li>
+<li>Load profile (15 or 30 min).</li>
+<li>Instantaneous parameters on demand.</li>
+<li>Events pushed in near real time (power fail, tamper).</li>
+</ul>
+</li>
+<li><strong>Commands.</strong><ul>
+<li>Remote disconnect/reconnect.</li>
+<li>Time sync.</li>
+<li>Tariff/TOD schedule updates.</li>
+<li>Load limit settings.</li>
+<li>Mode change (prepaid/postpaid).</li>
+<li>Firmware updates.</li>
+</ul>
+</li>
+<li><strong>VEE.</strong> Validate readings, <strong>estimate</strong> missing or invalid data, allow audited <strong>manual edits</strong>.</li>
+<li><strong>Billing.</strong><ul>
+<li>Postpaid bills with slab and time-of-day tariffs, fixed charges, taxes and subsidies.</li>
+<li>Net metering for rooftop solar (import/export).</li>
+</ul>
+</li>
+<li><strong>Prepaid.</strong><ul>
+<li>Recharge through many channels, credited in real time.</li>
+<li>Daily deductions.</li>
+<li>Balance and days-remaining projection.</li>
+<li>Low-balance alerts.</li>
+<li>Disconnect after grace, under regulatory rules (no disconnection at night or on holidays, and emergency credit where mandated; VERIFY).</li>
+<li>Automatic reconnect on recharge within minutes.</li>
+</ul>
+</li>
+<li><strong>Outages.</strong> Detect outages from meter events, identify the affected transformer or feeder, notify consumers, track restoration and compute reliability indices (SAIFI/SAIDI).</li>
+<li><strong>Energy accounting.</strong> Compare the energy input at the feeder and DT against the sum of consumer meters, to compute losses by area and flag theft hotspots.</li>
+<li><strong>Consumer app.</strong> Usage graphs, bill and balance, recharge, alerts, complaints.</li>
+<li><strong>Device management.</strong> Inventory, installation workflows (meter swap, mapping to consumer and DT), FOTA campaigns, configuration audits.</li>
+</ol>
+<h3 id="22-non-functional">2.2 Non-functional<a class="headerlink" href="#22-non-functional" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Data completeness</strong></td>
+<td>e.g. &gt; 98–99% of meters with daily data delivered within 24 h, and load profile similar (SLA-driven in AMISP contracts; VERIFY)</td>
+</tr>
+<tr>
+<td><strong>Latency</strong></td>
+<td>Events ingested in &lt; 1 min. Reconnect command executed within minutes of a recharge</td>
+</tr>
+<tr>
+<td><strong>Correctness</strong></td>
+<td>Billing-grade accuracy with a full audit of estimates and edits</td>
+</tr>
+<tr>
+<td><strong>Safety</strong></td>
+<td>Disconnects only when policy allows. Never mass-disconnect because of a bug</td>
+</tr>
+<tr>
+<td><strong>Security</strong></td>
+<td>Per-meter keys, encrypted and authenticated DLMS, no unauthorised commands</td>
+</tr>
+<tr>
+<td><strong>Scalability</strong></td>
+<td>25M+ meters and growing. Bursts during storms</td>
+</tr>
+<tr>
+<td><strong>Interoperability</strong></td>
+<td>Multiple meter makes through standard DLMS/COSEM. HES–MDM integration through standard interfaces</td>
+</tr>
+<tr>
+<td><strong>Retention</strong></td>
+<td>Years of interval data for disputes and regulatory audits (VERIFY)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-high-level-architecture">3. High-Level Architecture<a class="headerlink" href="#3-high-level-architecture" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart TB
+    subgraph Field
+        M[Smart meters - consumer]
+        DT[DT and feeder meters]
+        DCU[DCUs and gateways - RF mesh]
+        CELL[Cellular NB-IoT and 4G]
+    end
+    subgraph HES[Head-End System]
+        COMM[Communication servers - DLMS]
+        SCHED[Read scheduler]
+        CMD[Command manager]
+        KEYS[Key management - HSM]
+        EVT[Event receiver]
+    end
+    subgraph Core[Utility core]
+        BUS[Event bus - Kafka]
+        MDM[MDM - VEE, aggregation, relations]
+        TS[Time-series store]
+        PRE[Prepaid engine]
+        BILL[Billing and CIS]
+        OMS[Outage management]
+        GIS[Network model - GIS]
+        DM[Device management and FOTA]
+    end
+    subgraph Channels
+        APP[Consumer app]
+        PAY[Recharge - UPI, BBPS, wallets]
+        CRM[Call centre and field apps]
+    end
+    subgraph Data
+        LAKE[Lakehouse]
+        AN[Analytics - losses, theft, forecasting]
+    end
+    M --&gt; DCU --&gt; COMM
+    M --&gt; CELL --&gt; COMM
+    DT --&gt; CELL
+    SCHED --&gt; COMM
+    CMD --&gt; COMM
+    KEYS --&gt; COMM
+    COMM --&gt; EVT --&gt; BUS
+    COMM --&gt; BUS
+    BUS --&gt; MDM --&gt; TS
+    MDM --&gt; BILL
+    MDM --&gt; PRE
+    BUS --&gt; OMS
+    GIS --&gt; OMS
+    GIS --&gt; MDM
+    PAY --&gt; PRE
+    PRE --&gt; CMD
+    DM --&gt; CMD
+    APP --&gt; PRE
+    APP --&gt; TS
+    CRM --&gt; OMS
+    TS --&gt; LAKE
+    BUS --&gt; LAKE
+    LAKE --&gt; AN</code></pre>
+<p><strong>Key decisions</strong></p>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Choice</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Protocol</td>
+<td>DLMS/COSEM (IEC 62056) with the national companion spec (IS 15959; VERIFY)</td>
+<td>Multi-vendor interoperability</td>
+</tr>
+<tr>
+<td>Network</td>
+<td>Mixed: RF mesh in dense urban areas, cellular in sparse or rural areas and for DT meters</td>
+<td>Coverage vs cost</td>
+</tr>
+<tr>
+<td>HES vs MDM split</td>
+<td>HES owns communication. MDM owns data truth</td>
+<td>Swap vendors independently</td>
+</tr>
+<tr>
+<td>Ingest</td>
+<td>HES publishes to Kafka. Consumers (MDM, OMS, prepaid) read independently</td>
+<td>Decoupling, replay</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>Time-series DB or a columnar store for interval data, relational for master data</td>
+<td>Fit the access patterns</td>
+</tr>
+<tr>
+<td>Prepaid</td>
+<td>Utility-side balance (a "smart prepaid" meter reporting consumption), not balance in the meter</td>
+<td>Easy tariff changes, central control</td>
+</tr>
+<tr>
+<td>Commands</td>
+<td>An idempotent, rate-limited command queue with policy checks</td>
+<td>Safety at scale</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-how-it-works-end-to-end-journeys">4. How It Works — End-to-End Journeys<a class="headerlink" href="#4-how-it-works-end-to-end-journeys" title="Permanent link">&para;</a></h2>
+<h3 id="41-journey-1-a-day-of-meter-data">4.1 Journey 1: a day of meter data<a class="headerlink" href="#41-journey-1-a-day-of-meter-data" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Inside the meter.</strong> Every 15 minutes it records the block load profile: kWh import, kWh export, average voltage, average current. The data is stored in the meter's memory, which holds days to weeks of intervals. At midnight it snapshots the <strong>daily billing registers</strong>.</li>
+<li><strong>Communication paths.</strong><ul>
+<li><strong>RF mesh:</strong> the meter's radio forms a mesh with neighbours. Data hops to a DCU on a pole, and the DCU backhauls over 4G to the HES.</li>
+<li><strong>Cellular:</strong> an NB-IoT or 4G module talks to the HES directly (APN/VPN).</li>
+</ul>
+</li>
+<li><strong>Read schedule</strong> (§6.8).<ul>
+<li>The HES scheduler plans reads to fit network capacity. Daily profiles go out after midnight in waves.</li>
+<li>Load profile is read every 4–8 hours in batches.</li>
+<li>Some meters are configured to <strong>push</strong> data at set times, with jitter so they don't all send at once.</li>
+</ul>
+</li>
+<li><strong>The HES talks DLMS.</strong><ul>
+<li>It opens an association with the meter using security suite keys.</li>
+<li>It reads the COSEM objects (OBIS codes identify each quantity, e.g. 1.0.1.8.0.255 for active import energy).</li>
+<li>It receives encrypted and authenticated responses.</li>
+</ul>
+</li>
+<li><strong>The HES publishes raw readings</strong> to Kafka (<code>meter.reads.raw</code>) with meter ID, OBIS code, timestamp, value, quality flags and read time.</li>
+<li><strong>MDM VEE</strong> (§6.1). The MDM consumes readings and validates them:<ul>
+<li><strong>Checks:</strong> timestamps in range, no negative consumption on cumulative registers, spike checks, interval sum vs register delta, and more.</li>
+<li><strong>Gaps are estimated</strong> (§6.2) and flagged as estimated.</li>
+<li>Validated data is written to the <strong>time-series store</strong>. Daily aggregates feed billing and prepaid.</li>
+</ul>
+</li>
+<li><strong>Missing meters.</strong> Meters not read by the target time get retries, and are reported in communication-health dashboards (by DCU, area and vendor). Persistent failures create field tickets.</li>
+<li><strong>Consumer view.</strong> The next morning the app shows yesterday's usage by hour, plus a comparison with similar homes.</li>
+</ol>
+<h3 id="42-journey-2-a-prepaid-recharge-and-reconnection">4.2 Journey 2: a prepaid recharge and reconnection<a class="headerlink" href="#42-journey-2-a-prepaid-recharge-and-reconnection" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Disconnection.</strong> Priya's balance fell below zero yesterday evening. Under the regulatory rules the system <strong>did not disconnect at night</strong> (VERIFY the exact rule). It disconnected this morning at 10:00 after a grace period, and sent her SMS and app alerts before and after.</li>
+<li><strong>Recharge.</strong> Priya recharges ₹500 by UPI in the app. The payment gateway confirms, and the <strong>prepaid engine</strong> credits her balance idempotently, using the payment reference.</li>
+<li><strong>Reconnect decision.</strong> The balance is now above the reconnection threshold. The engine creates a <strong>reconnect command</strong> for her meter, with the reason <code>recharge</code> and a reference.</li>
+<li><strong>Command manager</strong> (§5.5). The command passes policy checks: meter ID valid, not flagged for tamper, reconnect allowed.<ul>
+<li>It is queued with high priority.</li>
+<li>The HES sends a DLMS action to the <strong>disconnect-control object</strong>.</li>
+</ul>
+</li>
+<li><strong>The meter's relay closes</strong> and power is restored. The meter confirms the relay status, and the HES publishes <code>RelayStatusChanged(connected)</code>.</li>
+<li><strong>Notification.</strong> The engine marks the command complete and sends "Power reconnected" to Priya, typically within minutes.</li>
+<li><strong>Failure handling.</strong> If the meter is unreachable (for example, the RF mesh is weak), the command retries with backoff. After a timeout it escalates to a field visit. Priya sees "Reconnection in progress" and can call the helpline.</li>
+</ol>
+<h3 id="43-journey-3-daily-prepaid-deduction">4.3 Journey 3: daily prepaid deduction<a class="headerlink" href="#43-journey-3-daily-prepaid-deduction" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Consumption.</strong> After midnight the MDM publishes validated daily consumption for each prepaid meter, broken down by time-of-day slot.</li>
+<li>
+<p><strong>Rating</strong> (§6.3). The prepaid engine calculates the charges:</p>
+<ul>
+<li>energy charges by slab and TOD rate;</li>
+<li>fixed charges pro-rated per day;</li>
+<li>electricity duty and taxes;</li>
+<li>subsidies (e.g. free units for eligible consumers under state schemes; VERIFY).</li>
+</ul>
+<p>It then <strong>deducts</strong> the total from the balance and records ledger entries.
+3. <strong>Balance projection</strong> (§6.4). Days remaining are estimated from recent consumption. If fewer than N days remain, a low-balance alert goes out.
+4. <strong>Negative balance.</strong> If the balance goes negative, the case enters the <strong>disconnect workflow</strong>:
+- check the policy windows (time of day, holidays, emergency credit);
+- then schedule a disconnect command in the next allowed window.
+5. <strong>Near real-time mode.</strong> Some utilities deduct more frequently (hourly) using load profile data, which gives faster balance feedback. Daily finalisation reconciles against the validated data.</p>
+</li>
+</ol>
+<h3 id="44-journey-4-a-transformer-trips-in-a-storm">4.4 Journey 4: a transformer trips in a storm<a class="headerlink" href="#44-journey-4-a-transformer-trips-in-a-storm" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Last gasp.</strong> A distribution transformer's fuse blows at 19:42. Its 300 consumer meters lose power, and each <strong>sends a "last gasp" power-fail event</strong>. This works on cellular meters with a supercapacitor, and on RF meters when the mesh survives. Some events are lost because the mesh nodes are down too.</li>
+<li><strong>Ingest.</strong> The HES receives thousands of events within seconds and publishes them to <code>meter.events</code>.</li>
+<li><strong>OMS correlation</strong> (§6.5).<ul>
+<li>The OMS groups events by time window and <strong>network topology</strong> from GIS (the meters on the same DT).</li>
+<li>If more than X% of meters under a DT report power-fail within a minute, it <strong>infers a DT-level outage</strong>. Meters with no event are inferred as affected too.</li>
+<li>If multiple DTs on one feeder fail together, it escalates to a <strong>feeder-level outage</strong>.</li>
+<li>Individual power-fail events are suppressed into one outage ticket.</li>
+</ul>
+</li>
+<li><strong>Response.</strong><ul>
+<li>A crew is dispatched with the DT's location.</li>
+<li>Consumers get an SMS: "Outage in your area, crew assigned, estimated restoration 21:00".</li>
+<li>Call-centre agents see the known outage when customers call.</li>
+</ul>
+</li>
+<li><strong>Restoration.</strong> When power returns, the meters send <strong>power-restore</strong> events. The OMS verifies restoration (a "ping" of a sample of meters) and closes the ticket. If some meters are still off, that suggests a nested outage (a single service line), and a new ticket is created.</li>
+<li><strong>Reliability indices.</strong> Outage durations per consumer feed <strong>SAIDI and SAIFI</strong> for regulatory reporting.</li>
+</ol>
+<h3 id="45-journey-5-catching-electricity-theft">4.5 Journey 5: catching electricity theft<a class="headerlink" href="#45-journey-5-catching-electricity-theft" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Energy balance.</strong> Each DT has its own meter.<ul>
+<li>Every day, energy accounting compares DT output with the <strong>sum of its consumers' consumption</strong> (after VEE).</li>
+<li>It adjusts for expected technical losses (§6.7).</li>
+<li>A DT with 25% unexplained loss is flagged.</li>
+</ul>
+</li>
+<li><strong>Consumer-level anomalies</strong> under flagged DTs (§6.6):<ul>
+<li>a sudden drop in consumption without a matching seasonal pattern;</li>
+<li><strong>tamper events</strong> (cover open, magnetic tamper, neutral disturbance, reverse current);</li>
+<li>consumption far below similar homes;</li>
+<li>zero consumption while the neighbouring meters show usage.</li>
+</ul>
+</li>
+<li><strong>Scoring and inspection.</strong> A model ranks the suspect consumers. An inspection team visits with a mobile app, and findings are recorded.</li>
+<li><strong>Feedback.</strong> The inspection results (theft found or not) are fed back to retrain the model.</li>
+</ol>
+<h3 id="46-journey-6-a-firmware-update-to-2-million-meters">4.6 Journey 6: a firmware update to 2 million meters<a class="headerlink" href="#46-journey-6-a-firmware-update-to-2-million-meters" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>The fix.</strong> A meter vendor releases firmware that fixes a clock drift bug. The utility tests it in the lab, then on a <strong>pilot group</strong> of 1,000 meters in a test area.</li>
+<li><strong>Staged campaign</strong> (§6.9).<ul>
+<li>Waves go 1% → 5% → 20% → 100%.</li>
+<li>Each wave has <strong>health gates</strong>: meters come back online after the update, read success rates stay stable, no increase in errors or tamper events.</li>
+<li>Waves are paused automatically if the gates fail.</li>
+</ul>
+</li>
+<li><strong>Bandwidth.</strong> Firmware images (hundreds of KB) are sent over a constrained RF mesh.<ul>
+<li>Use <strong>multicast or broadcast</strong> image transfer where supported (DLMS image transfer).</li>
+<li>Schedule during low-traffic hours.</li>
+<li>Transfer blocks with resume support.</li>
+</ul>
+</li>
+<li><strong>Activation.</strong> The image is verified by signature on the meter, then activated at a scheduled time. The meter reports its new version, and the device management inventory is updated.</li>
+<li><strong>Rollback.</strong> A failed activation falls back to the previous image where the meter supports dual banks.</li>
+</ol>
+<hr />
+<h2 id="5-core-subsystems-in-depth">5. Core Subsystems in Depth<a class="headerlink" href="#5-core-subsystems-in-depth" title="Permanent link">&para;</a></h2>
+<h3 id="51-head-end-system">5.1 Head-End System<a class="headerlink" href="#51-head-end-system" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Communication servers</strong> keep DLMS sessions over TCP or UDP (for cellular), or via the DCUs. They scale horizontally, and meters are partitioned across servers.</li>
+<li><strong>The scheduler</strong> holds job queues per network segment (DCU, cell), respecting capacity, priorities (commands above reads), time windows and retries.</li>
+<li><strong>Security</strong>:<ul>
+<li>DLMS security suites for authentication and encryption, with per-meter keys (global unicast encryption key, authentication key, master key);</li>
+<li>keys stored in an <strong>HSM</strong> and rotated;</li>
+<li>meters are provisioned at the factory with keys shared through a secure key exchange (VERIFY standard practices).</li>
+</ul>
+</li>
+<li><strong>Multi-vendor adapters</strong> cover the vendor quirks in DLMS implementations and conformance to the companion spec.</li>
+<li><strong>Outputs</strong> go to Kafka: raw reads, events and command acknowledgements.</li>
+</ul>
+<h3 id="52-mdm">5.2 MDM<a class="headerlink" href="#52-mdm" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Master data:</strong> meters, consumers, service points, DT and feeder relationships (from GIS/CIS), meter swaps with effective dates, and multipliers (CT/PT ratios for large consumers).</li>
+<li><strong>VEE engine:</strong> a rules pipeline per reading type (§6.1–6.2), with audit of every estimate and edit.</li>
+<li><strong>Aggregation:</strong><ul>
+<li>daily and monthly consumption;</li>
+<li>TOD buckets;</li>
+<li>DT and feeder aggregates for energy accounting;</li>
+<li>peak demand (max demand in a billing period).</li>
+</ul>
+</li>
+<li><strong>Interfaces:</strong> standard messages (IEC 61968-9 CIM-based; VERIFY) towards the HES and billing.</li>
+</ul>
+<h3 id="53-time-series-storage">5.3 Time-series storage<a class="headerlink" href="#53-time-series-storage" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Shape of the data:</strong> key = (meter ID, channel), value = (timestamp, value, quality flag).</li>
+<li><strong>Access patterns:</strong><ul>
+<li><strong>write</strong> in batches after reads;</li>
+<li><strong>read</strong> one meter's range (app, disputes);</li>
+<li><strong>aggregate</strong> across millions of meters for a time range (analytics).</li>
+</ul>
+</li>
+<li>
+<p><strong>Options:</strong></p>
+<ul>
+<li>a time-series DB (TimescaleDB, InfluxDB, Cassandra with time buckets) for per-meter queries;</li>
+<li>columnar lakehouse tables (Parquet/Iceberg, partitioned by date and region) for analytics.</li>
+</ul>
+<p>Many utilities use both: hot recent data in the TSDB, and everything in the lakehouse.
+- <strong>Corrections:</strong> re-estimation or late reads replace values, with a version and quality flag. Analytics must use the latest validated version.</p>
+</li>
+</ul>
+<h3 id="54-prepaid-engine">5.4 Prepaid engine<a class="headerlink" href="#54-prepaid-engine" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Ledger</strong> per consumer account: recharges (credits), deductions (debits), adjustments, and emergency credit.<ul>
+<li>Double-entry, idempotent by reference (<a href="../i11-telecom-billing-and-charging/">I11</a> patterns).</li>
+</ul>
+</li>
+<li><strong>Balance state:</strong><ul>
+<li>current balance;</li>
+<li>last deduction time;</li>
+<li>projected days;</li>
+<li>disconnect status;</li>
+<li>grace and emergency credit flags.</li>
+</ul>
+</li>
+<li><strong>Disconnect policy engine:</strong><ul>
+<li>rules on allowed windows (e.g. working hours only, no holidays), notice periods and exemptions (medical priority consumers, where policies exist);</li>
+<li>all encoded as configurable rules per state (VERIFY state regulations).</li>
+</ul>
+</li>
+<li><strong>Reconnect SLA:</strong> recharge → reconnect in minutes. The recharge path must be highly available.</li>
+</ul>
+<h3 id="55-command-manager-safety-critical">5.5 Command manager (safety-critical)<a class="headerlink" href="#55-command-manager-safety-critical" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Commands:</strong> disconnect, reconnect, load limit, tariff update, time sync, firmware.</li>
+<li><strong>Guardrails:</strong><ul>
+<li><strong>Rate limits</strong> per area and in total. A software bug must not disconnect 1M homes, so there is a <strong>global circuit breaker</strong> on the disconnect rate.</li>
+<li><strong>Two-person approval</strong> for bulk commands.</li>
+<li><strong>Policy checks</strong> per command: the consumer's status, balance, time window.</li>
+<li><strong>Idempotency:</strong> a command ID ensures repeats do nothing.</li>
+<li>Verification of the <strong>resulting relay state</strong>.</li>
+<li>A full audit trail: who or what initiated the command, why, and when.</li>
+</ul>
+</li>
+<li><strong>Priority:</strong> reconnects above disconnects above reads.</li>
+</ul>
+<h3 id="56-outage-management">5.6 Outage management<a class="headerlink" href="#56-outage-management" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Event correlation with GIS topology (§6.5).</li>
+<li>A crew management and dispatch app.</li>
+<li>Integration with SCADA for feeder-level trips at substations, which is more authoritative than meter events.</li>
+<li>Consumer communications.</li>
+<li>Reliability index computation.</li>
+</ul>
+<h3 id="57-device-management">5.7 Device management<a class="headerlink" href="#57-device-management" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Inventory:</strong> meter serial, make, model, firmware, communication module, installation details and photos.</li>
+<li><strong>Configuration audits:</strong> the actual settings read from the meter vs the desired settings (tariff schedule, profile interval, push schedules). Mismatches are fixed with commands.</li>
+<li><strong>FOTA campaigns:</strong> staged rollout with health gates (§6.9).</li>
+<li><strong>Communication health:</strong> per meter and per DCU, including the last successful read and signal quality.</li>
+</ul>
+<hr />
+<h2 id="6-algorithms">6. Algorithms<a class="headerlink" href="#6-algorithms" title="Permanent link">&para;</a></h2>
+<h3 id="61-vee-validation-rules">6.1 VEE validation rules<a class="headerlink" href="#61-vee-validation-rules" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Timestamp checks:</strong> within an expected window, and no future timestamps. Clock drift beyond a tolerance flags the meter for a time sync.</li>
+<li><strong>Cumulative register checks:</strong> kWh registers must be non-decreasing unless the meter was replaced (a meter swap event).</li>
+<li><strong>Interval vs register consistency:</strong> the sum of the day's intervals should equal the midnight register delta, within tolerance.</li>
+<li><strong>Spike and high/low limits:</strong> consumption above the connected load × time, or zero consumption while the voltage shows supply present.</li>
+<li><strong>Pattern checks:</strong> usage far outside the consumer's historical distribution, flagged for review rather than auto-corrected.</li>
+<li><strong>Event context:</strong> intervals overlapping a power failure should show zero consumption, which is valid and not a gap.</li>
+</ul>
+<h3 id="62-estimation-of-missing-or-invalid-data">6.2 Estimation of missing or invalid data<a class="headerlink" href="#62-estimation-of-missing-or-invalid-data" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Short gaps</strong> (a few intervals): linear interpolation between neighbouring intervals. When registers are available, <strong>distribute the known register delta</strong> across the missing intervals using the typical shape.</li>
+<li><strong>Long gaps</strong> (days):<ul>
+<li>use <strong>historical profile matching</strong>: the same weekday and season, scaled to recent consumption;</li>
+<li>or use similar consumers (same tariff and area) as a template.</li>
+</ul>
+</li>
+<li><strong>Billing estimates:</strong> if no register data exists at the billing date, estimate from the average daily usage, and true up when real data arrives.</li>
+<li><strong>Always</strong> record the method, the version and a flag. Estimated data can be replaced by actual data later.</li>
+</ul>
+<h3 id="63-tariff-rating-with-time-of-day-and-slabs">6.3 Tariff rating with time-of-day and slabs<a class="headerlink" href="#63-tariff-rating-with-time-of-day-and-slabs" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Inputs:</strong><ul>
+<li>consumption split by TOD slots (peak, normal, off-peak), from the load profile;</li>
+<li>the tariff: slabs per month (0–100 units at rate A, 101–200 at B, and so on), TOD surcharges or rebates, fixed charges per kW of sanctioned load, duties, subsidies.</li>
+</ul>
+</li>
+<li><strong>Monthly postpaid rating:</strong> apply the slabs to the monthly total, then apply TOD adjustments per slot, then fixed charges, duty and subsidy.</li>
+<li><strong>Daily prepaid:</strong> slabs are monthly, so the daily deduction allocates slabs <strong>incrementally</strong>. Track the units consumed so far this month and charge each day's units at the slab rates they fall into. This ensures the month's total equals the postpaid calculation.</li>
+<li><strong>Net metering:</strong> export units offset import, per regulations (net vs gross metering; VERIFY state rules).</li>
+</ul>
+<h3 id="64-prepaid-balance-projection">6.4 Prepaid balance projection<a class="headerlink" href="#64-prepaid-balance-projection" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Daily burn rate</strong> comes from an exponentially weighted moving average of recent days' charges. Add a seasonal adjustment (summer AC load) and weekday or weekend patterns.</li>
+<li><strong>Days remaining</strong> = balance ÷ projected daily charge. Alert when it is below 3 days, and again below 1 day.</li>
+<li><strong>Emergency credit:</strong> if configured, a small credit allows supply during non-disconnect windows, and is recovered on the next recharge.</li>
+</ul>
+<h3 id="65-outage-inference-from-events">6.5 Outage inference from events<a class="headerlink" href="#65-outage-inference-from-events" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Grouping:</strong> cluster power-fail events by time (e.g. 60 s windows) and by topology node (DT, feeder section).</li>
+<li>
+<p><strong>Upstream inference:</strong></p>
+<ul>
+<li>if the fraction of meters under a node reporting a failure exceeds a threshold, infer that the node is out;</li>
+<li>recurse upward: if multiple child nodes are out, infer the parent.</li>
+</ul>
+<p>This is similar to fault localisation in trees.
+- <strong>Missing events:</strong> the mesh may be down, so use <strong>pings</strong> to sample meters and confirm their status.
+- <strong>Restoration:</strong> power-restore events clear nodes. Nested outages are detected when some meters remain off.
+- <strong>Noise:</strong> individual meter failures (a tripped home MCB) don't escalate without a threshold. Momentary interruptions (less than 5 minutes) are counted separately (MAIFI).</p>
+</li>
+</ul>
+<h3 id="66-theft-and-anomaly-detection">6.6 Theft and anomaly detection<a class="headerlink" href="#66-theft-and-anomaly-detection" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Features per consumer:</strong><ul>
+<li>consumption trend breaks (change-point detection);</li>
+<li>the ratio to peers' consumption (same tariff, area, sanctioned load);</li>
+<li>tamper event counts;</li>
+<li>neutral current vs phase current imbalance;</li>
+<li>reverse energy;</li>
+<li>load profile shape anomalies (flat night usage, for example);</li>
+<li>zero consumption while voltage is present.</li>
+</ul>
+</li>
+<li><strong>Models:</strong><ul>
+<li>rules for strong signals (magnet tamper);</li>
+<li><strong>isolation forest</strong> or autoencoders for unsupervised anomaly scoring;</li>
+<li>supervised gradient-boosted models trained on inspection outcomes.</li>
+</ul>
+</li>
+<li><strong>Prioritisation:</strong> combine the consumer score with <strong>DT-level loss</strong> from the energy balance. Inspection capacity is limited, so rank by expected recovery.</li>
+</ul>
+<h3 id="67-energy-accounting-and-technical-loss">6.7 Energy accounting and technical loss<a class="headerlink" href="#67-energy-accounting-and-technical-loss" title="Permanent link">&para;</a></h3>
+<ul>
+<li>For each DT and each day:<ul>
+<li><strong>Loss</strong> = DT output energy − Σ consumer energy (after VEE, with consistent time windows and multipliers).</li>
+<li><strong>Technical loss estimate</strong> = transformer losses plus line losses. Estimate it with a load-flow approximation (I²R using the current profiles) or typical percentages by network type.</li>
+<li><strong>Commercial loss</strong> ≈ loss − technical loss.</li>
+</ul>
+</li>
+<li>
+<p><strong>Data quality prerequisites:</strong></p>
+<ul>
+<li>correct <strong>consumer-to-DT mapping</strong> (a frequent source of false alarms, since GIS mapping errors are common);</li>
+<li>complete readings;</li>
+<li>meter swaps handled.</li>
+</ul>
+<p>Detect mapping errors with <strong>voltage correlation</strong>: meters on the same DT show correlated voltage profiles, so a meter whose voltage correlates better with another DT is probably mis-mapped.</p>
+</li>
+</ul>
+<h3 id="68-read-scheduling-under-network-constraints">6.8 Read scheduling under network constraints<a class="headerlink" href="#68-read-scheduling-under-network-constraints" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Capacity model:</strong> each DCU or cell sector has a throughput budget. Each read job has a size (daily profile is small; load profile for 8 hours is medium; firmware is large).</li>
+<li><strong>Scheduling:</strong><ul>
+<li>a bin-packing and priority scheduler over time slots;</li>
+<li>randomised jitter for pushes, so meters don't synchronise;</li>
+<li>failed reads retry later with backoff.</li>
+</ul>
+</li>
+<li><strong>Adaptive:</strong> meters with poor links are read less often and in larger batches, and meters that repeatedly fail are flagged for field checks.</li>
+</ul>
+<h3 id="69-staged-ota-rollout">6.9 Staged OTA rollout<a class="headerlink" href="#69-staged-ota-rollout" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Waves</strong> with health gates. Each gate checks metrics against a control group:<ul>
+<li>reconnect rate after reboot;</li>
+<li>read success;</li>
+<li>error events;</li>
+<li>clock accuracy.</li>
+</ul>
+</li>
+<li><strong>Automatic pause</strong> if any metric degrades beyond thresholds, with statistical tests to avoid noise-driven pauses.</li>
+<li><strong>Diversity:</strong> include different vendors, hardware revisions and network types in the early waves, to surface issues early.</li>
+</ul>
+<h3 id="610-load-forecasting-and-demand-response">6.10 Load forecasting and demand response<a class="headerlink" href="#610-load-forecasting-and-demand-response" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Short-term load forecasting</strong> per feeder, DT and system:<ul>
+<li>inputs are historical load, weather (temperature, humidity), calendar (holidays, festivals) and special events;</li>
+<li>models are gradient boosting or deep sequence models;</li>
+<li>forecast horizons run from 15 minutes to a day ahead.</li>
+</ul>
+</li>
+<li><strong>Uses:</strong><ul>
+<li>power purchase planning (day-ahead markets);</li>
+<li>DT overload alerts;</li>
+<li>planning for EV charging growth.</li>
+</ul>
+</li>
+<li><strong>Demand response:</strong><ul>
+<li>send TOD price signals, or ask enrolled consumers to reduce load;</li>
+<li>load limiting via meter settings in emergencies (policy);</li>
+<li>measure the response against a baseline (e.g. the average of similar days).</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="7-data-architecture">7. Data Architecture<a class="headerlink" href="#7-data-architecture" title="Permanent link">&para;</a></h2>
+<h3 id="71-operational-stores">7.1 Operational stores<a class="headerlink" href="#71-operational-stores" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Store (reference)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Raw reads and events</td>
+<td>Kafka (retained for days) + raw zone in the lakehouse</td>
+<td>Replay for re-processing</td>
+</tr>
+<tr>
+<td>Validated interval data</td>
+<td>TSDB (recent) + Iceberg/Parquet (all history)</td>
+<td>Versioned values</td>
+</tr>
+<tr>
+<td>Master data (meters, consumers, topology)</td>
+<td>PostgreSQL + GIS (PostGIS)</td>
+<td>Effective-dated relationships</td>
+</tr>
+<tr>
+<td>Prepaid ledger and balances</td>
+<td>PostgreSQL (sharded by account)</td>
+<td>Idempotent</td>
+</tr>
+<tr>
+<td>Billing</td>
+<td>CIS database</td>
+<td>Monthly bills</td>
+</tr>
+<tr>
+<td>Commands and audit</td>
+<td>PostgreSQL + append-only audit log</td>
+<td>Safety</td>
+</tr>
+<tr>
+<td>Outages</td>
+<td>OMS database</td>
+<td>Reliability indices</td>
+</tr>
+<tr>
+<td>Device inventory and firmware</td>
+<td>PostgreSQL + object storage for images</td>
+<td>Signed images</td>
+</tr>
+</tbody>
+</table>
+<h3 id="72-analytics-platform">7.2 Analytics platform<a class="headerlink" href="#72-analytics-platform" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Lakehouse:</strong><ul>
+<li><strong>bronze:</strong> raw reads and events;</li>
+<li><strong>silver:</strong> validated interval data joined with master data;</li>
+<li><strong>gold:</strong> DT and feeder energy balances, consumer daily usage, outage stats, collections.</li>
+</ul>
+</li>
+<li><strong>Workloads:</strong><ul>
+<li>daily energy accounting;</li>
+<li>theft scoring;</li>
+<li>forecasting;</li>
+<li>regulatory reports (reliability indices, loss reports, smart meter performance for scheme monitoring; VERIFY RDSS reporting requirements);</li>
+<li>consumer insights (usage comparisons).</li>
+</ul>
+</li>
+<li><strong>Stream analytics:</strong> real-time outage dashboards, command success rates, prepaid disconnect and reconnect monitoring.</li>
+</ul>
+<h3 id="73-data-flow">7.3 Data flow<a class="headerlink" href="#73-data-flow" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>flowchart LR
+    HES[Head-End System] --&gt; K[Kafka - reads, events, acks]
+    K --&gt; VEE[MDM VEE]
+    VEE --&gt; TSDB[Time-series store]
+    VEE --&gt; LAKE[Lakehouse bronze, silver, gold]
+    K --&gt; OMS[Outage correlation]
+    VEE --&gt; PRE[Prepaid rating and ledger]
+    PRE --&gt; CMD[Command manager]
+    CMD --&gt; HES
+    LAKE --&gt; EA[Energy accounting]
+    LAKE --&gt; ML[Theft and forecast models]
+    EA --&gt; INSP[Inspection work orders]
+    ML --&gt; INSP
+    LAKE --&gt; REG[Regulatory reports]</code></pre>
+<hr />
+<h2 id="8-tech-stack-reference-choice">8. Tech Stack (reference choice)<a class="headerlink" href="#8-tech-stack-reference-choice" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Choice</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Meters and protocol</td>
+<td>DLMS/COSEM smart meters per IS 16444 and IS 15959 (VERIFY)</td>
+<td>Multi-vendor</td>
+</tr>
+<tr>
+<td>Network</td>
+<td>RF mesh (IEEE 802.15.4g/Wi-SUN-style), NB-IoT/4G modules, DCUs</td>
+<td>Mixed</td>
+</tr>
+<tr>
+<td>HES</td>
+<td>Vendor HES or custom (Java/Go) with DLMS libraries, HSM</td>
+<td>Often supplied by the AMISP</td>
+</tr>
+<tr>
+<td>Ingest</td>
+<td>Kafka (or MQTT brokers for push-based IoT feeding Kafka)</td>
+<td>Burst absorption</td>
+</tr>
+<tr>
+<td>Stream processing</td>
+<td>Flink or Kafka Streams</td>
+<td>VEE and correlation</td>
+</tr>
+<tr>
+<td>MDM</td>
+<td>Commercial MDM products or custom services (Java/Spring)</td>
+<td>VEE rules</td>
+</tr>
+<tr>
+<td>Time-series</td>
+<td>TimescaleDB, Cassandra, or InfluxDB; plus an Iceberg lakehouse</td>
+<td>Hot and cold</td>
+</tr>
+<tr>
+<td>Core services</td>
+<td>Java/Spring Boot, PostgreSQL</td>
+<td>Prepaid, commands</td>
+</tr>
+<tr>
+<td>GIS</td>
+<td>PostGIS, utility GIS products</td>
+<td>Topology</td>
+</tr>
+<tr>
+<td>Analytics</td>
+<td>Spark, Trino, BI dashboards; Python ML</td>
+<td>Losses, theft, forecasts</td>
+</tr>
+<tr>
+<td>Channels</td>
+<td>Mobile app, UPI/BBPS integrations</td>
+<td>Recharges</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-security-privacy-compliance">9. Security, Privacy &amp; Compliance<a class="headerlink" href="#9-security-privacy-compliance" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Critical infrastructure.</strong> Remote disconnect is a powerful capability, and a compromised HES could disconnect a city. Mitigations:<ul>
+<li>network segmentation;</li>
+<li>HSM-backed per-meter keys;</li>
+<li>signed commands;</li>
+<li>rate limits and circuit breakers;</li>
+<li>two-person approval for bulk actions;</li>
+<li>a SOC with ICS/OT monitoring;</li>
+<li>CERT-In directions and sectoral cybersecurity guidelines (VERIFY CEA cyber security regulations for the power sector).</li>
+</ul>
+</li>
+<li><strong>Firmware integrity.</strong> Signed images are verified on the meter. There is a secure boot chain where supported.</li>
+<li><strong>Privacy.</strong> 15-minute consumption reveals household routines (when people are at home, sleeping or travelling). Controls:<ul>
+<li>purpose limitation;</li>
+<li>access controls;</li>
+<li>aggregation for analytics;</li>
+<li>consent for third-party sharing;</li>
+<li>DPDP Act obligations (VERIFY).</li>
+</ul>
+</li>
+<li><strong>Consumer protection.</strong> Prepaid disconnection rules, notices and grievance processes follow the Electricity (Rights of Consumers) Rules and the SERC regulations (VERIFY).</li>
+</ul>
+<hr />
+<h2 id="10-reliability-operations">10. Reliability &amp; Operations<a class="headerlink" href="#10-reliability-operations" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Burst handling.</strong><ul>
+<li>Kafka absorbs storm events.</li>
+<li>The OMS correlation scales horizontally by region.</li>
+<li>Dashboards prioritise feeder-level outages.</li>
+</ul>
+</li>
+<li><strong>Degraded modes.</strong><ul>
+<li>If the HES is unreachable from the prepaid engine, <strong>pause disconnects</strong> (fail safe towards supply) but continue accepting recharges.</li>
+<li>Queue reconnects with high priority when the path recovers.</li>
+</ul>
+</li>
+<li><strong>Data completeness monitoring.</strong><ul>
+<li>Read success by DCU, area, vendor and firmware.</li>
+<li>SLAs with the AMISP.</li>
+<li>Automatic field tickets.</li>
+</ul>
+</li>
+<li><strong>Clock sync.</strong> Meters need accurate time for TOD billing and interval alignment. Schedule regular time sync commands and alert on drift.</li>
+<li><strong>Change management.</strong> Tariff changes (new financial year) are configured, tested on sample accounts and scheduled. FOTA goes out in staged waves.</li>
+</ul>
+<hr />
+<h2 id="11-key-trade-offs">11. Key Trade-offs<a class="headerlink" href="#11-key-trade-offs" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Chosen</th>
+<th>Accepted cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Prepaid balance</td>
+<td>Central (utility-side)</td>
+<td>Depends on communication for timely disconnect and reconnect</td>
+</tr>
+<tr>
+<td>Network</td>
+<td>Mixed RF and cellular</td>
+<td>Operational complexity</td>
+</tr>
+<tr>
+<td>Load profile interval</td>
+<td>15 min</td>
+<td>Data volume and privacy</td>
+</tr>
+<tr>
+<td>Estimation</td>
+<td>Automatic VEE with flags</td>
+<td>Estimates may be wrong until trued up</td>
+</tr>
+<tr>
+<td>Disconnect safety</td>
+<td>Rate limits and policy gates</td>
+<td>Slower collections enforcement</td>
+</tr>
+<tr>
+<td>Outage detection</td>
+<td>Meter events + topology + SCADA</td>
+<td>Needs accurate GIS mapping</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>TSDB + lakehouse</td>
+<td>Two copies</td>
+</tr>
+<tr>
+<td>Theft detection</td>
+<td>Models + inspections</td>
+<td>Inspection capacity limits</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-interview-qa">12. Interview Q&amp;A<a class="headerlink" href="#12-interview-qa" title="Permanent link">&para;</a></h2>
+<h3 id="beginner-b1">Beginner <span class="band b1">B1</span><a class="headerlink" href="#beginner-b1" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q1 [B1] ⭐ What are the HES and the MDM in a smart metering system?</summary>
+<p><strong>30-second answer:</strong> The Head-End System talks to meters over the network (DLMS), schedules reads, sends commands and receives events; the Meter Data Management system validates, estimates and stores the data, maintains meter-consumer-network relationships, and feeds billing, prepaid and analytics.</p>
+<p><strong>Deep answer:</strong> §1.2, §5.1, §5.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> A clear split enables vendor swaps.</p>
+<p><strong>Follow-ups:</strong>
+1. Who owns data truth? → MDM.
+2. Why Kafka between? → Decoupling.</p>
+<p><strong>Red flags:</strong> Billing directly from raw HES reads.</p>
+</details>
+<details class="question">
+<summary>Q2 [B1] How does a prepaid smart meter reconnect after a recharge?</summary>
+<p><strong>30-second answer:</strong> The payment credits the balance idempotently, the prepaid engine sees the balance above the threshold and issues a reconnect command, the command manager checks policy and sends a DLMS action via the HES, the meter's relay closes and confirms, and the consumer is notified.</p>
+<p><strong>Deep answer:</strong> §4.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Communication dependence.</p>
+<p><strong>Follow-ups:</strong>
+1. Meter unreachable? → Retries, field visit.
+2. Double recharge? → Idempotency.</p>
+<p><strong>Red flags:</strong> Reconnect only at the next daily batch.</p>
+</details>
+<details class="question">
+<summary>Q3 [B1] Why validate meter data before billing?</summary>
+<p><strong>30-second answer:</strong> Reads can be missing, duplicated, have wrong timestamps, spikes or register resets from meter swaps; billing on bad data creates disputes, so VEE checks, estimates gaps with flags, and audits edits.</p>
+<p><strong>Deep answer:</strong> §6.1, §6.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Estimates vs delays.</p>
+<p><strong>Follow-ups:</strong>
+1. True-up? → Replace with actuals.
+2. Audit? → Version and method.</p>
+<p><strong>Red flags:</strong> Silent corrections.</p>
+</details>
+<details class="question">
+<summary>Q4 [B1] How much data do 25 million smart meters generate?</summary>
+<p><strong>30-second answer:</strong> 96 intervals a day × a few channels × 25M ≈ 10 billion values a day, around 100k+ values per second on average with big batch peaks — tens of TB a year before compression, so time-series compression and partitioned storage matter.</p>
+<p><strong>Deep answer:</strong> §1.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Interval length vs volume.</p>
+<p><strong>Follow-ups:</strong>
+1. Retention? → Years.
+2. Compression? → Delta encoding.</p>
+<p><strong>Red flags:</strong> One row per reading in an OLTP DB forever.</p>
+</details>
+<h3 id="intermediate-b2">Intermediate <span class="band b2">B2</span><a class="headerlink" href="#intermediate-b2" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q5 [B2] ⭐ How do you detect outages from smart meters without creating a million tickets?</summary>
+<p><strong>30-second answer:</strong> Ingest last-gasp events into Kafka, group them by time window and network topology from GIS, infer DT- or feeder-level outages when a threshold fraction of child meters fails, confirm with pings and SCADA, create one outage ticket, and close it on restore events, detecting nested outages.</p>
+<p><strong>Deep answer:</strong> §4.4, §6.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Topology accuracy.</p>
+<p><strong>Follow-ups:</strong>
+1. Missing events? → Pings.
+2. Momentary? → MAIFI.</p>
+<p><strong>Red flags:</strong> One ticket per meter event.</p>
+</details>
+<details class="question">
+<summary>Q6 [B2] How would you estimate missing interval data?</summary>
+<p><strong>30-second answer:</strong> Short gaps: interpolate or distribute the known register delta across missing intervals using a typical shape; long gaps: scale historical same-weekday profiles or peer templates; always flag estimates with method and version and replace with actuals when they arrive.</p>
+<p><strong>Deep answer:</strong> §6.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Accuracy vs timeliness.</p>
+<p><strong>Follow-ups:</strong>
+1. Power failure intervals? → Zero is valid.
+2. Billing impact? → True-up.</p>
+<p><strong>Red flags:</strong> Filling zeros.</p>
+</details>
+<details class="question">
+<summary>Q7 [B2] How do you rate slab tariffs daily for prepaid consumers?</summary>
+<p><strong>30-second answer:</strong> Track month-to-date units, and charge each day's units at the slab rates they fall into incrementally, plus TOD adjustments and pro-rated fixed charges, so the month's deductions equal the postpaid calculation.</p>
+<p><strong>Deep answer:</strong> §6.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Complexity vs fairness.</p>
+<p><strong>Follow-ups:</strong>
+1. Tariff change mid-month? → Effective dates.
+2. Subsidies? → Free units first.</p>
+<p><strong>Red flags:</strong> Charging every day at the lowest slab.</p>
+</details>
+<details class="question">
+<summary>Q8 [B2] How do you schedule reads over a constrained RF mesh?</summary>
+<p><strong>30-second answer:</strong> Model throughput per DCU or cell, prioritise commands over reads, batch load profile reads, spread push schedules with jitter, retry with backoff, and read poor-link meters less often in bigger batches.</p>
+<p><strong>Deep answer:</strong> §6.8.</p>
+<p><strong>Trade-offs I'd call out:</strong> Freshness vs capacity.</p>
+<p><strong>Follow-ups:</strong>
+1. Storms? → Commands first.
+2. Firmware? → Off-peak.</p>
+<p><strong>Red flags:</strong> Polling all meters every minute.</p>
+</details>
+<details class="question">
+<summary>Q9 [B2] What makes remote disconnect safe at scale?</summary>
+<p><strong>30-second answer:</strong> Policy checks per command (balance, time windows, exemptions), idempotent command IDs, rate limits per area and globally with a circuit breaker, two-person approval for bulk actions, verification of the resulting relay state, and a full audit trail.</p>
+<p><strong>Deep answer:</strong> §5.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Slower enforcement.</p>
+<p><strong>Follow-ups:</strong>
+1. Bug disconnects many? → Breaker.
+2. HES down? → Fail safe.</p>
+<p><strong>Red flags:</strong> A batch job that disconnects everyone below zero instantly.</p>
+</details>
+<h3 id="senior-b3">Senior <span class="band b3">B3</span><a class="headerlink" href="#senior-b3" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q10 [B3] ⭐ How would you find electricity theft using smart meter data?</summary>
+<p><strong>30-second answer:</strong> Compute daily DT energy balances (DT meter minus consumers minus estimated technical loss) to find high-loss areas, then score consumers under them using tamper events, consumption trend breaks, peer comparison and profile anomalies with rules plus unsupervised and supervised models, and prioritise inspections, feeding results back.</p>
+<p><strong>Deep answer:</strong> §4.5, §6.6, §6.7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Inspection capacity; mapping errors.</p>
+<p><strong>Follow-ups:</strong>
+1. Mis-mapping? → Voltage correlation.
+2. Label scarcity? → Inspections.</p>
+<p><strong>Red flags:</strong> Flagging every low-usage consumer.</p>
+</details>
+<details class="question">
+<summary>Q11 [B3] How would you roll out firmware to 2 million meters safely?</summary>
+<p><strong>30-second answer:</strong> Lab test, a pilot, then staged waves with health gates against a control group (reconnects, read success, errors, clock accuracy), automatic pauses, diverse early waves, multicast image transfer off-peak with resume, signed images, and dual-bank rollback.</p>
+<p><strong>Deep answer:</strong> §4.6, §6.9.</p>
+<p><strong>Trade-offs I'd call out:</strong> Speed vs risk.</p>
+<p><strong>Follow-ups:</strong>
+1. Bandwidth? → Multicast.
+2. Bricked meters? → Rollback, field.</p>
+<p><strong>Red flags:</strong> Push to all at once.</p>
+</details>
+<details class="question">
+<summary>Q12 [B3] How do you store and query years of interval data?</summary>
+<p><strong>30-second answer:</strong> Recent data in a time-series DB keyed by meter and channel for per-meter queries; all history in a lakehouse partitioned by date and region for analytics; version values for corrections; compress with time-series encodings.</p>
+<p><strong>Deep answer:</strong> §5.3, §7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Two copies.</p>
+<p><strong>Follow-ups:</strong>
+1. Late corrections? → Versions.
+2. Disputes? → Per-meter queries.</p>
+<p><strong>Red flags:</strong> Everything in one relational table.</p>
+</details>
+<details class="question">
+<summary>Q13 [B3] How do you detect consumers mapped to the wrong transformer?</summary>
+<p><strong>30-second answer:</strong> Meters on the same transformer see correlated voltage fluctuations; compute correlations between each meter's voltage profile and its DT's (or neighbours') and flag meters that correlate better with another DT, then verify in the field and fix GIS.</p>
+<p><strong>Deep answer:</strong> §6.7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Needs voltage profiles.</p>
+<p><strong>Follow-ups:</strong>
+1. Impact? → Energy accounting.
+2. Phase identification? → Similar method.</p>
+<p><strong>Red flags:</strong> Trusting GIS blindly.</p>
+</details>
+<details class="question">
+<summary>Q14 [B3] How do you handle a storm with millions of events?</summary>
+<p><strong>30-second answer:</strong> Kafka absorbs bursts, OMS correlation scales by region with topology-based grouping, commands get priority over reads, dashboards focus on feeder-level outages, pings confirm status, and consumer notifications are batched per outage.</p>
+<p><strong>Deep answer:</strong> §4.4, §10.</p>
+<p><strong>Trade-offs I'd call out:</strong> Latency of inference.</p>
+<p><strong>Follow-ups:</strong>
+1. Duplicate events? → Idempotency.
+2. Prepaid disconnects? → Pause during storms.</p>
+<p><strong>Red flags:</strong> Synchronous processing of each event into the OMS DB.</p>
+</details>
+<h3 id="architect-b4">Architect <span class="band b4">B4</span><a class="headerlink" href="#architect-b4" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q15 [B4] ⭐ Design an AMI platform for 25 million prepaid meters.</summary>
+<p><strong>30-second answer:</strong> Mixed RF mesh and cellular network, HES with DLMS, HSM keys, scheduler and command manager; Kafka as the backbone; MDM with VEE, TSDB and lakehouse; a prepaid engine with ledger, policy-driven disconnects and fast reconnects; OMS with topology correlation; device management and FOTA; analytics for losses, theft and forecasting — with safety guardrails on commands.</p>
+<p><strong>Deep answer:</strong> §3–§7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Central prepaid vs meter-side.</p>
+<p><strong>Follow-ups:</strong>
+1. Vendor lock-in? → Standards.
+2. SLAs? → Completeness.</p>
+<p><strong>Red flags:</strong> No command safety.</p>
+</details>
+<details class="question">
+<summary>Q16 [B4] What are the cybersecurity risks of smart metering and your mitigations?</summary>
+<p><strong>30-second answer:</strong> Mass disconnect via a compromised HES, malicious firmware, key theft, spoofed data and privacy leaks; mitigate with segmentation, HSM per-meter keys, signed commands and firmware, rate limits and breakers, bulk approvals, OT security monitoring, and privacy controls on interval data.</p>
+<p><strong>Deep answer:</strong> §9.</p>
+<p><strong>Trade-offs I'd call out:</strong> Operational friction.</p>
+<p><strong>Follow-ups:</strong>
+1. Insider? → Two-person rule.
+2. Supply chain? → Firmware signing.</p>
+<p><strong>Red flags:</strong> Shared keys across meters.</p>
+</details>
+<details class="question">
+<summary>Q17 [B4] How would you build energy accounting for a DISCOM?</summary>
+<p><strong>30-second answer:</strong> Accurate topology (consumer–DT–feeder with effective dates), complete validated consumption, DT and feeder meters, daily balances with technical loss estimates, data quality checks (mapping via voltage correlation), and dashboards and work orders for high-loss areas.</p>
+<p><strong>Deep answer:</strong> §6.7, §7.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Data quality dependence.</p>
+<p><strong>Follow-ups:</strong>
+1. Technical loss? → Load flow.
+2. Regulators? → Reports.</p>
+<p><strong>Red flags:</strong> Monthly spreadsheets.</p>
+</details>
+<details class="question">
+<summary>Q18 [B4] How is IoT telemetry for meters different from generic IoT telemetry?</summary>
+<p><strong>30-second answer:</strong> Billing-grade correctness and audit, regulated commands with physical consequences (disconnect), constrained networks, multi-vendor standardised protocols, long device lifetimes (10+ years), and topology-aware analytics; generic IoT often favours best-effort metrics and MQTT.</p>
+<p><strong>Deep answer:</strong> Throughout.</p>
+<p><strong>Trade-offs I'd call out:</strong> Rigor vs agility.</p>
+<p><strong>Follow-ups:</strong>
+1. MQTT use? → Push ingest.
+2. Digital twins? → Network model.</p>
+<p><strong>Red flags:</strong> Treating meter data like app metrics.</p>
+</details>
+<details class="question">
+<summary>Q19 [B4] How would you forecast load and use it?</summary>
+<p><strong>30-second answer:</strong> Short-term forecasts per feeder and system from history, weather and calendar using gradient boosting or sequence models; use them for day-ahead power purchase, DT overload alerts, demand response baselines and planning for EVs and rooftop solar.</p>
+<p><strong>Deep answer:</strong> §6.10.</p>
+<p><strong>Trade-offs I'd call out:</strong> Weather forecast error.</p>
+<p><strong>Follow-ups:</strong>
+1. Solar? → Net load.
+2. Festivals? → Calendar features.</p>
+<p><strong>Red flags:</strong> Last year's same day only.</p>
+</details>
+<details class="question">
+<summary>Q20 [B4] What happens to prepaid when the communication network fails?</summary>
+<p><strong>30-second answer:</strong> Keep accepting recharges and crediting balances; pause disconnects (fail safe towards supply); queue reconnects with priority; estimate consumption from history and true up later; monitor communication health and dispatch field crews for persistent failures.</p>
+<p><strong>Deep answer:</strong> §10, §5.4.</p>
+<p><strong>Trade-offs I'd call out:</strong> Revenue leakage vs consumer harm.</p>
+<p><strong>Follow-ups:</strong>
+1. Meter-side balance? → Alternative design.
+2. SLA? → AMISP.</p>
+<p><strong>Red flags:</strong> Disconnecting meters you can't reconnect.</p>
+</details>
+<hr />
+<h2 id="13-summary">13. Summary<a class="headerlink" href="#13-summary" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Smart metering</strong> replaces manual reads with 15-minute interval data, events and remote commands. It is the backbone for accurate billing, prepaid collections, outage detection and loss reduction.</li>
+<li><strong>The HES</strong> handles communication (DLMS, scheduling, keys, commands). <strong>The MDM</strong> owns data truth (VEE, estimation, topology, aggregation). Kafka connects them to prepaid, the OMS and analytics.</li>
+<li><strong>Prepaid</strong> is a central ledger with slab and TOD rating. Disconnects are policy-driven and rate-limited, and reconnects must be fast.</li>
+<li><strong>Analytics</strong> turns data into action: energy accounting per DT, theft scoring, outage inference from topology, and forecasting.</li>
+<li><strong>Safety and security</strong> matter more than usual because commands switch real power. Use circuit breakers, approvals, signed firmware and HSM keys.</li>
+</ol>
+<h3 id="related-chapters">Related chapters<a class="headerlink" href="#related-chapters" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="../i11-telecom-billing-and-charging/">I11 — Telecom Billing</a></li>
+<li><a href="../i12-logistics-and-supply-chain/">I12 — Logistics</a></li>
+<li><a href="../../05-case-studies/51-real-time-analytics-and-top-k/">Ch 51 — Real-time Analytics</a></li>
+<li><a href="../../05-case-studies/50-distributed-job-scheduler/">Ch 50 — Job Scheduler</a></li>
+<li><a href="../i14-national-digital-id-and-vaccination-registration/">I14 — National Digital ID</a></li>
+<li>Next in this tab: <a href="../i17-hotel-and-homestay-booking/">I17 — Hotel &amp; Homestay Booking</a>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../i15-multiplayer-gaming-and-leaderboards/" class="md-footer__link md-footer__link--prev" aria-label="Previous: I15. Multiplayer Gaming &amp; Leaderboards">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                I15. Multiplayer Gaming & Leaderboards
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../i17-hotel-and-homestay-booking/" class="md-footer__link md-footer__link--next" aria-label="Next: I17. Hotel &amp; Homestay Booking">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                I17. Hotel & Homestay Booking
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

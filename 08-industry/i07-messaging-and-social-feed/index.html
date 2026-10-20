@@ -1,0 +1,6161 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Beginner to Architect — Java/Spring system design with production code, design documents and interview mastery">
+      
+      
+        <meta name="author" content="Ashish">
+      
+      
+      
+        <link rel="prev" href="../i06-video-streaming-and-live-cricket/">
+      
+      
+        <link rel="next" href="../i08-stockbroking-platform/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>I07. Messaging & Social Feed - System Design Enterprise Handbook</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#i07-messaging-social-feed" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-header__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            System Design Enterprise Handbook
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              I07. Messaging & Social Feed
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Orientation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Foundations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../02-distributed-core/10-replication/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Distributed Core
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../03-production/21-data-at-scale/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Production
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../04-architect/31-architecture-decision-making/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architect
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Case Studies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Capstone
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Interview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Industry Designs
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../99-appendix/qa-index/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Appendix
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-nav__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    System Design Enterprise Handbook
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Orientation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Orientation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    00. How to Use This Handbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/01-what-system-design-is/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    01. What System Design Is
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    02. Back-of-the-Envelope Estimation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/03-networking-essentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    03. Networking Essentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/04-api-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    04. API Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/05-relational-databases-deep-dive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    05. Relational Databases Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/06-nosql-and-polyglot-persistence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    06. NoSQL & Polyglot Persistence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/07-caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    07. Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/08-load-balancing-proxies-and-gateways/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    08. Load Balancing, Proxies & Gateways
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/09-scalability-fundamentals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    09. Scalability Fundamentals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distributed Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/10-replication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    10. Replication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/11-partitioning-and-sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    11. Partitioning & Sharding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/12-consistency-time-and-consensus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    12. Consistency, Time & Consensus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/13-distributed-transactions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    13. Distributed Transactions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/14-messaging-and-event-streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    14. Messaging & Event Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/15-event-driven-architecture-cqrs-and-event-sourcing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    15. Event-Driven Architecture, CQRS & Event Sourcing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/16-microservices-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    16. Microservices Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/17-inter-service-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    17. Inter-Service Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/18-resilience-patterns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    18. Resilience Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/19-concurrency-at-scale-in-java/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    19. Concurrency at Scale in Java
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/20-idempotency-ids-and-distributed-locks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    20. Idempotency, IDs & Distributed Locks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Production
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/21-data-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    21. Data at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/22-search-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    22. Search Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/23-security-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    23. Security Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/24-observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    24. Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/25-performance-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    25. Performance Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/26-deployment-and-infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    26. Deployment & Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/27-reliability-and-disaster-recovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    27. Reliability & Disaster Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/28-schema-and-data-evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    28. Schema & Data Evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/29-testing-distributed-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    29. Testing Distributed Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/30-multi-tenancy-and-saas-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    30. Multi-Tenancy & SaaS Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architect
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architect
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/31-architecture-decision-making/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    31. Architecture Decision Making
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/32-design-documents-and-architecture-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    32. Design Documents & Architecture Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/33-domain-driven-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    33. Domain-Driven Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/34-modern-architecture-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    34. Modern Architecture Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/35-cost-engineering-and-finops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    35. Cost Engineering & FinOps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/36-compliance-governance-and-data-residency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    36. Compliance, Governance & Data Residency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/37-leading-architecture-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    37. Leading Architecture at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Case Studies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Case Studies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    38. URL Shortener & SMS Short Links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/39-distributed-rate-limiter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    39. Distributed Rate Limiter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/40-notification-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    40. Notification System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/41-chat-customer-rider-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    41. Chat — Customer–Rider Messaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/42-search-autocomplete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    42. Search Autocomplete (Typeahead)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/43-home-feed-and-recommendations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    43. Home Feed & Recommendations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/44-distributed-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    44. Distributed Cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/45-payment-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    45. Payment System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/46-grocery-checkout-and-inventory-reservation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    46. Grocery Checkout & Inventory Reservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    47. Delivery Dispatch & Live Tracking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/48-delivery-slot-booking-and-capacity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    48. Delivery Slot Booking & Capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/49-pricing-promotions-and-coupons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    49. Pricing, Promotions & Coupons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/50-distributed-job-scheduler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    50. Distributed Job Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/51-real-time-analytics-and-top-k/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    51. Real-time Analytics & Top-K
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/52-object-storage-and-media-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    52. Object Storage & Media Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/53-web-crawler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    53. Web Crawler (Price Monitoring)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/54-distributed-key-value-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    54. Distributed Key-Value Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/55-order-matching-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    55. Order Matching Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capstone
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Capstone
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    56. The Grocery Marketplace, End to End
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interview
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interview
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    57. The System Design Interview Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/58-level-expectations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    58. Level Expectations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/59-interview-qa-bank/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    59. Interview Q&A Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/60-mock-interviews/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    60. Mock Interviews
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/61-behavioral-and-leadership/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    61. Behavioural & Leadership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/qa-bank-starred/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ⭐ Drill Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Industry Designs
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Industry Designs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01-amazon-style-global-marketplace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01. Amazon-Style Global Marketplace
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01b-amazon-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01b. Amazon — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02-flipkart-style-sale-day-ecommerce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02. Flipkart-Style Sale-Day E-Commerce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02b-flipkart-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02b. Flipkart — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i03-core-banking-and-upi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I03. Core Banking & UPI Payments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i04-hospital-ehr-and-telemedicine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I04. Hospital EHR & Telemedicine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i05-ride-hailing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I05. Ride-Hailing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i06-video-streaming-and-live-cricket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I06. Video Streaming & Live Cricket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I07. Messaging & Social Feed
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I07. Messaging & Social Feed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-two-products-different-physics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 Two products, different physics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-scale-assumptions-order-of-magnitude" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Scale (assumptions, order of magnitude)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-messenger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Messenger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-social-feed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Social feed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-the-messenger-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How the Messenger Works
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How the Messenger Works">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-registration-and-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Registration and keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-sending-the-first-message-to-someone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Sending the first message to someone
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-group-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Group messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-media" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Media
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-voice-and-video-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Voice and video calls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-status-stories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Status (stories)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#47-backups-and-new-phones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.7 Backups and new phones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#48-spam-and-abuse-without-reading-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.8 Spam and abuse without reading messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-how-the-social-feed-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. How the Social Feed Works
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. How the Social Feed Works">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-posting-a-photo-or-video" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Posting a photo or video
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-the-social-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 The social graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-building-the-home-feed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Building the home feed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-stories-and-reels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Stories and reels
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Notifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-content-moderation-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Content moderation pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-x3dh-key-agreement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 X3DH key agreement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-double-ratchet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Double Ratchet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-sender-keys-for-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Sender keys for groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-feed-fan-out-push-vs-pull" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Feed fan-out: push vs pull
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-graph-caching-and-consistency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Graph caching and consistency
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-ranking-funnel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Ranking funnel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-id-generation-and-sharding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 ID generation and sharding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-perceptual-hashing-and-near-duplicate-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Perceptual hashing and near-duplicate detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-spam-and-fake-account-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 Spam and fake-account detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#610-delivery-reliability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.10 Delivery reliability
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-messenger-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Messenger stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-social-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Social stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-logging-lakehouse-and-ml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Logging, lakehouse and ML
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-privacy-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Privacy &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i08-stockbroking-platform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I08. Stockbroking Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i09-insurance-policy-and-claims/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I09. Insurance Policy & Claims
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i10-travel-and-railway-ticketing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I10. Travel & Railway Ticketing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i11-telecom-billing-and-charging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I11. Telecom Billing & Charging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i12-logistics-and-supply-chain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I12. Logistics & Supply Chain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i13-online-exams-and-live-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I13. Online Exams & Live Classes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i14-national-digital-id-and-vaccination-registration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I14. National Digital ID & Vaccination Registration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i15-multiplayer-gaming-and-leaderboards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I15. Multiplayer Gaming & Leaderboards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i16-smart-metering-and-iot-telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I16. Smart Metering & IoT Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i17-hotel-and-homestay-booking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I17. Hotel & Homestay Booking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i18-food-delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I18. Food Delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Appendix
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Appendix
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/qa-index/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full Question Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/lab-catalogue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab Catalogue
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-system-in-one-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The System in One Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. The System in One Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-two-products-different-physics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 Two products, different physics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-scale-assumptions-order-of-magnitude" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Scale (assumptions, order of magnitude)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-messenger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Messenger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-social-feed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Social feed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-non-functional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Non-functional
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-Level Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-the-messenger-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How the Messenger Works
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How the Messenger Works">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-registration-and-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Registration and keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-sending-the-first-message-to-someone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Sending the first message to someone
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-group-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Group messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-media" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Media
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-voice-and-video-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Voice and video calls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-status-stories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Status (stories)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#47-backups-and-new-phones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.7 Backups and new phones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#48-spam-and-abuse-without-reading-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.8 Spam and abuse without reading messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-how-the-social-feed-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. How the Social Feed Works
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. How the Social Feed Works">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-posting-a-photo-or-video" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Posting a photo or video
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-the-social-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 The social graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-building-the-home-feed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Building the home feed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-stories-and-reels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Stories and reels
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Notifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-content-moderation-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Content moderation pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-x3dh-key-agreement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 X3DH key agreement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-double-ratchet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Double Ratchet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-sender-keys-for-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Sender keys for groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-feed-fan-out-push-vs-pull" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Feed fan-out: push vs pull
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-graph-caching-and-consistency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Graph caching and consistency
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-ranking-funnel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Ranking funnel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-id-generation-and-sharding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 ID generation and sharding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-perceptual-hashing-and-near-duplicate-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Perceptual hashing and near-duplicate detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-spam-and-fake-account-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.9 Spam and fake-account detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#610-delivery-reliability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.10 Delivery reliability
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-data-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Data Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Data Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-messenger-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Messenger stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-social-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Social stores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-logging-lakehouse-and-ml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Logging, lakehouse and ML
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-tech-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Tech Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-security-privacy-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Security, Privacy &amp; Compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-reliability-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Reliability &amp; Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-key-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Key Trade-offs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-interview-qa" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Interview Q&amp;A
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Interview Q&amp;A">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#beginner-b1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beginner B1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intermediate-b2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intermediate B2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#senior-b3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Senior B3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architect-b4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architect B4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#related-chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="i07-messaging-social-feed">I07. Messaging &amp; Social Feed<a class="headerlink" href="#i07-messaging-social-feed" title="Permanent link">&para;</a></h1>
+<div class="admonition abstract">
+<p class="admonition-title">Chapter at a glance</p>
+<p><strong>Sector:</strong> Social and communication · <strong>Format:</strong> system design walkthrough (no code) · <strong>Reader bands:</strong> B1 → B4 · <strong>Builds on:</strong> <a href="../../05-case-studies/41-chat-customer-rider-messaging/">Ch 41</a> (chat basics), <a href="../../05-case-studies/43-home-feed-and-recommendations/">Ch 43</a> (feed ranking), <a href="../../05-case-studies/52-object-storage-and-media-pipeline/">Ch 52</a> (media), <a href="../../03-production/23-security-architecture/">Ch 23</a></p>
+<p><strong>What you get:</strong> two connected products at billion-user scale.</p>
+<p><strong>A WhatsApp-style messenger:</strong></p>
+<ul>
+<li>end-to-end encryption (the Signal Protocol's key agreement and ratchets), multi-device and groups;</li>
+<li>delivery and read receipts, the offline queue, media, voice and video calls;</li>
+<li>status updates, business messaging, encrypted backups;</li>
+<li>spam and abuse control when the server can't read messages.</li>
+</ul>
+<p><strong>An Instagram-style social app:</strong></p>
+<ul>
+<li>posting photos and videos, the social graph;</li>
+<li>feed, stories and short-video ranking, notifications, search, ads;</li>
+<li>content moderation.</li>
+</ul>
+<p><strong>Plus:</strong></p>
+<ul>
+<li>the algorithms: key agreement, ratchets, sender keys, fan-out strategies, graph caching, ranking funnels, perceptual hashing, spam classifiers;</li>
+<li>the data platform, and a tech stack separating what Meta, WhatsApp and Instagram have published from a reference choice.</li>
+</ul>
+<p><strong>Reading time:</strong> 90 min.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Sources and honesty</p>
+<ul>
+<li>The <strong>Signal Protocol</strong> is publicly specified (X3DH, Double Ratchet, Sesame). WhatsApp's security whitepaper describes its use of it (VERIFY the current version).</li>
+<li>Meta has published papers and posts on <strong>TAO</strong> (social graph, 2013), <strong>Memcache at Facebook</strong> (2013), <strong>RocksDB</strong>, <strong>ZippyDB</strong>, <strong>Scuba</strong>, <strong>Presto</strong> and <strong>Hive</strong>.</li>
+<li>Instagram has described <strong>PostgreSQL sharding and ID generation</strong>, <strong>Cassandra</strong> and its Django/Python stack.</li>
+<li>WhatsApp's early use of <strong>Erlang</strong> and FreeBSD has been widely reported.</li>
+</ul>
+<p>All these are marked <strong>VERIFY</strong>. Everything else is a <strong>reference design</strong>. Indian intermediary rules (IT Rules 2021, including provisions on identifying the "first originator") are contested and marked <strong>VERIFY</strong>.</p>
+</div>
+<hr />
+<h2 id="1-the-system-in-one-page">1. The System in One Page<a class="headerlink" href="#1-the-system-in-one-page" title="Permanent link">&para;</a></h2>
+<h3 id="11-two-products-different-physics">1.1 Two products, different physics<a class="headerlink" href="#11-two-products-different-physics" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Messenger</th>
+<th>Social feed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Core promise</strong></td>
+<td>My message reaches exactly the people I chose, privately, instantly</td>
+<td>I see the most interesting posts from people and topics I care about</td>
+</tr>
+<tr>
+<td><strong>Data visibility to the server</strong></td>
+<td>Ciphertext only (end-to-end encryption)</td>
+<td>Plaintext; the server ranks, moderates and serves</td>
+</tr>
+<tr>
+<td><strong>Hardest problem</strong></td>
+<td>Reliable delivery to offline, multi-device users; encryption keys</td>
+<td>Ranking billions of candidates; media at scale; moderation</td>
+</tr>
+<tr>
+<td><strong>Consistency</strong></td>
+<td>Per-conversation ordering; exactly-once display</td>
+<td>Eventual; freshness in seconds is fine</td>
+</tr>
+<tr>
+<td><strong>Traffic</strong></td>
+<td>Enormous message rates, small payloads; media heavy</td>
+<td>Read-heavy; media-dominated egress</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12-scale-assumptions-order-of-magnitude">1.2 Scale (assumptions, order of magnitude)<a class="headerlink" href="#12-scale-assumptions-order-of-magnitude" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Messenger monthly users</td>
+<td>2B+ (WhatsApp has reported &gt;2B; VERIFY)</td>
+</tr>
+<tr>
+<td>Messages per day</td>
+<td>~100B (reported by WhatsApp in 2020; VERIFY)</td>
+</tr>
+<tr>
+<td>Peak message rate</td>
+<td>~2–3M messages/s (estimate from daily volume with a 2× peak)</td>
+</tr>
+<tr>
+<td>Concurrent connections</td>
+<td>Hundreds of millions of persistent connections</td>
+</tr>
+<tr>
+<td>Social app daily users</td>
+<td>500M+</td>
+</tr>
+<tr>
+<td>Posts/stories/reels created per day</td>
+<td>Hundreds of millions</td>
+</tr>
+<tr>
+<td>Feed and stories requests</td>
+<td>Tens of billions per day</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Estimation highlights:</strong></p>
+<ul>
+<li><strong>Connections:</strong> 500M concurrent connections at ~1–2M per server (achievable with an Erlang/epoll-style design; VERIFY published numbers) means <strong>hundreds of connection servers</strong>, which are a large, simple, horizontally scaled tier.</li>
+<li><strong>Messages:</strong> most are small (text, ~100 bytes of ciphertext plus headers). Media is uploaded once to blob storage, and only an encrypted reference is sent.</li>
+<li><strong>Feed:</strong> each feed request ranks ~1,000 candidates with a model. At billions of requests per day, ranking compute dominates the social app's cost.</li>
+</ul>
+<hr />
+<h2 id="2-requirements">2. Requirements<a class="headerlink" href="#2-requirements" title="Permanent link">&para;</a></h2>
+<h3 id="21-messenger">2.1 Messenger<a class="headerlink" href="#21-messenger" title="Permanent link">&para;</a></h3>
+<ol>
+<li>One-to-one and group chats (up to ~1,000 members; VERIFY current limits), with text, media, documents, voice notes, location, replies and reactions.</li>
+<li><strong>End-to-end encryption</strong> by default: only participants' devices can read content.</li>
+<li><strong>Multi-device:</strong> a phone plus up to several linked devices (web, desktop), each with its own keys.</li>
+<li>Delivery states: sent (server received), delivered (recipient device received), read (opened), per recipient in groups.</li>
+<li>Offline delivery: messages wait on the server (encrypted) until the device connects, with a retention limit.</li>
+<li>Voice and video calls, one-to-one and group.</li>
+<li>Status (24-hour stories), communities, channels (one-to-many broadcast), business accounts and APIs.</li>
+<li>Encrypted backups; account moves to a new phone.</li>
+<li>Abuse controls: block, report, forwarding limits, spam detection.</li>
+</ol>
+<h3 id="22-social-feed">2.2 Social feed<a class="headerlink" href="#22-social-feed" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Post photos, carousels and videos with captions, tags and location; edit and delete.</li>
+<li>Follow and unfollow; private accounts with approval.</li>
+<li>Home feed, stories tray, short-video (reels) feed, explore/discovery.</li>
+<li>Likes, comments, shares, saves; notifications.</li>
+<li>Search for users, hashtags, places, audio.</li>
+<li>Ads in feed, stories and reels.</li>
+<li>Moderation: prohibited content removed quickly; appeals; legal takedowns.</li>
+</ol>
+<h3 id="23-non-functional">2.3 Non-functional<a class="headerlink" href="#23-non-functional" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Message latency</strong></td>
+<td>p50 &lt; 200 ms sender-to-recipient when both are online in the same region</td>
+</tr>
+<tr>
+<td><strong>Durability</strong></td>
+<td>A message the server has acknowledged is never lost before delivery (within retention)</td>
+</tr>
+<tr>
+<td><strong>Ordering</strong></td>
+<td>Per-conversation order preserved per sender; the UI orders consistently</td>
+</tr>
+<tr>
+<td><strong>Privacy</strong></td>
+<td>E2EE content; minimised metadata; no content scanning on the server for E2EE chats</td>
+</tr>
+<tr>
+<td><strong>Feed latency</strong></td>
+<td>Feed first page p95 &lt; 500 ms; media starts loading immediately</td>
+</tr>
+<tr>
+<td><strong>Freshness</strong></td>
+<td>New post visible to followers within seconds to a minute</td>
+</tr>
+<tr>
+<td><strong>Availability</strong></td>
+<td>≥ 99.99% for messaging; graceful degradation for feed ranking</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-high-level-architecture">3. High-Level Architecture<a class="headerlink" href="#3-high-level-architecture" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart TB
+    subgraph Clients
+        PH[Phone apps]
+        LD[Linked devices - web, desktop]
+    end
+    subgraph Messaging
+        CS[Connection servers - persistent sockets]
+        RT[Message routing and offline queue]
+        KEYS[Key directory - identity and prekeys]
+        GRP[Group membership service]
+        MED[Encrypted media blobs]
+        CALL[Call signalling, TURN and SFU]
+        PUSH[Push notification gateway]
+        SPAM[Spam and abuse - metadata and reports]
+    end
+    subgraph Social
+        API[Social API and edge]
+        GRAPH[Social graph - objects and associations]
+        POST[Post and media processing]
+        FEED[Feed - candidates, ranking]
+        STORY[Stories and reels]
+        NOTIF[Notifications]
+        SRCH[Search]
+        ADS[Ads]
+        MOD[Content moderation]
+    end
+    subgraph Data
+        LOG[Event logging]
+        LAKE[Warehouse and lakehouse]
+        ML[ML training and serving]
+    end
+    PH --&gt; CS
+    LD --&gt; CS
+    CS --&gt; RT
+    RT --&gt; PUSH
+    PH --&gt; KEYS
+    RT --&gt; GRP
+    PH --&gt; MED
+    PH --&gt; CALL
+    RT --&gt; SPAM
+    PH --&gt; API
+    API --&gt; GRAPH
+    API --&gt; POST
+    API --&gt; FEED
+    FEED --&gt; GRAPH
+    FEED --&gt; ML
+    POST --&gt; MOD
+    Social --&gt; LOG --&gt; LAKE --&gt; ML</code></pre>
+<hr />
+<h2 id="4-how-the-messenger-works">4. How the Messenger Works<a class="headerlink" href="#4-how-the-messenger-works" title="Permanent link">&para;</a></h2>
+<h3 id="41-registration-and-keys">4.1 Registration and keys<a class="headerlink" href="#41-registration-and-keys" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Phone verification:</strong> the user registers with a phone number, verified by an SMS or voice OTP.</li>
+<li><strong>Key generation:</strong> the device generates, on the device:<ul>
+<li>a long-term <strong>identity key pair</strong>;</li>
+<li>a <strong>signed prekey</strong> (medium-term);</li>
+<li>a batch of <strong>one-time prekeys</strong>.</li>
+</ul>
+</li>
+<li><strong>Publishing:</strong> the <strong>public</strong> halves go to the <strong>key directory</strong> on the server. Private keys never leave the device.</li>
+<li><strong>Linked devices</strong> (web, desktop) generate their own keys and are linked by scanning a QR code. The phone vouches for them, and contacts' devices learn the new device list (VERIFY WhatsApp's multi-device design in its whitepaper).</li>
+</ol>
+<h3 id="42-sending-the-first-message-to-someone">4.2 Sending the first message to someone<a class="headerlink" href="#42-sending-the-first-message-to-someone" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Fetch keys:</strong> Alice's device fetches Bob's <strong>prekey bundle</strong>, covering each of Bob's devices: identity key, signed prekey, one one-time prekey. The server deletes one-time prekeys as they are handed out.</li>
+<li>
+<p><strong>Key agreement (X3DH):</strong> Alice's device computes a shared secret from:</p>
+<ul>
+<li>her identity key;</li>
+<li>a fresh ephemeral key;</li>
+<li>Bob's identity key, signed prekey and one-time prekey.</li>
+</ul>
+<p>Bob can compute the same secret later, even though he was offline (§6.1).
+3. <strong>Session:</strong> a <strong>Double Ratchet</strong> session is initialised per (Alice device, Bob device) pair. Each message gets a fresh message key (§6.2).
+4. <strong>Encrypt:</strong> Alice's device encrypts the message <strong>once per recipient device</strong>, including Alice's own other devices so her laptop shows what her phone sent. It sends the set of ciphertexts to the server over her persistent connection.
+5. <strong>Server:</strong> the server checks the sender is allowed to message the recipient (not blocked, not rate-limited), then stores each ciphertext in the recipient device's <strong>queue</strong> and returns <strong>sent</strong> (one tick).
+6. <strong>Delivery:</strong>
+- <strong>if Bob's device is connected:</strong> the connection server forwards immediately. The device decrypts it, stores it locally and acknowledges; the server deletes it from the queue and tells Alice <strong>delivered</strong> (two ticks);
+- <strong>if not:</strong> a <strong>push notification</strong> wakes the app (content-free, or with encrypted preview content decrypted on the device), which then connects and drains its queue.
+7. <strong>Read:</strong> when Bob opens the chat, his device sends a <strong>read receipt</strong>, itself an encrypted message to Alice's devices.</p>
+</li>
+</ol>
+<h3 id="43-group-messages">4.3 Group messages<a class="headerlink" href="#43-group-messages" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Naively</strong>, sending to a 500-member group means encrypting 500+ times, once per device. That is too much work for a phone.</li>
+<li><strong>Sender keys (§6.3):</strong><ul>
+<li>each member creates a <strong>sender key</strong> for the group;</li>
+<li>they distribute it to every other member's devices once, over the pairwise sessions;</li>
+<li>after that, each group message is encrypted <strong>once</strong> with the sender key, and the server <strong>fans out</strong> the single ciphertext to all member devices.</li>
+</ul>
+</li>
+<li><strong>Membership changes:</strong> when someone leaves, senders rotate their sender keys, so the removed member can't read future messages.</li>
+<li><strong>The group membership service</strong> holds member lists and admin roles. Membership changes are signed events distributed to members.</li>
+</ul>
+<h3 id="44-media">4.4 Media<a class="headerlink" href="#44-media" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Encrypt on the device:</strong> the sender encrypts the file with a random key (AES), uploads the <strong>ciphertext</strong> to blob storage over HTTPS, and receives a URL/ID.</li>
+<li><strong>Send the reference:</strong> the chat message (E2EE) carries the URL, the media key and a hash.</li>
+<li><strong>Download:</strong> recipients download the ciphertext, verify the hash and decrypt it. The server stores only encrypted blobs, which are deleted after all recipients download or after a retention period.</li>
+<li><strong>Forwarding:</strong> forwarding the same media reuses the uploaded blob where possible, with the same encrypted file and key, which saves storage and bandwidth.</li>
+</ol>
+<h3 id="45-voice-and-video-calls">4.5 Voice and video calls<a class="headerlink" href="#45-voice-and-video-calls" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Signalling:</strong> call offers go through the messaging channel, encrypted end to end, including the call's media keys.</li>
+<li><strong>Media:</strong><ul>
+<li>one-to-one calls go <strong>peer-to-peer</strong> when NATs allow (ICE with STUN), or via <strong>TURN relays</strong>;</li>
+<li>group calls use relay servers or SFUs;</li>
+<li>media is encrypted with SRTP using keys negotiated end to end.</li>
+</ul>
+</li>
+<li><strong>Adaptation:</strong> codecs adapt to network conditions, e.g. Opus for audio with bandwidth adaptation.</li>
+</ol>
+<h3 id="46-status-stories">4.6 Status (stories)<a class="headerlink" href="#46-status-stories" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A status</strong> is a message to all contacts with a 24-hour expiry. It is encrypted like a group message (sender keys per audience), with the audience limited by privacy settings.</li>
+<li><strong>Expiry</strong> is enforced by clients, and the server deletes the blobs after expiry.</li>
+</ul>
+<h3 id="47-backups-and-new-phones">4.7 Backups and new phones<a class="headerlink" href="#47-backups-and-new-phones" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Backups</strong> go to the user's cloud storage (Google Drive/iCloud).</li>
+<li><strong>End-to-end encrypted backups:</strong> the backup is encrypted with a key protected by a user password. The key is held in a <strong>hardware security module-based key vault</strong> that limits guessing attempts (WhatsApp's published design; VERIFY).</li>
+<li><strong>Moving to a new phone:</strong> a device-to-device transfer, or restore from backup. Contacts see a "security code changed" notice if identity keys change.</li>
+</ul>
+<h3 id="48-spam-and-abuse-without-reading-messages">4.8 Spam and abuse without reading messages<a class="headerlink" href="#48-spam-and-abuse-without-reading-messages" title="Permanent link">&para;</a></h3>
+<p>The server can't read E2EE content, so it uses:</p>
+<ul>
+<li><strong>metadata and behaviour:</strong> account age, sending rate, how many recipients don't have the sender in contacts, message patterns across many recipients, reports, blocks;</li>
+<li><strong>client-side signals:</strong> user reports, which include the last few messages forwarded by the reporting user;</li>
+<li><strong>product limits:</strong> <strong>forwarding limits</strong>, e.g. "forwarded many times" labels and limits on forwarding to multiple chats (VERIFY current limits);</li>
+<li><strong>enforcement:</strong> bans and rate limits.</li>
+</ul>
+<p>Classifiers run on metadata. Research on privacy-preserving techniques continues (VERIFY claims about any specific deployment).</p>
+<hr />
+<h2 id="5-how-the-social-feed-works">5. How the Social Feed Works<a class="headerlink" href="#5-how-the-social-feed-works" title="Permanent link">&para;</a></h2>
+<h3 id="51-posting-a-photo-or-video">5.1 Posting a photo or video<a class="headerlink" href="#51-posting-a-photo-or-video" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Upload:</strong> the app uploads media in resumable chunks to an upload service (<a href="../../05-case-studies/52-object-storage-and-media-pipeline/">Ch 52</a>), with client-side compression for mobile networks.</li>
+<li><strong>Processing pipeline:</strong><ul>
+<li>images: resize to several sizes and formats;</li>
+<li>video: transcode to an ABR ladder (<a href="../i06-video-streaming-and-live-cricket/">I06</a>);</li>
+<li>extract thumbnails;</li>
+<li>compute <strong>perceptual hashes</strong> (§6.8);</li>
+<li>run <strong>classifiers</strong>: nudity, violence, spam, and copyright via audio/video fingerprints;</li>
+<li>run <strong>OCR/captions</strong> for accessibility and search.</li>
+</ul>
+</li>
+<li><strong>Create the post:</strong> a post object (author, media IDs, caption, tags, location, visibility) is written to the <strong>social graph store</strong>, with associations: author → post, post → tagged users, post → hashtags.</li>
+<li><strong>Moderation outcome:</strong> high-confidence violations are blocked before publishing. Borderline content goes to limited distribution and human review.</li>
+<li><strong>Distribution:</strong> the post becomes eligible for followers' feeds (§5.3) and, if public, for discovery. Notifications go to tagged users and close friends.</li>
+</ol>
+<h3 id="52-the-social-graph">5.2 The social graph<a class="headerlink" href="#52-the-social-graph" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The model</strong> is <strong>objects</strong> (users, posts, comments, pages) and <strong>associations</strong>: typed, directed edges with timestamps (follows, likes, authored, tagged, commented).</li>
+<li><strong>Queries</strong> are overwhelmingly <strong>"get the association list"</strong>:<ul>
+<li>the people X follows;</li>
+<li>who liked post P;</li>
+<li>the latest 50 comments on P;</li>
+<li>counts.</li>
+</ul>
+</li>
+<li><strong>Meta's TAO</strong> (published 2013; VERIFY) serves exactly this: objects and associations on sharded MySQL, with a large, geographically distributed write-through cache tier. Reads served from cache; writes going to the leader region's database, and caches updated or invalidated.</li>
+<li><strong>Consistency:</strong> eventual across regions, with read-your-writes for the author (§6.5).</li>
+</ul>
+<h3 id="53-building-the-home-feed">5.3 Building the home feed<a class="headerlink" href="#53-building-the-home-feed" title="Permanent link">&para;</a></h3>
+<p>When a user opens the app:</p>
+<ol>
+<li><strong>Candidate generation.</strong> Several sources, a few thousand candidates in total:<ul>
+<li>recent posts from <strong>accounts followed</strong>;</li>
+<li><strong>recommended posts</strong> from similar-interest accounts (embedding retrieval);</li>
+<li>posts from <strong>friends' engagement</strong>;</li>
+<li>ads candidates from the ads system.</li>
+</ul>
+</li>
+<li>
+<p><strong>Fetching followed content — pull vs push (§6.4):</strong></p>
+<ul>
+<li>for most accounts, pull recent posts from each followed account's post list at read time, served from cache;</li>
+<li>for users who follow thousands, or for very active authors, precomputed per-user inboxes (push) help.</li>
+</ul>
+<p>Most large systems use a <strong>hybrid</strong>.
+3. <strong>Filtering:</strong> remove seen, blocked, muted, deleted or policy-violating posts, and apply privacy checks.
+4. <strong>Ranking funnel:</strong>
+- a light model scores thousands of candidates;
+- a heavy model scores the top few hundred, predicting several engagement probabilities (like, comment, share, save, time spent, "see less");
+- they are combined into a <strong>value score</strong> with weights reflecting product goals (<a href="../../05-case-studies/43-home-feed-and-recommendations/">Ch 43</a>).
+5. <strong>Final ordering:</strong> diversity (not five posts from the same author in a row), freshness, ad slots inserted at spacing rules, integrity demotions (borderline content ranks lower).
+6. <strong>Serving:</strong> the first page returns post IDs plus metadata. Media URLs point to the CDN. The client prefetches the next media. Pagination uses a cursor, and later pages re-rank with updated context.</p>
+</li>
+</ol>
+<h3 id="54-stories-and-reels">5.4 Stories and reels<a class="headerlink" href="#54-stories-and-reels" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Stories:</strong><ul>
+<li>the <strong>tray order</strong> ranks accounts by predicted interest;</li>
+<li>each story is short-lived (24 h);</li>
+<li>viewers are tracked (author sees who viewed), stored as associations with TTL.</li>
+</ul>
+</li>
+<li><strong>Reels (short video):</strong><ul>
+<li>mostly <strong>recommendation-driven</strong>, from non-followed creators;</li>
+<li>candidates come from embedding retrieval and trending;</li>
+<li>ranking predicts watch time, completion, replays, shares and follows;</li>
+<li>strong <strong>exploration</strong> of new creators;</li>
+<li>aggressive <strong>prefetching</strong> of the next videos, because swiping must feel instant.</li>
+</ul>
+</li>
+</ul>
+<h3 id="55-notifications">5.5 Notifications<a class="headerlink" href="#55-notifications" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Events</strong> (likes, comments, follows, mentions, live) generate notification candidates.</li>
+<li><strong>A notification ranker</strong> decides what to send and when: coalescing ("12 people liked your post"), frequency caps, quiet hours.</li>
+<li><strong>Delivery</strong> via push providers (FCM/APNs) and an in-app inbox (<a href="../../05-case-studies/40-notification-system/">Ch 40</a>).</li>
+</ul>
+<h3 id="56-content-moderation-pipeline">5.6 Content moderation pipeline<a class="headerlink" href="#56-content-moderation-pipeline" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Proactive detection at upload:</strong><ul>
+<li>hash matching against known-bad content databases (industry hash-sharing programmes for CSAM and terrorism content; VERIFY programmes);</li>
+<li>classifiers for policy categories;</li>
+<li>spam and fake-account detection.</li>
+</ul>
+</li>
+<li><strong>Actions:</strong> block, remove, restrict reach, age-gate, or send to human review, prioritised by severity and virality.</li>
+<li><strong>Human review</strong> tools show context. Reviewer wellbeing measures matter.</li>
+<li><strong>User reports and appeals:</strong> appeals re-review, with an oversight process where applicable.</li>
+<li><strong>Legal:</strong> government and court orders processed per jurisdiction, with transparency reporting. The IT Rules 2021 in India set grievance and takedown timelines for significant intermediaries (VERIFY).</li>
+</ol>
+<hr />
+<h2 id="6-algorithms">6. Algorithms<a class="headerlink" href="#6-algorithms" title="Permanent link">&para;</a></h2>
+<h3 id="61-x3dh-key-agreement">6.1 X3DH key agreement<a class="headerlink" href="#61-x3dh-key-agreement" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Goal:</strong> Alice and Bob agree on a secret while Bob is offline, with mutual authentication and forward secrecy.</li>
+<li>
+<p><strong>How:</strong> Alice combines several Diffie–Hellman computations:</p>
+<ul>
+<li>her identity key with Bob's signed prekey;</li>
+<li>her ephemeral key with Bob's identity key;</li>
+<li>her ephemeral key with Bob's signed prekey;</li>
+<li>optionally, her ephemeral key with Bob's one-time prekey.</li>
+</ul>
+<p>The outputs are fed into a key derivation function.
+- <strong>Why it works:</strong> only someone holding Bob's private keys can compute the same result. The ephemeral and one-time keys give forward secrecy.
+- <strong>Verification:</strong> users can compare <strong>safety numbers</strong> (a fingerprint of both identity keys) to detect a man-in-the-middle.</p>
+</li>
+</ul>
+<h3 id="62-double-ratchet">6.2 Double Ratchet<a class="headerlink" href="#62-double-ratchet" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Symmetric ratchet:</strong> each message uses a new key derived by a one-way chain (KDF). Compromising today's key reveals nothing about past messages (<strong>forward secrecy</strong>).</li>
+<li><strong>Diffie–Hellman ratchet:</strong> with each reply, the parties exchange new DH public keys and mix the result into the chain. A compromised device state is healed once new DH values are exchanged (<strong>post-compromise security</strong>).</li>
+<li><strong>Out-of-order delivery:</strong> skipped message keys are cached for a bounded number of messages.</li>
+</ul>
+<h3 id="63-sender-keys-for-groups">6.3 Sender keys for groups<a class="headerlink" href="#63-sender-keys-for-groups" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Setup:</strong> each sender has a chain key and signing key per group, sent to members over pairwise sessions.</li>
+<li><strong>Sending:</strong> messages are encrypted once with the chain's current key and signed. The chain ratchets forward per message.</li>
+<li><strong>Trade-offs:</strong><ul>
+<li>efficient fan-out (the server copies one ciphertext);</li>
+<li>weaker post-compromise security than pairwise ratchets (rotate on membership change and periodically);</li>
+<li>newer protocols like <strong>MLS</strong> (Messaging Layer Security, RFC 9420) scale group key agreement more efficiently for large groups.</li>
+</ul>
+</li>
+</ul>
+<h3 id="64-feed-fan-out-push-vs-pull">6.4 Feed fan-out: push vs pull<a class="headerlink" href="#64-feed-fan-out-push-vs-pull" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>How</th>
+<th>Good for</th>
+<th>Bad for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Push (fan-out on write)</strong></td>
+<td>On post, insert the post ID into every follower's inbox</td>
+<td>Fast reads; users with few follows</td>
+<td>Celebrities with 100M followers: 100M writes per post</td>
+</tr>
+<tr>
+<td><strong>Pull (fan-out on read)</strong></td>
+<td>On read, fetch recent posts from each followed account and merge</td>
+<td>No write amplification</td>
+<td>Users following thousands: many reads per request</td>
+</tr>
+<tr>
+<td><strong>Hybrid</strong></td>
+<td>Push for most authors; pull for celebrities (above a follower threshold) merged at read time</td>
+<td>Both</td>
+<td>Complexity</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Ranking-based feeds</strong> reduce the need for complete inboxes: candidates need only be "recent enough and plentiful", not exhaustive.</p>
+<h3 id="65-graph-caching-and-consistency">6.5 Graph caching and consistency<a class="headerlink" href="#65-graph-caching-and-consistency" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Two tiers:</strong><ul>
+<li><strong>write-through caches</strong> in front of sharded databases, per region, with <strong>leader and follower</strong> cache tiers;</li>
+<li>writes go to the leader region's database, and invalidations propagate to follower regions.</li>
+</ul>
+</li>
+<li><strong>Read-your-writes for the author:</strong> after writing, the author's reads route to the leader tier or carry a version token, so they see their own post immediately.</li>
+<li><strong>Hot objects</strong> (a celebrity's post with millions of likes) get replicated cache entries and <strong>counter sharding</strong> (like counts split across sub-counters) (<a href="../../05-case-studies/44-distributed-cache/">Ch 44</a>).</li>
+<li><strong>Lease-based cache fill</strong> avoids thundering herds and stale sets, as described in "Scaling Memcache at Facebook" (VERIFY).</li>
+</ul>
+<h3 id="66-ranking-funnel">6.6 Ranking funnel<a class="headerlink" href="#66-ranking-funnel" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Retrieval:</strong> two-tower embeddings (user tower, item tower) plus approximate nearest-neighbour search. Also graph-based candidates (friends' interactions).</li>
+<li><strong>Early-stage ranking:</strong> a light model (small neural network or GBDT) over thousands of candidates.</li>
+<li><strong>Late-stage ranking:</strong> a large multi-task neural network predicting several actions. Features include user history sequences, author affinity, content embeddings and context.</li>
+<li><strong>Value model:</strong> a weighted sum of predicted probabilities. The weights are tuned by experiments on long-term metrics (retention), not only short-term clicks.</li>
+<li><strong>Integrity-aware ranking:</strong> demote predicted-borderline content, and reduce virality of low-quality content.</li>
+</ul>
+<h3 id="67-id-generation-and-sharding">6.7 ID generation and sharding<a class="headerlink" href="#67-id-generation-and-sharding" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>IDs:</strong> 64-bit, time-sortable, with <strong>shard ID embedded</strong>, generated inside the database (Instagram's published approach: timestamp + logical shard ID + sequence; VERIFY). This keeps IDs unique without a central service and lets the ID route to the shard (<a href="../../02-distributed-core/20-idempotency-ids-and-distributed-locks/">Ch 20</a>).</li>
+<li><strong>Logical shards:</strong> thousands of logical shards mapped onto fewer physical databases, moved as load grows (<a href="../../02-distributed-core/11-partitioning-and-sharding/">Ch 11</a>).</li>
+</ul>
+<h3 id="68-perceptual-hashing-and-near-duplicate-detection">6.8 Perceptual hashing and near-duplicate detection<a class="headerlink" href="#68-perceptual-hashing-and-near-duplicate-detection" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Perceptual hashes</strong> (e.g. pHash/PDQ; Meta open-sourced PDQ and TMK+PDQF for video, VERIFY) map visually similar images to similar bit strings.</li>
+<li><strong>Matching:</strong> Hamming distance below a threshold, looked up with multi-index hashing or LSH.</li>
+<li><strong>Uses:</strong> blocking known-bad content, detecting reposts, copyright, and spam campaigns reusing images.</li>
+</ul>
+<h3 id="69-spam-and-fake-account-detection">6.9 Spam and fake-account detection<a class="headerlink" href="#69-spam-and-fake-account-detection" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Features:</strong> registration signals (phone number type, device), behaviour (message or follow rates, reply ratio, block and report rates), network features (connections to known spam clusters).</li>
+<li><strong>Models:</strong> GBDT/neural classifiers; graph methods (label propagation, community detection) for coordinated campaigns.</li>
+<li><strong>Actions:</strong> rate limits, challenges, bans. Appeals exist for false positives.</li>
+</ul>
+<h3 id="610-delivery-reliability">6.10 Delivery reliability<a class="headerlink" href="#610-delivery-reliability" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Queues:</strong> each device's queue is ordered. A message is removed only after the device acknowledges it, which is <strong>at-least-once</strong> delivery.</li>
+<li><strong>Deduplication:</strong> messages carry unique IDs, and clients deduplicate, giving <strong>exactly-once display</strong>.</li>
+<li><strong>Multi-device ordering:</strong> the per-conversation order is the sender's sequence. Clients merge by (server timestamp, sender sequence) for display.</li>
+</ul>
+<hr />
+<h2 id="7-data-architecture">7. Data Architecture<a class="headerlink" href="#7-data-architecture" title="Permanent link">&para;</a></h2>
+<h3 id="71-messenger-stores">7.1 Messenger stores<a class="headerlink" href="#71-messenger-stores" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Store (reference)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Connection routing (which server holds a device's socket)</td>
+<td>In-memory distributed registry</td>
+<td>Ephemeral</td>
+</tr>
+<tr>
+<td>Offline queues</td>
+<td>Durable per-device queues (a replicated log or KV store, e.g. RocksDB-based)</td>
+<td>Deleted on acknowledgement; retention limit</td>
+</tr>
+<tr>
+<td>Key directory</td>
+<td>Replicated KV store</td>
+<td>Public keys only</td>
+</tr>
+<tr>
+<td>Group membership</td>
+<td>Replicated KV/relational</td>
+<td>Signed membership events</td>
+</tr>
+<tr>
+<td>Media blobs</td>
+<td>Object storage + CDN</td>
+<td>Ciphertext; TTL-based deletion</td>
+</tr>
+<tr>
+<td>Metadata for abuse (minimal)</td>
+<td>Aggregated counters, limited retention</td>
+<td>Privacy-reviewed</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Chat history lives on devices,</strong> not the server, except for queued undelivered messages.</li>
+<li><strong>The server is a relay, not an archive.</strong> This is a design choice with privacy, cost and legal implications.</li>
+</ul>
+<h3 id="72-social-stores">7.2 Social stores<a class="headerlink" href="#72-social-stores" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Store (reference)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Graph objects and associations</td>
+<td>Sharded MySQL/PostgreSQL + TAO-style cache</td>
+<td>Publicly described for Meta (VERIFY)</td>
+</tr>
+<tr>
+<td>Feed inboxes (push part)</td>
+<td>Wide-column (Cassandra) or KV</td>
+<td>Instagram has described Cassandra use (VERIFY)</td>
+</tr>
+<tr>
+<td>Counters (likes, views)</td>
+<td>Sharded counters in KV + periodic aggregation</td>
+<td>Hot keys</td>
+</tr>
+<tr>
+<td>Media</td>
+<td>Object storage (Meta has described Haystack/f4 for photos; VERIFY) + CDN</td>
+<td>Petabytes</td>
+</tr>
+<tr>
+<td>Search</td>
+<td>Inverted indexes (Meta's Unicorn for the social graph; VERIFY)</td>
+<td>Users, hashtags, places</td>
+</tr>
+<tr>
+<td>Ranking features</td>
+<td>Online feature store (low-latency KV)</td>
+<td>Freshness in seconds</td>
+</tr>
+</tbody>
+</table>
+<h3 id="73-logging-lakehouse-and-ml">7.3 Logging, lakehouse and ML<a class="headerlink" href="#73-logging-lakehouse-and-ml" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Events</strong> (impressions, likes, watch time, sends, reports) → a logging pipeline (Meta's Scribe; VERIFY) → a warehouse on distributed storage.</li>
+<li><strong>Tools created at Meta</strong> and now widely used: <strong>Hive</strong>, <strong>Presto</strong>, <strong>RocksDB</strong>, <strong>PyTorch</strong>; Meta also described <strong>Scuba</strong> for real-time analysis (VERIFY each).</li>
+<li><strong>Uses:</strong><ul>
+<li>training ranking and integrity models (daily or continuous);</li>
+<li>experiment analysis (every product change is A/B tested);</li>
+<li>dashboards;</li>
+<li>transparency reports.</li>
+</ul>
+</li>
+<li><strong>Privacy:</strong><ul>
+<li>message content from E2EE chats never enters the lake;</li>
+<li>social data access is purpose-restricted, with deletion propagation (a deleted post must disappear from training sets on schedule);</li>
+<li>regional storage where required.</li>
+</ul>
+</li>
+</ul>
+<h3 id="74-data-flow">7.4 Data flow<a class="headerlink" href="#74-data-flow" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>flowchart LR
+    APPS[Apps] --&gt; EDGE[Edge and APIs]
+    EDGE --&gt; STORES[Graph, media, queues]
+    EDGE --&gt; LOGS[Event logging]
+    LOGS --&gt; RTA[Real-time analytics - Scuba-style]
+    LOGS --&gt; WH[Warehouse and lakehouse - Hive, Presto, Spark]
+    WH --&gt; TRAIN[Model training - PyTorch]
+    TRAIN --&gt; SERVE[Model serving for ranking and integrity]
+    SERVE --&gt; EDGE
+    WH --&gt; EXP[Experiment analysis]
+    WH --&gt; REP[Transparency and business reporting]</code></pre>
+<hr />
+<h2 id="8-tech-stack">8. Tech Stack<a class="headerlink" href="#8-tech-stack" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Publicly described (VERIFY each)</th>
+<th>Reference choice</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Messaging servers</td>
+<td><strong>Erlang/OTP</strong> (WhatsApp, historically on FreeBSD); ejabberd-derived early on</td>
+<td>Erlang/Elixir or Go/Rust with epoll-based connection servers</td>
+</tr>
+<tr>
+<td>Encryption</td>
+<td><strong>Signal Protocol</strong> (libsignal)</td>
+<td>libsignal; MLS for large groups</td>
+</tr>
+<tr>
+<td>Calls</td>
+<td>WebRTC-based stacks, relays</td>
+<td>WebRTC, coturn, SFU</td>
+</tr>
+<tr>
+<td>Social web tier</td>
+<td>Instagram: <strong>Python/Django</strong> (with performance work); Meta: Hack/HHVM</td>
+<td>Python/Go/Java services</td>
+</tr>
+<tr>
+<td>Graph storage</td>
+<td><strong>TAO</strong> over MySQL (Meta)</td>
+<td>Sharded PostgreSQL/MySQL + write-through cache</td>
+</tr>
+<tr>
+<td>Caching</td>
+<td><strong>Memcache</strong> at scale (Meta)</td>
+<td>Redis/memcached with leases</td>
+</tr>
+<tr>
+<td>KV</td>
+<td><strong>RocksDB</strong>, <strong>ZippyDB</strong> (Meta)</td>
+<td>RocksDB-based stores, Cassandra/ScyllaDB</td>
+</tr>
+<tr>
+<td>Wide-column</td>
+<td><strong>Cassandra</strong> (created at Facebook; used by Instagram)</td>
+<td>Cassandra/ScyllaDB</td>
+</tr>
+<tr>
+<td>Media storage</td>
+<td>Haystack, f4 (Meta)</td>
+<td>Object storage + CDN</td>
+</tr>
+<tr>
+<td>Queues/streams</td>
+<td>Scribe, LogDevice (Meta)</td>
+<td>Kafka</td>
+</tr>
+<tr>
+<td>Warehouse/query</td>
+<td><strong>Hive</strong>, <strong>Presto</strong> (created at Facebook), Spark</td>
+<td>Iceberg + Spark + Trino</td>
+</tr>
+<tr>
+<td>Real-time analytics</td>
+<td><strong>Scuba</strong></td>
+<td>Druid/Pinot/ClickHouse</td>
+</tr>
+<tr>
+<td>ML</td>
+<td><strong>PyTorch</strong></td>
+<td>PyTorch, feature store, model serving</td>
+</tr>
+<tr>
+<td>Mobile</td>
+<td>Native iOS/Android, React Native (created at Facebook) in some apps</td>
+<td>Native or React Native</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-security-privacy-compliance">9. Security, Privacy &amp; Compliance<a class="headerlink" href="#9-security-privacy-compliance" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>E2EE threat model:</strong> the server can't read content. It still sees <strong>metadata</strong>: who talks to whom, when, IP addresses, group membership. Minimise, protect and limit retention of metadata.</li>
+<li><strong>Key transparency:</strong> detect a server that could inject keys, with key transparency logs and safety-number verification (VERIFY deployment status).</li>
+<li><strong>Account security:</strong> two-step verification PIN, device linking approvals, notifications of new devices.</li>
+<li><strong>Social data:</strong> privacy settings enforced at query time in the graph layer (private accounts, close friends, blocked users). Deleted content is removed from caches, indexes, backups and training data on schedule.</li>
+<li><strong>Children:</strong> age assurance, default private accounts for teens, restricted messaging from unknown adults (VERIFY current policies).</li>
+<li><strong>India-specific:</strong><ul>
+<li>the IT Rules 2021 obligations for significant social media intermediaries: grievance officers, takedown timelines, monthly compliance reports;</li>
+<li>the <strong>traceability (first originator) requirement</strong> for messaging, which conflicts with E2EE and is under legal challenge (VERIFY current status);</li>
+<li>the DPDP Act 2023 (VERIFY).</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="10-reliability-operations">10. Reliability &amp; Operations<a class="headerlink" href="#10-reliability-operations" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Connection tier:</strong><ul>
+<li>stateless beyond sockets, so clients reconnect to any server;</li>
+<li>routing registry updates on reconnect;</li>
+<li>rolling deploys drain connections gradually, not all at once.</li>
+</ul>
+</li>
+<li><strong>Offline queues are replicated.</strong> A queue shard failure fails over without losing acknowledged messages.</li>
+<li><strong>Regional failover:</strong><ul>
+<li>users connect to the nearest region;</li>
+<li>messages route across regions to the recipient's connection;</li>
+<li>the social graph has a leader region per shard, with follower regions serving reads.</li>
+</ul>
+</li>
+<li><strong>Degradation:</strong><ul>
+<li>feed falls back to a simpler ranking (chronological with light scoring) if ranking services fail;</li>
+<li>stories still load;</li>
+<li>messaging stays independent of social features.</li>
+</ul>
+</li>
+<li><strong>Events:</strong> New Year's Eve, and festivals like Diwali, bring messaging peaks (greetings, media). Prepare capacity for media upload and delivery, and forwarding spikes.</li>
+</ul>
+<hr />
+<h2 id="11-key-trade-offs">11. Key Trade-offs<a class="headerlink" href="#11-key-trade-offs" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Chosen</th>
+<th>Accepted cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Message storage</td>
+<td>Device-side history; server relays</td>
+<td>Harder multi-device history sync; backups needed</td>
+</tr>
+<tr>
+<td>Group encryption</td>
+<td>Sender keys (MLS for large groups later)</td>
+<td>Weaker post-compromise security than pairwise</td>
+</tr>
+<tr>
+<td>Abuse control in E2EE</td>
+<td>Metadata, reports, product limits</td>
+<td>Less visibility than content scanning</td>
+</tr>
+<tr>
+<td>Feed fan-out</td>
+<td>Hybrid push/pull</td>
+<td>Two code paths</td>
+</tr>
+<tr>
+<td>Graph consistency</td>
+<td>Eventual across regions, read-your-writes for authors</td>
+<td>Brief inconsistency for others</td>
+</tr>
+<tr>
+<td>Ranking</td>
+<td>Multi-stage funnel with long-term metrics</td>
+<td>Heavy compute; complex experimentation</td>
+</tr>
+<tr>
+<td>Moderation</td>
+<td>Proactive detection + human review</td>
+<td>Cost; false positives need appeals</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-interview-qa">12. Interview Q&amp;A<a class="headerlink" href="#12-interview-qa" title="Permanent link">&para;</a></h2>
+<h3 id="beginner-b1">Beginner <span class="band b1">B1</span><a class="headerlink" href="#beginner-b1" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q1 [B1] ⭐ How does a message get from one phone to another?</summary>
+<p><strong>30-second answer:</strong> The sender's app encrypts it for each recipient device and sends it over a persistent connection; the server stores it in the recipient's queue and acknowledges (sent); if the recipient is online the server forwards it, otherwise a push notification wakes the app to fetch it; the recipient acknowledges (delivered) and later sends a read receipt.</p>
+<p><strong>Deep answer:</strong> §4.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Persistent connections cost vs latency.</p>
+<p><strong>Follow-ups:</strong>
+1. Offline for days? → Queue with retention.
+2. Duplicates? → Message IDs.</p>
+<p><strong>Red flags:</strong> Polling for messages.</p>
+</details>
+<details class="question">
+<summary>Q2 [B1] What does end-to-end encryption mean for the server?</summary>
+<p><strong>30-second answer:</strong> The server only relays and stores ciphertext; keys live on devices, so the server can't read messages — but it still sees metadata like who talks to whom and when.</p>
+<p><strong>Deep answer:</strong> §4.1, §9.</p>
+<p><strong>Trade-offs I'd call out:</strong> Privacy vs server-side features (search, moderation).</p>
+<p><strong>Follow-ups:</strong>
+1. Backups? → Encrypted with user key.
+2. Web client? → Linked device keys.</p>
+<p><strong>Red flags:</strong> "The server decrypts to route."</p>
+</details>
+<details class="question">
+<summary>Q3 [B1] What happens when you post a photo?</summary>
+<p><strong>30-second answer:</strong> Resumable upload, processing (resizes, formats, hashes, classifiers), a post object and associations in the social graph, moderation outcome, then the post becomes a candidate for followers' feeds and triggers notifications.</p>
+<p><strong>Deep answer:</strong> §5.1.</p>
+<p><strong>Trade-offs I'd call out:</strong> Upload latency vs checks.</p>
+<p><strong>Follow-ups:</strong>
+1. Video? → Transcoding ladder.
+2. Prohibited content? → Blocked before publish.</p>
+<p><strong>Red flags:</strong> Storing images in the database.</p>
+</details>
+<details class="question">
+<summary>Q4 [B1] What are the ticks in a messaging app?</summary>
+<p><strong>30-second answer:</strong> One tick: the server accepted the message. Two ticks: a recipient device received and decrypted it. Blue/read: the recipient opened the chat and sent a read receipt (if enabled) — in groups, per recipient.</p>
+<p><strong>Deep answer:</strong> §4.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Receipts are extra messages.</p>
+<p><strong>Follow-ups:</strong>
+1. Multi-device? → Delivered when any device receives.
+2. Privacy? → Read receipts optional.</p>
+<p><strong>Red flags:</strong> Server marks read on its own.</p>
+</details>
+<h3 id="intermediate-b2">Intermediate <span class="band b2">B2</span><a class="headerlink" href="#intermediate-b2" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q5 [B2] ⭐ How do group messages stay efficient with end-to-end encryption?</summary>
+<p><strong>30-second answer:</strong> Sender keys: each member distributes a group sender key once via pairwise encrypted sessions; each message is then encrypted once and the server fans out a single ciphertext; keys rotate when membership changes; MLS improves this for very large groups.</p>
+<p><strong>Deep answer:</strong> §4.3, §6.3.</p>
+<p><strong>Trade-offs I'd call out:</strong> Efficiency vs post-compromise security.</p>
+<p><strong>Follow-ups:</strong>
+1. Member removed? → Rotate keys.
+2. 1,000 members? → Fan-out on server.</p>
+<p><strong>Red flags:</strong> Encrypting per member per message on the phone.</p>
+</details>
+<details class="question">
+<summary>Q6 [B2] ⭐ Push or pull for building feeds?</summary>
+<p><strong>30-second answer:</strong> Push writes post IDs to followers' inboxes (fast reads, heavy writes for celebrities); pull merges followed accounts' recent posts at read time (no write amplification, heavy reads for users following many); production systems use a hybrid with a follower threshold, and ranking reduces the need for complete inboxes.</p>
+<p><strong>Deep answer:</strong> §5.3, §6.4.</p>
+<p><strong>Trade-offs I'd call out:</strong> Write vs read cost.</p>
+<p><strong>Follow-ups:</strong>
+1. Threshold? → Tuned by cost.
+2. Unfollow? → Filter at read.</p>
+<p><strong>Red flags:</strong> Push to 100M followers per post.</p>
+</details>
+<details class="question">
+<summary>Q7 [B2] How do you store the social graph?</summary>
+<p><strong>30-second answer:</strong> Objects and typed associations in sharded relational databases fronted by a large write-through cache tier per region (TAO-style); most queries fetch association lists and counts; writes go to the leader region and invalidate caches elsewhere.</p>
+<p><strong>Deep answer:</strong> §5.2, §6.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Eventual consistency across regions.</p>
+<p><strong>Follow-ups:</strong>
+1. Hot objects? → Replicated cache, sharded counters.
+2. Graph database? → Rarely needed at this scale.</p>
+<p><strong>Red flags:</strong> One giant graph DB with ad-hoc traversals.</p>
+</details>
+<details class="question">
+<summary>Q8 [B2] How do media files work in an encrypted messenger?</summary>
+<p><strong>30-second answer:</strong> The sender encrypts the file with a random key, uploads the ciphertext to blob storage, and sends the URL, key and hash inside the E2EE message; recipients download, verify and decrypt; the server keeps only ciphertext and deletes after delivery or retention.</p>
+<p><strong>Deep answer:</strong> §4.4.</p>
+<p><strong>Trade-offs I'd call out:</strong> Server can't dedupe different uploads.</p>
+<p><strong>Follow-ups:</strong>
+1. Forwarding? → Reuse blob.
+2. CDN? → Ciphertext is cacheable.</p>
+<p><strong>Red flags:</strong> Media sent through the message socket.</p>
+</details>
+<details class="question">
+<summary>Q9 [B2] How do notifications avoid spamming users?</summary>
+<p><strong>30-second answer:</strong> Events become candidates; a ranker decides what to send, coalesces similar events, applies frequency caps and quiet hours, and chooses push vs in-app; outcomes feed back into the model.</p>
+<p><strong>Deep answer:</strong> §5.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Engagement vs annoyance.</p>
+<p><strong>Follow-ups:</strong>
+1. Coalescing? → "12 people liked".
+2. Measurement? → Opt-out rates.</p>
+<p><strong>Red flags:</strong> Push for every like.</p>
+</details>
+<h3 id="senior-b3">Senior <span class="band b3">B3</span><a class="headerlink" href="#senior-b3" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q10 [B3] ⭐ Explain X3DH and the Double Ratchet at a system-design level.</summary>
+<p><strong>30-second answer:</strong> X3DH lets Alice establish a shared secret with offline Bob using his published identity, signed prekey and one-time prekey plus her ephemeral key; the Double Ratchet then derives a new key per message (forward secrecy) and mixes fresh Diffie–Hellman values on replies (post-compromise security). Systems-wise: a key directory, prekey replenishment, per-device sessions, and safety numbers for verification.</p>
+<p><strong>Deep answer:</strong> §6.1, §6.2.</p>
+<p><strong>Trade-offs I'd call out:</strong> Session state per device pair.</p>
+<p><strong>Follow-ups:</strong>
+1. Prekeys run out? → Signed prekey fallback.
+2. New phone? → New identity, warning.</p>
+<p><strong>Red flags:</strong> One shared key per chat forever.</p>
+</details>
+<details class="question">
+<summary>Q11 [B3] How do you guarantee delivery without duplicates?</summary>
+<p><strong>30-second answer:</strong> Per-device durable queues; messages removed only after device acknowledgement (at-least-once); unique message IDs and client-side dedup give exactly-once display; ordering by sender sequence per conversation.</p>
+<p><strong>Deep answer:</strong> §6.10.</p>
+<p><strong>Trade-offs I'd call out:</strong> Storage until acknowledgement.</p>
+<p><strong>Follow-ups:</strong>
+1. Device never returns? → Retention expiry.
+2. Queue failover? → Replicated.</p>
+<p><strong>Red flags:</strong> Deleting on send.</p>
+</details>
+<details class="question">
+<summary>Q12 [B3] How do you fight spam when you can't read messages?</summary>
+<p><strong>30-second answer:</strong> Metadata and behaviour signals (rates, unknown-recipient ratios, blocks, reports), user reports that include recent messages, forwarding limits and labels, registration signals, and graph-based detection of coordinated accounts — with rate limits and bans.</p>
+<p><strong>Deep answer:</strong> §4.8, §6.9.</p>
+<p><strong>Trade-offs I'd call out:</strong> Privacy vs detection power.</p>
+<p><strong>Follow-ups:</strong>
+1. False positives? → Appeals.
+2. Business spam? → Business policies.</p>
+<p><strong>Red flags:</strong> "Just scan messages on the server."</p>
+</details>
+<details class="question">
+<summary>Q13 [B3] ⭐ Design the ranking system for the home feed.</summary>
+<p><strong>30-second answer:</strong> Multiple candidate sources (followed, recommended via embeddings, friends' engagement, ads), filtering, a light early ranker, a heavy multi-task model predicting several actions, a value model with weights tuned for long-term retention, diversity and integrity adjustments, and continuous A/B testing.</p>
+<p><strong>Deep answer:</strong> §5.3, §6.6; <a href="../../05-case-studies/43-home-feed-and-recommendations/">Ch 43</a>.</p>
+<p><strong>Trade-offs I'd call out:</strong> Compute vs quality.</p>
+<p><strong>Follow-ups:</strong>
+1. Feature freshness? → Online feature store.
+2. Ranking failure? → Chronological fallback.</p>
+<p><strong>Red flags:</strong> Chronological only at scale, or clicks-only objectives.</p>
+</details>
+<details class="question">
+<summary>Q14 [B3] How do you generate IDs across thousands of database shards?</summary>
+<p><strong>30-second answer:</strong> 64-bit time-sortable IDs with an embedded logical shard ID and per-shard sequence, generated inside each shard's database; logical shards map onto physical databases so they can be moved.</p>
+<p><strong>Deep answer:</strong> §6.7; <a href="../../02-distributed-core/20-idempotency-ids-and-distributed-locks/">Ch 20</a>.</p>
+<p><strong>Trade-offs I'd call out:</strong> Clock dependence.</p>
+<p><strong>Follow-ups:</strong>
+1. Why shard in ID? → Routing without lookup.
+2. Resharding? → Move logical shards.</p>
+<p><strong>Red flags:</strong> Central ID service for everything.</p>
+</details>
+<h3 id="architect-b4">Architect <span class="band b4">B4</span><a class="headerlink" href="#architect-b4" title="Permanent link">&para;</a></h3>
+<details class="question">
+<summary>Q15 [B4] ⭐ How would you scale a messaging service to hundreds of millions of concurrent connections?</summary>
+<p><strong>30-second answer:</strong> A large tier of connection servers optimised for many idle sockets (Erlang/epoll), a routing registry for device-to-server mapping, stateless reconnection anywhere, per-device replicated queues, push notifications for offline devices, regional presence with cross-region routing, and graceful rolling deploys that drain sockets gradually.</p>
+<p><strong>Deep answer:</strong> §1.2, §10.</p>
+<p><strong>Trade-offs I'd call out:</strong> Memory per connection vs cost.</p>
+<p><strong>Follow-ups:</strong>
+1. Reconnect storms? → Jittered backoff.
+2. Presence? → Lazy, best effort.</p>
+<p><strong>Red flags:</strong> HTTP polling at this scale.</p>
+</details>
+<details class="question">
+<summary>Q16 [B4] How would you design content moderation at scale?</summary>
+<p><strong>30-second answer:</strong> Proactive detection at upload (hash matching, classifiers), risk-based actions (block, restrict, review), prioritised human review with context tools, user reports and appeals, legal takedown workflows per jurisdiction, and measurement (prevalence, precision, time-to-action) with transparency reporting.</p>
+<p><strong>Deep answer:</strong> §5.6, §6.8.</p>
+<p><strong>Trade-offs I'd call out:</strong> Speed vs accuracy; free expression vs harm.</p>
+<p><strong>Follow-ups:</strong>
+1. Viral content? → Prioritise by reach.
+2. New categories? → Human labels first.</p>
+<p><strong>Red flags:</strong> Reactive reports only.</p>
+</details>
+<details class="question">
+<summary>Q17 [B4] What are the trade-offs of keeping chat history only on devices?</summary>
+<p><strong>30-second answer:</strong> Strong privacy and lower server cost, but harder multi-device history sync, dependence on user backups, loss if the device is lost without backup, and limited server-side features (search, moderation); encrypted backups and device-to-device transfer mitigate.</p>
+<p><strong>Deep answer:</strong> §7.1, §4.7.</p>
+<p><strong>Trade-offs I'd call out:</strong> Privacy vs convenience.</p>
+<p><strong>Follow-ups:</strong>
+1. New linked device? → History transfer from phone.
+2. Legal requests? → Limited server data.</p>
+<p><strong>Red flags:</strong> Keeping plaintext copies "just in case".</p>
+</details>
+<details class="question">
+<summary>Q18 [B4] How do privacy regulations and traceability rules affect an E2EE messenger in India?</summary>
+<p><strong>30-second answer:</strong> IT Rules 2021 require significant messaging intermediaries to enable identification of a message's first originator on lawful orders — which conflicts with E2EE design and is under legal challenge; the platform must balance compliance, user privacy and security, alongside DPDP Act duties (VERIFY current status).</p>
+<p><strong>Deep answer:</strong> §9.</p>
+<p><strong>Trade-offs I'd call out:</strong> Compliance vs security guarantees.</p>
+<p><strong>Follow-ups:</strong>
+1. Metadata retention? → Minimise.
+2. Transparency? → Reports.</p>
+<p><strong>Red flags:</strong> Weakening encryption silently.</p>
+</details>
+<details class="question">
+<summary>Q19 [B4] How do you keep the social graph consistent across regions?</summary>
+<p><strong>30-second answer:</strong> Leader region per shard handles writes; follower regions serve reads from caches invalidated asynchronously; authors get read-your-writes via routing or version tokens; lease-based cache fills avoid stampedes; eventual consistency is accepted for others' views.</p>
+<p><strong>Deep answer:</strong> §6.5.</p>
+<p><strong>Trade-offs I'd call out:</strong> Cross-region write latency.</p>
+<p><strong>Follow-ups:</strong>
+1. Leader failover? → Promote a follower.
+2. Counters? → Sharded.</p>
+<p><strong>Red flags:</strong> Multi-master without conflict rules.</p>
+</details>
+<details class="question">
+<summary>Q20 [B4] Compare the architectures of a messenger and a social feed.</summary>
+<p><strong>30-second answer:</strong> The messenger is a privacy-preserving relay with device-held state, per-device queues and E2EE — optimising delivery and connections; the feed is a server-side content system with a social graph, media processing, ranking and moderation — optimising relevance and read throughput. They share identity, media infrastructure, notifications and abuse systems.</p>
+<p><strong>Deep answer:</strong> §1.1.</p>
+<p><strong>Trade-offs I'd call out:</strong> Where data lives and who can see it.</p>
+<p><strong>Follow-ups:</strong>
+1. Shared services? → Media, push, identity.
+2. Different SLOs? → Delivery vs relevance.</p>
+<p><strong>Red flags:</strong> Using the feed's database for messages.</p>
+</details>
+<hr />
+<h2 id="13-summary">13. Summary<a class="headerlink" href="#13-summary" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>The messenger is a relay with cryptography at the edges:</strong> keys and history live on devices; the server moves ciphertext through per-device queues and connection servers.</li>
+<li><strong>Signal-protocol building blocks</strong> (X3DH, Double Ratchet, sender keys; MLS for large groups) give forward secrecy and post-compromise security. Safety numbers let users verify.</li>
+<li><strong>The social feed is a graph plus a ranking funnel:</strong> objects and associations with massive caches, hybrid fan-out, multi-stage ranking tuned for long-term value.</li>
+<li><strong>Media dominates storage and egress:</strong> process once, hash for integrity, serve from CDNs.</li>
+<li><strong>Integrity is built in:</strong> metadata-based abuse control for E2EE, proactive detection and human review for public content, and legal and regulatory processes per jurisdiction.</li>
+</ol>
+<h3 id="related-chapters">Related chapters<a class="headerlink" href="#related-chapters" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="../../05-case-studies/41-chat-customer-rider-messaging/">Ch 41 — Chat</a> · <a href="../../05-case-studies/43-home-feed-and-recommendations/">Ch 43 — Home Feed</a> · <a href="../../05-case-studies/44-distributed-cache/">Ch 44 — Distributed Cache</a> · <a href="../../03-production/23-security-architecture/">Ch 23 — Security</a> · <a href="../i06-video-streaming-and-live-cricket/">I06 — Video Streaming</a></li>
+<li>Next in this tab: <a href="../i08-stockbroking-platform/">I08 — Stockbroking Platform</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../i06-video-streaming-and-live-cricket/" class="md-footer__link md-footer__link--prev" aria-label="Previous: I06. Video Streaming &amp; Live Cricket">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                I06. Video Streaming & Live Cricket
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../i08-stockbroking-platform/" class="md-footer__link md-footer__link--next" aria-label="Next: I08. Stockbroking Platform">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                I08. Stockbroking Platform
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

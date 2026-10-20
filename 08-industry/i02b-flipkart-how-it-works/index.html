@@ -1,0 +1,5212 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Beginner to Architect — Java/Spring system design with production code, design documents and interview mastery">
+      
+      
+        <meta name="author" content="Ashish">
+      
+      
+      
+        <link rel="prev" href="../i02-flipkart-style-sale-day-ecommerce/">
+      
+      
+        <link rel="next" href="../i03-core-banking-and-upi/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>I02b. Flipkart — How It Works - System Design Enterprise Handbook</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#i02b-flipkart-style-e-commerce-how-the-whole-system-works" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-header__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            System Design Enterprise Handbook
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              I02b. Flipkart — How It Works
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Orientation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Foundations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../02-distributed-core/10-replication/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Distributed Core
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../03-production/21-data-at-scale/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Production
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../04-architect/31-architecture-decision-making/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architect
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Case Studies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Capstone
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Interview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Industry Designs
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../99-appendix/qa-index/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Appendix
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="System Design Enterprise Handbook" class="md-nav__button md-logo" aria-label="System Design Enterprise Handbook" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    System Design Enterprise Handbook
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Orientation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Orientation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/00-how-to-use-this-handbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    00. How to Use This Handbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../00-orientation/01-what-system-design-is/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    01. What System Design Is
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/02-back-of-the-envelope-estimation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    02. Back-of-the-Envelope Estimation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/03-networking-essentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    03. Networking Essentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/04-api-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    04. API Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/05-relational-databases-deep-dive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    05. Relational Databases Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/06-nosql-and-polyglot-persistence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    06. NoSQL & Polyglot Persistence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/07-caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    07. Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/08-load-balancing-proxies-and-gateways/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    08. Load Balancing, Proxies & Gateways
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../01-foundations/09-scalability-fundamentals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    09. Scalability Fundamentals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distributed Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/10-replication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    10. Replication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/11-partitioning-and-sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    11. Partitioning & Sharding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/12-consistency-time-and-consensus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    12. Consistency, Time & Consensus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/13-distributed-transactions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    13. Distributed Transactions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/14-messaging-and-event-streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    14. Messaging & Event Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/15-event-driven-architecture-cqrs-and-event-sourcing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    15. Event-Driven Architecture, CQRS & Event Sourcing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/16-microservices-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    16. Microservices Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/17-inter-service-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    17. Inter-Service Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/18-resilience-patterns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    18. Resilience Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/19-concurrency-at-scale-in-java/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    19. Concurrency at Scale in Java
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../02-distributed-core/20-idempotency-ids-and-distributed-locks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    20. Idempotency, IDs & Distributed Locks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Production
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/21-data-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    21. Data at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/22-search-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    22. Search Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/23-security-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    23. Security Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/24-observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    24. Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/25-performance-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    25. Performance Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/26-deployment-and-infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    26. Deployment & Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/27-reliability-and-disaster-recovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    27. Reliability & Disaster Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/28-schema-and-data-evolution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    28. Schema & Data Evolution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/29-testing-distributed-systems/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    29. Testing Distributed Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../03-production/30-multi-tenancy-and-saas-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    30. Multi-Tenancy & SaaS Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architect
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architect
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/31-architecture-decision-making/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    31. Architecture Decision Making
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/32-design-documents-and-architecture-communication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    32. Design Documents & Architecture Communication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/33-domain-driven-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    33. Domain-Driven Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/34-modern-architecture-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    34. Modern Architecture Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/35-cost-engineering-and-finops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    35. Cost Engineering & FinOps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/36-compliance-governance-and-data-residency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    36. Compliance, Governance & Data Residency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../04-architect/37-leading-architecture-at-scale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    37. Leading Architecture at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Case Studies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Case Studies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/38-url-shortener-and-short-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    38. URL Shortener & SMS Short Links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/39-distributed-rate-limiter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    39. Distributed Rate Limiter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/40-notification-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    40. Notification System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/41-chat-customer-rider-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    41. Chat — Customer–Rider Messaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/42-search-autocomplete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    42. Search Autocomplete (Typeahead)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/43-home-feed-and-recommendations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    43. Home Feed & Recommendations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/44-distributed-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    44. Distributed Cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/45-payment-system/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    45. Payment System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/46-grocery-checkout-and-inventory-reservation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    46. Grocery Checkout & Inventory Reservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/47-delivery-dispatch-and-live-tracking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    47. Delivery Dispatch & Live Tracking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/48-delivery-slot-booking-and-capacity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    48. Delivery Slot Booking & Capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/49-pricing-promotions-and-coupons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    49. Pricing, Promotions & Coupons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/50-distributed-job-scheduler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    50. Distributed Job Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/51-real-time-analytics-and-top-k/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    51. Real-time Analytics & Top-K
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/52-object-storage-and-media-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    52. Object Storage & Media Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/53-web-crawler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    53. Web Crawler (Price Monitoring)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/54-distributed-key-value-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    54. Distributed Key-Value Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../05-case-studies/55-order-matching-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    55. Order Matching Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capstone
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Capstone
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../06-capstone/56-capstone-grocery-marketplace-end-to-end/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    56. The Grocery Marketplace, End to End
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interview
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interview
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/57-the-system-design-interview-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    57. The System Design Interview Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/58-level-expectations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    58. Level Expectations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/59-interview-qa-bank/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    59. Interview Q&A Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/60-mock-interviews/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    60. Mock Interviews
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/61-behavioral-and-leadership/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    61. Behavioural & Leadership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../07-interview/qa-bank-starred/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ⭐ Drill Bank
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Industry Designs
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Industry Designs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01-amazon-style-global-marketplace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01. Amazon-Style Global Marketplace
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i01b-amazon-how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I01b. Amazon — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i02-flipkart-style-sale-day-ecommerce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02. Flipkart-Style Sale-Day E-Commerce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02b. Flipkart — How It Works
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I02b. Flipkart — How It Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-what-makes-indian-e-commerce-different" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. What Makes Indian E-Commerce Different
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-architecture-in-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Architecture in Layers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-the-customer-journey-step-by-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. The Customer Journey, Step by Step
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. The Customer Journey, Step by Step">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-opening-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Opening the app
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-searching-in-hindi-hinglish-or-by-voice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Searching in Hindi, Hinglish or by voice
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-the-product-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 The product page
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-cart-and-checkout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Cart and checkout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-payments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Payments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-order-management-and-fulfilment-choice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 Order management and fulfilment choice
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-warehouses-and-the-logistics-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 Warehouses and the logistics network
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-returns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 Returns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-customer-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 Customer support
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-the-seller-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. The Seller Journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-algorithms-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Algorithms Catalog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5a-deep-dives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A. Deep Dives
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5A. Deep Dives">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#5a1-how-the-search-index-is-built-and-kept-fresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.1 How the search index is built and kept fresh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a2-how-recommendations-are-produced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.2 How recommendations are produced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a3-how-serviceability-and-the-promise-are-computed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.3 How serviceability and the promise are computed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a4-inside-a-warehouse-wms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.4 Inside a warehouse (WMS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a5-a-sale-day-request-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.5 A sale-day request, end to end
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a6-loyalty-coins-and-membership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.6 Loyalty coins and membership
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-data-platform-and-warehouse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Data Platform and Warehouse
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Data Platform and Warehouse">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-public-milestones-verify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Public milestones (VERIFY)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-reference-design-for-a-platform-of-this-kind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Reference design for a platform of this kind
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-data-model-highlights" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Data model highlights
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-tech-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Tech Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-reliability-and-sale-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Reliability and Sale Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-interview-angles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Interview Angles
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i03-core-banking-and-upi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I03. Core Banking & UPI Payments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i04-hospital-ehr-and-telemedicine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I04. Hospital EHR & Telemedicine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i05-ride-hailing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I05. Ride-Hailing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i06-video-streaming-and-live-cricket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I06. Video Streaming & Live Cricket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i07-messaging-and-social-feed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I07. Messaging & Social Feed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i08-stockbroking-platform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I08. Stockbroking Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i09-insurance-policy-and-claims/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I09. Insurance Policy & Claims
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i10-travel-and-railway-ticketing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I10. Travel & Railway Ticketing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i11-telecom-billing-and-charging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I11. Telecom Billing & Charging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i12-logistics-and-supply-chain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I12. Logistics & Supply Chain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i13-online-exams-and-live-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I13. Online Exams & Live Classes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i14-national-digital-id-and-vaccination-registration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I14. National Digital ID & Vaccination Registration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i15-multiplayer-gaming-and-leaderboards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I15. Multiplayer Gaming & Leaderboards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i16-smart-metering-and-iot-telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I16. Smart Metering & IoT Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i17-hotel-and-homestay-booking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I17. Hotel & Homestay Booking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../i18-food-delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I18. Food Delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Appendix
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Appendix
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/qa-index/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full Question Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../99-appendix/lab-catalogue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab Catalogue
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-what-makes-indian-e-commerce-different" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. What Makes Indian E-Commerce Different
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-architecture-in-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Architecture in Layers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-the-customer-journey-step-by-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. The Customer Journey, Step by Step
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. The Customer Journey, Step by Step">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-opening-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Opening the app
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-searching-in-hindi-hinglish-or-by-voice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Searching in Hindi, Hinglish or by voice
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-the-product-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 The product page
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-cart-and-checkout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Cart and checkout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-payments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Payments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-order-management-and-fulfilment-choice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 Order management and fulfilment choice
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-warehouses-and-the-logistics-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 Warehouses and the logistics network
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-returns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 Returns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-customer-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 Customer support
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-the-seller-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. The Seller Journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-algorithms-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Algorithms Catalog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5a-deep-dives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A. Deep Dives
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5A. Deep Dives">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#5a1-how-the-search-index-is-built-and-kept-fresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.1 How the search index is built and kept fresh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a2-how-recommendations-are-produced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.2 How recommendations are produced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a3-how-serviceability-and-the-promise-are-computed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.3 How serviceability and the promise are computed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a4-inside-a-warehouse-wms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.4 Inside a warehouse (WMS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a5-a-sale-day-request-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.5 A sale-day request, end to end
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5a6-loyalty-coins-and-membership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5A.6 Loyalty coins and membership
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-data-platform-and-warehouse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Data Platform and Warehouse
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Data Platform and Warehouse">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-public-milestones-verify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Public milestones (VERIFY)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-reference-design-for-a-platform-of-this-kind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Reference design for a platform of this kind
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-data-model-highlights" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Data model highlights
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-tech-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Tech Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-reliability-and-sale-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Reliability and Sale Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-interview-angles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Interview Angles
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="i02b-flipkart-style-e-commerce-how-the-whole-system-works">I02b. Flipkart-Style E-Commerce — How the Whole System Works<a class="headerlink" href="#i02b-flipkart-style-e-commerce-how-the-whole-system-works" title="Permanent link">&para;</a></h1>
+<div class="admonition abstract">
+<p class="admonition-title">What this page adds</p>
+<p><a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> focuses on four sale-day problems with labs. This page is the <strong>system walkthrough, with no code</strong>. It follows a customer and a seller through an Indian e-commerce platform:</p>
+<ul>
+<li>the app and edge, catalog and seller onboarding, vernacular search and discovery, recommendations and ads;</li>
+<li>pricing, offers and loyalty, cart and checkout, payments including UPI, EMI and COD;</li>
+<li>fraud and abuse, and the order pipeline;</li>
+<li>the logistics network: warehouses, hubs, pincode serviceability, last mile, COD cash, and returns;</li>
+<li>customer support;</li>
+<li>the <strong>algorithms</strong>, the <strong>data platform and warehouse</strong>, and the <strong>tech stack</strong>.</li>
+</ul>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Sources and honesty</p>
+<p>Statements about Flipkart come from <strong>public sources</strong>: its engineering blog, conference talks, case studies published by technology vendors, and news. They are marked <strong>VERIFY</strong>. Internal details are not public, so "a system like this would…" describes a <strong>reference design</strong>.</p>
+</div>
+<hr />
+<h2 id="1-what-makes-indian-e-commerce-different">1. What Makes Indian E-Commerce Different<a class="headerlink" href="#1-what-makes-indian-e-commerce-different" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Factor</th>
+<th>System consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Mobile-first, many entry-level Android phones</strong></td>
+<td>Lightweight apps and PWAs, small payloads, offline tolerance (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> L3)</td>
+</tr>
+<tr>
+<td><strong>~19,000+ pincodes with uneven courier reach</strong></td>
+<td>Serviceability and promise computed per pincode (VERIFY count)</td>
+</tr>
+<tr>
+<td><strong>Cash on delivery still common</strong></td>
+<td>COD risk scoring, cash reconciliation, RTO management (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> L2)</td>
+</tr>
+<tr>
+<td><strong>Many languages</strong></td>
+<td>Vernacular UI, transliteration, voice search</td>
+</tr>
+<tr>
+<td><strong>Festive sale concentration</strong></td>
+<td>Big Billion Days-style events with extreme peaks (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a>)</td>
+</tr>
+<tr>
+<td><strong>UPI, bank offers, no-cost EMI, pay later</strong></td>
+<td>Complex checkout pricing and payment routing</td>
+</tr>
+<tr>
+<td><strong>Regulation</strong></td>
+<td>E-commerce rules for marketplaces, FDI rules on the marketplace model, GST, payment data storage (VERIFY)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-architecture-in-layers">2. Architecture in Layers<a class="headerlink" href="#2-architecture-in-layers" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart TB
+    subgraph Clients
+        APP[Android and iOS apps]
+        LITE[Mobile web and PWA]
+        SAPP[Seller Hub app and portal]
+        WH[Warehouse and delivery apps]
+    end
+    subgraph Edge
+        CDN[CDN - images, static, cacheable pages]
+        GW[API gateway, bot defence, rate limits]
+    end
+    subgraph Experience
+        PAGES[Page composition - home, browse, product, cart, checkout]
+        CMS[Content and widget platform - sale pages]
+    end
+    subgraph Commerce
+        CAT[Catalog and listings]
+        SRCH[Search - vernacular, voice]
+        REC[Recommendations and personalisation]
+        PRICE[Pricing, offers, bank offers, coupons]
+        LOY[Loyalty - coins and membership]
+        CART[Cart]
+        CHK[Checkout]
+        PAY[Payments - UPI, cards, EMI, COD, pay later]
+        RISK[Risk - fraud, COD, resellers]
+        ORD[Order management]
+        ADS[Ads platform]
+        SUP[Customer support]
+    end
+    subgraph Supply
+        SELL[Seller platform - onboarding, inventory, settlement]
+        WMS[Warehouse management]
+        SVC[Serviceability and promise]
+        LMS[Logistics - hubs, routing, last mile, COD cash]
+        RET[Returns and reverse logistics]
+    end
+    subgraph Data
+        BUS[Event streams]
+        LAKE[Data platform - lake and warehouse]
+        MLP[ML platform]
+    end
+    Clients --&gt; Edge --&gt; Experience
+    Experience --&gt; Commerce
+    Commerce --&gt; Supply
+    Commerce --&gt; BUS
+    Supply --&gt; BUS
+    BUS --&gt; LAKE --&gt; MLP
+    MLP --&gt; Commerce</code></pre>
+<hr />
+<h2 id="3-the-customer-journey-step-by-step">3. The Customer Journey, Step by Step<a class="headerlink" href="#3-the-customer-journey-step-by-step" title="Permanent link">&para;</a></h2>
+<h3 id="31-opening-the-app">3.1 Opening the app<a class="headerlink" href="#31-opening-the-app" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>App launch:</strong> a single <strong>home page API</strong> call returns a personalised layout.<ul>
+<li>Widgets such as banners, deals and "recently viewed" are chosen by a <strong>content/widget platform</strong> that marketing configures for sales without code deployments.</li>
+<li>Personalisation ranks the widgets.</li>
+</ul>
+</li>
+<li><strong>Caching:</strong><ul>
+<li><strong>Static assets and images</strong> come from the CDN in sizes appropriate to the device.</li>
+<li><strong>Personalised parts</strong> are fetched separately from cacheable parts, so most bytes are cacheable at the edge.</li>
+</ul>
+</li>
+<li><strong>Device constraints:</strong> for low-end devices and slow networks, the app or PWA downloads less (fewer widgets, lower-resolution images). Flipkart publicly launched a PWA, Flipkart Lite, in 2015 (VERIFY).</li>
+</ol>
+<h3 id="32-searching-in-hindi-hinglish-or-by-voice">3.2 Searching in Hindi, Hinglish or by voice<a class="headerlink" href="#32-searching-in-hindi-hinglish-or-by-voice" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>The query</strong> can be typed in English, Hindi script, Latin-script Hindi ("mobail cover") or spoken.</li>
+<li><strong>Speech:</strong> voice input goes through speech recognition to text. Flipkart has publicly discussed vernacular voice search (VERIFY details).</li>
+<li><strong>Query understanding:</strong><ul>
+<li>transliteration and normalisation to a common representation;</li>
+<li>spell correction trained on Indian spelling patterns;</li>
+<li>vernacular-to-English mapping for catalog terms;</li>
+<li>category and attribute prediction (e.g. "under 15000" becomes a price filter).</li>
+</ul>
+</li>
+<li><strong>Retrieval:</strong><ul>
+<li>lexical matches from an inverted index;</li>
+<li><strong>semantic retrieval</strong> with multilingual embeddings;</li>
+<li>filtered by serviceability to the user's pincode.</li>
+</ul>
+</li>
+<li><strong>Ranking:</strong> learning-to-rank on relevance, conversion history, price competitiveness, delivery speed, ratings and seller quality. Sponsored listings are blended through the ads auction.</li>
+</ol>
+<h3 id="33-the-product-page">3.3 The product page<a class="headerlink" href="#33-the-product-page" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Components:</strong><ul>
+<li>catalog content (possibly translated);</li>
+<li>the chosen seller's offer (a buy-box-like selection among sellers, similar to <a href="../i01-amazon-style-global-marketplace/">I01</a>);</li>
+<li>price with sale discount;</li>
+<li><strong>bank offers and EMI options</strong> (estimated);</li>
+<li>exchange offers;</li>
+<li><strong>delivery date for the user's pincode</strong>;</li>
+<li>COD availability;</li>
+<li>ratings and reviews;</li>
+<li>questions and answers;</li>
+<li>recommendations.</li>
+</ul>
+</li>
+<li><strong>Pincode check:</strong> the serviceability service answers from precomputed tables:<ul>
+<li>pincode × seller or warehouse × product size/weight class × payment type;</li>
+<li>result: can we deliver, by when, and is COD allowed.</li>
+</ul>
+</li>
+</ul>
+<h3 id="34-cart-and-checkout">3.4 Cart and checkout<a class="headerlink" href="#34-cart-and-checkout" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Cart:</strong> the cart stores items and quantities. It can be merged across devices at login.</li>
+<li><strong>Checkout:</strong><ul>
+<li>address selection, with <strong>address quality checks</strong>: pincode validation, geocoding, and prompts for missing landmarks;</li>
+<li>serviceability re-check.</li>
+</ul>
+</li>
+<li><strong>Price computation:</strong><ul>
+<li>sale price;</li>
+<li>coupon;</li>
+<li><strong>bank offer</strong> once the payment instrument is known;</li>
+<li>coins or loyalty redemption;</li>
+<li>delivery fee rules;</li>
+<li>taxes (GST per item and seller).</li>
+</ul>
+</li>
+<li><strong>Payment options:</strong> UPI (intent or collect), cards (tokenised), net banking, EMI (card EMI, cardless EMI or pay later), wallets and gift cards, and <strong>COD</strong> if the risk score allows (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> L2).</li>
+<li><strong>Order placement:</strong><ul>
+<li>reservation of stock from the chosen warehouse or seller;</li>
+<li>payment authorisation (or COD confirmation flow);</li>
+<li>order created with the promise, the fulfilment plan and price breakdown lines (who funds each discount: seller, platform or bank).</li>
+</ul>
+</li>
+</ol>
+<h3 id="35-payments">3.5 Payments<a class="headerlink" href="#35-payments" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Routing:</strong> a payments orchestrator routes each transaction to a gateway or processor by method, bank and <strong>live success rates</strong> (<a href="../../05-case-studies/45-payment-system/">Ch 45</a> L4).</li>
+<li><strong>UPI flows:</strong> intent (opens a UPI app) or collect (request in the UPI app), with status polling and callbacks; see <a href="../i03-core-banking-and-upi/">I03</a> for the bank side.</li>
+<li><strong>EMI and pay later:</strong> eligibility checks with lenders. The platform may partner with lenders for credit products (VERIFY).</li>
+<li><strong>Refunds</strong> go to the source instrument or wallet. Reconciliation against gateway and bank settlement files, as in <a href="../../05-case-studies/45-payment-system/">Ch 45</a>.</li>
+</ul>
+<h3 id="36-order-management-and-fulfilment-choice">3.6 Order management and fulfilment choice<a class="headerlink" href="#36-order-management-and-fulfilment-choice" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The order management system (OMS)</strong> splits the order into shipments by seller, warehouse and size class. Each shipment is a state machine: created → packed → dispatched → in transit → out for delivery → delivered or RTO.</li>
+<li><strong>Fulfilment models:</strong><ul>
+<li><strong>platform warehouses</strong> hold seller inventory (a fulfilment-by-platform model; Flipkart's "Flipkart Assured" signals quality and fast delivery, VERIFY);</li>
+<li><strong>seller-fulfilled</strong> items are picked up from the seller.</li>
+</ul>
+</li>
+<li><strong>Cancellation</strong> is allowed until dispatch. Payment is authorised or captured according to the method.</li>
+</ul>
+<h3 id="37-warehouses-and-the-logistics-network">3.7 Warehouses and the logistics network<a class="headerlink" href="#37-warehouses-and-the-logistics-network" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Warehouses (fulfilment centres):</strong> inbound from sellers, stow, pick, pack.<ul>
+<li>Large-appliance warehouses are separate from small-item ones.</li>
+<li>Sortation is automated at big sites (VERIFY specific automation).</li>
+</ul>
+</li>
+<li><strong>Network:</strong> fulfilment centre → <strong>mother hubs</strong> (large sortation) → <strong>delivery hubs</strong> near pincode clusters → delivery agents. This is a hub-and-spoke network run by the in-house logistics arm (Ekart; VERIFY current structure) plus third-party couriers.</li>
+<li><strong>Line-haul:</strong> truck schedules between hubs, planned from volume forecasts. Sale periods add temporary hubs and vehicles.</li>
+<li><strong>Last mile:</strong><ul>
+<li>shipments assigned to delivery agents by area;</li>
+<li><strong>route optimisation</strong> (VRP with time windows and capacity);</li>
+<li>agent app with navigation, proof of delivery (OTP, photo);</li>
+<li>COD cash collection and UPI-at-door.</li>
+</ul>
+</li>
+<li><strong>COD cash:</strong> agents deposit cash at hubs. Cash is reconciled per shipment and remitted. Mismatches are investigated (<a href="../../05-case-studies/45-payment-system/">Ch 45</a> §2.7).</li>
+<li><strong>Failed deliveries:</strong> re-attempt scheduling, customer calls. If it still fails, <strong>RTO</strong> back to the warehouse or seller.</li>
+</ol>
+<h3 id="38-returns">3.8 Returns<a class="headerlink" href="#38-returns" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Return request:</strong> reason captured; policy checked (return, replacement, or not returnable).</li>
+<li><strong>Reverse pickup:</strong> scheduled, with doorstep quality checks for some categories (e.g. matching IMEI for phones).</li>
+<li><strong>Refund:</strong> issued on pickup or on receipt, depending on the customer's trust tier.</li>
+<li><strong>Returned item:</strong> graded at the warehouse, then restocked, returned to the seller, or refurbished.</li>
+</ul>
+<h3 id="39-customer-support">3.9 Customer support<a class="headerlink" href="#39-customer-support" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Self-service first:</strong> order tracking, cancellation, returns and refund status.</li>
+<li><strong>Chat:</strong> a chatbot with intent classification, handing off to agents with full order context.</li>
+<li><strong>Voice support in multiple languages.</strong></li>
+<li><strong>Operations:</strong> support tickets link to orders and shipments. Common issues are auto-resolved by rules, e.g. refunding automatically when a shipment is marked lost.</li>
+</ul>
+<hr />
+<h2 id="4-the-seller-journey">4. The Seller Journey<a class="headerlink" href="#4-the-seller-journey" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Onboarding:</strong> GST and PAN verification, bank account verification, and address and pickup location (VERIFY required documents).</li>
+<li><strong>Listing:</strong><ul>
+<li>match to an existing catalog product, or create a new listing with attributes per category;</li>
+<li><strong>quality checks</strong> on images and content, with ML models detecting prohibited items, counterfeit indicators and poor images.</li>
+</ul>
+</li>
+<li><strong>Inventory and pricing:</strong> sellers manage stock and prices through the portal or APIs. <strong>Pricing recommendations</strong> suggest competitive prices.</li>
+<li><strong>Orders:</strong> notifications with dispatch SLAs, labels and manifests, and pickup scheduling.</li>
+<li>
+<p><strong>Settlement:</strong></p>
+<ul>
+<li>the platform collects payments;</li>
+<li>it deducts commission, fees (fixed, shipping, collection) and taxes (TCS under GST, VERIFY);</li>
+<li>it settles to the seller on a schedule, with detailed statements.</li>
+</ul>
+<p>This needs a per-seller ledger.
+6. <strong>Performance:</strong> metrics (cancellation, late dispatch, returns) affect visibility and eligibility for programmes.
+7. <strong>Ads:</strong> sellers buy sponsored placements with bids and budgets.</p>
+</li>
+</ol>
+<hr />
+<h2 id="5-algorithms-catalog">5. Algorithms Catalog<a class="headerlink" href="#5-algorithms-catalog" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Problem</th>
+<th>Algorithm (typical)</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Query understanding (vernacular)</td>
+<td>Transliteration models, spell correction, multilingual classifiers for category and attributes</td>
+<td>Search</td>
+</tr>
+<tr>
+<td>Retrieval</td>
+<td>Inverted index + multilingual embeddings with ANN (HNSW)</td>
+<td>Search</td>
+</tr>
+<tr>
+<td>Ranking</td>
+<td>Learning-to-rank (gradient-boosted trees → neural rankers)</td>
+<td>Search, browse</td>
+</tr>
+<tr>
+<td>Recommendations</td>
+<td>Item-to-item co-view/co-purchase; embedding-based candidate generation (two-tower) + ranking; session-based sequence models</td>
+<td>Home, product pages</td>
+</tr>
+<tr>
+<td>Home page layout</td>
+<td>Widget ranking (contextual bandits or learned ranking)</td>
+<td>Home</td>
+</tr>
+<tr>
+<td>Pricing</td>
+<td>Elasticity and competitive price models; sale pricing rules</td>
+<td>Pricing</td>
+</tr>
+<tr>
+<td>Bank offer budgets</td>
+<td>Budget pacing controllers (<a href="../../05-case-studies/49-pricing-promotions-and-coupons/">Ch 49</a>)</td>
+<td>Offers</td>
+</tr>
+<tr>
+<td>Demand forecasting</td>
+<td>Hierarchical time-series forecasting (category → product, national → region), with sale uplift features</td>
+<td>Inventory, capacity</td>
+</tr>
+<tr>
+<td>Serviceability</td>
+<td>Precomputed lookup tables from courier coverage and SLAs</td>
+<td>Promise</td>
+</tr>
+<tr>
+<td>COD risk</td>
+<td>Gradient-boosted classifiers on customer, pincode and order features</td>
+<td>Checkout (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> L2)</td>
+</tr>
+<tr>
+<td>Address intelligence</td>
+<td>Address parsing, normalisation and geocoding; clustering to delivery hubs</td>
+<td>Logistics, abuse (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> L4)</td>
+</tr>
+<tr>
+<td>Fraud and abuse</td>
+<td>Graph features across devices, payments and addresses; anomaly detection</td>
+<td>Risk</td>
+</tr>
+<tr>
+<td>Hub routing</td>
+<td>Network flow / shortest path with capacities</td>
+<td>Middle mile</td>
+</tr>
+<tr>
+<td>Last-mile routing</td>
+<td>VRP with time windows (heuristics, local search)</td>
+<td>Delivery agents</td>
+</tr>
+<tr>
+<td>Warehouse slotting and picking</td>
+<td>Velocity-based slotting, batch picking, route heuristics</td>
+<td>Warehouses</td>
+</tr>
+<tr>
+<td>Deal unlocks</td>
+<td>Client time sync (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> L1)</td>
+<td>Sale events</td>
+</tr>
+<tr>
+<td>Support</td>
+<td>Intent classification, automated resolution rules</td>
+<td>Customer support</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5a-deep-dives">5A. Deep Dives<a class="headerlink" href="#5a-deep-dives" title="Permanent link">&para;</a></h2>
+<h3 id="5a1-how-the-search-index-is-built-and-kept-fresh">5A.1 How the search index is built and kept fresh<a class="headerlink" href="#5a1-how-the-search-index-is-built-and-kept-fresh" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Source events:</strong> catalog changes (new listing, attribute edit), offer changes (price, stock, seller) and serviceability changes all emit events.</li>
+<li><strong>Document assembly:</strong> an indexing pipeline joins these into a <strong>search document</strong> per product. It holds:<ul>
+<li>title and attributes;</li>
+<li>vernacular and transliterated variants;</li>
+<li>category path;</li>
+<li>best price and discount;</li>
+<li>rating;</li>
+<li>seller-quality score;</li>
+<li><strong>availability by region</strong> (bitmaps or lists of serviceable warehouse clusters).</li>
+</ul>
+</li>
+<li>
+<p><strong>Two update paths:</strong></p>
+<ul>
+<li><strong>real-time partial updates</strong> for price and stock, within seconds, so sold-out items don't rank;</li>
+<li><strong>periodic full rebuilds</strong> (e.g. nightly) for text and embedding changes.</li>
+</ul>
+<p>Blue-green index aliases switch rebuilt indexes in without downtime (<a href="../../03-production/22-search-systems/">Ch 22</a>).
+4. <strong>Embeddings:</strong> product embeddings are recomputed in batch by the ML platform and pushed to the vector index. Query embeddings are computed online.
+5. <strong>Serving:</strong> search nodes shard the index by product and replicate each shard. A query fans out to shards, merges top-K, then re-ranks with the heavier model on the top few hundred (<a href="../../05-case-studies/42-search-autocomplete/">Ch 42</a> for autocomplete).</p>
+</li>
+</ol>
+<h3 id="5a2-how-recommendations-are-produced">5A.2 How recommendations are produced<a class="headerlink" href="#5a2-how-recommendations-are-produced" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Candidate generation.</strong> Several cheap sources each propose hundreds of items:<ul>
+<li>co-view and co-buy item-to-item tables (precomputed daily);</li>
+<li>embedding nearest neighbours of recently viewed items;</li>
+<li>trending in the user's city;</li>
+<li>category affinity;</li>
+<li>"continue where you left off".</li>
+</ul>
+</li>
+<li><strong>Ranking:</strong> one model scores all candidates with user features, item features, context (time, device, language, sale day) and cross features, trained on clicks and purchases.</li>
+<li><strong>Re-ranking:</strong> business rules and diversity, such as:<ul>
+<li>not five similar phones in a row;</li>
+<li>boosting in-stock items that are fast to deliver to this pincode;</li>
+<li>removing out-of-stock or non-serviceable items;</li>
+<li>frequency caps for sponsored items.</li>
+</ul>
+</li>
+<li><strong>Serving:</strong><ul>
+<li>precomputed recommendations for the home page are stored per user in a key-value store, so reading them is a single lookup;</li>
+<li>real-time signals (the last few views in this session) re-rank at request time;</li>
+<li>everything degrades to popular-in-category if the model service is slow.</li>
+</ul>
+</li>
+<li><strong>Measurement:</strong> A/B tests on conversion and revenue per session, and guardrails on page latency.</li>
+</ol>
+<h3 id="5a3-how-serviceability-and-the-promise-are-computed">5A.3 How serviceability and the promise are computed<a class="headerlink" href="#5a3-how-serviceability-and-the-promise-are-computed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Inputs:</strong><ul>
+<li>courier and own-logistics coverage per pincode;</li>
+<li>hub mappings;</li>
+<li>transit time matrices (origin hub → destination hub, hub → pincode);</li>
+<li>cut-off times;</li>
+<li>capacity per hub per day;</li>
+<li>product constraints (weight, size, hazardous items, high value);</li>
+<li>payment constraints (COD limits per pincode).</li>
+</ul>
+</li>
+<li>
+<p><strong>Precompute:</strong> a batch job builds a table:</p>
+<blockquote>
+<p>origin warehouse cluster × destination pincode × product class → {serviceable, promise days, COD allowed, courier options}</p>
+</blockquote>
+<p>It is loaded into a low-latency key-value store and refreshed several times a day, plus immediately on disruptions (hub closure, floods).
+- <strong>At request time:</strong> find warehouses holding stock for the product, look up each (warehouse, pincode, class), and choose the fastest serviceable option with capacity. The result is the "Delivery by Tuesday" and COD flag.
+- <strong>Feedback:</strong> actual delivery times feed back into transit-time estimates, so promises reflect reality. Promise accuracy is tracked per pincode and hub.</p>
+</li>
+</ul>
+<h3 id="5a4-inside-a-warehouse-wms">5A.4 Inside a warehouse (WMS)<a class="headerlink" href="#5a4-inside-a-warehouse-wms" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Inbound:</strong> receive against the seller's advance shipping notice, with quality checks per category.</li>
+<li><strong>Put-away and slotting:</strong> fast-moving items go to locations close to packing. Slotting is recomputed by sales velocity before sales.</li>
+<li><strong>Order release in waves:</strong> orders are grouped by dispatch cut-off and destination hub.</li>
+<li><strong>Picking:</strong><ul>
+<li><strong>batch picking</strong>: one picker collects items for many orders, then they are sorted to orders (put-wall);</li>
+<li>pick paths are optimised per zone.</li>
+</ul>
+</li>
+<li><strong>Packing:</strong> box recommendation by item dimensions; invoice and label printing.</li>
+<li><strong>Sortation:</strong> sorted by destination hub into bags or cages, then manifested per truck.</li>
+<li><strong>Sale preparation:</strong> pre-packing of hot deal items before the sale (packed and labelled once the order arrives), and extra shifts.</li>
+</ol>
+<h3 id="5a5-a-sale-day-request-end-to-end">5A.5 A sale-day request, end to end<a class="headerlink" href="#5a5-a-sale-day-request-end-to-end" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Before the unlock:</strong> the user opens the deal page from the CDN, and the app syncs to server time (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> L1).</li>
+<li><strong>Buy:</strong> the tap goes through the gateway (bot checks, rate limits) into the <strong>waiting room</strong>, which admits the user at checkout's sustainable rate (<a href="../../05-case-studies/46-grocery-checkout-and-inventory-reservation/">Ch 46</a>).</li>
+<li><strong>Checkout:</strong><ul>
+<li>the deal quantity is reserved from bucketed stock;</li>
+<li>the household limit is checked (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> L4);</li>
+<li>the price is computed with bank offers, the offer budget reserved, the payment authorised, and the order created.</li>
+</ul>
+</li>
+<li><strong>Events:</strong> order events flow to OMS, the warehouse release queue, notifications, and the <strong>real-time sale dashboard</strong> via stream processing.</li>
+<li><strong>Fulfilment:</strong> pre-packed items ship within hours. Logistics hubs run extended shifts, and customers see live tracking from scan events.</li>
+</ol>
+<h3 id="5a6-loyalty-coins-and-membership">5A.6 Loyalty coins and membership<a class="headerlink" href="#5a6-loyalty-coins-and-membership" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Coins</strong> are earned on orders and credited after the return window. They are redeemable on later orders and partner offers, and expire.</li>
+<li><strong>Accounting:</strong> a <strong>ledger per customer</strong>, where earning, redemption, expiry and reversal on return are all entries (<a href="../../05-case-studies/45-payment-system/">Ch 45</a> patterns). Coin liability is tracked by finance.</li>
+<li><strong>Membership tiers</strong> unlock benefits (early sale access, free delivery). Tier eligibility is computed from spend or coins over a window.</li>
+</ul>
+<hr />
+<h2 id="6-data-platform-and-warehouse">6. Data Platform and Warehouse<a class="headerlink" href="#6-data-platform-and-warehouse" title="Permanent link">&para;</a></h2>
+<h3 id="61-public-milestones-verify">6.1 Public milestones (VERIFY)<a class="headerlink" href="#61-public-milestones-verify" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Flipkart has publicly described an in-house <strong>data platform</strong> built on the Hadoop ecosystem for batch processing and reporting, plus streaming pipelines, in engineering blog posts.</li>
+<li>Flipkart announced a strategic partnership with <strong>Google Cloud</strong> (2021), which included cloud infrastructure (VERIFY scope).</li>
+</ul>
+<h3 id="62-reference-design-for-a-platform-of-this-kind">6.2 Reference design for a platform of this kind<a class="headerlink" href="#62-reference-design-for-a-platform-of-this-kind" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Role</th>
+<th>Reference technology</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Event collection</td>
+<td>App clickstream, service events</td>
+<td>SDK → collectors → Kafka</td>
+</tr>
+<tr>
+<td>Change data</td>
+<td>From operational databases</td>
+<td>Debezium CDC → Kafka</td>
+</tr>
+<tr>
+<td>Stream processing</td>
+<td>Real-time metrics, fraud features, sale dashboards</td>
+<td>Apache Flink</td>
+</tr>
+<tr>
+<td>Lake storage</td>
+<td>Raw and curated tables</td>
+<td>Object storage + Apache Iceberg/Hudi</td>
+</tr>
+<tr>
+<td>Batch processing</td>
+<td>Heavy transforms</td>
+<td>Apache Spark</td>
+</tr>
+<tr>
+<td>Warehouse and query</td>
+<td>Analytics SQL</td>
+<td>Trino/Presto, a cloud warehouse (e.g. BigQuery), or ClickHouse for real-time dashboards</td>
+</tr>
+<tr>
+<td>Orchestration</td>
+<td>Pipelines</td>
+<td>Airflow; dbt for SQL models</td>
+</tr>
+<tr>
+<td>Catalog and governance</td>
+<td>Ownership, lineage, PII tags</td>
+<td>DataHub or OpenMetadata</td>
+</tr>
+<tr>
+<td>BI</td>
+<td>Dashboards</td>
+<td>Superset, Looker or similar</td>
+</tr>
+<tr>
+<td>ML</td>
+<td>Features, training, serving</td>
+<td>Feature store, Spark/PyTorch training, model serving on Kubernetes</td>
+</tr>
+<tr>
+<td>Experimentation</td>
+<td>A/B tests</td>
+<td>An in-house platform on the lake</td>
+</tr>
+</tbody>
+</table>
+<h3 id="63-data-model-highlights">6.3 Data model highlights<a class="headerlink" href="#63-data-model-highlights" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Facts:</strong><ul>
+<li>sessions and events (views, searches, clicks);</li>
+<li>cart events, orders and order items;</li>
+<li>shipments with every logistics scan;</li>
+<li>deliveries, RTOs and returns;</li>
+<li>payments and refunds;</li>
+<li>ad impressions and clicks;</li>
+<li>seller settlements.</li>
+</ul>
+</li>
+<li><strong>Dimensions:</strong> customer (pseudonymised), product and category tree, seller, pincode (with city tier, state, hub), warehouse, courier, payment method and bank, date and time (with sale-event flags).</li>
+<li><strong>Key derived metrics:</strong><ul>
+<li>conversion funnel by channel and language;</li>
+<li>search success rate by language;</li>
+<li>promise accuracy by pincode;</li>
+<li>RTO rate by pincode, courier and payment type;</li>
+<li>COD share;</li>
+<li>bank offer spend vs budget;</li>
+<li>seller performance;</li>
+<li>cost per shipment.</li>
+</ul>
+</li>
+<li><strong>Real-time sale dashboards</strong> (seconds-level) come from stream processing, not the batch warehouse.</li>
+</ul>
+<hr />
+<h2 id="7-tech-stack">7. Tech Stack<a class="headerlink" href="#7-tech-stack" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Publicly reported for Flipkart (VERIFY each)</th>
+<th>Reference choice</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Services</td>
+<td>Java-based microservices widely reported</td>
+<td>Java 21 / Spring Boot, gRPC</td>
+</tr>
+<tr>
+<td>Front end</td>
+<td>Native Android/iOS; React-based web and PWA (Flipkart Lite)</td>
+<td>Kotlin/Swift or Flutter; React/Next.js PWA</td>
+</tr>
+<tr>
+<td>Key-value and caching</td>
+<td>Aerospike reported in vendor case studies</td>
+<td>Aerospike or Redis for sessions and carts</td>
+</tr>
+<tr>
+<td>Relational</td>
+<td>MySQL widely reported</td>
+<td>MySQL/PostgreSQL, sharded (Vitess/Citus)</td>
+</tr>
+<tr>
+<td>Wide-column / big tables</td>
+<td>HBase reported in the Hadoop-based platform</td>
+<td>HBase/Cassandra, or cloud equivalents</td>
+</tr>
+<tr>
+<td>Search</td>
+<td>Solr/Elasticsearch-family engines reported</td>
+<td>OpenSearch/Elasticsearch + vector search</td>
+</tr>
+<tr>
+<td>Messaging</td>
+<td>Kafka widely used</td>
+<td>Kafka</td>
+</tr>
+<tr>
+<td>Data platform</td>
+<td>Hadoop ecosystem; Google Cloud partnership (2021)</td>
+<td>Iceberg/Hudi + Spark + Trino/BigQuery</td>
+</tr>
+<tr>
+<td>Infrastructure</td>
+<td>Private cloud plus public cloud</td>
+<td>Kubernetes, Terraform, Argo CD</td>
+</tr>
+<tr>
+<td>Observability</td>
+<td>—</td>
+<td>OpenTelemetry, Prometheus, Grafana, ELK/OpenSearch</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-reliability-and-sale-operations">8. Reliability and Sale Operations<a class="headerlink" href="#8-reliability-and-sale-operations" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Readiness:</strong> capacity planning, load tests at a multiple of forecast, dependency agreements, and freeze windows (<a href="../i02-flipkart-style-sale-day-ecommerce/">I02</a> §2.10).</li>
+<li><strong>Isolation:</strong> sale-specific services (deal pages, waiting rooms) scaled and isolated from the everyday catalog, with <strong>feature switches</strong> to degrade non-critical widgets.</li>
+<li><strong>Logistics surge:</strong> temporary hubs, additional delivery agents, extended hours, and serviceability tightened when capacity is exceeded.</li>
+<li><strong>War room:</strong> journey dashboards, per-bank payment success, logistics backlog by hub, RTO early indicators.</li>
+</ul>
+<hr />
+<h2 id="9-interview-angles">9. Interview Angles<a class="headerlink" href="#9-interview-angles" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>B2:</strong> customer journey and services.</li>
+<li><strong>B3:</strong> serviceability, COD risk, vernacular search, logistics hubs.</li>
+<li><strong>B4:</strong> data platform, sale readiness, algorithms across the funnel.</li>
+</ul>
+<p>The 20 interview questions for this design are in <a href="../i02-flipkart-style-sale-day-ecommerce/">I02 §8</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../i02-flipkart-style-sale-day-ecommerce/" class="md-footer__link md-footer__link--prev" aria-label="Previous: I02. Flipkart-Style Sale-Day E-Commerce">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                I02. Flipkart-Style Sale-Day E-Commerce
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../i03-core-banking-and-upi/" class="md-footer__link md-footer__link--next" aria-label="Next: I03. Core Banking &amp; UPI Payments">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                I03. Core Banking & UPI Payments
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
