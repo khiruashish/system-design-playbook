@@ -1,0 +1,22 @@
+== 1. OLTP source: 10,000,000 order lines, 90 days, 200 stores, 8 cities, 20,000 SKUs, 30 categories
+   postgres table + indexes: 1384 MB
+== 2. ELT: extract → load → transform into a Parquet lake partitioned by day
+   extract (COPY to CSV): 9190 ms, 754 MB   |   transform + write Parquet: 6988 ms, 58 MB in 90 files
+== 3. Queries (best of 3; PostgreSQL uses up to 2 parallel workers, DuckDB 2 threads; 2 vCPU)
+   query                                                        PostgreSQL DuckDB/Parquet
+   Q1 OLTP: one order's lines by primary key                      0.894 ms        11 ms
+   Q2 OLAP: revenue by city x category, last 30 days            650.089 ms       164 ms
+   Q3 OLAP: top 10 SKUs in Bengaluru, whole quarter             627.849 ms       180 ms
+   Q4 OLAP: weekly distinct orders + GMV (tz math per row)     5448.943 ms      3331 ms
+   Q4 on the local date column dt computed once during ELT             n/a       463 ms
+   Q4 on dt with approx_count_distinct (HyperLogLog)                   n/a       295 ms
+   Q5 one day's GMV (PG: index range; lake: partition pruning)    16.902 ms         4 ms
+   same answers from both engines:
+      Q1 postgres 8bb10102, duckdb 8bb10102 same
+      Q2 postgres 64634485, duckdb 64634485 same
+      Q3 postgres c18eacfe, duckdb c18eacfe same
+      Q4 postgres 4ed32810, duckdb 4ed32810 same
+== 4. Why: bytes the engines touch
+   Q3 needs 3 of 11 columns. Parquet column sizes for city, sku_id, qty vs whole files:
+   columns read: 22.1 MB of 57.2 MB (columnar)   |   PostgreSQL heap: every page, all columns
+   Q5 with hive partitioning reads 1 file(s) of 90

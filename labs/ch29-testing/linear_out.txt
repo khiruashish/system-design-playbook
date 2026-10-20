@@ -1,0 +1,26 @@
+Linearizability checking: given a recorded history of a distributed register (initial value 0), does a valid
+sequential order exist? The checker respects real-time order AND register semantics (a read = the last write).
+
+   History 1 — correct register (quorum reads/writes):
+        C1 write(1) [0..3]
+        C2 read()->1 [2..5]
+        C1 write(2) [6..8]
+        C3 read()->2 [9..11]
+     → LINEARIZABLE. A valid real-time order exists: W1 R1 W2 R2
+
+   History 2 — async replica served a STALE read:
+        C1 write(1) [0..2]
+        C2 read()->1 [3..5]
+        C3 read()->0 [6..8]
+     → NOT LINEARIZABLE. No sequential order respects both real time and register semantics — the register lied.
+
+   History 3 — lost update (write acked but overwritten wrongly):
+        C1 write(1) [0..2]
+        C2 write(2) [3..5]
+        C3 read()->1 [6..8]
+     → NOT LINEARIZABLE. No sequential order respects both real time and register semantics — the register lied.
+
+   → the checker is your oracle: it turns 'the database says it's strongly consistent' into a mechanical proof
+     or a concrete counterexample. History 1 is accepted; the stale read and the lost update are both rejected
+     with certainty. This is exactly how Jepsen finds consistency violations that survived every unit test —
+     you generate randomized concurrent histories under fault injection (partitions, pauses) and check each one.

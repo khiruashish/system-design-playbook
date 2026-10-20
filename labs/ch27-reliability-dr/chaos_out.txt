@@ -1,0 +1,19 @@
+Game day: the product page depends on a NON-critical 'recommendations' service. Hypothesis each time:
+"a failure there must not breach the product-page SLO (p99 < 300 ms, errors < 1%)." We inject the fault and check.
+
+   --- resilience patterns OFF (timeout 150ms + breaker + empty-recos fallback) ---
+   baseline (no fault)                naive      p99     153 ms  errors   0.0%   SLO HELD
+   dependency SLOW (+3 s)             naive      p99    3012 ms  errors   0.0%   SLO BREACHED
+   dependency 50% ERRORS              naive      p99       6 ms  errors  50.2%   SLO BREACHED
+   dependency CRASHED (conn refused)  naive      p99       6 ms  errors 100.0%   SLO BREACHED
+   recovery (fault cleared)           naive      p99       3 ms  errors   0.0%   SLO HELD
+   --- resilience patterns ON (timeout 150ms + breaker + empty-recos fallback) ---
+   baseline (no fault)                resilient  p99       4 ms  errors   0.0%   SLO HELD
+   dependency SLOW (+3 s)             resilient  p99     151 ms  errors   0.0%   SLO HELD
+   dependency 50% ERRORS              resilient  p99       4 ms  errors   0.0%   SLO HELD
+   dependency CRASHED (conn refused)  resilient  p99       2 ms  errors   0.0%   SLO HELD
+   recovery (fault cleared)           resilient  p99       2 ms  errors   0.0%   SLO HELD
+
+   → naive: a slow/broken NON-critical dependency drags the whole product page past its SLO — the failure propagates.
+     resilient: a tight timeout caps the slow case, the breaker stops hammering a dead dependency, and the fallback (empty
+     recommendations) keeps the page within SLO. Chaos engineering is how you KNOW this before a real outage proves it.

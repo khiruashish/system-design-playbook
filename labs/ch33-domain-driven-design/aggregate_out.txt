@@ -1,0 +1,23 @@
+Replaying the same 9 operations against an ANEMIC Order and a RICH aggregate.
+
+   operation                            | anemic: rules broken after this op       | rich aggregate
+   add 2 x milk @ ₹60                   | valid                                    | accepted
+   add -1 x bread (UI bug)              | 1 broken (+non-positive quantity)        | REJECTED: quantity must be positive
+   add 15 x rice (bulk abuse)           | 2 broken (+qty > 10 per SKU)             | REJECTED: max 10 per SKU
+   admin tool sets total directly       | 3 broken (+total != subtotal - discount) | accepted
+   coupon larger than subtotal          | 4 broken (+discount outside 0..subtotal) | REJECTED: discount must be within 0..subtotal
+   place the order                      | 4 broken (carried over)                  | accepted
+   add item AFTER placing (2nd path)    | 4 broken (carried over)                  | REJECTED: cannot add items when PLACED
+   cancel the order                     | 4 broken (carried over)                  | accepted
+   cancel again (client retry)          | 4 broken (carried over)                  | accepted
+
+   Operations that left the order violating a business rule:  anemic 8/9   rich 0/9
+   Final anemic order: status=CANCELLED, 4 line(s), total ₹-4999.01 (true subtotal ₹1455.00)
+   Final rich order:   status=CANCELLED, 1 line(s), total ₹120.00
+
+   → the anemic model accepts every call, and once one invalid write lands the damage persists: every later state is
+     invalid too, ending as a CANCELLED order with a negative quantity and a total of ₹-4,999.01 against a real subtotal of ₹1,455.00.
+     The rules existed, but in callers' heads; each new code path (admin tool, retry, second UI) was a chance to skip them.
+     The aggregate makes illegal states unrepresentable: it rejects the bad commands at the boundary, derives the total
+     instead of storing it, treats the retried cancel as an idempotent no-op, and ends valid. That is the core DDD move:
+     put the invariant WITH the data it protects.

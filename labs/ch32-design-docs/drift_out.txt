@@ -1,0 +1,24 @@
+Architecture drift: dependencies recovered from source code vs relationships drawn in the design doc.
+
+   Recovered from code (8):
+      catalog -> topic:price-changes        (catalog/CatalogService.java:4)
+      checkout -> catalog                   (checkout/CheckoutService.java:2)
+      checkout -> ext:razorpay              (checkout/PaymentAdapter.java:3)
+      checkout -> promotions                (checkout/CheckoutService.java:4)
+      checkout -> topic:order-events        (checkout/CheckoutService.java:8)
+      dispatch -> ext:sms                   (dispatch/DispatchListener.java:4)
+      promotions -> catalog                 (promotions/PromotionsService.java:2)
+      topic:order-events -> dispatch        (dispatch/DispatchListener.java:3)
+   Documented in the design doc (6): [checkout -> catalog, checkout -> ext:razorpay, checkout -> topic:order-events, dispatch -> checkout, dispatch -> ext:sms, topic:order-events -> dispatch]
+
+   ✗ UNDOCUMENTED  catalog -> topic:price-changes       found at catalog/CatalogService.java:4
+   ✗ UNDOCUMENTED  checkout -> promotions               found at checkout/CheckoutService.java:4
+   ✗ UNDOCUMENTED  promotions -> catalog                found at promotions/PromotionsService.java:2
+   ✗ STALE         dispatch -> checkout                 drawn in the doc, absent from the code
+
+   → 5 of 6 documented relationships still hold; 3 real dependencies are missing from the diagram; 1 drawn
+     relationship(s) no longer exist. The undocumented ones matter most: checkout's synchronous call to promotions is now on the
+     checkout critical path (a latency and availability dependency no reviewer approved), and promotions itself calls
+     catalog. The stale dispatch → checkout arrow was removed from the code in June but still shapes how people reason
+     about failure blast radius. Generate the container diagram from recovered dependencies (or fail CI on drift) and
+     the design doc stays a description of the system rather than of its past.

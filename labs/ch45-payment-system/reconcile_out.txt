@@ -1,0 +1,22 @@
+Day D: ledger 100,000 payments + 3,000 refunds; settlement file 102,757 rows (+ 500 in the D+1 file).
+Injected: 232 real problems, 500 noise items (300 settled late, 200 one-paisa rounding).
+
+   method                                                     breaks for real problems  false alarms money impact explained
+                                                                  humans         found                                     
+   R1) totals only                                         1 (the total)  0 identified             — ₹-390,332.55 unexplained
+   R2) exact line match (id, amount)                                 582            82           500             ₹87,343.14
+   R3) + T+3 carry-forward, ±1 paisa, fee rules, dedupe              232           232             0             ₹93,129.97
+
+   R3 exception queue by category:
+        amount                 25   ₹    3,926.60
+        duplicate               5   ₹    5,215.99
+        fee                   150   ₹    5,786.83
+        missing in ledger      40   ₹   75,999.41
+        unknown refund         12   ₹    2,201.14
+
+   → a matching total is not proof of anything, and a mismatched total tells you nothing about where the money went.
+     Line-by-line matching finds the problems but buries them under hundreds of timing and rounding differences that
+     fix themselves — people stop reading the report. Rules for known benign patterns (settlement delays, rounding)
+     and for known costs (the fee each method should carry) leave a short queue of real exceptions, each with a
+     category and a rupee value: customers charged without an order, duplicate settlements to return, refunds
+     nobody recorded, and a gateway overcharging fees. Reconciliation is how a payment system finds its own bugs.

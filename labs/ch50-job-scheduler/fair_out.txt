@@ -1,0 +1,15 @@
+50 workers, 1 hour; marketing dumps 200,000 jobs at 10:00; payments bug enqueues 30,000 retries at 40:00.
+
+   queueing                                            payments       slots      search   analytics     marketing     payments
+                                                       p99 wait    p99 wait    p99 wait    p99 wait   finished at  retry storm
+   F1) one FIFO queue                                    22 min      22 min      22 min      22 min         32:35       12 min
+   F2) strict priority classes                            2 min       2 min       2 min       2 min  84% by 60:00        2 min
+   F3) fair queuing across tenants                        8 min       0.2 s       1.4 s       9.2 s  84% by 60:00        9 min
+   F4) F3 + retry lane, bulk lanes at half weight         0.1 s       0.1 s       0.3 s       1.6 s  84% by 60:00       11 min
+
+   → with one FIFO queue, one tenant's bulk dump becomes everyone's 22-minute outage. Priority classes protect
+     everyone from the marketing dump — until the payments bug floods the critical class, and every tenant behind
+     it waits minutes. Fair queuing isolates tenants from each other, but not a tenant from
+     itself: payments' normal checks queue behind its own 30,000 retries. Giving retries their own lane, and bulk
+     lanes half the weight, keeps every first attempt fast while the campaign and the storm drain in the background.
+     The price: bulk finishes later than under FIFO (which gave it everything first) — which is what 'bulk' means.

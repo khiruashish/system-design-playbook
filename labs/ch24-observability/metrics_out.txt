@@ -1,0 +1,22 @@
+A. RED metrics (from counters/gauge on /metrics, scraped by Prometheus)
+   Rate    : 5,580 requests over ~12 s
+   Errors  : 102 (1.83%)
+   Duration: avg 73.4 ms  |  by route {/cart=840, /checkout=825, /products=3915}
+
+B. histogram_quantile vs exact percentile (bucket boundaries decide the error)
+   quantile from histogram   exact            error
+   p50      21.2             20.7             +0.5 ms (2%)
+   p90      48.0             44.7             +3.2 ms (7%)
+   p95      86.7             79.7             +7.0 ms (9%)
+   p99      1930.6           1544.7           +385.9 ms (25%)
+   p99.9    2443.1           1793.9           +649.2 ms (36%)
+   → p99/p99.9 land in the wide 1000–2500 ms bucket (and beyond +Inf), so the estimate is coarse there.
+     Add buckets where your SLO lives; you cannot recover accuracy the buckets didn't capture.
+
+C. Why the average lies
+   average 73.4 ms would meet a "200 ms" SLO, but p99 is 1545 ms and p99.9 is 1794 ms — 99% of users are fine, the tail is not.
+
+D. Exemplar: jump from the slow bucket to a trace
+   a request in the >250 ms range carried trace_id=6fac2e7a0fb35bda — click it in the dashboard to open the trace (Ch 24 L3).
+
+(Prometheus scraped :19701/metrics live; see prom_out.txt for its own view of the same counters.)

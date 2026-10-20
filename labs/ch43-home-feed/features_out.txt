@@ -1,0 +1,16 @@
+Redis feature store: 60,000 item-store keys, 2,000 customer hashes. 400 candidates per request, 500 requests each.
+
+   strategy                                                    round trips          p50          p99 at 0.5 ms RTT (est.)    stale stock
+   F1) GET + HGET per candidate                                        800     30.92 ms     43.30 ms             430.9 ms             0%
+   F2) MGET / HMGET in batches of 100                                    8      0.83 ms      3.78 ms               4.8 ms             0%
+   F3) one MGET + one HMGET                                              2      0.61 ms      1.36 ms               1.6 ms             0%
+   F4) local item cache (30 s) + one HMGET                               1      0.75 ms      3.90 ms               1.2 ms          5.02%
+   (p50/p99 are real localhost timings and vary by machine; the 0.5 ms column adds a typical cross-AZ round trip
+    per trip to the measured p50 — an estimate.)
+
+   → the cost of features is round trips, not bytes: hundreds of tiny GETs cost far more than one large MGET,
+     and across availability zones the difference is the whole latency budget. Batch everything a request needs
+     into as few calls as possible (MGET/HMGET/pipelines, or a feature service that does it). Caching slowly-
+     changing item features in process removes another trip (invisible on localhost, worth ~0.5 ms per request across
+     zones), at the price of staleness — fine for popularity,
+     not for stock: re-check availability for the items actually shown, or subscribe to stock changes.

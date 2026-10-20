@@ -1,0 +1,27 @@
+Same 500 features. Hand-offs = Σ (teams per feature − 1). Limits: 2–4 services per team, change load ≤ 188 features/team.
+
+   ownership map                                   teams  hand-offs   multi-team %    max team load
+   one giant team (no limits)                          1          0             0%              500
+   CURRENT — by history / layer                        9        591            91%              333
+   ALIGNED — by bounded context (L1)                   8        500            86%              212
+   OPTIMISED from change data (within limits)          8        240            43%              171
+
+   Optimised teams (services grouped by who changes together):
+        T1: [stock, reservation]                         from contexts {inventory=2}
+        T2: [rider, tracking, identity, notification]    from contexts {customer=2, delivery=2}
+        T3: [dispatch, routing]                          from contexts {delivery=1, fulfilment-ops=1}
+        T4: [order, payment, invoice, refunds]           from contexts {ordering=1, payments=3}
+        T5: [replenishment, darkstore, slot, picking]    from contexts {fulfilment-ops=2, inventory=2}
+        T6: [profile, address]                           from contexts {customer=2}
+        T7: [product, media, search, recommendations]    from contexts {catalog=3, pricing-promo=1}
+        T8: [pricing, promotions, cart, checkout]        from contexts {ordering=2, pricing-promo=2}
+   6 of 8 optimised teams mix bounded contexts.
+
+   → with no limits the 'best' organisation is one giant team — zero hand-offs and unmanageable cognitive load.
+     Within realistic limits, grouping services by how they change together more than halves hand-offs compared
+     with the context-aligned map (e.g. pricing, promotions, cart and checkout form one checkout-experience team;
+     slot and picking travel with dark-store stock). Some groupings are warnings, not answers: identity and notification
+     land with rider and tracking only because OTP logins and rider updates both send messages — a shared capability
+     like that belongs with a PLATFORM team offering it as a stable self-service API, not inside one stream team.
+     The output is evidence for a human decision: check whether each coupling is essential (one domain) or accidental
+     (a design flaw to fix), weigh skills, on-call and language, and re-run it every quarter as the product changes.

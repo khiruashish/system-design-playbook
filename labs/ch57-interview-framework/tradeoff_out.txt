@@ -1,0 +1,28 @@
+Cart store (read-your-writes, 5M active carts, sale spikes)
+   PostgreSQL (partitioned)       base score  67.0   ← base-case winner
+   Redis + PG snapshot            base score  63.0
+   Managed KV (DynamoDB-like)     base score  67.0
+   Cassandra                      base score  51.0
+   wins under perturbation: PostgreSQL 45%   Redis 12%   Managed 43%   Cassandra 0%   
+   margin over runner-up: TIE; doubling one weight flips it: 'write throughput' → Managed KV (DynamoDB-like); 'ops burden' → Managed KV (DynamoDB-like)
+
+Event backbone (order events, replay, 20 consumers)
+   Kafka                          base score  81.0   ← base-case winner
+   RabbitMQ                       base score  55.0
+   SQS/SNS                        base score  49.0
+   Pulsar                         base score  75.0
+   wins under perturbation: Kafka 87%   RabbitMQ 0%   SQS/SNS 0%   Pulsar 13%   
+   margin over runner-up: 6.0 points; doubling one weight flips it: no
+
+Product search (250k SKUs, typo tolerance, facets)
+   OpenSearch                     base score  59.0
+   PostgreSQL full-text           base score  57.0
+   Managed search SaaS            base score  70.0   ← base-case winner
+   wins under perturbation: OpenSearch 3%   PostgreSQL 2%   Managed 95%   
+   margin over runner-up: 11.0 points; doubling one weight flips it: no
+
+   → a matrix doesn't make the decision; it makes your reasoning inspectable. The useful output is not the
+     winner but its robustness: a choice that wins under most reasonable weightings can be defended calmly;
+     a tie or narrow margin should be presented as a close call, naming what would flip it ('if write throughput
+     or ops burden mattered more, I'd take the managed KV'). And when the matrix disagrees with the choice you
+     made (search here), say which criterion it is missing — that is the conversation senior interviews reward.

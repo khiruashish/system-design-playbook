@@ -1,0 +1,19 @@
+Checkout SLO: 99.9% success over 30 days. Requests 9,661,153, failures 13,517, error rate 0.1399%
+Error budget: 0.1000% = 9,661 failed requests allowed in 30 days; used 13,517 (140% of budget)
+
+Comparing alert strategies on the same 30 days (an alert 'fires' when its condition holds; we page on a rising edge):
+   strategy                                     pages    false     missed  median detect
+   naive threshold: 5-min err > 1%                  5        1          0          1 min
+   single window: 1-hour burn > 1                  20       17          0          1 min
+   multi-window multi-burn (SRE page)               4        0          0          2 min
+
+   incidents to catch: day 8 (20 min, 90% — sharp), day 15 (6 h, 4% — slow burn), day 22 (3 min, 60% — blip)
+   → naive fixed threshold: its pages don't map to budget (a 1% rate is a crisis at 600 rpm, noise at 50 rpm), so it both over- and under-pages;
+     single long window: it flaps — the condition dips and re-crosses during an incident, so one incident becomes many pages (alert fatigue);
+     multi-window multi-burn: fewest pages, zero false pages, ~2-min detect. The short window confirms the incident is still live before paging,
+     and the burn-rate framing means every page corresponds to real error-budget burn (see the per-incident budget below).
+
+   How much budget each incident burned (page only when it matters):
+     day 8 sharp outage   burned 10,501 failed reqs = 108.7% of the 30-day budget
+     day 15 slow burn     burned  1,046 failed reqs =  10.8% of the 30-day budget
+     day 22 blip          burned     99 failed reqs =   1.0% of the 30-day budget

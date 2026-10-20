@@ -1,0 +1,16 @@
+A. 20 judged queries over 20,000 products: analyzer stages vs relevance (nDCG@10, BM25, name boost 2)
+   analyzer                                            nDCG@10  zero results   queries still failing (nDCG < 0.5)
+   lowercase + split                                     0.367            11   atta 5kg, aata, आटा, doodh, दूध 1 litre, tomatos, chini, shampo, मूंग दाल, haldi, chai patti, gur, anda
+   + units (5kg, 1 litre) + plural stem                  0.457            10   aata, आटा, doodh, दूध 1 litre, chini, shampo, मूंग दाल, haldi, chai patti, gur, anda
+   + Devanagari + phonetic (aata/atta/आटा)               0.607             7   doodh, दूध 1 litre, chini, shampo, haldi, chai patti, gur, anda
+   + synonyms (curd↔dahi, milk↔doodh …)                  0.900             1   shampo, potato
+   + fuzzy, naive (edit distance 1, ≥ 4 chars)           0.900             0   chai patti, potato
+     fuzzy guarded instead (≥ 5 chars, score ×0.5)       0.950             0   potato
+   + product-type field, boost 3                         1.000             0   -
+   analyzed forms: आटा→ata, aata→ata, Atta→ata, दूध→dudh, doodh→dudh, मूंग→mung, moong→mung, 1 litre→1l, 5kg→5kg
+B. Inverted index vs scanning every product (final analyzer, 20 queries × 50 rounds)
+   index: 160 terms, 113,296 postings | per query: index 873 µs, full scan 124,672 µs (143x)
+C. Business ranking and facets (final analyzer)
+   text only       : nDCG@10 1.000, out-of-stock in top 3: 11 of 60
+   + stock & popularity boost: nDCG@10 0.992, out-of-stock in top 3: 0 of 60
+   facets for "masala" (1,262 matches): category {Masala=1022, Snacks=240}; after filter category=Masala, top brands [Gauri 74, Shubh 63, Annika 57]

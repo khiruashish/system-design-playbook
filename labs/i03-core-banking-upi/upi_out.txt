@@ -1,0 +1,13 @@
+2,000,000 payments in a day; 109,875 timed out with the outcome unknown (5.49%)
+60,381 of those were in fact credited to the beneficiary
+
+remitter bank's action on timeout                  paid twice payer short >1 h payer short >24 h   status calls    exceptions
+R1 reverse the debit immediately                       60,381                0                0              0        60,381
+R2 treat as success, fix at settlement                      0           49,494           49,494              0        49,494
+R3 status checks with backoff, then decide                  0           30,993           19,530        705,361        43,707
+R4 R3 + unresolved → reverse at settlement                  0           22,593                0        705,361             0
+
+paid twice: payer refunded although the beneficiary was credited (bank must recover the money)
+payer short: payer's money neither with the payer nor with the beneficiary for longer than the window
+settlement: settlement/reconciliation files reveal every outcome at the next cycle (every 4 h here); T+1 batch = end of next day
+status checks at +30 s, 2, 5, 15, 30 min, 1 h, 2 h; the beneficiary bank's status API is down during its incident

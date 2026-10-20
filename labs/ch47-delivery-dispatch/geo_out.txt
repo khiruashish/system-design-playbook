@@ -1,0 +1,20 @@
+1) Serviceability: 400 store polygons, 200,000 customer locations (85% inside some zone).
+
+   method                                           total time polygon tests / lookup        wrong
+   brute force: test every polygon                     1457 ms                  136.7            0
+   grid index (500 m cells → candidate polygons)         78 ms                    1.9            0
+
+2) Nearest 5 riders to a point, 20,000 riders, 5,000 queries.
+
+   method                                                  p50          p99     different from exact top-5
+   brute force over every rider                       780.1 µs    2538.9 µs                              0
+   grid index (1 km cells, expanding rings)            11.1 µs      73.2 µs                              0
+   Redis GEOSEARCH (network round trip incl.)         467.6 µs    1536.7 µs                              7
+   (Redis uses haversine distance and 52-bit geohash-rounded positions; this lab uses a flat approximation, so riders at
+    almost equal distance — the 5th and 6th — occasionally swap. Pick one distance function for ranking.)
+
+   → both questions are 'find the few candidates near here, then do the exact check': a grid (or geohash, S2, H3)
+     index turns 'test all 400 polygons' into ~1–3 tests, and 'measure 20,000 riders' into a few cells, with
+     identical answers. Redis GEO is the same idea behind a network round trip, shared by every dispatcher. Straight-line
+     distance is only the candidate filter: the final choice needs road distance and ETA (L4), and 'available' needs
+     fresh positions (L2).

@@ -1,0 +1,18 @@
+Noisy neighbor: 'noisy' bursts 300 tasks at once; 'quietA'/'quietB' submit 20 tasks each, spread out.
+One shared worker. Wait time = ticks a task waited before being served.
+
+   FIFO (one shared queue, arrival order):
+        noisy   tasks=300  mean wait=  149.5 ticks  max wait=   299 ticks
+        quietA  tasks=20   mean wait=  224.0 ticks  max wait=   300 ticks
+        quietB  tasks=20   mean wait=  222.0 ticks  max wait=   298 ticks
+
+   FAIR (per-tenant queues, round-robin):
+        noisy   tasks=300  mean wait=  179.2 ticks  max wait=   339 ticks
+        quietA  tasks=20   mean wait=    0.1 ticks  max wait=     1 ticks
+        quietB  tasks=20   mean wait=    0.0 ticks  max wait=     0 ticks
+
+   → under FIFO the burst monopolizes the worker, so the quiet tenants — who barely use the system — suffer huge
+     waits purely because of a neighbor. Fair queuing gives each tenant its own line served in turn, so a quiet
+     tenant's wait stays tiny no matter how much the noisy one submits; the noisy tenant simply takes longer to drain
+     its own burst. Same idea in production: per-tenant connection-pool caps, per-tenant thread limits, weighted fair
+     queuing, and per-tenant rate limits (L4). Isolation of THROUGHPUT, not just of DATA (L1/L2).

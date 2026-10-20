@@ -1,0 +1,19 @@
+6,749,510 events from 1,500,000 customers across 50 stores × 24 hours (1,200 keys).
+
+   EXACT SETS (SADD / SCARD / SUNIONSTORE)
+      memory in Redis     366.7 MB   load  18.2 s
+      store 17, 19:00       5,040 (truth 5,040, +0.00%) in 5.35 ms
+      city, today       1,500,000 (truth 1,500,000, +0.00%) in 3956.3 ms
+      sum of the 1,200 per-store-hour counts: 6,243,573 (+316% vs truth) ← not a unique count
+
+   HYPERLOGLOG (PFADD / PFCOUNT over 1,200 keys)
+      memory in Redis      16.5 MB   load   8.3 s
+      store 17, 19:00       5,010 (truth 5,040, -0.60%) in 0.11 ms
+      city, today       1,507,654 (truth 1,500,000, +0.51%) in 24.3 ms
+      sum of the 1,200 per-store-hour counts: 6,244,980 (+316% vs truth) ← not a unique count
+
+   → distinct counts don't add: the same customer appears in many store-hours, so summing them counts people
+     several times over. Exact sets answer correctly but hold every id in every key and must union big sets at
+     query time. HyperLogLog keeps a small fixed-size sketch per key and MERGES correctly (the union of sketches
+     is the sketch of the union), so hourly per-store sketches roll up to any store set and any time range, with
+     about 1% error. Pre-aggregate sketches, not counts.

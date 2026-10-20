@@ -1,0 +1,55 @@
+One architecture model → every C4 view is generated from it, and the model can be validated.
+
+   Model: {PERSON=2, SYSTEM=1, EXTERNAL=2, CONTAINER=5, DATABASE=2, QUEUE=1}, 11 relationships
+
+=== Generated C4 Level 1 — System Context (containers collapsed into their system) ===
+flowchart LR
+    customer([Customer])
+    shop[Grocery Platform]
+    rider([Delivery rider])
+    razorpay[Razorpay - external]
+    sms[SMS gateway - external]
+    customer -->|orders groceries with| shop
+    rider -->|accepts deliveries with| shop
+    shop -->|takes payment via| razorpay
+    shop -->|notifies customer via| sms
+
+=== Generated C4 Level 2 — Containers (same model, more detail) ===
+flowchart LR
+    subgraph shop[Grocery Platform]
+      app[Mobile app - Kotlin/Swift]
+      gw[API gateway - Spring Cloud Gateway]
+      checkout[Checkout service - Spring Boot]
+      catalog[Catalog service - Spring Boot]
+      dispatch[Dispatch service - Spring Boot]
+      ordersdb[(Orders DB - PostgreSQL 16)]
+      events[[Order events - Kafka]]
+      search[(Search index - Meilisearch)]
+    end
+    customer([Customer])
+    rider([Delivery rider])
+    razorpay[Razorpay - external]
+    sms[SMS gateway - external]
+    customer -->|orders groceries with - HTTPS| app
+    rider -->|accepts deliveries with - HTTPS| app
+    app -->|calls - HTTPS/JSON| gw
+    gw -->|routes checkout to - HTTP/JSON| checkout
+    gw -->|routes browse to - HTTP/JSON| catalog
+    checkout -->|reads prices from - gRPC| catalog
+    checkout -->|stores orders in - JDBC| ordersdb
+    checkout -->|takes payment via - HTTPS| razorpay
+    checkout -->|publishes OrderPlaced to - ?| events
+    events -->|delivers OrderPlaced to - Kafka consumer| dispatch
+    dispatch -->|notifies customer via - HTTPS| sms
+
+=== Model validation ===
+   ✗ V1 no owner       container 'Dispatch service' has no owning team
+   ✗ V2 orphan         'Search index' has no relationships (dead, or undocumented)
+   ✗ V3 no protocol     Checkout service → Order events (publishes OrderPlaced to)
+   → 3 problem(s) found.
+
+   → both diagrams come from one model, so they cannot contradict each other, and a rename happens once.
+     The same model answers questions a picture can't: which container has no owner (Dispatch — who gets paged?),
+     what is drawn but connected to nothing (Search index — dead, or a dependency nobody documented?), and which
+     arrows hide their protocol. Structurizr DSL / C4-PlantUML do this for real; keep the model in the repo and
+     render it in CI so the diagrams in the design doc are always regenerated from the current model.

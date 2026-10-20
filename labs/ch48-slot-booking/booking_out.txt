@@ -1,0 +1,14 @@
+60 slots × 840 rider-minutes; 32 workers; 12,000 booking attempts (70% want 8 hot slots); real PostgreSQL.
+
+   booking method                                                booked   slots over   retries  attempts/s       p99
+                                                                            capacity                                
+   B1) read, check in Java, write back (READ COMMITTED)           2,965           60         0       4,880   31.6 ms
+   B2) same, SERIALIZABLE + retry                                 1,996            0     1,043       5,247   36.7 ms
+   B3) conditional UPDATE ... WHERE used + m <= cap               1,999            0         0       7,679   20.6 ms
+   B4) event-sourced append, PK(slot, version) + retry            1,998            0     1,020       5,192   35.4 ms
+
+   → B1 is the classic check-then-act race: two workers read the same 'used', both see room, both book. SERIALIZABLE
+     detects it but pays in aborted transactions on exactly the hot slots. A conditional UPDATE makes the check and
+     the write one atomic step — the row lock serialises bookings per slot and nothing retries. The event-sourced
+     aggregate is equally correct (the version key is the guard) and keeps who-took-what as history (L3); its
+     retries on hot slots are the price of optimistic concurrency.

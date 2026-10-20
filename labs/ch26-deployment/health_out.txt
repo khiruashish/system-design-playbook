@@ -1,0 +1,11 @@
+   scenario                                               ok     failed    fail rate
+   A. slow start, NO probes (route immediately)          422        284        40.2%
+   A. slow start, readiness probe ON                     797          5         0.6%
+   B. lost DB, NO probes (keeps routing to it)           876        260        22.9%
+   B. lost DB, readiness ON (drains it)                 1133          8         0.7%
+   C. hung, NO probes (black-holes requests)             446         60        11.9%
+   C. hung, liveness ON (restarts, 1x)                  1146          5         0.4%
+
+   → readiness gates ROUTING (don't send traffic to an instance that's starting or has lost a dependency);
+     liveness gates RESTARTS (kill and replace a hung/deadlocked instance); a startup probe protects a slow boot
+     from a trigger-happy liveness check. Getting these wrong causes the errors above — or restart loops.

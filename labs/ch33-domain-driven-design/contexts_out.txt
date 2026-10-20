@@ -1,0 +1,36 @@
+17 use cases over 14 entities (weekly volume in thousands). Candidate decompositions:
+
+   decomposition                            contexts  cross-ctx %  ctx per call    largest  modularity
+   A) one service per entity (nouns)              14        78.9%          2.16          1       -0.11
+   B) one big module                               1         0.0%          1.00         14        0.00
+   C) threshold clustering, edges ≥ 80k/wk         2         2.9%          1.03         13        0.00
+   C) threshold clustering, edges ≥ 100k/wk        9        25.8%          1.38          4        0.27
+   E) modularity clustering (Louvain)              5        36.6%          1.37          4        0.32
+   D) domain-expert draft (4 contexts)             4        29.5%          1.44          6        0.24
+
+   C) threshold clustering at 80k/wk (single linkage):
+        {Address, Cart, Customer, DeliverySlot, Invoice, Order, Payment, ProductDescription, ProductPrice, Reservation, Rider, Shipment, StockLevel}
+        {Coupon}
+
+   E) modularity clustering:
+        {Address, DeliverySlot, Rider, Shipment}
+        {Cart, Coupon, StockLevel}
+        {Customer, Invoice}
+        {Order, Payment, Reservation}
+        {ProductDescription, ProductPrice}
+
+   D) domain-expert draft:
+        {Address, Cart, Customer, Invoice, Order, Payment}
+        {Coupon, ProductDescription, ProductPrice}
+        {DeliverySlot, Rider, Shipment}
+        {Reservation, StockLevel}
+
+   → no single number picks the design. Splitting by nouns (A) makes 79% of weekly work cross service boundaries —
+     a distributed monolith. Minimising cross-context calls alone rewards one big module (B), and single-linkage
+     clustering (C) chains everything into a blob via a few busy use cases. Modularity (E) is the most useful signal:
+     it independently finds Catalog {ProductDescription, ProductPrice} and a Fulfilment context — and pulls Address
+     into Fulfilment, because the busy use cases need a DELIVERY LOCATION, not the customer's address book. But it also
+     proposes {Cart, Coupon, StockLevel}, which follows call patterns, not invariants or language. So the data doesn't
+     replace the domain experts; it challenges their draft (D) in two concrete places: model Address separately per
+     context (a DeliveryLocation copied onto the order), and question whether Reservation belongs to Inventory or to
+     checkout. Boundaries are decided on ubiquitous language, invariants and team ownership, with this data as evidence.

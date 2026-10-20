@@ -1,0 +1,18 @@
+Registry compatibility check (loads REAL protoc descriptor sets, applies the field-level rules):
+
+== v1 -> v2  (added currency + tags) ==
+  field #4 (currency) ADDED -- backward+forward safe (old readers skip it, new readers default it)
+  field #5 (tags) ADDED -- backward+forward safe (old readers skip it, new readers default it)
+  --> BACKWARD: PASS   FORWARD: PASS   registry verdict: FULL
+
+== v1 -> v3  (reused #3 with a new type, moved sku) ==
+  field #2 (sku) REMOVED -- ok, but its number must be RESERVED so it is never reused
+  field #6 (sku) ADDED -- backward+forward safe (old readers skip it, new readers default it)
+  field #3: TYPE CHANGED TYPE_INT64 -> TYPE_STRING (name total_paise->total_rupees) -- BACKWARD BREAK
+  field 'sku' MOVED #2 -> #6 -- old bytes for #2 now misread -- BACKWARD BREAK
+  field #3: TYPE CHANGED TYPE_INT64 -> TYPE_STRING (name total_paise->total_rupees) -- FORWARD BREAK
+  field 'sku' MOVED #2 -> #6 -- old bytes for #2 now misread -- FORWARD BREAK
+  --> BACKWARD: FAIL   FORWARD: FAIL   registry verdict: INCOMPATIBLE
+
+A registry set to FULL/BACKWARD would ACCEPT v2 and REJECT v3 at publish time -- the incompatible producer
+never ships. That is how you version messages on a bus (Kafka/Pub-Sub) without a flag-day upgrade of every consumer.

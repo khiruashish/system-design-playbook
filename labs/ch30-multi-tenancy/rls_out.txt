@@ -1,0 +1,12 @@
+Row-Level Security on real PostgreSQL: the policy scopes EVERY query to current_setting('app.tenant').
+
+   as tenant=acme: 'select count(*) from rls_orders' (no WHERE!) → 3 rows (only acme's). The leak is impossible.
+   as tenant=acme: UPDATE ... WHERE tenant_id='globex' affected 0 rows — RLS hid globex entirely, so nothing matched.
+   as tenant=globex: sees 3 rows, and 0 were zeroed by the acme attempt (proof globex was untouched).
+   with app.tenant UNSET: sees 0 rows — RLS fails CLOSED (no tenant context = no rows), never open.
+
+   → RLS turns 'every query must remember the tenant filter' (fragile, one bug = full breach) into a single policy the
+     engine enforces on select/insert/update/delete. It fails CLOSED when no tenant is set. Two cautions: (1) the table
+     OWNER and roles with BYPASSRLS ignore policies unless you FORCE it — the app must connect as a NON-owner, limited role;
+     (2) set app.tenant from the authenticated principal at connection checkout, never from user input. Keep app-level
+     filtering too — RLS is the backstop, not the only control.

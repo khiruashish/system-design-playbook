@@ -1,0 +1,17 @@
+N=3, one-way latency median 1 ms, 3% stall chance per replica per request (+20–200 ms); 200,000 write→read pairs.
+
+   config                                   write p50 write p99  read p50  read p99    stale reads
+   W=1 R=1 (read sent to one replica)          1.6 ms    3.0 ms    2.2 ms  173.7 ms          2.97%
+   W=1 R=1 + hedge to a 2nd after 5 ms         1.6 ms    3.0 ms    2.2 ms    8.3 ms          3.07%
+   W=1 R=1 (read sent to all, first wins)      1.6 ms    3.0 ms    1.6 ms    3.0 ms          3.00%
+   W=1 R=2                                     1.6 ms    3.0 ms    2.2 ms   25.8 ms          0.08%
+   W=2 R=1                                     2.2 ms    6.7 ms    1.6 ms    3.0 ms          2.74%
+   W=2 R=2 (quorum, R+W>N)                     2.2 ms    6.7 ms    2.2 ms   25.8 ms          0.00%
+   W=3 R=1                                     3.1 ms  193.7 ms    1.6 ms    3.0 ms          0.00%
+
+   → the tail comes from stalls, and how many replicas you wait for decides who pays for them. A read sent to one
+     replica inherits its stalls; hedging to a second after 5 ms cuts that tail, and asking all three and taking the
+     first answer cuts it further — none of these changes staleness (~3%). With R + W ≤ N a read can miss the write
+     the client just made. R + W > N guarantees overlap: zero stale reads, paid for in the tail (read p99 ~26 ms at
+     R=2 when two replicas are slow). W=3 puts every replica's stall into the write's p99. Choose per operation:
+     carts and order status want quorum; a product-view counter is fine with ONE.

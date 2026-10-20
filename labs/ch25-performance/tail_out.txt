@@ -1,0 +1,29 @@
+A. Fan-out amplification — one slow backend makes the whole request slow
+   a single backend call: p50 10 ms, p95 112 ms, p99 271 ms  (5% of calls are slow)
+   request that waits for ALL of N backends      p50      p95      p99
+   fan-out 1                                  10 ms    108 ms    270 ms   (P[≥1 slow] = 5%)
+   fan-out 5                                  17 ms    270 ms    303 ms   (P[≥1 slow] = 23%)
+   fan-out 20                                174 ms    301 ms    310 ms   (P[≥1 slow] = 64%)
+   fan-out 100                               283 ms    310 ms    316 ms   (P[≥1 slow] = 99%)
+   → at fan-out 100, ~99% of requests hit at least one slow backend: the backend's rare tail becomes the request's NORM.
+     This is why one slow dependency (Ch 24 L3) wrecks a fan-out page, and why you must cut the tail, not the average.
+
+B. Hedging: send a 2nd request if the 1st is slow, take the first to answer (Ch 17)
+   fan-out 20 without hedge: p99 310 ms; single-call hedge after p95: p99 126 ms, at 5% extra load
+   → hedging trades a few % extra requests for a much shorter tail; cap it (only hedge above p95) so it can't double load.
+
+C. Queueing theory: on a real single queue, wait time explodes as utilisation → 100% (M/M/1)
+   utilisation    measured wait  M/M/1 predicts   vs 50%% util    
+   50             5.0            5.0              1x              
+   70             11.9           11.7             2x              
+   80             19.4           20.0             4x              
+   90             47.4           45.0             9x              
+   95             107.1          95.0             21x             
+   99             798.3          495.0            159x            
+   → past ~80% utilisation the wait time turns a corner; running hot to "save money" buys a latency cliff.
+     Capacity planning targets ~60-70% so a traffic spike or a lost node doesn't push you over the knee.
+
+D. Coordinated omission: a load test that pauses when the server stalls hides the tail
+   naive (per-call service time):   p99 0 ms, p999 0 ms  → "looks fine"
+   corrected (from scheduled time): p99 100 ms, p999 460 ms  → the stall is visible
+   → measure latency from when a request SHOULD have started; tools that back off during a stall under-report the tail.

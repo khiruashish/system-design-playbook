@@ -1,0 +1,18 @@
+Appended 103,500 audit events in 4091 ms (25,297/s); full verification in 2166 ms. 10 external anchors (last at seq 100,000).
+Clean log: VERIFIED
+
+   Insider cover-up of entry 42,008 (ISSUE_REFUND by ops.kiran, amountPaise=40476):
+
+   manipulation                                               hash chain alone       chain + external anchors
+   1. change the actor on the entry                           DETECTED               DETECTED — entry 42008 content does not match its hash
+   2. delete the entry                                        DETECTED               DETECTED — sequence gap/reorder at position 42008 (found seq 42009)
+   3. swap it with the next entry (reorder)                   DETECTED               DETECTED — sequence gap/reorder at position 42008 (found seq 42009)
+   4. delete it AND recompute every later hash                NOT detected           DETECTED — chain hash at anchored seq 50000 differs from the external anchor
+   5. delete the 3,500 entries written since the last anchor  NOT detected           NOT detected
+
+   → the hash chain alone catches the clumsy edits (1–3): any change breaks every later hash. But an insider who controls
+     the whole table can delete the entry and recompute the rest of the chain (4) — internally consistent, undetectable
+     from inside. External anchors defeat that: the chain hash at seq 50,000 no longer matches what was written to
+     write-once storage outside the insider's control. Neither catches (5), removing entries written since the last
+     anchor: anchor often (or stream every entry to the external store) so that window is seconds, not hours. Keep the
+     anchor store in a separate account with separate admins, and alert on any verification failure.

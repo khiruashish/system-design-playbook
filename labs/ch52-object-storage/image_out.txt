@@ -1,0 +1,29 @@
+PART 1 — real resize + JPEG encode (JDK ImageIO, bicubic). Original 2400×2400: 1,096 KB at q=0.85.
+
+   variant           bytes    resize+encode    vs original bytes
+   1200 px        156.5 KB          86.9 ms                14.3%
+   600 px          52.1 KB          22.7 ms                 4.8%
+   300 px          18.1 KB           6.8 ms                 1.6%
+   150 px           6.7 KB           2.0 ms                 0.6%
+   80 px            2.8 KB           1.0 ms                 0.3%
+
+   JPEG quality at 600 px: q=0.95 → 144.5 KB   q=0.80 → 52.1 KB   q=0.60 → 29.3 KB   
+
+PART 2 — one day: 200,000 images, 3,000 of them uploaded today, 5,000,000 requests (same traffic on the 29 days before).
+
+   strategy                                   bytes to users  transform CPU  origin requests  variants stored
+                                                                      today                       (catalogue)
+   S1) original 2400 px to everyone                  5613 GB           0 s        5,000,000                0
+   S2) eager: 5 variants at upload                    132 GB         358 s        5,000,000        1,000,000
+   (lazy: 966,441 of 1,000,000 possible variants existed before today)
+   S3) lazy: variant on first request, kept           132 GB         177 s        5,000,000          973,789
+   S4) S3 behind a 20 GB CDN (LRU)                    132 GB         177 s          400,890          973,789
+
+   (variant bytes per image, all 5 sizes: 236 KB; a 5-variant catalogue = 48 GB; S2 transforms every upload.)
+
+   → the big wins are the first and the last: serving the right-sized variant instead of the original cuts bytes
+     to users ~40x, and a CDN keeps ~92% of requests off the origin. Eager vs lazy matters less than it sounds on a
+     busy catalogue: with this traffic almost every variant is requested within a month (97% existed), so lazy saves
+     little storage and about half of today's transform CPU. Lazy wins when catalogues are huge and sparse (millions
+     of seller images) and when you add a new size — nothing to backfill. Common design: lazy transforms + object-store
+     cache + CDN, with the one or two most-used sizes made eagerly so a new product's first viewers don't wait.

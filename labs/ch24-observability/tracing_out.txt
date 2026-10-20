@@ -1,0 +1,27 @@
+A. One slow trace (209.3 ms end to end). The span tree:
+     bff         GET /product   209.3 ms
+       catalog     getProduct       9.3 ms
+         catalog-db  SELECT product   7.1 ms
+       pricing     getPrice       208.1 ms
+         fx-rates    convert        206.6 ms
+       inventory   getStock        19.6 ms
+   critical path: bff 209ms → pricing 208ms → fx-rates 206ms
+   → optimising anything OFF the critical path (e.g. catalog) does not shrink the request; fix the fx-rates call under pricing.
+
+B. 10,000 traces: which service drives the p99 of the product page?
+   product page: p50 43.7 ms, p95 202.7 ms, p99 261.8 ms
+   service      appears on crit. path  its p99 when on it
+   bff          10,000 of 10,000 (100%) 261.8 ms
+   fx-rates     6,780 of 10,000 (68%)  271.5 ms
+   pricing      6,780 of 10,000 (68%)  273.0 ms
+   inventory    2,173 of 10,000 (22%)  74.5 ms
+   catalog-db   1,047 of 10,000 (10%)  11.9 ms
+   catalog      1,047 of 10,000 (10%)  65.6 ms
+   → pricing/fx-rates sits on the critical path ~68% of the time and carries the whole tail (the 30% of calls that hit the slow currency service): that's the p99 lever.
+
+C. Sampling 10,000 traces (each ~5 spans): head-based vs tail-based
+   head-based  100%: keeps 10,000 traces (60,000 spans), slow traces kept 554/554
+   head-based   10%: keeps  1,035 traces (6,210 spans), slow traces kept 70/554
+   head-based    1%: keeps    126 traces (756 spans), slow traces kept 6/554
+   tail-based (keep all >200ms + 1% baseline): keeps ~654 traces, slow traces kept 554/554 — but must buffer every trace until it completes
+   → head sampling is cheap and decides early, but drops most slow traces; tail sampling keeps the interesting ones at the cost of buffering.

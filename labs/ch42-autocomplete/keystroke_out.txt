@@ -1,0 +1,15 @@
+20,000 typing sessions over a 20,351-query suggestion index; users tap the target as soon as it's suggested.
+
+   strategy                                                   keystrokes     origin   edge hits stale flashes     target visible
+                                                              per search   requests  per search       per 100 p50 / p95 after key
+   K1) request every keystroke, render every response               5.82       5.82        0.00          41.8         64 /  479 ms
+   K2) K1 + drop out-of-order responses                             5.82       5.82        0.00           0.0         64 /  479 ms
+   K3) K2 + 120 ms debounce                                         5.82       4.82        0.00           0.0        184 /  586 ms
+   K4) K3 + client prefix cache + edge cache (≤3 chars)             5.82       3.12        1.70           0.0        135 /  308 ms
+
+   → without sequence numbers a slow response for 'am' can overwrite the results for 'amul b' — the user sees the
+     suggestions jump backwards. Dropping out-of-order responses costs nothing. Debouncing cuts server traffic by
+     skipping keystrokes typed in quick succession (only ~17% here: most people type slower than 120 ms a key) and
+     adds its delay to every suggestion. Caching the first three characters at the edge and reusing complete result
+     lists on the client halves origin traffic and brings the slow tail below K1's. Size the backend for origin
+     requests per search after these, not for keystrokes.

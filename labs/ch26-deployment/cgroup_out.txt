@@ -1,0 +1,14 @@
+=== A. JVM heap sizing follows the cgroup memory limit (-XX:MaxRAMPercentage=75) ===
+   host (no cgroup): JVM sees: availableProcessors=2, maxMemory=1498 MB
+   cgroup mem   256 MB: JVM sees: availableProcessors=2, maxMemory=185 MB
+   cgroup mem   512 MB: JVM sees: availableProcessors=2, maxMemory=371 MB
+   cgroup mem  1024 MB: JVM sees: availableProcessors=2, maxMemory=742 MB
+
+=== B. Memory limit exceeded — two very different outcomes ===
+   -Xmx400m in a 256 MB cgroup: last log 'allocated 180 MB (live)', exit 137 (137 = kernel SIGKILL, OOM-killer; no Java exception)
+   MaxRAMPercentage=75 in 256 MB : last log 'Terminating due to java.lang.OutOfMemoryError: Java heap space', exit 3 (3 = clean JVM OOM you can alert on)
+
+=== C. CPU quota throttling (same 800M-op single-threaded workload) ===
+   quota  2.0 cores:    7,633 ms, availableProcessors=2, throttled 0 times
+   quota  1.0 cores:    7,631 ms, availableProcessors=1, throttled 15 times
+   quota  0.5 cores:   15,801 ms, availableProcessors=1, throttled 182 times

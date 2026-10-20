@@ -1,0 +1,16 @@
+Two WebSocket chat nodes (A, B), PostgreSQL for history, Redis pub/sub between nodes.
+200 conversations: every customer on node A, every rider on node B.
+
+   Phase 1 — 4,187 sends (187 retries of the same client id) in 3.6 s
+        delivered across nodes: 4,000   end-to-end p50 92.58 ms   p99 394.83 ms   (localhost; timings vary)
+
+   Phase 2 — 50 riders dropped; customers sent 250 messages meanwhile; riders reconnected to node A
+        replayed from PostgreSQL on reconnect: 250
+
+   Stored messages: 4,250 (distinct client ids: 4,250 — retries did not create duplicates)
+   Phones: expected to see 4,250 messages from the other side, saw 4,250; duplicates dropped by seq 0; out of order 0; gaps 0
+
+   → the node a message arrives at is irrelevant: the database assigns the conversation's order, Redis carries it
+     to whichever node holds the other phone, and a phone that was away asks for everything after its last
+     sequence number — from any node. Retries with the same client id return the original sequence, so a lost
+     ACK never becomes a second message. Pub/sub is fire-and-forget; the database is what makes delivery complete.

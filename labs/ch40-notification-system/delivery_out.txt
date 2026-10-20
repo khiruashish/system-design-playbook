@@ -1,0 +1,12 @@
+20,000 notification events; 8 workers; PostgreSQL job table with SKIP LOCKED leases.
+
+   design                                     jobs queued vendor calls  customers got    duplicates         lost
+   A) no dedupe                                    21,018       24,362         20,000  1,838 (1,950 SMS)      0
+   B) dedupe key at intake                         20,000       23,235         20,000    884 (926 SMS)      0
+   C) B + vendor idempotency key                   20,000       23,219         20,000      0 (0 SMS)      0
+
+   → every hop is at-least-once, so duplicates are the default, not a bug to be surprised by. A unique dedupe key
+     at intake removes the bus redeliveries; the rest come from sends whose outcome we can't know — a timeout
+     after the vendor accepted, a crash after the send. Only an idempotency key the VENDOR honours closes that
+     gap; without one, choose per message type between a rare duplicate (OTP, order update) and a rare loss. Retries
+     with a lease make sure nothing is lost: every design delivered every notification at least once.

@@ -1,0 +1,15 @@
+redis-benchmark -t set,get -n 200000 -c 50 -r 100000 -d 64   (2-CPU sandbox: server and benchmark share the CPUs)
+
+   server                                            SET/s          GET/s  SET/s pipeline 16  GET/s pipeline 16
+   MiniCache — global lock                          45,882         52,165            258,398            322,061
+   MiniCache — striped (ConcurrentHashMap)          51,033         51,894            331,675            407,332
+   Redis 7.0 (single-threaded event loop)          101,112         90,992            621,118            840,336
+
+   Memory for 500,000 keys × 64-byte values: MiniCache (JVM heap) 212 bytes/key, Redis 152 bytes/key
+
+   → one request per round trip, both MiniCache engines are bound by syscalls and context switches, not by the map —
+     the lock barely matters. Pipeline 16 commands per round trip and throughput multiplies for every server, and
+     now the global lock starts to show (numbers vary between runs on a 2-CPU sandbox). Redis's single-threaded event loop needs no locks, does
+     far less work per command than a thread-per-connection server, and stores each key more compactly;
+     a JVM cache pays object headers, boxed entries and GC for its convenience. Build on proven engines; understand
+     them by building one.

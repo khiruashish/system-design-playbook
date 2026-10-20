@@ -1,0 +1,20 @@
+Integration testing against REAL PostgreSQL 16 (not a mock). Three capabilities a mock can't give you:
+
+   A) Isolation: each test runs in a transaction that is rolled back — the table is untouched afterward.
+      [PASS] 5 tests each inserted a row then rolled back; row count unchanged (0 == 0)
+
+   B) Catch a real schema bug: 'registering the same email twice must fail'.
+      Run 1 — against the table AS SHIPPED (no unique constraint on email):
+      [FAIL] duplicate email is rejected
+      Run 2 — after the migration adds `UNIQUE (email)`:
+      [PASS] duplicate email is rejected
+
+   C) Fault injection: terminate the DB backend mid-transaction; the app must fail cleanly and not half-commit.
+      → commit after backend kill threw, as it must: PSQLException (FATAL: terminating connection due to administrator command)
+      [PASS] the killed transaction surfaced an error to the app
+      [PASS] no partial write survived (uncommitted row was discarded: 0 == 0)
+
+   Result: 4 passed, 1 failed.
+   → the mock-free integration test caught a missing UNIQUE constraint (Run 1 FAILED, Run 2 PASSED after the
+     migration), proved test isolation via rollback, and verified the app's behaviour when the database dies
+     mid-transaction — none of which a mocked repository can tell you, because a mock enforces nothing and never fails.

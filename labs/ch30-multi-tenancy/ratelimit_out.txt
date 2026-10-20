@@ -1,0 +1,15 @@
+Per-tenant rate limiting on real Redis (atomic token bucket). Each tenant fires 30 requests in a tight burst.
+Plans:  free = capacity 5 (refill 0.5/s),  pro = capacity 20 (refill 5/s),  enterprise = capacity 200 (refill 50/s)
+
+   tenant    plan            sent    allowed  throttled
+   acme      free              30          5         25
+   globex    pro               30         20         10
+   initech   enterprise        30         30          0
+
+== Usage meter (what billing reads for the period) ==
+   acme      served requests today: 5
+   globex    served requests today: 20
+   initech   served requests today: 30
+
+== Refill: wait 4s and let the free tenant (acme) try again ==
+   acme (free) after 4s idle: 2 of 10 allowed — the bucket refilled ~0.5 token/s * 4s ≈ 2 tokens. Steady state, not a reset.

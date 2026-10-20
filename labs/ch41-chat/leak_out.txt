@@ -1,0 +1,30 @@
+20,000 messages: 18,000 ordinary (with OTPs, order ids, flats, amounts, pincodes), 2,000 leaking a contact.
+
+   detector                                                        recall   false positives
+   D1) regex for a 10-digit mobile number                           15.8%               100   e.g. "Courier AWB 7169564695 for the return"
+   D2) normalise, then regex + UPI/email                            59.0%               200   e.g. "Write to support@grocery.in for the refund"
+   D3) + any-script digits, number words, context rules             85.7%                 0
+
+   Recall by how the number was written (D1 → D3):
+        +91              100% →   100%
+        dashed             0% →   100%
+        devanagari         0% →   100%
+        email              0% →   100%
+        english words      0% →   100%
+        hindi words        0% →   100%
+        kannada digits     0% →   100%
+        leading0           0% →   100%
+        mixed              0% →   100%
+        plain            100% →   100%
+        spaced             0% →   100%
+        split in two       0% →     0%
+        typo words         0% →     3%
+        upi                0% →   100%
+
+   → a phone-number regex finds only the numbers people write plainly; the rest are written with spaces, words or
+     another script precisely because people know plain numbers get caught. Normalising first — separators,
+     Devanagari digits, number words in the languages your users write — is what makes detection work, and
+     context rules keep it from masking a courier AWB or our own support address. What no per-message rule catches:
+     misspelt number words and a number split across two messages — detection has to look at the conversation, and
+     it will never be perfect. Mask rather than block, log for trust & safety, and keep masked calling so that
+     nobody needs to share a number in the first place.

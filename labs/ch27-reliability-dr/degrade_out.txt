@@ -1,0 +1,19 @@
+Checkout page dependencies (core = the purchase cannot complete without it):
+   catalog (product data)       CORE
+   inventory (stock)            CORE
+   payment gateway              CORE
+   recommendations              degradable → hide the 'you may also like' row
+   reviews/ratings              degradable → hide stars; show 'ratings unavailable'
+   personalization/promos       degradable → fall back to default (non-personalized) pricing & banners
+
+Progressive failure: bring dependencies down one by one (non-core first) and check the core journey:
+   dependencies down                        core works?    user experience
+   (none)                                   YES            full experience
+   1 (recommendations)                      YES            degraded: 1 feature(s) hidden, checkout still works
+   2 (reviews/ratings)                      YES            degraded: 2 feature(s) hidden, checkout still works
+   3 (personalization/promos)               YES            degraded: 3 feature(s) hidden, checkout still works
+   4 (catalog)                              NO             HARD DOWN: catalog (product data) is core — checkout cannot complete
+
+   → losing all 3 non-core dependencies still lets customers buy (a visibly reduced but working page).
+     Only a CORE dependency (catalog/inventory/payment) takes checkout down — those get the strongest resilience
+     (replicas, failover, Ch 18 patterns). A degradation catalogue decides, per feature, what to drop before an incident.

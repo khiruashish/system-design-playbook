@@ -1,0 +1,21 @@
+200,000 carts, 3–20 lines, GST 0/5/12/18% per line, ₹75 coupon on carts over ₹999.
+
+   M1) double rupees, (long)(d*100):        44,961 carts with the invoice total wrong by at least 1 paisa (worst 3 paise)
+   M1) double rupees, Math.round at the end: 3,352 carts wrong
+   M2) long paise:                                0 carts wrong
+
+   184,688 carts got the coupon; it must be spread over their lines:
+   P1) round each share independently:  106,913 carts whose shares don't add up to ₹75.00 (131,714 paise adrift in total)
+   P2) largest remainder:                     0 carts
+
+   the customer returns every line, one at a time:
+   R1) refund list price (ignore the coupon)      184,688 carts refunded more than paid, ₹13,851,600.00 in total
+   R2) recompute coupon share at refund time      171,915 carts refunded more than paid, ₹3,200,345.28 in total
+   R3) refund price − share stored at checkout          0 carts refunded more than paid, ₹0.00 in total
+
+   → binary doubles can't represent most paise, so totals drift, and '(long)(d * 100)' truncates the drift into a
+     wrong invoice. Rounding at the end helps, but can't fix a per-line tax that landed on 0.4999… instead of 0.5.
+     Keep money as integer paise (or BigDecimal with explicit rounding) end to end. A cart-level discount must be
+     allocated to lines exactly once — largest remainder makes the shares add up — and STORED on the order, because
+     GST, refunds and seller settlement all need 'what was actually paid for this line'. Recomputing at refund time
+     gives a different answer as soon as the cart changes (here: the coupon's threshold stops applying).

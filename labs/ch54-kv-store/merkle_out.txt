@@ -1,0 +1,21 @@
+2,000,000 keys per replica; full comparison ships 91.6 MB every time.
+
+   differing keys     method                  bytes exchanged  round trips   keys to repair  roots equal
+   10                 F full pairs                    91.6 MB            1               10          yes
+                      M depth 15 (~61/leaf)           36.9 KB           17               10          yes   (tree build 367 ms)
+                      M depth 18 (~7/leaf)            13.7 KB           20               10          yes   (tree build 524 ms)
+   1,000              F full pairs                    91.6 MB            1            1,000          yes
+                      M depth 15 (~61/leaf)            3.1 MB           17            1,000          yes
+                      M depth 18 (~7/leaf)           900.9 KB           20            1,000          yes
+   20,000             F full pairs                    91.6 MB            1           20,000          yes
+                      M depth 15 (~61/leaf)           43.8 MB           17           20,000          yes
+                      M depth 18 (~7/leaf)            11.5 MB           20           20,000          yes
+   200,000            F full pairs                    91.6 MB            1          200,000          yes
+                      M depth 15 (~61/leaf)           93.6 MB           17          200,000          yes
+                      M depth 18 (~7/leaf)            56.5 MB           20          200,000          yes
+
+   → a Merkle tree lets two replicas agree that billions of bytes match by comparing one 32-byte hash, and find
+     a few differences by walking only the branches that differ: kilobytes instead of 92 MB. The saving shrinks as
+     divergence grows — when a large share of leaves differ, shipping everything is as cheap and needs one round
+     trip. Deeper trees mean smaller leaves (less to ship per difference) but more levels and more tree to keep
+     up to date. This is how Dynamo-style stores (Cassandra repair, Riak AAE) repair replicas in the background.

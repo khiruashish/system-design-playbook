@@ -1,0 +1,14 @@
+8,000,000 events in 16 city partitions; national #10 has 34,374 views, #11 has 31,562.
+
+   method                                                    true top-10  reported counts       pairs sent
+                                                                   found            wrong                 
+   M1) merge each partition's local top-10                          6/10             5/10              160
+   M2) merge each partition's local top-100                        10/10             0/10            1,600
+   M3) TPUT three-phase threshold (exact)                          10/10             0/10            4,950
+   M4) shuffle all counts by product (exact)                       10/10             0/10        1,509,929
+
+   → an item that is, say, #12 in every city can be near the top nationally, yet appears in nobody's local top-10.
+     Merging local top lists misses such items (4 of the true 10 here) and under-counts the ones it does report,
+     because partitions that didn't list an item contribute nothing for it. Asking each partition for 10× K happened
+     to be exact on this data, but carries no guarantee. A threshold algorithm (TPUT) is provably exact and ships
+     ~300x less than a full shuffle. Or partition by the key you rank on, so each product is counted in one place.

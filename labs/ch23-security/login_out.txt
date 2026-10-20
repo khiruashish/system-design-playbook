@@ -1,0 +1,15 @@
+A. OTP login control conformance (6-digit code, 1,000,000 possibilities)
+   control                                        naive          hardened      
+   legitimate owner with the real code            —              200 logged in 
+   wrong codes tolerated before lockout           unlimited      5             
+   codes issuable per phone / 10 min              unlimited      3 (4th → 429) 
+   guessing budget before code expires/locks      n/a            5 tries vs 1e6 space ≈ 1 in 200,000
+   → naive: unlimited attempts make a 6-digit code guessable; hardened: locked after 5, and codes are hashed at rest with expiry.
+B. OAuth 2.0 Authorization Code + PKCE conformance for the mobile app
+   request presented to /token                          naive            hardened (BCP)  
+   correct verifier, registered redirect                token issued     token issued    
+   wrong PKCE verifier                                  token issued     reject: PKCE    
+   no verifier at all                                   token issued     reject: PKCE    
+   attacker-controlled redirect_uri                     token issued     reject: redirect
+   same code exchanged a second time                    —                reject: replay  
+   first token after that replay                        —                revoked         

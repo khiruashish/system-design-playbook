@@ -1,0 +1,33 @@
+Part 1 — measured encodings of 50,000 real-shaped order events (java.util.zip, level 6):
+
+   encoding                          total  bytes/event    vs JSON
+   JSON                           11,981 KB        245.4       1.0x
+   JSON + gzip                     1,912 KB         39.2       6.3x
+   compact binary (varints)        1,900 KB         38.9       6.3x
+   compact binary + gzip           1,332 KB         27.3       9.0x
+
+ Part 2 — three data streams kept for 3 years. Illustrative ₹/GB-month: hot (DB / search cluster) 8.0,
+   object standard 1.9, infrequent 1.0, archive 0.08. Compression ratio applied: 6.3x (measured above).
+
+   stream            raw GB/day         all hot, raw     object store, gzip   gzip + lifecycle tiers
+   order events             1.2             ₹2.0 L               ₹7,433                 ₹2,481
+   application logs      1210.0          ₹19.34 Cr              ₹73.3 L                ₹24.5 L
+   app clickstream        240.0           ₹3.84 Cr              ₹14.5 L                 ₹4.9 L
+   all three                             ₹23.20 Cr                                     ₹29.3 L
+
+ Part 3 — cross-zone transfer per month (3 zones, ₹1.6 per GB that crosses a zone, illustrative):
+   stream            default (2/3 cross zones)  zone-aware (~5% spill-over)
+   order events                           ₹19                           ₹1
+   application logs                   ₹18,538                       ₹1,390
+   app clickstream                     ₹3,677                         ₹276
+
+   For scale: the monthly cloud bill in L1 is ₹2.28 Cr. Worst-case storage for all three streams averages ₹64.4 L/month over
+   the 3 years; default cross-zone transfer is ₹22,233/month.
+
+   → the measurement is real: gzip shrinks these JSON events ~6x and a schema'd binary encoding + gzip ~9x (Protobuf/Avro in
+     practice, Ch 28). But proportionality decides where effort goes. Order events — the data engineers worry about — are
+     a rounding error at any policy. Logs and clickstream are 100–1,000x bigger, and for them the retention policy, not the
+     encoding, is the lever: 'keep everything hot, uncompressed' versus 'compress and tier' is the difference between a
+     real line on the bill and a negligible one. Cross-zone transfer is small at this platform's scale; it becomes a
+     top-five line for data-heavy systems (media, ML features, analytics replication), where zone-aware routing and
+     follower-fetching consumers matter. FinOps rule: rank the streams by size first, then optimise the big ones.

@@ -1,0 +1,18 @@
+One checkout = 5 collaborator calls. Same logic, same responses (verified identical). 3,000 measured runs each, localhost.
+
+   deployment                                        p50          p99 p50 vs modules
+   modular monolith (in-process calls)           11.2 µs      30.7 µs            1x
+   microservices, 5 serial HTTP calls          1107.2 µs    7825.5 µs           99x
+   microservices, 5 parallel HTTP calls         484.1 µs    4500.1 µs           43x
+
+   Availability if every deployable is 99.9% and all are required on the checkout path:
+        modular monolith (1 deployable):      99.900%  →   43 min/month down
+        microservices (6 deployables):        99.401%  →  259 min/month down
+
+   → even on localhost the HTTP path costs ~99x the in-process one, and serial calls add up hop by hop (fan-out halves
+     it). In absolute terms ~1 ms is small against a 300 ms budget — what bites in production is the TAIL (p99 is already
+     several ms here, before real network, TLS, sidecars and GC pauses) and the AVAILABILITY multiplication: six required
+     99.9% deployables give ~6x the downtime of one. None of this makes microservices wrong; it prices them. Independent
+     deploys, scaling and team autonomy must be worth these costs, which is why the default is a modular monolith with
+     enforced module boundaries, extracting a module when a real driver appears (Ch 16, Ch 31) — and, when you do,
+     removing required synchronous hops (fan-out, caching, async events) rather than chaining them.

@@ -1,0 +1,20 @@
+== 1. Init primary with WAL archiving on (the prerequisite for PITR) ==
+== 2. Base backup (the daily full backup) ==
+   base backup taken: 39 MB
+== 3. Ongoing traffic AFTER the backup (these rows exist only in the WAL, not the base backup) ==
+   50,000 orders written after the backup, last at 2026-09-26 09:17:11.060175+00
+   restore point 'before_mistake' created (orders now: 57000)
+== 4. THE MISTAKE: a human runs DELETE with no WHERE at 14:03 ==
+   orders after the mistake: 1  (catastrophe: 57000 rows gone)
+== 5. RECOVER to the instant before the mistake (PITR) ==
+   recovered database has 57000 orders (target: 57000 before the mistake)
+
+== RESULT ==
+   rows at safe point : 57000
+   rows after mistake : 1   (data destroyed by the DELETE)
+   rows after PITR    : 57000
+   RPO (data lost vs safe point) : 0 rows
+   RTO (restore wall-clock)      : 327 ms for this small DB
+   → PITR replays the base backup + the archived WAL up to a named restore point, undoing the mistake without losing the
+     50,000+ orders that were written after the backup. Without WAL archiving you could only restore the base backup
+     (losing everything since it); without a recorded safe timestamp you'd guess where to stop.

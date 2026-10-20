@@ -1,0 +1,15 @@
+2,000 conversations × ~40 messages; 5% request loss, 3% ack loss (retry), heavy-tailed latency,
+5% of pushes dropped, rider clock skew up to ±120 s.
+
+   design                                                      duplicates   missing  reply before its sender's own msgs
+                                                                    shown                     message      out of order
+   A) no dedupe, sort by sender's clock                             2,407     4,034            59,998                 0
+   B) dedupe by message id, sort by server receive time                 0     4,083                 0               539
+   C) dedupe + per-sender order + conversation seq + gap fetch           0         0                 0                 0
+
+   → phones' clocks can't order a conversation: the rider's replies landed before the questions they answered.
+     Server time fixes causality between people (a reply is sent after its question was stored) but not a
+     sender's own burst, which the network reorders, and nothing notices a dropped push. The fix is the one
+     every chat system converges on: a client-generated id for idempotent retries, the sender's own sequence
+     number so the server keeps each person's order, and a server-assigned per-conversation sequence so every
+     phone can see a gap and fetch it. Push delivery is a hint; the sequence is the truth.

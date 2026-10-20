@@ -1,0 +1,17 @@
+UPI checkouts ~40/s for 2 h; PSP-A degraded minutes 20–50; Bank-3 (20% of customers) down minutes 70–90.
+
+   routing policy                                               overall   during PSP   during BANK   routing flips     customers
+                                                                success     incident      incident                        nudged
+   S1) everything via PSP-A                                       83.2%        54.4%         79.1%               0             0
+   S2) PSP-level health, fail over all traffic                    92.4%        91.3%         78.7%              20             0
+   S3) health per (PSP, bank); bank-side → nudge customer         94.2%        91.6%         88.7%             106         5,852
+   S4) S3 + auto-retry on the other PSP for PSP-side failures     95.5%        96.9%         88.7%             106         5,834
+
+   → a gateway-level health check can't tell a gateway problem from a bank problem: when Bank-3 went down, S2 saw
+     PSP-A's success fall and moved everyone to PSP-B, which failed Bank-3 just the same — churn without benefit.
+     Measuring success per (gateway, bank) shows where the failure is: move only the traffic a healthy gateway can
+     carry, and when every gateway fails for one bank, no routing helps — the only rescue is steering the customer to
+     another bank or method. An automatic retry on a second gateway rescues gateway-side failures within the same
+     checkout, but only with an idempotent order so the customer can't be charged twice. (S3/S4 flip often because an
+     avoided path gets no traffic, so its window empties and it looks healthy again — real routers keep a small
+     probe share on avoided paths, as in Ch 40's vendor routing.)

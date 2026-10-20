@@ -1,0 +1,26 @@
+5,000 requests → 24,776 log events, 146 ERROR events
+
+A. Querying: "which requests failed in inventory, and what was the error?"
+   structured JSON: filter level=ERROR AND service=inventory → 33 events, each with trace_id, user_id, sku, error
+   unstructured   : grep 'inventory' | grep 'ERROR', then parse free text. One line looks like:
+     Fri Sep 25 23:19:27 IST 2026 [inventory] ERROR request failed for user u876 sku sku-31 - timeout calling payme
+   → structured logs are queryable by field; text logs force brittle regex and can't be aggregated reliably.
+
+B. Correlation: reconstruct ONE failed request's path across services
+   with a correlation id: filter trace_id=6417317d6d792d49 → 2 ordered events:
+     gateway   INFO  gateway handled
+     order     ERROR timeout calling pricing
+   without one: the 5 lines are scattered among 24,776 events with no shared key — you'd correlate by guessing on timestamp+user.
+
+C. Levels and sampling: cut INFO volume without losing errors
+   full volume: {ERROR=146, INFO=24630}
+   keep  100% of INFO traces (errors always kept):  24,776 events stored (100%), ERROR events kept 146/146
+   keep   10% of INFO traces (errors always kept):   3,051 events stored (12%), ERROR events kept 146/146
+   keep    1% of INFO traces (errors always kept):     796 events stored (3%), ERROR events kept 146/146
+   → sample by trace, never by line (so a kept request is whole), and never sample errors.
+
+D. Cardinality: what happens if you put high-cardinality values in labels
+   distinct services: 5  (safe as a label)
+   distinct users   : 1,853  distinct traces: 5,000  (NEVER a metric label — one time series each)
+   a counter labelled by (service, level, user_id) would create ~18,530 time series; by (service, level) only 10.
+   → high-cardinality identifiers belong in logs/traces (searchable), not in metric labels (they explode storage).

@@ -1,0 +1,22 @@
+3-master Redis Cluster, 30,000 keys loaded. Adding a 4th master and rebalancing live...
+
+   Rebalance took 7.7 s. Reads during the whole run:
+
+   client                                         successful  MOVED handled  ASK handled     errors     misses
+   NAIVE (static slot map)                           129,995              0            0     11,706          0
+   SMART (follows MOVED and ASK)                     140,737          3,126            1          0          0
+
+   Keys per master after rebalancing:
+        127.0.0.1:7001    7,492 keys  ██████████████████
+        127.0.0.1:7002    7,481 keys  ██████████████████
+        127.0.0.1:7003    7,500 keys  ██████████████████
+        127.0.0.1:7004    7,527 keys  ██████████████████
+
+   Keys that moved: 7,527 of 30,000 (25%) — all of them to the new node. Modulo hashing (hash % 3 → % 4) would have
+   moved 22,496 (75%), mostly between the OLD nodes, emptying most of every cache at once.
+
+   → hash slots make scale-out a gradual, key-by-key migration: only the slots that move change owner, and only
+     to the new node. During the move the cluster answers MOVED (slot now lives elsewhere) or ASK (this key is
+     mid-migration); a cluster-aware client follows both and never sees an error, while a client with a stale map
+     fails on every key that moved. The {sku…} hash tag controls which keys share a slot, so multi-key commands
+     on related keys keep working. Resharding is routine only if every client speaks the redirect protocol.

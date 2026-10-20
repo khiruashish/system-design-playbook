@@ -1,0 +1,15 @@
+40 tasks, 6 slots; critical path 158 min, total work 915 min on an average night; deadline 06:00 (360 min).
+
+   scheduling                                              runs on bad  nights with  avg finish  p95 finish    correct by
+                                                                inputs manual rerun                         06:00 (of 60)
+   D1) cron times from average durations                         1,371           60    03:13       04:28             0
+   D2) cron times padded 50%                                       974           60    03:55       04:30             0
+   D3) DAG: start when inputs succeed, auto-retry                    0            0    03:46       05:40            57
+   D4) D3 + longest critical path first                              0            0    03:33       05:15            58
+
+   → time-based chaining encodes a guess about durations. It 'finishes' early because it doesn't wait: on any
+     night where a task runs long or fails, downstream tasks run on missing inputs, and with 40 tasks and no retries
+     that is every night — someone re-runs payouts by hand each morning. Padding cuts the bad runs and still fails.
+     Declaring dependencies and retrying automatically removes the bad runs; the pipeline then takes as long as the
+     work really takes, so heavy nights can still miss 06:00. With limited slots, feeding the critical path first
+     shortens the night. What's left is capacity planning for the heavy nights.

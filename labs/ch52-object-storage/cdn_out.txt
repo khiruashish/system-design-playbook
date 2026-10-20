@@ -1,0 +1,13 @@
+50,000 images, 3 days, 2M requests/day, 600 photo updates/day; product API cached 60 s.
+
+   caching                                          outdated photo     CDN hit  origin requests  worst staleness
+   C1) mutable URL, TTL 7 days                              81,271       99.2%           50,000         3.0 days
+   C2) mutable URL, TTL 5 minutes                               43       61.2%        2,325,117            4 min
+   C3) mutable URL, TTL 7 days + purge on update             4,310       99.1%           51,587         2.8 days
+   C4) versioned (content-hash) URL, TTL 1 year                 14       99.1%           51,620             54 s
+
+   → with mutable URLs you choose between long TTLs (great hit ratio, customers see an old photo for days) and
+     short TTLs (fresh, but the origin serves many times more requests). Purging on update narrows the gap, but
+     purges are asynchronous and sometimes fail — and a failed purge means days of staleness. Versioned URLs
+     remove the dilemma: content never changes under a URL, so it can be cached for a year, and an update is a
+     new URL. What remains is how stale the page that hands out the URL is (60 s here).

@@ -1,0 +1,9 @@
+Same workload (1 GB heap, ~15 s, replacing a 300 MB live set + ~1 MB garbage/request). STW = stop-the-world pause from the GC log.
+JDK / GC                  reqs   alloc  STW total   STW max   req p99  req p999  req max
+JDK21 Parallel           67510  70.8GB     4099ms   118.4ms   0.368ms  13.785ms  118.9ms
+JDK21 G1                 72817  76.4GB     3817ms    54.8ms   0.540ms  17.588ms   55.9ms
+JDK21 ZGC                70240  73.7GB    sub-ms*   sub-ms*   0.523ms  14.313ms   36.3ms
+JDK25 G1                 65493  68.7GB     4817ms    68.8ms   0.385ms  22.298ms   89.0ms
+JDK25 ZGC (gen)          87764  92.0GB    sub-ms*   sub-ms*   0.542ms   3.377ms    7.5ms
+* ZGC's stop-the-world pauses are concurrent and sub-millisecond, so they are not logged as 'Pause … ms' at the gc level;
+  its effect shows in the request tail (req max), not in a STW column. ZGC ran many concurrent minor/major collections instead.

@@ -1,0 +1,15 @@
+OTPs at ~50/s for 2 h; V1 silently degrades to 35% delivery in minutes 30–70 (API still returns 200).
+
+   policy                                                   OTPs ≤30 s  during incident      SMS sent ₹ per useful OTP
+   S1) cheapest vendor only                                      65.9%             3.9%       359,645            0.182
+   S2) fail over on API errors                                   65.9%             3.9%       359,645            0.182
+   S3) route on DLR health (85%, 60 s window)                    94.6%            90.0%       359,651            0.137
+        first shift away from V1 at minute 30.7 (incident began at minute 30.0)
+   S4) S3 + resend via other vendor after 20 s                   99.4%            98.9%       378,975            0.139
+        first shift away from V1 at minute 30.6 (incident began at minute 30.0)
+
+   → the vendor's API said 'accepted' throughout; failing over on errors never triggered. Delivery reports are the
+     only honest health signal, so route on them: measured over a sliding window they exposed the silent failure
+     in under a minute (a send can only be judged once its 30 s deadline passes) and moved traffic, keeping a trickle on the
+     sick vendor to see recovery. A single resend through another vendor covers the messages already lost —
+     worth its extra SMS for OTPs, where a failed login costs far more than ₹0.20; not for marketing.

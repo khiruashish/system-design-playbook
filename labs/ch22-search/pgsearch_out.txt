@@ -1,0 +1,18 @@
+== 1. Substring search: LIKE '%paneer%'
+   no index (seq scan)        :   28.043 ms, 4952 rows
+   GIN trigram index          :   13.966 ms, 4952 rows   (index 11 MB)
+== 2. Full-text search: tsvector (english stemming on name, weight A; brand+category weight B), GIN, ts_rank
+   'fresh paneer' → 'fresh' & 'paneer'                      12.186 ms,   2486 rows
+   'tomatoes'     → 'tomato'                                14.833 ms,   4981 rows
+   'tomatos'      → 'tomato'                                14.838 ms,   4981 rows
+   'masala chips' → 'masala' & 'chip'                       11.844 ms,   2477 rows
+   'आटा'    → (empty: no lexemes)                      1.824 ms,      0 rows
+   'aata'         → 'aata'                                   2.326 ms,      0 rows
+== 3. Autocomplete and typos
+   prefix 'sham:*'            :   16.995 ms → Nirmal Herbal Shampoo|Ujjwal Herbal Shampoo|Prakriti Anti-Dandruff Shampoo|Sunehri Herbal Shampoo|Deshi Dairy Herbal Shampoo
+   word_similarity 'shampo'    :   34.522 ms → Amrit Anti-Dandruff Shampoo|0.86|Amrit Herbal Shampoo|0.86|Annika Anti-Dandruff Shampoo|0.86
+   word_similarity 'toor daal' :   33.855 ms → Nirmal Toor Dal|0.80|Saral Toor Dal|0.80|Ujjwal Toor Dal|0.80
+== 4. Facets for 'masala' in one round trip (grouping sets)
+     21.580 ms → Masala:*:10101 Snacks:*:2477 *:Gauri:702 *:Pavitra:675 *:Deshi Dairy:662 *:Nirmal:657
+== 5. Ranking with business signals: text rank × popularity, in-stock first
+     17.355 ms → Saral Malai Paneer 500 g t 2700|Bhoomika Fresh Paneer 500 g t 2525|Hariyali Farms Malai Paneer 200 g t 1794

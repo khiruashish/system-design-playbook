@@ -1,0 +1,29 @@
+Evaluating 10 data flows from the architecture manifest against 5 residency/transfer rules.
+
+   F1   orders DB → DR replica (Hyderabad)             → IN_HYDERABAD PASS
+   F2   orders DB → DR replica (Singapore)             → SG           BLOCK
+          ✗ R1 payment-data localisation payment data would be STORED in SG
+   F3   payment auth → card network (abroad leg)       → US           PASS
+   F4   clickstream → US marketing SaaS                → US           BLOCK
+          ✗ R3 purpose limitation        'behavioural' data used for 'ad-targeting' without a matching purpose/consent
+          ✗ R3 purpose limitation        'personal' data used for 'ad-targeting' without a matching purpose/consent
+   F5   clickstream → US marketing SaaS (aggregated)   → US           PASS
+   F6   app logs → EU observability vendor             → EU           BLOCK
+          ✗ R2 card data                 raw card numbers leave the PCI vault — use network tokens
+   F7   support tickets → SG helpdesk vendor           → SG           PASS
+   F8   fraud signals → US fraud vendor                → US           BLOCK
+          ✗ R1 payment-data localisation payment data would be STORED in US
+   F9   invoice archive → cold storage                 → IN_MUMBAI    BLOCK
+          ✗ R5 GST retention             retention shorter than the statutory period
+   F10  recommendations model training                 → IN_MUMBAI    PASS
+
+   5 of 10 flows blocked.
+   Allowed regions for a full orders-DB DR replica: [IN_MUMBAI, IN_HYDERABAD]
+
+   → the dangerous flows are ordinary engineering decisions: a DR replica in Singapore (F2) is 'just' a failover region,
+     but it stores payment data outside India; debug logs shipped to an observability vendor (F6) carry card numbers
+     (L2 finds them); a clickstream export (F4) reuses personal data for ad targeting the customer never agreed to — the
+     aggregated version (F5) of the same export passes. A payment network's foreign leg (F3) passes only because it
+     processes transiently and deletes within a day. Encoding the rules and running them over every manifest change
+     turns compliance from a yearly audit surprise into a failed build, and makes the DR decision explicit: full-copy
+     replicas stay in Indian regions; anything abroad must be transient, anonymised, or have payment data removed.

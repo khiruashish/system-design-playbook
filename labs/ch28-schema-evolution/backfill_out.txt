@@ -1,0 +1,11 @@
+3,000,000 rows. A live writer updates random rows the whole time. We backfill amount_rupees two ways.
+
+   A) ONE big UPDATE   : 11,613 ms total   concurrent writer blocked up to 8,011 ms   dead tuples after: 3,000,085
+   B) BATCHED (25k/txn): 11,108 ms total   concurrent writer blocked up to   100 ms   dead tuples after: 3,002,345   (120 batches)
+
+   → the single UPDATE locks every row it rewrites for the entire statement, so a concurrent writer touching one of
+     those rows waits behind the whole backfill -- here it blocked until lock_timeout (8 s) fired. Both forms create
+     ~3M dead tuples, but the single UPDATE holds them in ONE uncommitted transaction that autovacuum cannot touch
+     until it ends; the batched form commits every 25k rows, so each lock lasts milliseconds, writers slip between
+     batches, and autovacuum can reclaim as it goes. Same result, but only the batched form is safe on a live table.
+     Add a short sleep between batches under load, and drive batches off an indexed key range (not OFFSET, which re-scans).

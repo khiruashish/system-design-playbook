@@ -1,0 +1,21 @@
+each service 99.95% on its own; outages random, mean 30 min; one simulated year; 99.95% budget = 21.6 min/month.
+
+   checkout journey                                          availability       outage    months over     most customers
+                                                                (traffic-    min/month  99.95% budget       down at once
+                                                                weighted)                     (of 12)                   
+   A1) as-built: 16 hard dependencies                             99.091%        398.1             12               100%
+   A2) designed: 10 hard dependencies                             99.458%        237.3             12               100%
+   A3) designed, but all 10 share one PostgreSQL cluster          99.400%        262.9             12               100%
+   A4) designed, 4 independent cells                              99.453%        239.7             12                50%
+   A5) designed, each critical service at 99.99%                  99.904%         42.3              6               100%
+   A6) designed, each critical service at 99.995%                 99.938%         27.1              6               100%
+
+   rule of thumb: n independent hard dependencies at availability a → a^n: 0.9995^16 = 99.2030%, 0.9995^10 = 99.5011%
+
+   → a journey's availability is at best the PRODUCT of its hard dependencies': neither sixteen nor ten services at
+     99.95% can make a 99.95% checkout — every month blows the budget. Cutting hard edges (L3) helps; sharing one
+     database quietly adds a dependency to every journey. Cells don't make outages rarer (same availability) — they
+     make each one smaller: a quarter of customers per outage, half at worst when two cells failed together, never
+     all. Even each critical service at 99.995% left this simulated year at 99.94% with half the months over budget:
+     meeting 99.95% end to end takes both an extra nine on every critical service AND fewer of them — which is why
+     the critical set must be small, and why the SLO for a journey has to be set with this arithmetic in hand.

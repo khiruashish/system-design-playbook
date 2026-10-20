@@ -1,0 +1,14 @@
+500,000 book updates in ~5 min to 200 subscribers; ~0.1% loss per subscriber in bursts of 1–20.
+
+   feed design                                                   books wrong    time with a time knowingly    MB sent per
+                                                                  at the end     WRONG book          stale     subscriber
+   M1) deltas only, no sequence numbers                                   18          9.44%         0.000%          9.5 MB
+   M2) sequenced deltas + retransmit on gap                                0          0.00%         0.334%          9.6 MB
+   M3) sequenced deltas + 1 s snapshots, resync on gap                     0          0.00%         7.838%         10.9 MB
+
+   → an incremental feed without sequence numbers can't know it missed something: one lost update leaves a price
+     level wrong until that level happens to change again, and nobody notices. Sequence numbers turn silent
+     corruption into a detected gap. Retransmission repairs it in milliseconds; snapshots repair it by the next
+     snapshot (up to a second of 'stale — don't trade on this') at the cost of bandwidth. Real feeds combine
+     both: sequenced multicast deltas, a retransmit service for small gaps, and snapshots for late joiners and
+     big gaps.

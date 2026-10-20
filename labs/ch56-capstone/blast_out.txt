@@ -1,0 +1,44 @@
+AS-BUILT — 22 services on synchronous paths
+   journey                          longest sync chain   services it can't work without
+   home / browse                                     2   api-gateway, catalog-service, identity-service, pricing-service, promotion-service, recommendation-service, serviceability-service
+   search                                            3   api-gateway, catalog-service, identity-service, pricing-service, search-service
+   add to cart                                       3   api-gateway, cart-service, catalog-service, identity-service, inventory-service, pricing-service
+   checkout                                          4   api-gateway, audit-service, cart-service, checkout-service, customer-service, fulfilment-service, identity-service, inventory-service, invoice-service, notification-service, order-service, payment-service, pricing-service, promotion-service, serviceability-service, slot-service
+   track order                                       3   api-gateway, dispatch-service, identity-service, order-service, tracking-service
+   login / OTP                                       3   api-gateway, identity-service, notification-service
+   seller: update catalogue                          3   api-gateway, audit-service, catalog-service, identity-service, search-service, seller-service
+
+   services whose failure breaks user traffic: 22; that break CHECKOUT: 16; traffic lost summed over all
+   single-service failures: 649% (i.e. 6.5 platforms' worth of traffic if each failed once)
+   worst five:
+   api-gateway                  100% of requests fail   (home / browse, search, add to cart, checkout, track order, login / OTP, seller: update catalogue)
+   identity-service             100% of requests fail   (home / browse, search, add to cart, checkout, track order, login / OTP, seller: update catalogue)
+   catalog-service               82% of requests fail   (home / browse, search, add to cart, seller: update catalogue)
+   pricing-service               82% of requests fail   (home / browse, search, add to cart, checkout)
+   promotion-service             45% of requests fail   (home / browse, checkout)
+
+DESIGNED — 19 services on synchronous paths
+   journey                          longest sync chain   services it can't work without
+   home / browse                                     2   api-gateway, catalog-service, pricing-service, serviceability-service
+   search                                            3   api-gateway, catalog-service, pricing-service
+   add to cart                                       3   api-gateway, cart-service, catalog-service, pricing-service
+   checkout                                          3   api-gateway, cart-service, checkout-service, customer-service, inventory-service, order-service, payment-service, pricing-service, serviceability-service, slot-service
+   track order                                       2   api-gateway, order-service
+   login / OTP                                       3   api-gateway, identity-service, notification-service
+   seller: update catalogue                          3   api-gateway, audit-service, catalog-service, seller-service
+
+   services whose failure breaks user traffic: 15; that break CHECKOUT: 10; traffic lost summed over all
+   single-service failures: 385% (i.e. 3.8 platforms' worth of traffic if each failed once)
+   worst five:
+   api-gateway                  100% of requests fail   (home / browse, search, add to cart, checkout, track order, login / OTP, seller: update catalogue)
+   catalog-service               82% of requests fail   (home / browse, search, add to cart, seller: update catalogue)
+   pricing-service               82% of requests fail   (home / browse, search, add to cart, checkout)
+   serviceability-service        45% of requests fail   (home / browse, checkout)
+   cart-service                  20% of requests fail   (add to cart, checkout)
+
+   → the difference between the two platforms is not the services — it's the edges. Every synchronous, hard
+     dependency adds its failure to its callers'. Verifying tokens locally removes identity from every request;
+     moving confirmations, audit, invoices and fulfilment behind events removes them from checkout; giving optional
+     features a degraded answer removes them from the home page. What remains — gateway, catalogue, pricing,
+     serviceability, cart, checkout, inventory, payment, order — is the platform's true critical set: those get
+     redundancy, cells and the strictest SLOs. Draw this graph from real traces, not from the architecture diagram.

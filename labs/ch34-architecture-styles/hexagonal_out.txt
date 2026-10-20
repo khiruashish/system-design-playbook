@@ -1,0 +1,17 @@
+Hexagonal architecture: one checkout domain, two sets of adapters, the same 2,000 checkouts.
+
+   wiring                                                   paid  declined orders saved       time
+   TEST: in-memory repository + fake payment adapter       1,980        20        2,000      11 ms
+   REAL: file repository + HTTP payment adapter            1,980        20        2,000   3,000 ms
+   → identical business outcomes: YES;  real wiring is 273x slower
+
+   Dependency rule check over 7 domain types (no java.net / java.io / java.nio / java.sql):
+        ✓ domain references no infrastructure type
+   Same check against a LeakyCheckoutService that takes an HttpClient (the shortcut someone will try):
+        ✗ LeakyCheckoutService uses java.net.http.HttpClient
+
+   → the domain produced the same paid/declined split and the same number of saved orders with both wirings, because
+     it only knows its ports. That buys two things: the business rules are tested at in-memory speed (the fast suite
+     above) with a few slower contract tests per adapter, and swapping the file store for PostgreSQL or Razorpay for
+     another gateway is a new adapter, not a domain change. The reflection check is the fitness function that keeps it
+     that way: the day someone passes an HttpClient into CheckoutService, the build fails.

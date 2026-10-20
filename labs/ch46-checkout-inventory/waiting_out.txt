@@ -1,0 +1,16 @@
+Checkout service (10 DB connections, ~20 ms DB work per checkout), 2,000 boxes, 8,000 customers arriving within 2 s;
+clients time out at 3 s and retry.
+
+   design                                             bought    told sold    no answer   answer p50     answer p99   fair (bought
+                                                                      out      in 25 s                             & first 2,000)
+   W1) no admission control                              162          263        7,575     22.48 s       24.76 s          43.4%
+        (2,000 orders in the database — 1,838 buyers never heard back: their request timed out after the box was theirs)
+   W2) 40 in flight, fast 503 + Retry-After            2,000        6,000            0      7.72 s        9.47 s          31.2%
+   W3) virtual waiting room, admit 300/s FIFO          2,000        6,000            0      7.93 s        9.91 s          91.7%
+
+   → without admission control the crowd queues inside the service for database connections: requests time out,
+     clients retry, and the retries join the same queue — work is done for people who have already given up, and
+     who gets a box is decided by retry luck. Shedding with a fast 503 protects the database, but the order in which
+     people are served is still random. A waiting room turns the crowd into an ordered queue in front of the
+     service: the database sees a steady, safe rate, every customer gets an answer and a position, and the first
+     to arrive are the first to buy. For a flash sale, fairness is part of correctness.

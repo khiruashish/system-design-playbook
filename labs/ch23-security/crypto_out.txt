@@ -1,0 +1,18 @@
+A. Envelope encryption of a customer's address (AES-256-GCM per record, DEK wrapped by the KMS KEK)
+   plaintext (60 bytes) → ciphertext 76 bytes, iv 12 bytes, wrapped DEK 89 bytes, KEK version 2
+   what the database row stores: ACZvPdn9qYOVSgAGu/RqTLnLwRZxOZim...  (no plaintext, no key material)
+   decrypt round-trip matches original: true
+B. Authenticated encryption detects tampering (GCM tag)
+   one flipped bit → AEADBadTagException (record rejected, not silently corrupted)
+C. KEK rotation without re-encrypting the data
+   KEK rotated to version 3 in the KMS. Existing rows keep working (KMS keeps old versions to unwrap):
+     old row still decrypts: true
+     rewrapped DEK now at KEK version 3; ciphertext unchanged (true); still decrypts: true
+   → rotation rewraps kilobytes of DEKs, never terabytes of data.
+D. Crypto-shredding: honour "delete all my data" by destroying the key, not chasing every copy
+   before deletion: DEK unwrappable = true
+   after destroying the customer's KEK (HTTP 204): unwrap fails → data is unrecoverable everywhere it was copied
+E. Cost: KMS round-trip per record vs a cached/derived DEK (1,000 fields)
+   KMS call per record :  1.594 ms/field  (a network hop each time)
+   one wrapped DEK reused:  0.010 ms/field  (165x cheaper; rewrap the one DEK on rotation)
+   → cache/derive DEKs per tenant or batch; never cache the KEK, and give each record its own IV.

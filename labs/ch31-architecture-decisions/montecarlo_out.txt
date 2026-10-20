@@ -1,0 +1,19 @@
+Decision under uncertainty: Serverless vs owned VMs for next year. Monthly volume is UNCERTAIN
+   (triangular: pessimistic 40M, likely 120M, optimistic 400M requests/month).
+
+   Naive point estimate at the 'likely' 120M/mo:  serverless $23,040  vs  VMs $28,080  →  SERVERLESS cheaper
+
+   Monte Carlo (200,000 trials over the uncertain volume):
+        option             mean $        p10 $        p90 $
+        serverless        $35,895      $18,051      $57,582
+        owned VMs         $29,594      $28,080      $32,760
+        P(serverless cheaper) = 36%   |   P(VMs cheaper) = 64%
+        break-even volume ≈ 147M requests/month (below → serverless wins, above → VMs win)
+
+   → the point estimate at the 'likely' volume says SERVERLESS. The Monte Carlo says VMs in expectation, and
+     serverless is cheaper in only 36% of plausible futures. Why they disagree: the volume distribution is
+     RIGHT-SKEWED (the 'likely' 120M is below the mean, because upside adoption scenarios stretch to 400M), and
+     serverless cost grows linearly with volume with no ceiling while the VM fleet has a high HA floor but a much
+     lower marginal cost. Plugging in the mode ignores the fat upper tail — exactly where serverless gets expensive
+     (compare the p90s). Decision: prefer VMs, OR start serverless with a pre-agreed migration trigger at ~147M/mo.
+     Either is defensible; what is NOT defensible is the single-number comparison that hid the skew and the break-even.

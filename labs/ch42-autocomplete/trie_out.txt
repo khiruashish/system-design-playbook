@@ -1,0 +1,13 @@
+200,000 suggestion candidates, 429,506 trie nodes; 200,000 keystroke prefixes (avg length 6.5).
+
+   approach                                                    build   extra memory p50 / keystroke p99 / keystroke
+   A) scan all candidates, sort, take 5                            —              —      2834.7 µs      8160.9 µs
+   B) trie + subtree search with a heap                       554 ms              —       107.5 µs      3081.3 µs
+   C) trie with top-5 precomputed per node                   1152 ms          24 MB         0.2 µs         2.2 µs
+   identical top-5 across all three approaches on 2,000 checked prefixes: yes
+   why B's p99 is high: the prefix 'm' has 27,162 candidates under it; C reads 5 pointers regardless.
+
+   → a scan is fine for a few thousand candidates and hopeless for hundreds of thousands. A plain trie makes long
+     prefixes fast but short ones — the first keystrokes, which everybody types — still search huge subtrees.
+     Precomputing the top-k at every node moves that work to build time and makes every keystroke a walk of
+     prefix-length steps plus a read of k items, at the cost of memory and a rebuild when counts change.

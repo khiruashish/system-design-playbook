@@ -1,0 +1,13 @@
+4 gateways × 250,000 orders; each design runs the same input 3 times.
+
+   design                                               distinct trade streams       replica / recovery       orders/s
+                                                                   (of 3 runs)       identical to live?               
+   D1) gateways call the book directly, under a lock                         3         n/a (no journal)      3,012,088
+   D2) sequencer + journal + single matcher thread                           3              yes, 3 of 3      3,953,355
+
+   → both designs see the same orders, but in whatever order the threads happen to interleave, so different
+     runs produce different trades — that race is real and unavoidable at the gateways. The difference is what
+     happens next. With threads matching under a lock, the order that decided priority exists nowhere: it can't be
+     audited, replayed, or reproduced on a standby. A sequencer makes the race's outcome a FACT (a numbered journal),
+     and a single-threaded, deterministic matcher turns that journal into the same book and the same trades on every
+     replica and after every crash. Determinism, not parallelism, is the property the design protects.

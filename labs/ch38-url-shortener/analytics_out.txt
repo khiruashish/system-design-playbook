@@ -1,0 +1,21 @@
+Part 1 — 40,000 clicks, 32 concurrent writers, PostgreSQL 16 with durable commits (fsync on)
+
+   strategy                                               clicks/s   p99 cost on redirect  DB statements    counted
+   A) UPDATE per click, spread over 1,000 links             12,253               11.33 ms         40,000     40,000
+   B) UPDATE per click, ONE hot campaign link                2,263               67.22 ms         40,000     40,000
+   C) buffer + 1 s micro-batch upsert (half on hot link)     10,000              0.0100 ms          2,029     40,000
+      (C is paced at 10,000 clicks/s — its limit is the redirect traffic, not the counter)
+
+Part 2 — 3,000,000 clicks from repeat visitors across 20 redirect nodes
+
+   exact unique devices (HashSet)                        663,668 ~37 MB of set entries
+   HyperLogLog, 20 node sketches merged                  666,410     16 KB per sketch   error +0.41%
+   adding the 20 per-node unique counts instead        2,613,952                        error +294%
+   HLL standard error at p=14: 1.04/√16384 = 0.81%
+
+   → counting with a synchronous UPDATE puts a row lock on the redirect's critical path; it is tolerable when
+     clicks spread out and collapses onto one lock exactly when a campaign makes one link hot (several times slower,
+     with a far worse p99). Micro-batching makes the redirect's cost a memory increment and turns 40,000 increments into one upsert
+     per link per second (20x fewer statements) — take clicks off the redirect path (in production: a
+     Kafka topic + stream aggregation, Ch 14), accepting counts that are a second or so behind. Unique visitors
+     don't add up across nodes or days; HyperLogLog sketches do merge, in kilobytes, within about 1%.

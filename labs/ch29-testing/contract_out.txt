@@ -1,0 +1,12 @@
+Consumer-driven contract: the checkout consumer needs {cart_id:number, total_paise:number, currency:string}.
+We verify each provider version against that contract, with NO consumer running — just the published contract.
+
+   Contract (published by the consumer): GET /cart/42 must return {total_paise=number, cart_id=number, currency=string}
+
+   provider v1 (original)                : VERIFIED ✓ — honours the contract
+   provider v2 (renamed total_paise→amount, dropped currency): CONTRACT BROKEN ✗ — [missing/!number field 'total_paise', missing/!string field 'currency']
+
+   → v1 passes: every field the consumer relies on is present with the right type. v2 'refactored' a field the
+     provider team believed was internal — and the contract test FAILS the provider's build, naming the exact
+     missing fields, before it ever reaches the consumer. That is how you decouple deploys safely: the provider
+     may change anything the contract does NOT mention (it changed nothing about 'items'), but not what it does.

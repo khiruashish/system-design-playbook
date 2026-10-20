@@ -1,0 +1,14 @@
+100 sites × 300 pages, 1 request / 500 ms per site allowed (429 otherwise, ban after 10); 64 threads, 20 s.
+
+   frontier                                                         pages ok     429s   sites that      sites
+                                                                                         banned us    crawled
+   C1) global FIFO, fetch immediately                                     49      307            4         49
+   C2) global FIFO, wait for the host's turn before fetching             625       15            0         55
+   C3) per-host queues + ready-host scheduler (back queues)            3,826        0            0        100
+
+   → the web is lopsided: a few sites hold most links, so a global FIFO is mostly URLs of the same few sites.
+     Fetching them immediately hammers those sites until they ban us, and banned sites stop yielding new links.
+     Waiting for each site's turn in place mostly fixes the manners (a few 429s still slip through from timing
+     jitter) but not the throughput: threads sit blocked on the busy sites while other sites' URLs wait behind
+     them. Separate queues per site, and a scheduler that hands out SITES when they may next be contacted, keep
+     every thread on a ready site: close to the 4,000-page politeness ceiling (100 sites × 2/s × 20 s), no 429s.

@@ -1,0 +1,15 @@
+250,000 pings from 50,000 riders (20 s at 1 ping / 4 s); ~7,489 delivered out of order; 40% of riders stationary.
+
+   ingester                                                          pings/s   Redis commands    riders left with an
+                                                                      (real)                          older position
+   T1) GEOADD + HSET per ping, no ordering check                      12,781          500,000                    480
+   T2) one Lua script per ping, drops older pings                     20,865          250,000                      0
+   T3) T2 pipelined in batches of 200                                 94,526          250,000                      0
+   T4) T3 + write only if moved > 20 m or 15 s passed                162,832          145,061                      0
+   (T4 deliberately skips pings that didn't move a rider; its check counts only positions older than its own last write.)
+
+   → one round trip per update caps ingestion far below what one Redis can do; pipelining multiplies it. Without an
+     ordering check, a late ping silently moves a rider back to where they were seconds ago — and dispatch trusts
+     it. A Lua script that compares timestamps makes the update atomic and order-safe. Finally, most pings carry
+     no news (riders waiting at the store): thinning the LIVE index by movement cuts writes sharply, while the raw
+     stream still goes to Kafka for history, ETA training and dispute resolution.

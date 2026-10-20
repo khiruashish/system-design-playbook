@@ -1,0 +1,13 @@
+Primary :6391 → replica :6392 (async replication). Replica stalls 300 ms, primary is killed during the stall.
+
+   write mode                                    writes sent     acknowledged  lost (acked    batch p50      batch max
+                                                                              but missing)                            
+   ASYNC (reply OK = done)                           327,150          327,100        6,000      0.16 ms       25.02 ms
+   WAIT 1 100 after each batch                       170,800          170,650            0      0.23 ms      201.06 ms
+
+   → asynchronous replication acknowledges a write before any replica has it, so a failover during replica lag
+     silently discards acknowledged writes. WAIT makes the client find out: batches written during the stall
+     were NOT confirmed, so the client knows they aren't safe (retry, or rebuild from the source of truth) —
+     at the price of waiting for a replica on every batch. WAIT is not consensus (a promoted replica can still
+     miss writes WAIT counted if another replica had them), so the rule stands: a cache may lose data; keep the
+     truth in a database, and don't store in a cache anything you can't rebuild or afford to lose.

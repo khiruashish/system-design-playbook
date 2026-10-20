@@ -1,0 +1,18 @@
+A. Basic object operations (SeaweedFS S3 API, SigV4 signed)
+   PUT products/sku-1001/main.jpg (480,000 B)  → 200, ETag "929df4cadcea3fdff1ba15cacfdb132b"
+   HEAD                                  → 200, Content-Length 480000, Content-Type image/jpeg
+   GET Range bytes=0-1023                → 206, 1,024 bytes (thumbnail header / resumable download)
+   LIST prefix products/sku-1002/        → 200, 3 keys
+B. Presigned URLs: the app uploads straight to storage; our servers only sign
+   presigned PUT, valid 5 min            → 200
+   presigned GET                         → 200
+   same URL, key changed to rider-78     → 403 (signature covers the path)
+   URL signed 10 min ago, valid 60 s     → 403 (expired)
+   unsigned GET of a private object      → 403
+C. Multipart upload: 40 MB invoice archive in 8 MB parts, part 3 fails once and is retried alone
+   part 3: (simulated) connection reset after 4 MB → only part 3 is sent again
+   complete → 200 in 493 ms; bytes sent 44 MB for a 40 MB object (a failed single PUT resends all 40 MB)
+   multipart ETag "f719698066a50ef5eed65211e0e520f5-10": not the MD5 of the object; verify with your own checksum
+   downloaded object identical: true
+D. Content-addressed keys: the same image uploaded by 3 sellers is stored once
+   uploads 3, objects stored 1, key blobs/sha256/915bec70f771e55e…

@@ -1,0 +1,20 @@
+Logged by the old popularity ranker: 4,000,000 impressions, 228,718 clicks (CTR 5.72%).
+
+   model                                                w buy-again  w co-purch   w popular  w discount  w position
+   true model (hidden)                                         2.20        1.40        0.30        0.80           —
+   R1 naive                                                    1.82        1.08        1.63        0.57           —
+   R2 with position feature                                    1.88        1.11        0.25        0.59       -0.17
+   R3 inverse-propensity weighted                              1.89        1.09        0.29        0.55           —
+
+   ranker                                                  NDCG@10 expected clicks/req
+   R0) old popularity ranker                                 0.537              1.202
+   R1) naive logistic regression                             0.939              1.892
+   R2) + position feature (0 at serving)                     0.999              1.992
+   R3) inverse-propensity weighted                           0.999              1.991
+   R*) true model (upper bound)                              1.000              1.993
+
+   → the logs record what the OLD ranker chose to show at the top, so popular items look better than they are:
+     the naive model inflates popularity and learns the logging policy's bias back. Modelling position explicitly
+     (or reweighting by how likely each slot was to be seen) recovers weights close to the truth and a better
+     ranking. Every learned ranker is trained on data its predecessor shaped — measure and correct for that, and
+     keep some randomised traffic (L4) so the logs contain evidence about items the old ranker never showed.

@@ -1,0 +1,15 @@
+2,000,000 puts (1,200,000 distinct keys) + 100,000 deletes; 1,103,928 live keys = 122 MB of live data.
+
+   engine                                          write    read hit   read miss   files read   files read      space    RAM for
+                                                    MB/s   p50 / p99         p50      per hit     per miss    amplif.    lookups
+   E1) Bitcask: log + in-memory hash index           115   2.8/  18 µs      0.3 µs         1.00         0.00      1.92x     101 MB
+   E2) LSM: memtable + 72 SSTables, no Bloom          81 114.4/1340 µs     81.6 µs        30.48        72.00      1.91x      10 MB
+   E3) LSM + Bloom filters (72 SSTables)              65   7.6/  45 µs      4.0 µs         1.24         0.59      1.91x      12 MB
+   E4) LSM + Bloom, after full compaction              —   5.3/  20 µs      0.1 µs         1.00         0.01      1.05x       7 MB
+
+   → the log-structured designs never overwrite in place, so writes are sequential and fast. Bitcask reads are one
+     disk access, but every key must fit in RAM. The LSM keeps only a sparse index in RAM and pays on reads: a key
+     may be in any SSTable, and a MISSING key must check them all — Bloom filters turn that into almost no file
+     reads. Old versions and tombstones pile up (space amplification) until compaction merges files, which also
+     brings every read to one file. Compaction is the price: it rewrites data in the background, competing with
+     foreground I/O — the core tuning problem of RocksDB, Cassandra and friends.

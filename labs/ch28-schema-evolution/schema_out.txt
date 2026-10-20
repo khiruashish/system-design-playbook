@@ -1,0 +1,11 @@
+2,000,000 orders. A background workload runs SELECT-by-id + UPDATE continuously while we alter the schema.
+   DDL operation                                                       max stall queries errored
+   ADD COLUMN with a volatile DEFAULT (rewrites the whole table)         1829 ms            0   (DDL took 1,868 ms)
+   ADD COLUMN with a constant DEFAULT (metadata-only in PG 11+, fast)        14 ms            0   (DDL took 25 ms)
+   ADD NOT NULL by validating existing rows (scans + locks the table)      8012 ms            8   (DDL took 8,724 ms)
+   CREATE INDEX (blocks writes for the whole build)                       765 ms            0   (DDL took 761 ms)
+   CREATE INDEX CONCURRENTLY (builds without blocking writes)              32 ms            0   (DDL took 2,128 ms)
+
+   → the volatile-default add, the NOT NULL validation and the plain CREATE INDEX all take a strong lock and stall live
+     traffic for the duration of a full-table operation. The constant-default add is metadata-only, and CREATE INDEX
+     CONCURRENTLY / adding a CHECK ... NOT VALID then VALIDATE avoid the stall. Same end state, very different blocking.

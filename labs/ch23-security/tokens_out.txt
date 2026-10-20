@@ -1,0 +1,21 @@
+A. Validating tokens presented to payment-api
+   token                                          naive validator  hardened validator        
+   valid token (payment API audience)             ACCEPTED         ACCEPTED (valid)          
+   alg:none, no signature                         ACCEPTED         rejected (unsigned)       
+   HS256 signed with our PUBLIC key as secret     ACCEPTED         rejected (alg mismatch)   
+   attacker key embedded in header (jwk)          ACCEPTED         rejected (key in header)  
+   payload edited (role→admin), old signature     rejected         rejected (bad signature)  
+   expired 2 hours ago                            ACCEPTED         rejected (expired)        
+   valid, but audience rider-app                  ACCEPTED         rejected (aud)            
+   valid, but jti revoked at logout               ACCEPTED         rejected (revoked)        
+   valid signature, 30-day lifetime               ACCEPTED         rejected (lifetime too long)
+B. Key rotation through the JWKS (kid k1 → k2)
+   overlap (JWKS has k1+k2): old-key token valid, new-key token valid
+   after k1 retired (> max token lifetime later): old-key token unknown/retired kid, new-key token valid
+C. A refresh token is stolen from a phone backup; the attacker and the customer both use it (30-day refresh, 15-min access)
+   long-lived reusable refresh token:     attacker kept access for 43,200 minutes (the whole 30 days, unnoticed)
+   rotation + reuse detection:            attacker kept access for     15 minutes (one access token; the customer's next refresh exposed the reuse, the family was revoked)
+D. Cost per operation and token size
+   RS256 (RSA 2048)       sign   1167.1 µs   verify    46.6 µs   token 582 bytes
+   ES256 (P-256)          sign    218.4 µs   verify   737.4 µs   token 326 bytes
+   HS256 (shared secret)  sign      5.1 µs   verify     1.9 µs   token 283 bytes

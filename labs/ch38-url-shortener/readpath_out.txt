@@ -1,0 +1,24 @@
+Part 1 — 10,000,000 clicks over 1,000,000 links (Zipf s=1.0); 762,847 distinct links clicked at least once.
+
+   LRU cache size       % of links   hit ratio   DB reads remaining       cache memory
+                1,000         0.1%       40.3%            5,969,787               0 MB
+               10,000         1.0%       58.5%            4,149,039               2 MB
+               50,000         5.0%       71.8%            2,820,044              10 MB
+              100,000        10.0%       77.7%            2,228,565              20 MB
+              250,000        25.0%       85.5%            1,448,328              50 MB
+
+Part 2 — campaign: 20M SMS × 12% click-through = 2,400,000 clicks on ONE code, decaying over 10 min; peak 29,769 redirects/s.
+   Redis cluster: 6 shards. A single Redis shard comfortably serves ~100k simple GETs/s (VERIFY on your hardware).
+
+                                                  peak on HOT shard /s  peak other shard /s      hot / other
+   no near-cache (every click → Redis)                          27,184                  550              49x
+   1 s near-cache on each of 20 nodes                              570                  550               1x
+
+   At this blast the hot shard runs at ~27% of one shard's capacity — fine today. But its load scales with the
+   SIZE OF THE BLAST, not the cluster: a ~74M-SMS festival campaign saturates it, and adding shards changes nothing.
+
+   → the cache curve flattens fast: 1% of links as cache serves 58% of clicks, 10x more memory only gets to 78%,
+     and the long tail of cold links always reaches the database — size the database for the tail, the cache for
+     the head. The campaign is a different problem: sharding spreads KEYS, not load, so every click on the offer
+     code lands on one shard at ~49x its peers' load. A near-cache of even one second on each node caps it at one
+     lookup per node per second; for a scheduled campaign, pre-warm the code on every node before the blast.

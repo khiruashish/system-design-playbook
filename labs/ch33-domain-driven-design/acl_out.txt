@@ -1,0 +1,24 @@
+Ingesting 12 legacy ERP rows into the Catalog context, naive mapping vs anti-corruption layer.
+
+   ERP row                    | naive: defect in the domain                  | ACL
+   0001234 AMUL TAAZA MILK 5… | —                                            | ok: Amul Taaza Milk 500ml, ₹28.50, size unit ml
+   0001235 BRITANNIA BREAD 4… | unit 'gm' ≠ 'g'                              | ok: Britannia Bread 400g, ₹45.00, size unit g
+   0001236 FORTUNE SUNFLOWER… | unit 'ltr' ≠ 'l'                             | ok: Fortune Sunflower Oil 1l, ₹189.99, size unit l
+   0001237 TATA SALT 1KG      | —                                            | ok: Tata Salt 1kg, ₹28.00, size unit kg
+   0001238 MAGGI NOODLES 70G  | unit 'gms' ≠ 'g'                             | ok: Maggi Noodles 70g, ₹14.00, size unit g
+   0001239 FRESH EGGS 12PC    | price ₹78.84 ≠ ₹78.85; unit 'nos' ≠ 'piece'  | ok: Fresh Eggs 12pc, ₹78.85, size unit piece
+   0001240 ALPHONSO MANGO 1KG | —                                            | ok: Alphonso Mango 1kg, ₹399.00, size unit kg
+   0001241 OLD PEPSI 600ML    | sellable=true (is discontinued)              | ok: Old Pepsi 600ml, ₹40.00, size unit ml, NOT sellable
+   0001242 PARLE G 250G       | admitted as sellable                         | QUARANTINED: implausible price ₹0.29 for a packaged item (likely entry error)
+   0001243 IMPORTED CHEESE 2… | admitted as sellable                         | QUARANTINED: missing HSN code — tax category unknown, cannot invoice (GST)
+   0001244 KITCHEN TOWEL 2 R… | admitted as sellable                         | QUARANTINED: unknown unit of measure 'RL'
+   0001245 ONION              | admitted as sellable                         | QUARANTINED: unknown status code 'S9'
+
+   Rows producing a WRONG product inside the Catalog domain:  naive 9/12   ACL 0/12 (8 translated, 4 quarantined with a reason)
+
+   → the naive mapping 'works' — every row loads — and that is the problem. Legacy unit codes leak in unnormalized, so
+     a pack-size filter on 'g' or 'l' silently misses products; double arithmetic plus truncation turns ₹78.85 into ₹78.84;
+     any status code means 'sellable', so a discontinued Pepsi and an unknown S9 onion go on sale; a blank HSN becomes
+     'tax-exempt' on a GST invoice; and a ₹0.29 data-entry error goes live. The ACL translates into the Catalog's own
+     language (Unit, Money, Availability), uses exact decimal arithmetic, and quarantines what it can't translate
+     faithfully — with a reason a human can act on. The ERP's model stays outside the boundary, where it belongs.

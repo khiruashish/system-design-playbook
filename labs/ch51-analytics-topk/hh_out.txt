@@ -1,0 +1,15 @@
+20,000,000 events, 845,461 distinct SKUs seen; the top-100 hold 44.5% of views; #100 has 15,104 views, #101 has 14,743.
+
+   method                                                    top-100      count error     state size     throughput
+                                                              recall  (mean, top-100)                  (M events/s)
+   H1) exact hash map of every SKU                              100%            0.00%        64.5 MB            6.8
+   H2) Count-Min 4×65,536 + top-100 heap                        100%            0.12%         2.0 MB            9.8
+   H3) Space-Saving, 1,000 counters                             100%            0.00%          47 KB            4.2
+   H4) 1% sample × 100                                           99%            5.05%         4.0 MB           84.6
+
+   → exact counting needs state for every distinct key ever seen in the window (state size for H1 is an estimate:
+     ~80 bytes per boxed map entry). Sketches keep a small, fixed state: Count-Min only over-estimates (collisions
+     add), and Space-Saving keeps just the candidates that could be heavy. On a skewed stream like this both find
+     the true top-100 exactly or nearly so — heavy hitters sit far above the noise. Their errors live in the tail,
+     where Space-Saving's bound is N/1,000 = 20,000 views, larger than item #100's whole count. Sampling is the
+     fastest but noisy near the cut. (An item missing from a method's list counts as 100% error.)

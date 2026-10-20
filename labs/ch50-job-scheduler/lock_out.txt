@@ -1,0 +1,15 @@
+5 nodes, 100 ticks of 300 ms, job 60–120 ms, 8% of runs freeze 400–900 ms; lock TTL 500 ms. Real Redis + PostgreSQL.
+
+   strategy                                                     runs overlapping    events done  cursor went  fenced off
+                                                                            runs more than once    backwards            
+   S1) every node runs every tick                                500         448         40,400          343           0
+   S2) Redis lock, release with plain DEL                        114          21          1,400           12           0
+   S3) Redis lock with owner token (compare-and-delete)           99          11            900            9           0
+   S4) S3 + fencing token claimed on read, checked on write      101          10              0            0           9
+
+   → a lock with a timeout is a lease, and a paused process doesn't know its lease ran out. When it wakes it
+     finishes a batch built on a cursor it read long ago, and the events are processed twice. A plain DEL can also
+     delete the NEXT holder's lock; an owner token stops that, but not the stale write. What closes the gap is a check
+     at the resource: a monotonically increasing fencing token the database compares — on the READ as well as the
+     write, or a new holder can read before the old one's late write lands. (Or make the work idempotent, e.g. a
+     unique key per event, so duplicates bounce.)

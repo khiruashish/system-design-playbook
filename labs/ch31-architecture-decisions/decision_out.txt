@@ -1,0 +1,35 @@
+Weighted decision matrix — architecture style for the grocery platform's next phase.
+   Criteria/weights: time-to-market=3  scalability=2  operability=2  cost-at-current-scale=2  team-fit=3  evolvability=2  
+
+   option               raw scores (ttm/scale/ops/cost/team/evolve)   weighted
+   Modular Monolith     [5, 3, 5, 5, 5, 4]                         4.57
+   Microservices        [2, 5, 2, 2, 2, 5]                         2.86
+   Serverless (FaaS)    [4, 5, 3, 4, 3, 3]                         3.64
+   → base winner: Modular Monolith (4.57)
+
+   sensitivity A — scalability weight 2→6:
+        Modular Monolith       4.22
+        Microservices          3.33
+        Serverless (FaaS)      3.94
+        → winner: Modular Monolith  (unchanged)
+
+   sensitivity A — scalability weight 2→9:
+        Modular Monolith       4.05
+        Microservices          3.57
+        Serverless (FaaS)      4.10
+        → winner: Serverless (FaaS)  ← RANKING FLIPPED
+
+   sensitivity B — how far can each weight move (alone) before the winner changes?
+        time-to-market         base weight 3 → never flips within [0,12]
+        scalability            base weight 2 → flips to Serverless (FaaS) at weight ≈ 8.75
+        operability            base weight 2 → never flips within [0,12]
+        cost-at-current-scale  base weight 2 → never flips within [0,12]
+        team-fit               base weight 3 → never flips within [0,12]
+        evolvability           base weight 2 → never flips within [0,12]
+
+   → the recommendation is the Modular Monolith, and the sensitivity analysis shows it's a ROBUST choice, not a coin-flip:
+     tripling the scalability weight (2→6) doesn't change it, and of all six criteria only scalability can flip it at all —
+     and only at an extreme weight (≈8.75, i.e. scalability valued ~3x everything else combined), at which point Serverless,
+     not Microservices, takes over. That is the useful output: the ADR records not just the winner but that the decision is
+     stable under normal disagreement about weights, with a concrete, quantified trigger to reopen it (scalability becoming
+     dominant). A decision that flipped under a tiny weight nudge would be one you don't yet understand.

@@ -1,0 +1,30 @@
+Twelve access requests through each model (✓ allow, · deny). The 'no ticket' row flips ABAC's environment.
+   request                                        RBAC   ABAC   ReBAC 
+   customer views their own order                 ✓      ✓      ✓     
+   customer views someone else's order (IDOR)     ✓      ·      ·     
+   rider views the order they're delivering       ✓      ✓      ✓     
+   picker updates an order in their store         ✓      ✓      n/a   
+   picker updates an order in another store       ✓      ·      n/a   
+   store manager refunds ₹1,499 in their store    ✓      ✓      n/a   
+   store manager refunds ₹8,000 (over limit)      ✓      ·      n/a   
+   city manager reads a Bengaluru store order     ✓      ✓      ✓     
+   city manager reads a Mumbai order              ✓      ·      ·     
+   support reads customer PII (open ticket)       ✓      ✓      n/a   
+   support reads customer PII (no ticket)         ✓      ·      n/a   
+   finance reads an order amount                  ✓      ✓      ·     
+
+What each model gets right or wrong on these requests:
+   RBAC alone ALLOWS the IDOR read (customer→other's order), the cross-store update, the over-limit refund,
+      the Mumbai read by the Bengaluru manager, and PII reads with no ticket: roles can't express own/scope/limit/purpose.
+   ABAC denies all of those via attributes (ownership, store, ₹ limit, city, open-ticket purpose).
+   ReBAC answers order 'view' from the relationship graph: owner, delivering rider, and manager via store→city inheritance,
+      without the resource carrying storeId/city columns — the edges do. (Refund limits still need an ABAC-style condition.)
+
+IDOR negative control — the same 'read order' requests through a handler that checks the role but not ownership:
+   customer views their own order                 vulnerable handler: LEAKS     with object check: allows
+   customer views someone else's order (IDOR)     vulnerable handler: LEAKS     with object check: denies
+   rider views the order they're delivering       vulnerable handler: denies    with object check: allows
+   city manager reads a Bengaluru store order     vulnerable handler: denies    with object check: allows
+   city manager reads a Mumbai order              vulnerable handler: denies    with object check: denies
+   finance reads an order amount                  vulnerable handler: denies    with object check: allows
+   → Authentication is not authorization. Every object fetch must check the subject's relation to THAT object.

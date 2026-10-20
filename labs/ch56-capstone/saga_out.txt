@@ -1,0 +1,16 @@
+3 real HTTP services on real PostgreSQL; 2,000 checkouts, 20 concurrent, 40 SKUs with limited stock;
+payment: 5% declined, 8% succeed but the reply is lost (1 s timeout); orchestrator crashes in 3% of checkouts.
+
+   design                                           orders   charged,    charged  order w/o   oversold    leaked       told
+                                                    placed   NO order      twice     charge      units   reserv.   'failed'
+   S1) naive: retry charge, release on failure        1627         60        139          0          0        44        373
+   S2) idempotent steps + status check + saga log     1660         39          0          0          0        44        340
+   S3) S2 + recovery sweeper for crashed sagas        1709          0          0          0          0         0        334
+
+   → a timeout is not a failure — it is 'unknown'. The naive design turns every lost reply into a second charge
+     or a refund-shaped support ticket, and every crashed pod into money taken with no order and stock locked
+     forever. Idempotency keys make retries safe; asking the gateway for the charge status resolves 'unknown'
+     into a fact; a saga log records how far each checkout got. But a log nobody reads doesn't finish anything:
+     the sweeper that resumes or compensates abandoned sagas is what brings every invariant to zero. The
+     conditional stock update keeps overselling at zero in every design — the database invariant does that job.
+     (Some customers the crashed pods told 'failed' get an order from the sweeper — they must be notified.)

@@ -1,0 +1,14 @@
+child JVM appends 128-byte records, acks each; parent SIGKILLs it after 2.5 s and recovers the log.
+
+   ack policy                                                acked    recovered ACKED BUT LOST         acks/s
+   M1) buffered in the process, ack at once              3,381,860    3,381,760            100      2,254,050
+   M2) write() to the OS each record, no fsync           1,158,499    1,158,499              0        772,250
+   M3) fsync every record                                   13,228       13,229              0          8,818
+   M4) group commit: 8 writers, one fsync per batch         43,132       43,139              0         28,750
+
+   → an acknowledgement is a promise. Acking from a user-space buffer breaks it on any crash. Handing bytes to the
+     OS survives a process kill (the kernel still has them) but not a power cut. fsync per record keeps the
+     promise at the cost of one device flush per write; group commit keeps it too and amortises the flush over
+     a batch — the technique behind database and Kafka durability settings. Recovery must also detect a torn
+     last record (length + CRC) and stop there. (fsync speed depends heavily on the device; this sandbox's disk
+     may be faster or slower than yours.)

@@ -1,0 +1,25 @@
+place-order critical path; per-hop lognormal latencies + 0.5% slow outliers; 1,000,000 checkouts.
+
+   design                                                              end-to-end  end-to-end    our part    our part   degraded
+                                                                              p50         p99         p99       p99.9           
+   C1) everything sequential                                               252 ms     1561 ms     1269 ms     1549 ms      0.00%
+   C2) five pre-payment checks in parallel                                 224 ms     1524 ms     1231 ms     1508 ms      0.00%
+   C3) C2 + timeouts/degradation (non-critical) + hedged pricing           222 ms     1418 ms     1050 ms     1492 ms      1.06%
+
+   why parallelism alone doesn't fix the tail: the slowest of five parallel calls (each with 0.5% outliers):
+   max of the five: p50 19 ms, p99 1030 ms — vs inventory alone p99 60 ms
+
+   tail amplification: a page that needs ALL of N calls, each 'fast 99% of the time':
+   N = 1    →   1.0% of page loads wait for at least one slow (p99) call
+   N = 5    →   4.9% of page loads wait for at least one slow (p99) call
+   N = 10   →   9.6% of page loads wait for at least one slow (p99) call
+   N = 30   →  26.0% of page loads wait for at least one slow (p99) call
+   N = 100  →  63.4% of page loads wait for at least one slow (p99) call
+
+   → the external payment gateway is most of the median — budget for it, show progress, and resolve lost answers
+     asynchronously (L2). The TAIL, though, is mostly ours: with 0.5% outliers on each of our hops, a few percent of
+     checkouts hit at least one, so our part's p99 is an outlier (~1.2 s) though every hop's own p99 is < 60 ms.
+     Latency is a sum over sequential steps and a MAX over parallel ones: parallel calls shorten the median, but
+     the max of five is only as good as the worst of them. Timeouts with an honest degraded answer for OPTIONAL
+     calls and hedged idempotent reads cut the tail; outliers in critical calls (inventory, slot) remain and must be
+     fixed at their source.

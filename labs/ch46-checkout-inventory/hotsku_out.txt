@@ -1,0 +1,16 @@
+One SKU, 5,000 units, 20,000 reservation attempts from 64 concurrent workers (PostgreSQL 16, durable commits).
+
+   design                                             sold    sold out in   reserv./s        p99       oversold  DB transactions
+                                                                                                                       attempted
+   A) one row, atomic conditional UPDATE             5,000         6.08 s         822   254.4 ms              0           20,000
+   B) one row, SELECT FOR UPDATE then UPDATE         5,000         6.89 s         726   299.2 ms              0           20,000
+   C) 16 buckets, random then fallback               5,000         1.29 s       3,864   107.3 ms              0          245,489
+   D) Redis Lua front-gate + DB write                5,000         5.90 s         848   249.7 ms              0            5,000
+
+   → one row is correct and simple, and every buyer queues on its lock: ~800 reservations/s here, with a p99 over
+     a quarter of a second. Holding the lock across two round trips (FOR UPDATE, then UPDATE) is slower still.
+     Sixteen buckets spread the lock and sold out about 4x faster — but once stock ran out, every attempt probed all
+     16 buckets before saying 'sold out', twelve times the database transactions of A. Cache a sold-out flag.
+     The Redis front-gate kept the 15,000 losers away from the database entirely (5,000 transactions), yet sold out
+     no faster: the winners still queue on the one row behind it. Combine them — gate plus buckets — for the
+     biggest deals, and remember the gate is a second copy of the stock count that must be seeded and reconciled.

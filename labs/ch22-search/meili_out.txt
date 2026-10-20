@@ -1,0 +1,18 @@
+A. Meilisearch 1.11 on the 20 judged queries (typo tolerance and prefix search are on by default)
+   configuration                                   nDCG@10  zero results     index time   queries still failing (nDCG < 0.5)
+   engine defaults                                   0.429            11       3,588 ms   aata, आटा, doodh, दूध 1 litre, cooking oil, chini, मूंग दाल, haldi, chai patti, gur, anda
+   + synonyms setting                                0.779             4       3,352 ms   आटा, दूध 1 litre, cooking oil, मूंग दाल
+   + enrichment: aliases field (Hinglish, Hindi)     0.979             0       3,671 ms   -
+   engine-reported processing time for 'shampo': 0 ms
+B. Facets and filters
+   'masala' → estimatedTotalHits 1000, facetDistribution {"category":{"Masala":1022,"Snacks":240},"in_stock":{"false":194,"true":1068}}
+   'masala' + filter category = Masala AND in_stock = true → 876 hits
+C. Sync: 200 price/stock updates per second for 10 s → outbox → indexer (poll every 50 ms) → Meilisearch
+   1 indexer, ≤ 20/batch, waits each task   updates 2,000 | commit→searchable p50 22,031 ms, p99 43,095 ms | newer overwritten by older:   0 | stale at end: 0 of 1910
+   1 indexer, ≤ 20/batch, pipelined         updates 2,000 | commit→searchable p50    846 ms, p99  1,120 ms | newer overwritten by older:   0 | stale at end: 0 of 1910
+   1 indexer, ≤ 500/batch, pipelined        updates 2,000 | commit→searchable p50    814 ms, p99  1,080 ms | newer overwritten by older:   0 | stale at end: 0 of 1910
+D. Two indexers in parallel, 20 hot products, 100 updates/s for 4 s (indexer 2 is sometimes slower)
+   2 indexers, unordered chunks             updates   400 | commit→searchable p50    872 ms, p99  1,245 ms | newer overwritten by older:  26 | stale at end: 3 of 20
+   2 indexers, partitioned by product id    updates   400 | commit→searchable p50  1,012 ms, p99  2,185 ms | newer overwritten by older:   0 | stale at end: 0 of 20
+E. Reindex with new settings into products_v2, then swap, while 4 clients search continuously
+   rebuild + swap took 5,193 ms; searches during it: 6,604 ok, 0 empty, 0 errors

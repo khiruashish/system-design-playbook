@@ -1,0 +1,12 @@
+3,000,000 events: 60% limit, 30% cancel, 10% market; price-time priority; tick 5 paise.
+
+   book                                                           events/s        p50        p99      p99.9      trades  trade-stream hash
+   B1) sorted ArrayList per side                                    14,095    3.48 µs  540.13 µs   801.2 µs   1,752,321   2740042cb83b9625
+   B2) TreeMap<price, FIFO> + id index                           3,481,981    0.13 µs    1.55 µs     5.0 µs   1,752,321   2740042cb83b9625
+   B3) tick-ladder array of levels + intrusive lists             6,071,547    0.09 µs    0.51 µs     0.8 µs   1,752,321   2740042cb83b9625
+
+   → all three books produce the identical trade stream — matching rules, not data structures, define the result.
+     A sorted list pays for every insert and cancel by shifting elements. A tree of price levels makes inserts
+     O(log levels) and matching O(1) at the best level. A tick ladder turns price → level into an array index and
+     cancel into an unlink — the shape real exchange engines use, because prices live on a known grid in a narrow
+     band. The tail (p99.9) matters as much as the average: one slow insert delays every order queued behind it.

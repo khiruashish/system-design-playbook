@@ -1,0 +1,17 @@
+Blast radius: one global deployment vs 8 cells with wave deploys. 10,000 simulated years each.
+
+   architecture                        platform-min lost       p95 year   effective avail.   worst incident
+   one global deployment                         880 min        967 min           99.8325%          100.0%
+   8 cells, waves over 90 min                    205 min        280 min           99.9611%          100.0%
+   8 cells, waves over 36 h                      110 min        121 min           99.9791%           12.5%
+
+   8 cells, waves over 90 min: latent bugs had reached all 8 cells in 100% of cases; mean share hit 100.0%
+   8 cells, waves over 36 h: latent bugs had reached all 8 cells in 0% of cases; mean share hit 12.5%
+
+   → cells cut expected customer impact by ~4x because the most frequent large incidents — infrastructure failures and
+     one city's overload — are confined to one cell (12.5% of customers), and an immediately-breaking deploy is caught in
+     the canary cell. But a fast 90-minute rollout gives NO protection against latent bugs: by the time one triggers,
+     every cell has it, so the worst incident is still 100%. Spacing the waves 12 h apart turns latent bugs into
+     one-cell incidents too — the cost is slower delivery (a change takes 1.5 days to reach everyone), so reserve slow
+     waves for risky changes and use per-cell feature flags for the rest. Cells are not free: duplicated infrastructure,
+     a routing layer, cross-cell reporting, and customers who move between cities — they pay off at large scale.

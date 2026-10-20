@@ -1,0 +1,13 @@
+8 workers × 150 increments (expected 1,200); lock TTL 100 ms; 3 % of critical sections pause 150 ms
+   scheme                                   final   lost 2 holders  foreign  rejected     time
+                                            value          at once  unlocks & retried         
+   no lock                                    152  1,048         0        0         0 1,540 ms
+   Redis TTL lock, DEL release                510    690      1172      307         0 2,749 ms
+   Redis TTL lock, owner-checked release      776    424       851        0         0 4,429 ms
+   + fencing token checked on write         1,200      0       833        0        36 5,200 ms
+   + fencing token claimed at read          1,200      0       857        0        42 6,386 ms
+   PostgreSQL advisory xact lock            1,200      0         0        0         0 7,223 ms
+   no lock, optimistic CAS + retry          1,200      0         0        0       769 1,804 ms
+scripted pause, fencing token checked on write : A's stale write accepted, B's write accepted → value 1 after 2 increments
+scripted pause, fencing token claimed at read  : A's stale write rejected, B's write accepted, A retried with token 7 → value 2 after 2 increments
+SET NX without TTL, holder crashed: worker-b acquired within 3 s: false; key TTL: -1 (held forever)

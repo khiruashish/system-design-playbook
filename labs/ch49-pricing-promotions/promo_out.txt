@@ -1,0 +1,18 @@
+20,020 promotions (20 cart-level or bank), 20,000 carts of 4–25 lines; floor = 60% of price.
+
+   291,017 lines; list-price total ₹111,537,653
+
+   engine                                                               p50       p99 order-dependent  lines below  customers pay
+                                                                                               carts        floor        (total)
+   E1) scan all promotions, apply every match in stored order     3818.0 µs 7821.9 µs         19,594      247,854     22,128,688
+   E2) indexed lookup, apply every match in stored order            57.4 µs  181.1 µs         19,594      247,854     22,128,688
+   E3) indexed + one item offer/line (priority), cart, bank, floor   74.8 µs  210.7 µs              0            0     86,871,919
+   E4) E3 but the best item offer per line                          86.4 µs  236.7 µs              0            0     76,485,232
+
+   → scanning every promotion per cart is the first thing to go: index promotions by what they target, and a cart
+     only touches the few that could apply (~60x faster here). The harder problem is combination. 'Apply everything
+     that matches' stacks offers nobody meant to stack (customers paid ~20% of list price), sells a quarter of a
+     million lines below the margin floor, and gives a different total for almost every cart depending on evaluation
+     order — two servers could quote two prices. Explicit combination rules (one offer per line, fixed group order, a
+     floor) make pricing deterministic. WHICH single offer wins is then a business decision worth ~12% of revenue here:
+     marketing's priority order (E3) or the customer's best deal (E4). Decide it on purpose, and write it down.

@@ -1,0 +1,15 @@
+Architecture fitness functions on the module dependency graph (api→application→domain→infrastructure).
+
+   BEFORE (architecture has eroded):
+        ✗ F3 domain purity Order (domain) depends on PaymentGatewayHttp (infrastructure)
+        ✗ F1 layering      Pricing (domain) → OrderService (application) points UP a layer
+        ✗ F2 no cycles     OrderService → Order → Pricing → OrderService
+        → 3 violation(s): build FAILS.
+
+   AFTER (fixed: infra wired by the application layer, domain pure):
+        ✓ all fitness functions PASS — architecture conforms.
+
+   → the same three rules that architects usually enforce by review (and lose) are here EXECUTABLE: the eroded graph
+     fails the build naming each violation — an upward dependency, a domain→infrastructure leak, and the cycle it formed;
+     the fixed graph passes. Run these in CI (ArchUnit/jQAssistant on real bytecode) and the architecture can evolve
+     safely because every change is checked against its constraints — governance by test, not by tribal memory.

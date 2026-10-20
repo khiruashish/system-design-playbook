@@ -1,0 +1,27 @@
+Shortener on http://127.0.0.1:43925 (PostgreSQL 16, JDK HttpServer on virtual threads)
+
+   Creating links:
+        POST https://track.grocery.in/orders/ORD-88213?t=f3a9           → 201 {"code":"jFF7XOx","short":"https://gro.cr/jFF7XOx"}
+        POST https://track.grocery.in/orders/ORD-88213?t=f3a9           → 200 {"code":"jFF7XOx","short":"https://gro.cr/jFF7XOx","existing":true}
+        POST https://offers.grocery.in/diwali?utm_source=sms            → 201 {"code":"pt1IVd8","short":"https://gro.cr/pt1IVd8"}
+        POST http://track.grocery.in/orders/ORD-1                       → 422 {"error":"only https destinations are allowed"}
+        POST https://grocery.in@evil.example/login                      → 422 {"error":"credentials in URL are not allowed"}
+        POST https://grocery-in.example/kyc-update                      → 422 {"error":"destination host 'grocery-in.example' is not on the allow-list"}
+
+   Following links:
+        GET /jFF7XOx  → 302 Location: https://track.grocery.in/orders/ORD-88213?t=f3a9
+        GET /Zz0exp1  → 410 
+        GET /aaaaaaa  → 404 
+        GET /../etc   → 404 
+
+   Load: 50,000 redirects over 10,000 links (Zipf popularity, 6,806 distinct links hit), 200 concurrent clients
+        302s: 50,000   throughput: 5,455 redirects/s   p50 23.06 ms   p99 124.84 ms   (timings vary by machine)
+        database reads: 7,522 for 50,000 redirects — the cache absorbed 85.0%
+        but only 6,806 distinct links were requested: 716 reads were CONCURRENT misses for a code another request was
+        already loading — a small thundering herd on cold, popular links (fix: coalesce misses per key, Ch 7)
+        counter values used: 10,003 via 11 sequence round-trips (blocks of 1,000)
+
+   → the retry returned the SAME code (200, existing) instead of minting a second link; http, a userinfo trick
+     that really points at evil.example, and a look-alike domain were all refused before anything was stored.
+     Expired links say 410 (gone for good), unknown ones 404. Redirects are 302 with no browser caching, so every
+     click reaches us — the price of analytics is that we must serve every one, which is why the cache matters.

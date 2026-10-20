@@ -1,0 +1,18 @@
+299,635 offers across 50,000 products (1–8 sellers each, 8% out of stock)
+
+workload (4 threads, 5 s)                                    ops/s    p50 ms    p99 ms
+A product page: compute winner on read                      29,304      0.10      0.49
+B product page: read buy_box row                            57,143      0.05      0.29
+A repricing: update offer only                               5,058      0.68      3.54
+B repricing: update offer + upsert buy_box                   3,570      1.03      3.12
+B repricing, price war on 20 hot products                    3,719      1.00      2.55
+B' same price war, per-product lock first                    3,209      1.10      4.17
+
+buy_box vs a from-scratch computation (buy_box rebuilt before each run):
+  B,  random products : 0 of 50,000 products show the wrong winner
+  B,  price war       : 1 of 50,000 products show the wrong winner
+  B', price war + lock: 0 of 50,000 products show the wrong winner
+
+The race a benchmark hides — two reprices of one product, forced interleaving:
+  without a lock:            buy box shows seller 1 at ₹450 — WRONG: seller 2 at ₹400 is cheaper, and nothing will fix it until the next reprice
+  with per-product lock:     buy box shows seller 2 at ₹400 — correct (seller 2 at ₹400 is cheaper)

@@ -1,0 +1,24 @@
+Part 1 — 100,000 keys per representation in real Redis (limit 60/min, 30 requests in the current window)
+
+   representation                            bytes per key 10M keys would need
+   sliding log (ZSET of 30 timestamps)                 986            9.86 GB
+   sliding counter (2 window counters)                 149            1.49 GB
+   token bucket (HASH tokens + ts)                     122            1.22 GB
+   GCRA (one TAT integer)                               90            0.90 GB
+
+Part 2 — 2,217,134 decisions for 20,000 bursty keys over 10 minutes, limit 60 per 60 s
+
+   algorithm                                     decisions ≠ exact log      max allowed in any 60 s
+   sliding window log (exact reference)                              —                           60
+   sliding window counter (weighted)                            4.338%                          108
+   fixed window                                                 5.263%                          120
+   GCRA / token bucket (1/s, burst 60)          (a rate, not a window)                          119
+   sliding counter errors: 73,704 extra allows, 22,468 extra denials (it assumes the previous window was evenly spread)
+   GCRA vs token bucket (1/s, burst 60): 0 of 2,217,134 decisions differ.
+
+   → at platform scale the limiter is a memory problem first: the exact log stores every request (~1 KB per
+     key here, ~10 GB for 10M keys); GCRA stores one integer and makes exactly the token bucket's decisions.
+     The sliding-window counter is cheap but only approximate, and its error depends on the traffic's SHAPE:
+     it assumes last window's requests were evenly spread, so a burst at the end of one window lets a key through
+     well above the limit within a true 60 s span — better than the fixed window's double, but not a hard cap.
+     Use GCRA/token bucket for rates, and an exact log only where 'at most N per window' must hold (OTP per phone).

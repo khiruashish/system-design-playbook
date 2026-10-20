@@ -1,0 +1,16 @@
+500 products; 40 launch on day 10 (9 of them beat the best existing product's 6.0% CTR; best new 9.0%).
+5,000 feeds a day × 10 slots, daily retrain. Measured over days 10–30.
+
+   policy                                                     clicks   % oracle       new items with      best new item's
+                                                                                   ≥ 200 impressions       rank on day 30
+   E1) greedy on observed CTR                                 45,410      57.3%               0 / 40                 #492
+   E2) ε-greedy (10% of feeds get a random slot)              58,556      73.9%               4 / 40                 #301
+   E3) Thompson sampling                                      73,261      92.5%              27 / 40                   #1
+   E4) greedy + reserved new-arrivals slot                    73,825      93.2%              40 / 40                   #1
+
+   → a ranker trained only on its own past choices never learns about items it doesn't show: the greedy feed locked
+     onto whatever it happened to show first and gave no new launch a fair trial, though 9 beat everything on the
+     shelf. Uniform random exploration helps a little. Thompson sampling explores in proportion to uncertainty and
+     exploits as soon as evidence arrives, reaching 92% of the oracle. A reserved new-arrivals slot did as well HERE
+     because the best products happened to be new; it explores nothing else, so lock-in among existing products
+     remains. Log which impressions were exploratory — L2's debiasing needs exactly that data.

@@ -1,0 +1,29 @@
+Service: ~0.08 ms serial (locked) + ~1 ms downstream I/O per request, on 2 cores.
+
+A/B. Closed model: N concurrent clients, each calling in a loop for 1.5 s. Throughput and latency vs N.
+   N      throughput/s   p50 ms     p99 ms     in-flight L 
+   1      835            1.18       1.29       1.0         
+   2      1664           1.18       1.37       2.0         
+   4      3318           1.17       1.48       3.9         
+   8      6548           1.17       1.97       7.7         
+   16     10188          1.52       2.85       15.5        
+   32     10011          3.44       5.85       34.4        
+   64     9930           7.79       12.90      77.4        
+   96     9859           11.37      18.05      112.1       
+   128    9513           16.86      26.68      160.4       
+   192    9394           24.42      40.66      229.4       
+   256    9336           31.50      76.94      294.1       
+
+C. Universal Scalability Law fit  X(N) = N·X1 / (1 + α(N-1) + βN(N-1))
+   X1 (one client) = 835 req/s
+   contention α = 0.048  (the serialised critical section — Amdahl's serial fraction)
+   coherency  β = 0.00020  (crosstalk between workers)
+   predicted peak: N* ≈ 69 concurrent → X_max ≈ 11,078 req/s; beyond N* throughput RETROGRADES
+   → the model, fit from a few load points, predicts the peak so you don't have to test to destruction.
+
+D. Little's law for capacity planning (Ch 9, Ch 19)
+   to serve 2,000 req/s at ~1.1 ms each: in-flight L = λ·W = 2 → pool/DB-connections ≈ 4 with headroom
+   Plan to run at ~60–70% of X_max, not at the peak: a spike or a lost node then can't push you past the knee (L1 C).
+
+   Closed vs open model: this closed test caps in-flight at N, so it can't overload the service — throughput just plateaus.
+   An open model (fixed arrival rate, measured from the scheduled time) is what reveals the latency cliff and coordinated omission (L1 D).

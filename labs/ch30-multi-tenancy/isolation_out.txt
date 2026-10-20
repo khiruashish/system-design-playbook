@@ -1,0 +1,16 @@
+Three multi-tenant isolation models on real PostgreSQL 16. Tenants: acme, globex, initech.
+
+   A) SHARED TABLE (one table, tenant_id column):
+        correct query (WHERE tenant_id='acme') sees 3 rows.
+        BUG — a query that forgot the tenant filter sees 9 rows (ALL tenants) → cross-tenant leak.
+   B) SCHEMA-PER-TENANT (acme.orders, globex.orders, ...):
+        request scoped to acme (search_path=acme): 'select count(*) from orders' sees 3 rows — only acme's.
+        same query after switching search_path to globex: 3 rows — only globex's. The filter can't be forgotten.
+   C) DATABASE-PER-TENANT (tenant_acme, tenant_globex, ...):
+        connected to database tenant_acme: sees 3 rows.
+        attempt to read tenant_globex from the acme connection: REJECTED (ERROR: relation "tenant_globex.orders" does not exist) — cross-DB access is impossible.
+
+   → SHARED TABLE is cheapest but a single forgotten `WHERE tenant_id=?` leaks every tenant (see the bug below);
+     mitigate with Row-Level Security (L2). SCHEMA-PER-TENANT scopes via search_path so a forgotten filter stays
+     inside the tenant. DATABASE-PER-TENANT is strongest (separate backups, residency, blast radius) but costliest
+     to run at 10,000 tenants. Most SaaS uses shared-table + RLS for small tenants and dedicated DBs for large ones.

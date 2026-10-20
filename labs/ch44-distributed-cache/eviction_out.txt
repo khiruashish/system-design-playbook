@@ -1,0 +1,19 @@
+Hit ratio (%), 2,000,000 requests over 1,000,000 keys per trace.
+
+   trace    cache size        LRU    sampled LRU    LFU (decayed)    W-TinyLFU
+   ZIPF         10,000      39.5%          39.2%            41.5%        48.6%
+   ZIPF         50,000      55.0%          54.7%            56.5%        60.2%
+   ZIPF        200,000      70.4%          70.1%            71.1%        71.2%
+   SCAN         10,000      34.3%          34.0%            36.3%        43.4%
+   SCAN         50,000      47.7%          47.4%            49.4%        53.3%
+   SCAN        200,000      60.7%          60.5%            62.1%        62.2%
+   SHIFT        10,000      39.4%          39.1%            41.4%        46.4%
+   SHIFT        50,000      54.7%          54.4%            56.2%        55.2%
+   SHIFT       200,000      68.8%          68.5%            67.6%        66.3%
+
+   → recency alone is a weak signal under skew: a scan of cold keys pushes hot keys out of an LRU cache, and
+     every one-hit wonder displaces something useful. Frequency-aware admission (W-TinyLFU) keeps the hot set and
+     wins most at small sizes, where each slot matters (+9 points at 10,000 keys). But frequency is history: when
+     popularity shifts abruptly, LFU and this fixed-window W-TinyLFU fall behind plain LRU at larger sizes — which
+     is why Caffeine resizes its window adaptively (hill climbing) and Redis decays LFU counters. Sampled LRU is
+     within half a point of exact LRU with no linked list, which is why Redis uses it. Measure on your own traces.

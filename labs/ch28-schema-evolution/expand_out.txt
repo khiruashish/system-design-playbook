@@ -1,0 +1,13 @@
+EXPAND/CONTRACT: rename total_paise (bigint paise) -> amount_rupees (numeric rupees) with zero downtime.
+300,000 rows. A writer thread inserts new orders and a reader thread verifies BOTH contracts, the whole time.
+
+   [phase 1] EXPAND: added nullable amount_rupees (metadata-only). Old code unaffected, new column NULL for now.
+   [phase 2] DUAL-WRITE: new inserts populate BOTH columns. Old rows + old-instance rows still have amount_rupees NULL.
+   [phase 3] BACKFILL: filled 300,517 historical rows in batches. NULLs 300,517 -> 0 (remaining are in-flight, caught by dual-write).
+   [phase 3] Added CHECK (amount_rupees IS NOT NULL) as NOT VALID then VALIDATE -- enforced without blocking writes.
+   [phase 4] READ-NEW: readers use amount_rupees. Reader asserts round(total_paise/100,2) == amount_rupees on live rows.
+   [phase 5] CONTRACT: dropped total_paise. Migration complete -- and no reader or writer ever saw an error.
+
+   Final: 302,236 rows, every one has amount_rupees, the old column is gone, mismatches seen by live readers: 0.
+   Zero downtime came from ORDERING: expand (add) and dual-write are backward-compatible, so old and new code
+   coexist; the destructive contract (drop) happens only after nothing reads or writes the old shape. Never rename in place.

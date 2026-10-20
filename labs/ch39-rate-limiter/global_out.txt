@@ -1,0 +1,25 @@
+Global limit 1,000 req/s (burst 100) for one partner key, 8 gateway nodes, 10 s simulated, real Redis Lua.
+
+   Scenario 1 — UNDER the limit, skewed: 900 req/s offered (node 0 gets 60% = 540 req/s)
+      strategy                                   allowed/s    rejected   Redis calls    calls/request  busiest second
+      A) local only (125/s per node)                   486       4,093             0            0.000             503
+      B) central GCRA in Redis                         895           0         8,951            1.000             930
+      C) leasing (adaptive 1-20, 100 ms)               895           0         1,484            0.166             930
+         leased tokens expired unused and given back: 4,823
+
+   Scenario 2 — OVER the limit, even: 2,000 req/s offered
+      strategy                                   allowed/s    rejected   Redis calls    calls/request  busiest second
+      A) local only (125/s per node)                 1,009       9,665             0            0.000           1,095
+      B) central GCRA in Redis                       1,010       9,658        19,757            1.000           1,099
+      C) leasing (adaptive 1-20, 100 ms)             1,009       9,671         7,781            0.394           1,087
+         leased tokens expired unused and given back: 14
+
+   Measured cost of one Lua call on localhost: 31 µs round-trip (cross-AZ adds ~0.5–1 ms; VERIFY in your network).
+
+   → local limits need no network but are wrong under skew: they rejected thousands of requests from a partner
+     within its contract, because node 0 saw 540 req/s against a 125 share; they cap the total only when load is
+     even. A central GCRA is exact but costs a Redis round-trip on every request. Leasing admitted exactly what
+     the central limiter did under skew with about a sixth of the calls, and held the cap when over the limit.
+     It needed three refinements to get there (in earlier runs of this lab, fixed 20-token leases stranded tokens
+     on quiet nodes and rejected in-contract traffic): size leases to each node's rate, give unused tokens back,
+     and cache denials. Over the limit, calls rise again because every lease is small — tokens are scarce.

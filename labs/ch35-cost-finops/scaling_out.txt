@@ -1,0 +1,17 @@
+14 days of checkout demand: normal daily peak 1,913 req/s, festival peak 10,178 req/s (5.3x). Pod = 150 req/s at target.
+
+   capacity policy                                peak pods   pod-hours     cost (₹)   overloaded   degraded
+   A) static for all-time peak (+20%)                    82      27,552      495,936         0 min       0 min
+   B) static for a normal day's peak (+20%)              16       5,376       96,768       120 min       0 min
+   C) reactive autoscaling (60% target, 5-min lag)        68       1,801       32,410         5 min       0 min
+   D) C + scheduled pre-scale for the sale               75       1,905       34,296         0 min       0 min
+
+   Static-for-peak fleet: pod-hours actually needed at target ÷ pod-hours provisioned = 4% (the rest is idle headroom)
+   Autoscaling + pre-scale costs 7% of the static-for-peak fleet.
+
+   → sizing statically for the festival peak buys safety by paying for idle pods almost all fortnight. Sizing for a
+     normal day is cheap and fails exactly when revenue is highest. Reactive autoscaling tracks the daily curve at a
+     fraction of the cost, but a ~5x step arrives faster than a 5-minute control loop: the first bucket of the sale is
+     overloaded. Known events are not surprises — a calendar-driven pre-scale removes that gap for a few extra pod-hours.
+     Rightsizing is therefore two decisions: the TARGET utilisation (cost vs the queueing cliff) and how you cover the
+     demand your control loop can't react to in time (pre-scaling, warm pools, load shedding).

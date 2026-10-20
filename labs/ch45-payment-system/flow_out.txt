@@ -1,0 +1,16 @@
+2,000 checkouts through a fake Razorpay-style PSP over real HTTP; merchant state in PostgreSQL.
+Webhooks: 10% duplicated, some out of order, 5% never delivered; 2% of app 'success' calls are tampered.
+
+   merchant design                                       captured  fulfilled  charged, NOT  fulfilled  fulfilled  paid, status
+                                                           at PSP  correctly     fulfilled      twice     unpaid   says FAILED
+   A) trust app callback, apply every webhook               1,708         87             0      1,621         35           106
+   B) guarded state machine + event dedupe                  1,708      1,621            87          0          0            20
+   C) B + reconciliation poller (CREATED/FAILED, 2 s)       1,708      1,708             0          0          0             0
+
+   → the app's 'success' is a claim from an untrusted device, and webhooks are at-least-once, unordered and
+     occasionally missing. Applying them naively fulfils orders twice, cancels paid orders when a stale failure
+     arrives last, and ships to customers who never paid. A guarded state machine (transitions checked in the
+     UPDATE itself, events deduplicated, fulfilment only on entering CAPTURED) removes duplicates and wrong turns —
+     but a dropped webhook still leaves a paid customer waiting forever. Only asking the PSP closes that gap: a
+     reconciliation poller for anything not yet captured — including FAILED, because a retry on the same order can
+     still succeed — and daily settlement reconciliation (L3) as the final backstop.

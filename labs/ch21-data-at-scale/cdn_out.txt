@@ -1,0 +1,15 @@
+A. 20,000 image requests, 500 products (Zipf), 40 % of URLs carry tracking params in random order
+   setup                                origin hits  hit ratio    origin egress
+   no CDN                                    20,000       0.0 %           953 MB
+   CDN, key = full URL                        8,520      57.4 %           406 MB
+   CDN, normalised key                          499      97.5 %            23 MB
+B. The hottest product's JSON expires while 400 requests arrive at once
+   without coalescing         origin requests for one key: 400
+   with request coalescing    origin requests for one key: 1
+C. sku-7 price changes from 47 to 39 while 50 req/s read it for 3 s
+   TTL only (max-age=2)     stale responses  93 of 138, last stale at 2,003 ms
+   TTL + purge on change    stale responses   0 of 139, last stale at     0 ms
+   versioned URL            stale responses   0 of 141, last stale at     0 ms
+D. Origin goes down for 5 s; product JSON has max-age=2
+   strict TTL               served 0, errors 50
+   stale-if-error (60 s)    served 50, errors 0

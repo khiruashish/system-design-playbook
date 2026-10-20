@@ -1,0 +1,23 @@
+Minting 2,000,000 short codes. 62^6 = 56,800,235,584   62^7 = 3,521,614,606,208
+
+   strategy                                     length   collisions  extra lookups neighbour guess hits
+   A) MD5(url) truncated to 6 base62 chars           6           40              0       ~0% (random)
+   B) random 7 chars, check-and-retry                7            0      2,000,000       ~0% (random)
+   C) counter → base62                               5            0              0             100.0%
+   D) counter → Feistel permutation → base62         7            0              0              0.00%
+
+   First five codes minted by C and D (consecutive counter values):
+        C: 6laZE 6laZF 6laZG 6laZH 6laZI
+        D: jFF7XOx jstj0mT pt1IVd8 d5RctH9 JNOJwOr
+
+   Birthday estimate for A: n²/2N = 35 expected colliding pairs (measured 40).
+   Random 7-char space is 0.00006% full after 2,000,000 codes, so B needed 0 retries — but still one lookup per insert.
+   At 2M links/day, 62^7 lasts 4,824 years for C/D; 62^6 would last 78 years.
+
+   → hashing needs no coordination but collides (and two customers' different URLs can't share a code), so it
+     still needs a check-and-retry — at which point it is B with extra steps. B is simple and unguessable but
+     costs a uniqueness check on every insert (a unique index and a retry loop). C is perfect for the database and
+     terrible for privacy: every tracking link's neighbour is another customer's order. D keeps C's properties —
+     unique by construction, no lookup, one short range per node — and a keyed permutation makes neighbours useless.
+     A permutation hides ORDER, not existence: codes are still 7 chars from a 3.5-trillion space, so pair it with
+     rate limiting (Ch 39) and never put secrets behind a short link alone.

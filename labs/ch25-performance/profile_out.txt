@@ -1,0 +1,19 @@
+Workload: 3,000,000 price computations. JFR profile recording (settings=profile), then analysed with 'jfr print'.
+
+SLOW baseline : 3,000,000 in 33,326 ms =    90,020/s
+FAST (fixed)  : 3,000,000 in    190 ms = 15,789,474/s   (175x; identical checksum, so behaviour is unchanged)
+
+Top CPU by self-time (jdk.ExecutionSample, 3,159 samples):
+   1513  java.lang.Integer.getChars          <- building the key: turning ints into chars
+   1492  jdk.internal.util.ArraysSupport.mismatch  <- String.endsWith/startsWith in the linear promo scan
+    111  HotspotL3.priceSlow
+  → both roll up to HotspotL3.priceSlow (3,139 of 3,159 samples). The profiler names the exact method to fix without guessing.
+
+Top allocation by class (jdk.ObjectAllocationSample, 10,428 samples):
+  10092  byte[]     <- the String concatenation in the loop allocates a new backing array every "+"
+    220  java.lang.String
+     23  char[]
+  → 97% of sampled allocation is byte[] from string building — the classic O(n^2) concat-in-a-loop.
+
+The fix the profile points to: StringBuilder for the key (no per-'+' array) + a precomputed HashMap for the promo lookup
+(replacing the linear endsWith scan). Result: 175x faster and almost no allocation. The profile predicted exactly this.

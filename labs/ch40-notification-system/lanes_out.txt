@@ -1,0 +1,14 @@
+Vendor 500 SMS/s. 19:00 campaign of 2,500,000 SMS; OTP 20/s → 150/s (19:05–19:35), expires 300 s;
+transactional 60/s → 200/s (19:10–20:00). Window 19:00–21:00.
+
+   strategy                                       OTP p50   OTP p99 OTP expired      txn p99 campaign unsent 21:00
+   A) one FIFO queue                            none sent none sent      100.0%        4893s                    0
+   B) lanes, strict priority                           0s        0s        0.0%           0s              130,467
+   C) lanes, weighted fair 20/30/50                   64s      300s       11.9%         464s               85,537
+   D) B + separate promotional route (400/s)           0s        0s        0.0%           0s                    0
+
+   → a single queue puts OTPs behind the campaign exactly when the campaign drives logins. Strict priority
+     protects OTPs and order updates, but the campaign only gets what is left and misses the 21:00 cut-off.
+     'Fair' weights chosen for the campaign starve OTPs during the login surge. A separate promotional route
+     (India's DLT rules already separate promotional from transactional/service traffic) removes the contention;
+     size it so the campaign finishes inside the legal window. Priority is a product decision per message type.

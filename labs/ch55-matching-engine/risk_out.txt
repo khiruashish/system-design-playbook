@@ -1,0 +1,13 @@
+2,000 credit accounts, 200,000 buy orders in 60 s via 4 gateways; 50 accounts burst across all gateways.
+
+   where the credit check runs                                    accounts  worst overspend      added p99    check ceiling
+                                                                over limit                         latency       (orders/s)
+   K1) at each gateway, exposure cache refreshed every 500 ms          392         ₹195,948       10 µs          not the limit
+   K2) central risk service, synchronous call per order                  0               ₹0    138.3 ms   4,000 (0.25 ms each)
+   K3) in the sequenced engine path, in-memory exposure                  0               ₹0        2 µs          not the limit
+
+   → a check against a cached number is a check against the past: a buyer spraying orders through four gateways
+     gets four copies of the same headroom, and every burst between refreshes slips through. A central service is
+     correct but puts every order behind a network hop and one queue of checks — at a burst it queues, and the
+     queue IS the latency. Putting the credit check in the sequenced path makes it both exact and cheap: it runs
+     in the same single thread, in the same order, on in-memory state that the journal can rebuild.

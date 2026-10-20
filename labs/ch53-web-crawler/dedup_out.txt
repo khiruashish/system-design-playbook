@@ -1,0 +1,15 @@
+2,000,000 pages, 12,000,000 links; e.g. http://shop1834.example.in/c/28/product/1432233?size=4&variant=3&utm_medium=cpc
+                              → https://shop1834.example.in/c/28/product/1432233?size=4&variant=3
+
+   seen-set                                                  fetches        duplicate      pages never       memory
+                                                                              fetches          fetched             
+   D1) exact URL strings as written                       10,767,117        8,767,117                0    1474.5 MB
+   D2) canonicalised URLs, exact string set                2,000,000                0                0     258.7 MB
+   D3) canonicalised, 64-bit hash set                      2,000,000                0                0      64.0 MB
+   D4) canonicalised, Bloom filter (1% FP)                 1,996,620                0            3,380       2.3 MB
+
+   → without canonicalisation the crawler fetches the same page under every spelling it finds — here more
+     fetches go to duplicates than to new pages, and every one costs the site a request. Canonicalising first makes
+     dedup exact; storing 8-byte hashes instead of strings cuts the seen-set several-fold with no practical collision
+     risk at this scale. A Bloom filter is smaller still, but its false positives are pages we silently NEVER
+     fetch — acceptable for a web-scale crawl, not for a price monitor that must see every product.

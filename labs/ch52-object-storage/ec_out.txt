@@ -1,0 +1,21 @@
+PART 1 — real Reed–Solomon over GF(2^8): 16 objects × 6 MB, destroy m shards each, rebuild, verify SHA-256.
+
+   scheme         overhead    shards lost      encode MB/s     rebuild MB/s   verified
+   RS(6,3)           1.50x           3/9              395              342      16/16
+   RS(10,4)          1.40x           4/14              405              288      16/16
+
+PART 2 — durability for 10 PB of user data (Markov model: disk AFR 2%, one repair at a time per group).
+
+   scheme                      raw bytes  repair time   repair reads  P(any data loss)/year      MTTDL per group
+                                  stored    (assumed)  per lost byte           across 10 PB                     
+   2 replicas                      2.00x        12 h             1x               1.00e+00          9.13e+05 y
+   3 replicas                      3.00x        12 h             1x               1.33e-02          1.11e+10 y
+   RS(6,3)                         1.50x        24 h             6x               1.48e-03          1.01e+11 y
+   RS(10,4)                        1.40x        36 h            10x               3.26e-05          4.57e+12 y
+
+   → any k of the k + m shards rebuild the object bit-for-bit: the SHA-256 checks above are real, including
+     lost data shards. RS(10,4) survives 4 simultaneous losses at 1.4x storage; three replicas survive 2 at 3x.
+     The price is repair: rebuilding one lost shard reads k shards (6–10x the bytes), so repairs take longer and
+     use more network — which is why stores keep hot, small or recent objects replicated and erasure-code the rest.
+     The durability figures are a model (independent failures, fixed repair times); correlated failures — a rack,
+     a bad firmware batch, a zone — dominate real losses, so shards are also spread across racks and zones.

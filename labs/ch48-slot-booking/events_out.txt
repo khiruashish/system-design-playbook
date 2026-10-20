@@ -1,0 +1,22 @@
+819,306 events for 3,000 slots (busiest slot 3,994 events).
+
+   load: 819,306 events appended in 6.8 s (120,685 events/s, batched)
+
+   projector v1 (ignores RESCHEDULED_OUT): replayed 819,306 events in 0.98 s → 2,088 of 3,000 slots disagree with history; 442 shown FULL that have room
+   projector v2 rebuilt from the event store: replayed 819,306 events in 0.89 s → 0 of 3,000 slots disagree with history; 0 shown FULL that have room
+
+   loading one aggregate for a booking decision (2,000 loads each, real queries):
+                                                  rows read / load          p50          p99
+   any slot, full replay                                     259.7      0.09 ms      2.84 ms
+   any slot, snapshot + tail                                  48.7      0.07 ms      0.13 ms
+   hot slot, full replay                                   2,802.5      1.41 ms      3.74 ms
+   hot slot, snapshot + tail                                  51.5      0.12 ms      0.28 ms
+
+   time travel: slot 13 as of 05:18 UTC (midway through its history) — held 29, booked 809 of 840 min, from 1,492 events in 2.5 ms
+   audit: the hold that took this slot to its fullest point was customer 4966253 (22 min, event v523) — 12.4 ms
+
+   → the read model is a cache of the history, so a projector bug is a data bug you can FIX: rebuild from the events
+     and every slot is right again — a mutable counter would have kept the wrong number forever. Busy slots grow
+     long histories and full replay slows down with them; a snapshot bounds the tail to under 100 events. For quiet
+     slots the difference is noise. Questions nobody planned for — what did this slot look like an hour ago, whose
+     hold filled it — are queries over the history, not forensics.

@@ -1,0 +1,23 @@
+Part 1 — contract 1,000 req/s global; offered 900 req/s (1,400 in minutes 6–7); Mumbai share 80% → 25% over minutes 3–5
+
+   design                                                 in-contract reqs  max admitted in 1 s     cross-region calls
+                                                                  rejected     (contract 1,000)                       
+   S1) static split 500 / 500                                       99,370                  944                      0
+   S2) static split from history 800 / 200                         167,179                  945                      0
+   S3) rebalance every 10 s by demand                                  914                1,000                      0
+   S4) central in Mumbai (partition min 6–7: fail open)                  0                1,468                308,377
+
+Part 2 — OTP limiter's Redis down for 120 s (minutes 4–6) during an SMS-pumping attack; 8 gateway nodes
+
+   behaviour while Redis is down                        attack SMS in outage     legit OTPs refused      attack cost
+   fail OPEN (allow everything)                                        2,059                      0           ₹9,265
+   fail CLOSED (reject everything)                                         0                  3,955               ₹0
+   LOCAL fallback (1/8 of each budget per node)                           30                     16             ₹135
+
+   → a global quota split statically between regions is wrong as soon as traffic moves: the partner is refused
+     while well inside its contract. Rebalancing shares by recent demand keeps both properties with only periodic
+     count exchange; a single central limiter is exact but puts a cross-region call on every remote request and
+     turns a partition into a choice between over-admitting (1,468/s here) and an outage. When the limiter itself fails, the
+     right default depends on what the limit protects: failing open on an OTP endpoint during an attack pays the
+     fraudsters, failing closed stops all logins; a conservative local fallback bounds both. Decide per limit, in
+     advance, and test it.

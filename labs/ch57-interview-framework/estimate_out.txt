@@ -1,0 +1,31 @@
+COARSE rounding (each input to 1, 5 or 10 × 10^k):
+   prompt                                 peak writes/s          peak reads/s           storage (3 copies)       decision from exact → from estimate
+                                          exact / estimate       exact / estimate       exact / estimate        
+   URL shortener (writes = new links)     417 / 500              41.7k / 50.0k          32.9 TB / 22.5 TB        same: distributed storage
+   Grocery orders (this handbook)         347 / 250              13.9k / 12.5k          19.7 TB / 33.8 TB        same: distributed storage
+   Chat messages                          92.6k / 125.0k         138.9k / 125.0k        1.3 PB / 2.3 PB          same: shard/partition writes, cache tier, distributed storage, stream ingest
+   Rider GPS pings (writes)               15.0k / 5.0k           3.0k / 500             15.1 TB / 3.6 TB         shard/partition writes, distributed storage  →  single primary + replicas
+   Product reviews                        2 / 1                  1.9k / 500             329 GB / 45 GB           same: single primary + replicas
+   Notification sends                     4.2k / 2.5k            417 / 250              7.9 TB / 5.6 TB          same: single primary + replicas
+   Photo uploads (social app)             3.1k / 12.5k           156.3k / 625.0k        739.1 PB / 3375.0 PB     cache tier, distributed storage  →  shard/partition writes, cache tier, distributed storage
+   Ad click events                        130.2k / 50.0k         6.5k / 2.5k            615.9 TB / 450.0 TB      shard/partition writes, distributed storage, stream ingest  →  shard/partition writes, distributed storage
+   worst ratio estimate vs exact: 7.3x; design decisions unchanged in 5 of 8 prompts
+
+ONE SIGNIFICANT FIGURE (each input to d × 10^k):
+   prompt                                 peak writes/s          peak reads/s           storage (3 copies)       decision from exact → from estimate
+                                          exact / estimate       exact / estimate       exact / estimate        
+   URL shortener (writes = new links)     417 / 300              41.7k / 30.0k          32.9 TB / 22.5 TB        same: distributed storage
+   Grocery orders (this handbook)         347 / 360              13.9k / 14.4k          19.7 TB / 19.4 TB        same: distributed storage
+   Chat messages                          92.6k / 80.0k          138.9k / 160.0k        1.3 PB / 1.1 PB          same: shard/partition writes, cache tier, distributed storage, stream ingest
+   Rider GPS pings (writes)               15.0k / 16.0k          3.0k / 3.2k            15.1 TB / 11.5 TB        same: shard/partition writes, distributed storage
+   Product reviews                        2 / 2                  1.9k / 1.6k            329 GB / 360 GB          same: single primary + replicas
+   Notification sends                     4.2k / 3.6k            417 / 360              7.9 TB / 6.5 TB          same: single primary + replicas
+   Photo uploads (social app)             3.1k / 2.7k            156.3k / 135.0k        739.1 PB / 729.0 PB      same: cache tier, distributed storage
+   Ad click events                        130.2k / 200.0k        6.5k / 10.0k           615.9 TB / 1.1 PB        same: shard/partition writes, distributed storage, stream ingest
+   worst ratio estimate vs exact: 1.8x; design decisions unchanged in 8 of 8 prompts
+
+   → interviewers don't grade arithmetic; they grade whether the numbers drive the design. But rounding error
+     compounds: rounding five inputs to 1-or-5 multiplies small errors into a 7x miss and flips decisions for
+     prompts near a threshold. Keeping ONE significant figure per input is still easy mental math and keeps the
+     estimate close enough that the architecture it implies rarely changes. When a result lands near a threshold,
+     say so out loud and design for the higher side.

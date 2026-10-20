@@ -1,0 +1,14 @@
+60,000 riders on shift; ~6 brief drops/hour each (median 8 s, half silent); real offline ~0.5/hour.
+
+   design                                                        extra writes  false offline       fan-out real offline shown
+                                                                   per second   per rider-hr      events/s    after p50 / p95
+   S1) heartbeat 5 s, timeout 10 s, instant on close                   12,000           4.53         239.2           0 s / 10 s
+   S2) heartbeat 30 s, timeout 60 s, instant on close                   2,000           3.06         165.7           0 s / 57 s
+   S3) S2 + 20 s grace after a close                                    2,000           0.55          40.4          20 s / 57 s
+   S4) from location updates (10 s), timeout 35 s, 20 s grace               0           0.67          46.1          20 s / 34 s
+
+   → presence is a trade between honesty and noise. Frequent heartbeats detect real departures fast but cost
+     writes and flag every lift ride as 'offline'; instant offline on socket close is the worst of both, because
+     mobile connections close all the time and reopen seconds later. A short grace period absorbs the flapping,
+     and deriving presence from traffic the rider already sends (location updates) costs no extra writes at all.
+     Show 'last seen' rather than a hard offline, and never make a business decision on one missed heartbeat.

@@ -1,0 +1,21 @@
+== 1. Primary with a replication slot and a replication user ==
+== 2. Clone the standby with pg_basebackup and start it following the primary (ASYNC) ==
+   standby streaming: streaming (async)
+== 3. Write to primary, watch it appear on the standby (read replica) ==
+   primary rows: 10000  |  standby rows: 10000  (async: standby follows within ms)
+== 4. ASYNC replication lag = the RPO window (committed but not yet streamed) ==
+   peak replication lag during the burst: 16376 KB of un-replayed WAL on the standby
+   -> if the primary is lost at that instant, that un-streamed WAL is the async RPO (a small window of commits).
+   after the burst drains, lag settles to 0 bytes (standby caught up).
+== 5. Promote the standby to be the new primary (failover) ==
+   standby promoted to primary in 115 ms; now accepts writes. rows carried over: 210000
+
+== 6. Same test with SYNCHRONOUS replication (RPO 0) ==
+   sync state now: sync  (commit waits for the standby to persist the WAL)
+   primary committed 10000 rows in 84 ms, then died; standby has 10000
+   sync RPO = 0 rows (0 by construction; the cost is commit latency)
+
+== RESULT ==
+   ASYNC : standby lags the primary by the network/flush delay; on a sudden primary loss, in-flight commits are lost (RPO > 0), but commits are fast.
+   SYNC  : every commit waits for the standby to persist the WAL, so RPO = 0, at the cost of commit latency and availability (a lost standby blocks commits).
+   Failover = promote the standby (here ~sub-second); real RTO also includes detection, DNS/endpoint switch, and cache/connection re-warm.

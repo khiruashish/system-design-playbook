@@ -1,0 +1,25 @@
+Decision: which checkout design meets a 300 ms p99 SLO at 800 req/s? Four downstream services.
+
+   service      svc(ms) cap(r/s)      ρ    p99(ms)
+   catalog           20     2000   0.40       81.3
+   inventory         35     2500   0.32      110.8
+   pricing           15     3000   0.27       40.1
+   promotions        25     2000   0.40      101.7
+
+   A) SEQUENTIAL  end-to-end p99 = sum  =  333.9 ms  →  BREACHES SLO
+   B) PARALLEL    end-to-end p99 = max  =  110.8 ms  →  MEETS SLO
+
+   Bottleneck: 'catalog' (capacity 2000 r/s), headroom at 800 r/s = 60%. Beyond capacity, ANY design's latency → ∞.
+
+   The queueing cliff (a 35 ms service's p99 as its utilization ρ rises toward 1):
+        ρ=0.50: p99 ≈ 196 ms
+        ρ=0.80: p99 ≈ 679 ms
+        ρ=0.90: p99 ≈ 1484 ms
+        ρ=0.95: p99 ≈ 3094 ms
+        ρ=0.99: p99 ≈ 15974 ms
+
+   → the numbers decide it: SEQUENTIAL breaches the 300 ms SLO (the four p99s add up), PARALLEL meets it comfortably
+     (end-to-end ≈ the slowest single call). But the deeper lesson is the queueing cliff: neither design saves you once a
+     service nears its capacity — p99 rises non-linearly as ρ→1 and goes vertical (196 ms → 16 s from ρ=0.5 to 0.99). So
+     the real architectural decisions are 'fan out the independent calls' AND 'keep every service's utilization well below
+     1' (headroom, autoscaling). This is the arithmetic an ADR should contain — not the adjective 'scalable'.

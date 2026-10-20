@@ -1,0 +1,16 @@
+120,000 jobs due over 40 s (30% in one second); 4 workers; real PostgreSQL.
+
+   design                                                   late p50   late p99   late max  claim queries   time in them
+   W1) poll 1 s, no index                                      28 ms     527 ms     544 ms          2,691        51.9 s
+   W2) poll 1 s, partial index on due_at                       17 ms     892 ms    1015 ms          3,392        40.9 s
+   W3) poll 100 ms, partial index                              13 ms      83 ms     107 ms          7,878        91.0 s
+   W4) index + 2 s lookahead into an in-memory timer            0 ms       2 ms     145 ms             46         2.4 s
+
+   → with pollers, the tick bounds the lateness: work that falls due while the pollers sleep waits up to a whole
+     interval (the p99 and max columns), plus however long a burst takes to drain. W1's full-scan claims were so
+     slow the queue was rarely empty, so it hardly slept: near-continuous polling, paid for with a table scan per
+     query. Faster ticks cost more queries and more database time. The index helps less than you'd expect: each
+     claim is also an UPDATE + commit, and the head of a queue index fills with dead entries for jobs just claimed
+     (queue tables need vacuum tuning, time partitioning, or moving done rows out). A short lookahead decouples
+     lateness from database load: lease what's due in the next seconds in big batches, fire it from an in-memory
+     timer at the right instant, and let the lease expire back to the table if the node dies.

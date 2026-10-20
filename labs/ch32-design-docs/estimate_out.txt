@@ -1,0 +1,18 @@
+Recomputing a design doc's capacity figures from its own stated assumptions (flag if off by >2x).
+
+   Assumptions: 2,000,000 DAU, 0.5 orders/DAU/day, peak ×5, 4 KiB/order, 3 yr retention, 40 reads/order
+
+   figure                            claimed    derived   ratio   derivation
+   avg order writes/s                 11.6/s     11.6/s    1.0x   2M DAU × 0.5 ÷ 86,400          ✓
+   peak order writes/s                 500/s     57.9/s    8.6x   avg × peak factor 5            ✗ INCONSISTENT
+   peak order reads/s                2,300/s    2,315/s    1.0x   peak writes × 40 reads/order   ✓
+   order storage (3 yr, 1 copy)       2.0 TB     4.5 TB    0.4x   1M/day × 365 × 3 × 4 KiB       ✗ INCONSISTENT
+   Kafka ingest (3 replicas)/day      4.2 GB     4.6 GB    0.9x   1M/day × 1.5 KiB × 3           ✓
+
+   → 2 of 5 figures disagree with the doc's own assumptions by more than 2x.
+     The peak write rate is overstated ~9x — yet the peak READ figure matches the CORRECT derivation, which proves
+     the author had the right number (58/s) when computing reads and the 500 is an isolated slip on one line. Storage
+     is understated ~2.2x and the doc shows no working, so nobody can tell which assumption it silently changed.
+     Each mistake changes a decision: 500 writes/s suggests sharding, 58 fits one PostgreSQL
+     primary with room to spare. Put derivations in an estimation appendix, generated from the assumptions, so the
+     numbers in the doc cannot drift apart — and so a reviewer can challenge an ASSUMPTION rather than a result.

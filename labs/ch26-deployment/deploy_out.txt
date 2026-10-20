@@ -1,0 +1,11 @@
+4 instances of v1 behind a load balancer. We deploy v2 (which fails 40% of requests) each way.
+
+   strategy                               ok     failed      fail rate notes
+   recreate (stop-all → start-all)        971        843          46.5% downtime window + 100% on the bad v2
+   rolling (one at a time)              1867        682          26.8% no downtime, but v2's errors ramp to 100% as it rolls
+   blue-green (flip after smoke test)       2611          0           0.0% smoke test FAILED → never flipped, users saw only v1
+   canary (10% + auto-rollback)         2991         53           1.7% canary error 40% > 5% SLO → rolled back after ~0.9 s; blast radius = the canary only
+
+   → recreate has downtime AND full exposure; rolling avoids downtime but still exposes everyone as it completes;
+     blue-green makes the bad build catchable by a smoke test before the flip (and gives instant rollback by flipping back);
+     canary limits the blast radius to a small % and rolls back automatically on an SLO breach — the safest for risky changes.

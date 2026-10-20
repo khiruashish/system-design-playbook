@@ -1,0 +1,25 @@
+1.5M orders, 200k customers; query: a customer's orders in the last 90 days, newest first (the order-history page)
+before: index on (customer_id) — after: covering index on (customer_id, created_at DESC) INCLUDE (total_paise, status)
+
+round  state    samples    best ms    mean ms     p50 ms     p99 ms
+1      before       300       0.05       0.22       0.13       1.58
+1      after        300       0.02       0.18       0.08       2.49
+2      before       300       0.06       0.14       0.09       1.22
+2      after        300       0.02       0.09       0.06       1.44
+3      before       300       0.02       0.07       0.03       1.96
+3      after        300       0.02       0.03       0.03       0.11
+
+reduction after the change (positive = faster):
+  round 1   p50  38.3% (95% CI  31.3 …  43.9%)   p99  -57.7% (95% CI -186.5 …  27.3%)
+  round 2   p50  36.7% (95% CI  33.6 …  38.7%)   p99  -18.3% (95% CI -262.7 …  86.8%)
+  round 3   p50  10.5% (95% CI   6.1 …  13.3%)   p99   94.4% (95% CI  -49.0 …  97.0%)
+
+misleading versions of round 1:
+  worst-before vs best-after:   "99% faster"  (cherry-picked pair)
+  one sample each:              "70.0% faster"  (a single pair of queries is mostly noise)
+  mean before vs mean after:    "19.4% faster"  (says nothing about the tail)
+
+plan after:
+  Limit  (cost=0.43..12.47 rows=2 width=34)
+    ->  Index Scan using beh_orders_cust_created on beh_orders  (cost=0.43..12.47 rows=2 width=34)
+          Index Cond: ((customer_id = 42) AND (created_at > (now() - '90 days'::interval)))

@@ -1,0 +1,12 @@
+Load: 1440 ticks, 123–3736 rps (diurnal + a flash-sale spike). Target 70% util, 100 rps/replica, 15 s warm-up.
+
+   autoscaler configuration                             SLO breach  scale ops avg replicas  max util
+   reactive, NO stabilisation (thrashes)                        47        827          8.2      211%
+   reactive + scale-down stabilisation (30 s)                   16        101          8.9      195%
+   controller ignores warm-up (under-scales)                    18        126          8.4      195%
+   + predictive pre-scale for the peak                           1        131         11.6      141%
+
+   → stabilisation stops flapping (fewer scale ops, steadier fleet); modelling warm-up matters because a just-added
+     replica isn't at full capacity for ~15 s, so a purely reactive loop is always a step behind a fast spike;
+     pre-scaling for a KNOWN peak (a sale) cuts the breach window that reactive scaling can't catch in time.
+   (The 'ignores warm-up' row provisions the same replicas but breaches more: it treats cold replicas as full, so it scales too little.)

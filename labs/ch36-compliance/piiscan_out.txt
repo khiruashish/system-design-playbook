@@ -1,0 +1,20 @@
+20,000 synthetic log lines with planted (synthetic) PII among order ids, epoch timestamps, trace ids and SKUs.
+
+   detector   planted | naive: hits / precision validated              validated + key-aware 
+   aadhaar        394 |  20466 /   1.9% r100%     2404 /  16.4% r100%      394 / 100.0% r100%  
+   card           182 |  20279 /   0.9% r100%      186 /  97.8% r100%      182 / 100.0% r100%  
+   pan            181 |    181 / 100.0% r100%      181 / 100.0% r100%      181 / 100.0% r100%  
+   phone          620 |    716 /  86.6% r100%      716 /  86.6% r100%      620 / 100.0% r100%  
+   email          412 |    412 / 100.0% r100%      412 / 100.0% r100%      412 / 100.0% r100%  
+   (hits / precision, r = recall)
+
+   Redaction (validated + key-aware): 1,728 lines changed; planted PII still present: 0; order ids/timestamps destroyed: 0
+   before: ts=1780087243523 level=INFO svc=checkout trace=fe35230c89d04d65 order=839552981919 latencyMs=184 kycDoc=4355 7339 6128 msg="OTP sent to +91 95081 16159"
+   after:  ts=1780087243523 level=INFO svc=checkout trace=fe35230c89d04d65 order=839552981919 latencyMs=184 kycDoc=[AADHAAR] msg="OTP sent to [PHONE]"
+
+   → format-only regexes drown in look-alikes: 13-digit epoch timestamps look like card numbers and 12-digit order ids
+     look like Aadhaar numbers, so the naive scanner's alerts are almost all noise and get ignored. Checksums remove most
+     of it — Luhn + issuer prefix makes the card detector nearly exact — but a checksum passes random digits ~10% of the
+     time, so thousands of order ids still 'pass' Verhoeff, and redacting them would destroy the ids engineers need.
+     Knowing the STRUCTURE of the log (which keys can never hold personal data) closes the gap. That's also the real fix:
+     structured logging with field allow-lists, so personal data is never written — scanning is the safety net.

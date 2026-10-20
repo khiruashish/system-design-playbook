@@ -1,0 +1,15 @@
+Cell router over 3 real HTTP cells. Pune + Nagpur on cell-1, Delhi on cell-2. 4 Pune + 2 Nagpur clients add items for 3 s;
+at 1.5 s Pune is moved to cell-3. Then every acknowledged item is read back through the router.
+
+   NAIVE  ok  4,961  failed 0 | acked items  4,961  MISSING 1,519 | no hold           | worst latency: Pune   20 ms  Nagpur   18 ms
+          Pune items acknowledged before the move: ~1,515 | Pune data left orphaned on cell-1: YES
+   PROPER ok  7,264  failed 0 | acked items  7,264  MISSING     0 | Pune held 13 ms   | worst latency: Pune   21 ms  Nagpur   16 ms
+          Pune items acknowledged before the move: ~2,321 | Pune data left orphaned on cell-1: no
+
+   → the naive flip returns no errors at all — which is what makes it dangerous: every Pune item acknowledged before the
+     flip is now invisible, because cell-3 has none of Pune's data and cell-1's copy is orphaned. The proper move holds
+     only Pune's requests at the router for the duration of the copy — Nagpur, on the SAME source cell, isn't held —
+     flips the route while nothing is in flight, and loses nothing. The hold lasts exactly as long as the copy, which for
+     a few thousand cart items is within normal latency noise — but it grows with the city's data, so production moves
+     of large tenants use dual-write or change-data-capture to pre-copy, pause only for the final delta, verify before
+     dropping the source, and replicate the routing table to every edge router.

@@ -1,0 +1,14 @@
+5,000 payments, 13,475 webhook deliveries (25% duplicated, 15% of payments out of order, 178 events never delivered); 2 nodes, one restart.
+
+   answer                                                     effects applied      status went   final status  money effects
+                                                                       twice        backwards          wrong        missing
+   B1) in-memory seen-set per node, apply status                         830              747            755            104
+   B2) dedup by event id in the same DB transaction                        0              747            755            104
+   B3) B2 + forward-only status + outbox                                   0                0             82             82
+   B4) B3 + reconciliation with the gateway's list API                     0                0              0              0
+
+   → every answer 'handles webhooks'; they differ in which failure modes they have thought about. B1 works in a demo
+     and double-credits in production (two nodes, restarts). B2 makes duplicates harmless but trusts arrival order.
+     B3 encodes the domain's state machine, so late events can't move a payment backwards. B4 accepts that an
+     at-least-once channel can still lose messages and closes the loop with reconciliation. That progression —
+     correct once, correct under concurrency, correct under reordering, correct under loss — is what the levels mean.

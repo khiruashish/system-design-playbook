@@ -1,0 +1,25 @@
+Customer C-1001 asks us to erase their personal data. It lives in 6 stores (+ a GST invoice we must retain).
+
+   A) delete from the orders DB only                  NOT erased (still readable): 5 [read model (incl. basket), support search (incl. basket), cache (incl. basket), nightly backup (incl. basket), warehouse (incl. basket)]
+                                                      retained under legal obligation: GST invoice (name + address only)
+                                                      other customer C-2002 still intact: yes (7/7)
+
+   B) delete from every store we remembered           NOT erased (still readable): 2 [nightly backup (incl. basket), warehouse (incl. basket)]
+                                                      retained under legal obligation: GST invoice (name + address only)
+                                                      other customer C-2002 still intact: yes (7/7)
+
+   C) crypto-shredding (per-customer key destroyed)   NOT erased (still readable): 0 []
+                                                      retained under legal obligation: GST invoice (name + address only)
+                                                      other customer C-2002 still intact: yes (7/7)
+
+   Erasure log entry (kept as evidence):
+        {"request":"ER-2026-0931","subject":"C-1001","keyDestroyed":"pii-C-1001","retainedUnderLaw":["GST invoice INV-1001 (legal-C-1001)"],
+         "completedAt":"2026-09-29T07:12:03Z","stores":6}
+
+   → deleting from the primary leaves the customer readable in 5 other places — including the backup, which also keeps
+     a sensitive INFERENCE (the basket) that was never a 'field' anyone thought to erase. Chasing every copy misses the
+     immutable backup and the warehouse another team owns. Crypto-shredding makes erasure a single, provable action:
+     every copy — backups included — was written as ciphertext under the customer's key, so destroying the key erases
+     them all at once, while other customers are untouched. The GST invoice survives because the law requires it,
+     under a separate purpose key with only the fields the law needs. Crypto-shredding only works if personal data is
+     NEVER written in plaintext anywhere (logs, exports, caches) — enforce that at write time.

@@ -1,0 +1,16 @@
+20,000 stock reservations over 300 SKUs (Zipf s=1.1: top 5 SKUs = 43% of orders), 16 transactions in flight.
+
+   aggregate design                                        rounds   conflicts  wasted work       vs ideal
+   A) one StoreInventory aggregate                         20,000     299,880        93.7%          16.0x
+   B) one aggregate per SKU                                 4,007      44,012        68.8%           3.2x
+   C) per SKU + hot SKUs split into 8 stock buckets         1,382       2,102         9.5%           1.1x
+   (ideal: 16 commits every round)                          1,250            
+
+   → A serializes everything: the store-wide aggregate lets exactly ONE reservation commit per round, so throughput
+     collapses to 1/16 of capacity and almost all concurrent work is thrown away as version conflicts. There is no
+     invariant spanning SKUs that needed that boundary — 'stock ≥ 0' is per SKU. B draws the boundary around the
+     invariant and is 5x faster than A, yet still runs at only ~31% of capacity: with 43% of orders on 5 SKUs, milk and
+     bread keep colliding. C splits only those hot SKUs' stock into buckets (each bucket enforces stock ≥ 0 on its
+     share), paying for it with allocation logic (rebalance when a bucket runs dry) and reaching ~91% of capacity.
+     Rule: make aggregates as SMALL as the invariants allow, reference other aggregates by ID, and let rules that
+     span aggregates be eventually consistent via domain events.

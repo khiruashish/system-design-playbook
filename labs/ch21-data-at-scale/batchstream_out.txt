@@ -1,0 +1,14 @@
+A. Nightly batch over 10,000,000 order lines in chunks of 100,000 (PostgreSQL); the pod crashes once at chunk 60
+   restart strategy             rows read   chunks    (day, store)   revenue off        time
+                                            redone      rows wrong        by (₹)            
+   checkpoint committed later  10,100,000        1             200    53,673,670   11,867 ms
+   checkpoint in same tx       10,100,000        1               0             0   11,239 ms
+   overwrite                   20,000,000        -               0             0    9,074 ms
+B. Orders per store per 1-minute window, 1,080,000 events over 6 h; 90 % arrive in ~0.5 s, 8 % in 5–60 s, 2 % in 2–20 min
+   streaming strategy                              windows    events result delay result delay   updates
+                                                     exact   dropped          p50          p99   /window
+   processing-time windows                           29.8%         0       0.0 s       0.0 s      0.00
+   event time, watermark 5 s, late events dropped    43.0%    60,625       5.1 s       5.4 s      0.00
+   event time, watermark 60 s, late dropped          74.3%    21,343      60.1 s      60.4 s      0.00
+   event time, watermark 5 s + lateness 30 min      100.0%         0       5.1 s       5.4 s      0.84
+   Kappa-style reprocessing: replaying the 6 h log through the job runs at 4,408,672 events/s on one core (0.2 s for the evening)

@@ -1,0 +1,14 @@
+160 MB upload; 16 MB/s per connection, 64 MB/s link; 0.4% drop chance per 64 KB. Real HTTP.
+
+   strategy                                           result                       time  MB received     intact
+   U1) single PUT, restart from 0 on failure (max 5)  FAILED                      2.8 s           34          —
+   U2) multipart 8 MB, sequential, retry the part     ok (9 part retries)        12.3 s          182        yes
+   U3) multipart 8 MB, 4 in parallel                  ok (11 part retries)        5.0 s          202        yes
+   U4) multipart 8 MB, 8 in parallel                  ok (15 part retries)        5.1 s          223        yes
+
+   → with a drop every ~16 MB on average, a 160 MB single request almost never survives, and every retry starts
+     again from zero. Splitting the object into parts turns one fragile transfer into many small, independently
+     retryable ones: the re-sent bytes are bounded by the part size. Parallel parts use more of the link; past
+     4 connections the 64 MB/s cap limits the gain. The server assembles parts only on 'complete', and the
+     end-to-end checksum proves the object is intact. Uploads go straight to the object store with pre-signed URLs
+     — the application servers never carry the bytes.

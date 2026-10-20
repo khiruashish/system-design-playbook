@@ -1,0 +1,16 @@
+20,000 wallet operations (60% payments, 25% refunds, 15% top-ups), 16 threads, 200 wallets, PostgreSQL 16.
+
+   design                                                ops/s  declined  retries     wrong money created  negative  unbalanced     audit trail
+                                                               (no funds)           balances  or destroyed   wallets     entries                
+   A) balance column, read-then-write                    6,963     3,649        0       116    ₹34,011.55         0           0            none
+   B) FOR UPDATE + balance + double-entry journal        4,128     3,931        0         0         ₹0.00         0           0  every movement
+   C) append-only journal, SERIALIZABLE + retry            712     3,964   58,764         0         ₹0.00         0           0  every movement
+
+   → the read-then-write balance loses updates as soon as two operations touch one wallet: most wallets end up
+     wrong, money is silently created or destroyed, and there is no record of why. (No wallet went negative here —
+     that needs two payments to pass the same stale check; it is possible, just rarer.) Locking the account row (B)
+     makes every balance exact at half A's throughput. Deriving balances from the journal under SERIALIZABLE (C) is
+     also exact, but on busy wallets the conflict detection turns into a retry storm — tens of thousands of retries
+     and a fraction of the throughput. The usual production shape is B: an append-only, balanced journal as the
+     record, plus a balance row per account updated under a row lock in the same transaction as a fast, checkable
+     projection. Corrections are new entries, never UPDATEs to history.

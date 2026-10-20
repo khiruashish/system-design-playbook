@@ -1,0 +1,14 @@
+== Source database has 20000 orders. Producing three 'backups': ==
+   backup A (good.dump):      80 KB
+   backup B (truncated.dump): 48 KB  (silently cut off at 60% — the job 'succeeded')
+   backup C (orphaned.dump):  present, but its referenced data was pruned by retention (restores 'clean' but wrong)
+
+== The restore drill: restore each into a throwaway database and VERIFY row counts + a checksum ==
+   backup A (good)     : RESTORED and VERIFIED (20000 rows = expected) ✓ usable
+   backup B (truncated): pg_restore FAILED (1 errors) ✗ NOT a usable backup
+   backup C (orphaned) : restored but VERIFY FAILED (got 15000, expected 20000) ✗ retention pruned referenced data
+
+== RESULT ==
+   Only backup A passes the drill. B and C both 'exist' and their backup jobs reported success — but a restore drill
+   is the only thing that proves recoverability. Schedule automated restore-and-verify drills; alert if a drill fails;
+   track the drill's wall-clock as your real RTO. An untested backup is a hope, not a recovery plan.
