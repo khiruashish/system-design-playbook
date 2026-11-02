@@ -276,12 +276,12 @@ flowchart LR
     CO -- sync, parallel --> INV[inventory-service]
     CO -- sync --> PAY
     CO -- sync --> ORD
-    ORD -. event order.order.placed.v1 .-> FUL[fulfilment-service]
+    ORD -. "event order.order.placed.v1" .-> FUL[fulfilment-service]
     ORD -. event .-> INVC[invoice-service]
     ORD -. event .-> NOT[notification-service]
-    PAY -. event payment.payment.captured.v1 .-> ORD
-    FUL -. event fulfilment.order.packed.v1 .-> ORD
-    CAT[catalog-service] -. event catalog.product.updated.v1 .-> PRC
+    PAY -. "event payment.payment.captured.v1" .-> ORD
+    FUL -. "event fulfilment.order.packed.v1" .-> ORD
+    CAT[catalog-service] -. "event catalog.product.updated.v1" .-> PRC
     CAT -. event .-> INV
     CAT -. event .-> SRCH[search-service]
     subgraph Platform
