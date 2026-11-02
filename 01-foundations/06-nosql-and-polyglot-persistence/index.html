@@ -48,12 +48,14 @@
         
         
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
-        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
       
     
     
       <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/playbook-theme.css">
     
     <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
@@ -71,7 +73,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -127,7 +129,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
     
       <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -137,7 +139,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
     
       <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -5276,14 +5278,14 @@
 <p><strong>Partition-size check for our table:</strong> one ping every 4 s during a 12-hour shift is ~10,800 rows × ~100 B ≈ <strong>1 MB per partition</strong>. That's comfortable. Without the <code>day</code> bucket, 90 days of retention would be ~100 MB per rider partition: too big.</p>
 <h3 id="26-lsm-trees-and-compaction-b3">2.6 LSM trees and compaction ⭐ <span class="band b3">B3</span><a class="headerlink" href="#26-lsm-trees-and-compaction-b3" title="Permanent link">&para;</a></h3>
 <p>Most write-optimized stores (Cassandra, ScyllaDB, RocksDB, HBase, LevelDB, and the storage behind many time-series DBs) use a <strong>Log-Structured Merge tree</strong>:</p>
-<pre class="mermaid"><code>flowchart LR
+<div class="diagram">flowchart LR
     W["Write"] --&gt; CL["Commit log&lt;br/&gt;(sequential append, durability)"]
     W --&gt; MT["Memtable&lt;br/&gt;(sorted, in memory)"]
     MT --&gt;|"full → flush"| S1["SSTable (newest)&lt;br/&gt;immutable, sorted, Bloom filter"]
     S1 --&gt; S2["SSTable"] --&gt; S3["SSTable (oldest)"]
     S1 &amp; S2 &amp; S3 --&gt;|"compaction: merge, keep newest version,&lt;br/&gt;drop tombstones past gc_grace"| C["Merged SSTable"]
     R["Read"] --&gt; MT
-    R --&gt;|"newest → oldest, skip via Bloom filter"| S1</code></pre>
+    R --&gt;|"newest → oldest, skip via Bloom filter"| S1</div>
 <p>L1 (§5) implements exactly this. Its real output shows the trade-offs:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>After 200,000 writes: 41 SSTables holding 39,725 entries for 1,000 live keys (space amplification ~40x)
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>1 read of a missing key  : 1 table probes, 40 tables skipped by Bloom filters
@@ -5499,7 +5501,7 @@ R + W &gt; RF \;\Rightarrow\; \text{a read overlaps at least one replica that sa
 <p><strong>Time-series.</strong> Metrics and telemetry with downsampling and retention (Ch 24, 52). Rider pings <em>can</em> live in a TSDB, but per-rider path queries fit wide-column partitioning better.</p>
 <p><strong>Search engines.</strong> An inverted index plus relevance scoring, fed from the system of record. Never the source of truth (Ch 22).</p>
 <h3 id="210-polyglot-persistence-and-the-system-of-record-b3-b4">2.10 Polyglot persistence and the system of record <span class="band b3">B3</span> <span class="band b4">B4</span><a class="headerlink" href="#210-polyglot-persistence-and-the-system-of-record-b3-b4" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>flowchart LR
+<div class="diagram">flowchart LR
     subgraph SoR["Systems of record"]
         PG[("PostgreSQL&lt;br/&gt;orders, inventory")]
         LOG[["Kafka topic&lt;br/&gt;tracking.location.updated.v1&lt;br/&gt;(retained 3 days)"]]
@@ -5509,7 +5511,7 @@ R + W &gt; RF \;\Rightarrow\; \text{a read overlaps at least one replica that sa
     K2 --&gt; DOC[("Catalog documents")]
     LOG --&gt; RD[("Redis&lt;br/&gt;latest + geo")]
     LOG --&gt; CS[("Cassandra&lt;br/&gt;7-day history")]
-    LOG --&gt; WH[("Warehouse&lt;br/&gt;analytics")]</code></pre>
+    LOG --&gt; WH[("Warehouse&lt;br/&gt;analytics")]</div>
 <table>
 <thead>
 <tr>
@@ -5661,7 +5663,7 @@ R + W &gt; RF \;\Rightarrow\; \text{a read overlaps at least one replica that sa
 <hr />
 <h2 id="3-architecture-diagrams">3. Architecture &amp; Diagrams<a class="headerlink" href="#3-architecture-diagrams" title="Permanent link">&para;</a></h2>
 <h3 id="31-component-view-the-location-pipeline">3.1 Component view: the location pipeline<a class="headerlink" href="#31-component-view-the-location-pipeline" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>flowchart LR
+<div class="diagram">flowchart LR
     RA["Rider app&lt;br/&gt;ping every 4 s (batched 2-3 per request)"] --&gt; GW["api-gateway"]
     GW --&gt; TI["tracking-ingest&lt;br/&gt;validate, stamp, publish"]
     TI --&gt; K[["Kafka tracking.location.updated.v1&lt;br/&gt;key = riderId, 48 partitions, 3-day retention"]]
@@ -5670,9 +5672,9 @@ R + W &gt; RF \;\Rightarrow\; \text{a read overlaps at least one replica that sa
     K --&gt;|"group: loc-analytics"| AW["analytics sink"] --&gt; WH[("Warehouse")]
     DS["dispatch-service"] --&gt;|"GEOSEARCH nearest"| RD
     TS["tracking-stream (Ch 03)"] --&gt;|"latest"| RD
-    SUP["support tools"] --&gt;|"path by day / order"| CS</code></pre>
+    SUP["support tools"] --&gt;|"path by day / order"| CS</div>
 <h3 id="32-sequence-happy-path-one-ping-to-all-stores">3.2 Sequence: happy path, one ping to all stores<a class="headerlink" href="#32-sequence-happy-path-one-ping-to-all-stores" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>sequenceDiagram
+<div class="diagram">sequenceDiagram
     autonumber
     participant R as Rider app
     participant TI as tracking-ingest
@@ -5693,9 +5695,9 @@ R + W &gt; RF \;\Rightarrow\; \text{a read overlaps at least one replica that sa
         K--)HW: batch of 500 pings
         HW-&gt;&gt;CS: async INSERTs (idempotent: same PK = same row), LOCAL_QUORUM
         HW-&gt;&gt;K: commit offsets after all acks
-    end</code></pre>
+    end</div>
 <h3 id="33-sequence-failure-path-cassandra-degraded-redis-unaffected">3.3 Sequence: failure path, Cassandra degraded, Redis unaffected<a class="headerlink" href="#33-sequence-failure-path-cassandra-degraded-redis-unaffected" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>sequenceDiagram
+<div class="diagram">sequenceDiagram
     autonumber
     participant K as Kafka
     participant LW as latest-writer
@@ -5715,20 +5717,20 @@ R + W &gt; RF \;\Rightarrow\; \text{a read overlaps at least one replica that sa
         HW-&gt;&gt;CS: catch up from Kafka at max throughput
     else outage &gt; retention
         HW-&gt;&gt;HW: accept gap, alert, history missing for that window
-    end</code></pre>
+    end</div>
 <div class="admonition note">
 <p class="admonition-title">What the system guarantees after this failure path</p>
 <p>A degraded history store <strong>never</strong> affects latest-position or dispatch, because each sink has its own consumer group. History is eventually complete as long as the outage is shorter than Kafka retention (3 days), since the writer only commits offsets after writes are acknowledged, and duplicate writes on retry are harmless (same primary key → same row). Delivery evidence for disputes lives in PostgreSQL, not in the history store.</p>
 </div>
 <h3 id="34-state-a-riders-presence-in-the-geo-index">3.4 State: a rider's presence in the geo index<a class="headerlink" href="#34-state-a-riders-presence-in-the-geo-index" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>stateDiagram-v2
+<div class="diagram">stateDiagram-v2
     [*] --&gt; ABSENT
     ABSENT --&gt; ONLINE: ping (GEOADD + lastseen)
     ONLINE --&gt; ONLINE: ping every ~4 s
     ONLINE --&gt; STALE: no ping for 60 s
     STALE --&gt; ONLINE: ping arrives
     STALE --&gt; ABSENT: pruner removes from GEO + lastseen
-    ONLINE --&gt; ABSENT: rider goes off shift (explicit remove)</code></pre>
+    ONLINE --&gt; ABSENT: rider goes off shift (explicit remove)</div>
 <hr />
 <h2 id="4-design-document-excerpt-rider-location-storage">4. Design Document Excerpt: Rider Location Storage<a class="headerlink" href="#4-design-document-excerpt-rider-location-storage" title="Permanent link">&para;</a></h2>
 <table>
@@ -7713,6 +7715,10 @@ R + W &gt; RF \;\Rightarrow\; \text{a read overlaps at least one replica that sa
     
     
       <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+      
+        <script src="../../javascripts/playbook-diagrams.js"></script>
       
     
   </body>

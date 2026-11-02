@@ -48,12 +48,14 @@
         
         
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
-        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
       
     
     
       <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/playbook-theme.css">
     
     <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
@@ -71,7 +73,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -127,7 +129,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
     
       <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -137,7 +139,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
     
       <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -4947,14 +4949,14 @@
 <p>Load balancers and gateways are where <strong>every request's fate is decided</strong>: which instance, how long to wait, whether to retry, who the caller is, and how much they may send. Their defaults are designed for "all backends are equal and healthy." Production is never like that.</p>
 </div>
 <h3 id="12-where-this-lives-in-the-grocery-platform">1.2 Where this lives in the grocery platform<a class="headerlink" href="#12-where-this-lives-in-the-grocery-platform" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>flowchart LR
+<div class="diagram">flowchart LR
     U["Customers, riders, sellers"] --&gt; DNS["GeoDNS / anycast&lt;br/&gt;api.grocery.in"]
     DNS --&gt; CDN["CDN + WAF&lt;br/&gt;TLS, HTTP/2+3, bot rules"]
     CDN --&gt; LB["Cloud L7 LB&lt;br/&gt;(regional, multi-AZ)"]
     LB --&gt; GW["api-gateway&lt;br/&gt;Spring Cloud Gateway"]
     LB --&gt; PGW["partner-gateway&lt;br/&gt;(seller APIs)"]
     GW --&gt; SVC["Services (K8s Services / mesh)&lt;br/&gt;client-side LB between services"]
-    PGW --&gt; SVC</code></pre>
+    PGW --&gt; SVC</div>
 <table>
 <thead>
 <tr>
@@ -5197,12 +5199,12 @@
 <p>With many independent LB instances (every gateway pod, every client), "always pick the least loaded" makes them all pick the <strong>same</strong> backend at the same moment (herding), because their load information is stale. Choosing the better of two <em>random</em> candidates spreads decisions while still avoiding bad backends. The theory: max load drops from O(log n / log log n) to O(log log n) (Mitzenmacher).</p>
 </div>
 <h3 id="25-consistent-hashing-and-affinity-b2-b3">2.5 Consistent hashing and affinity <span class="band b2">B2</span> <span class="band b3">B3</span><a class="headerlink" href="#25-consistent-hashing-and-affinity-b2-b3" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>flowchart LR
+<div class="diagram">flowchart LR
     subgraph Ring["Hash ring (with virtual nodes)"]
         A1["A-v1"] --&gt; B1["B-v1"] --&gt; C1["C-v1"] --&gt; A2["A-v2"] --&gt; C2["C-v2"] --&gt; B2["B-v2"] --&gt; A1
     end
     K1(["key: cart:cust-42"]) -. "hash → next node clockwise" .-&gt; B1
-    K2(["key: cart:cust-77"]) -. "hash" .-&gt; A2</code></pre>
+    K2(["key: cart:cust-77"]) -. "hash" .-&gt; A2</div>
 <table>
 <thead>
 <tr>
@@ -5536,7 +5538,7 @@
 <hr />
 <h2 id="3-architecture-diagrams">3. Architecture &amp; Diagrams<a class="headerlink" href="#3-architecture-diagrams" title="Permanent link">&para;</a></h2>
 <h3 id="31-gateway-internals-a-request-through-filters">3.1 Gateway internals: a request through filters<a class="headerlink" href="#31-gateway-internals-a-request-through-filters" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>flowchart LR
+<div class="diagram">flowchart LR
     IN["Request from L7 LB"] --&gt; F1["Strip spoofable headers&lt;br/&gt;(X-User-Id, X-Internal-*)"]
     F1 --&gt; F2["Correlation ID"]
     F2 --&gt; F3["AuthN: validate JWT&lt;br/&gt;(JWKS cached)"]
@@ -5547,9 +5549,9 @@
     F7 --&gt; F8["Circuit breaker + timeout&lt;br/&gt;(per route)"]
     F8 --&gt; F9["Retry (idempotent only,&lt;br/&gt;different instance, budget)"]
     F9 --&gt; LB["Load balancer&lt;br/&gt;P2C + EWMA + outlier ejection"]
-    LB --&gt; SVC["order-service pods"]</code></pre>
+    LB --&gt; SVC["order-service pods"]</div>
 <h3 id="32-sequence-happy-path-authenticated-request-through-the-edge">3.2 Sequence: happy path, authenticated request through the edge<a class="headerlink" href="#32-sequence-happy-path-authenticated-request-through-the-edge" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>sequenceDiagram
+<div class="diagram">sequenceDiagram
     autonumber
     participant App as Flutter app
     participant CDN as CDN / WAF (anycast)
@@ -5566,9 +5568,9 @@
     GW-&gt;&gt;GW: P2C: pod 7 (2 in-flight, EWMA 18 ms) vs pod 3 (5 in-flight, 22 ms) → pod 7
     GW-&gt;&gt;OS: GET /api/v1/orders (timeout 2 s, X-Correlation-Id)
     OS--&gt;&gt;GW: 200
-    GW--&gt;&gt;App: 200 (RateLimit-Remaining: 17)</code></pre>
+    GW--&gt;&gt;App: 200 (RateLimit-Remaining: 17)</div>
 <h3 id="33-sequence-failure-path-slow-pod-detected-ejected-and-a-non-idempotent-retry-prevented">3.3 Sequence: failure path, slow pod detected, ejected, and a non-idempotent retry prevented<a class="headerlink" href="#33-sequence-failure-path-slow-pod-detected-ejected-and-a-non-idempotent-retry-prevented" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>sequenceDiagram
+<div class="diagram">sequenceDiagram
     autonumber
     participant GW as api-gateway
     participant P5 as order-service pod 5 (sick disk)
@@ -5585,13 +5587,13 @@
     GW-&gt;&gt;GW: outlier ejection: pod 5 out for 30 s (max 50 % of pool may be ejected)
     GW-&gt;&gt;P2: retry GET on a different instance (within retry budget)
     P2--&gt;&gt;GW: 200
-    Note over GW,P9: after 30 s, pod 5 returns on probation, and if it fails again it is ejected for 60 s</code></pre>
+    Note over GW,P9: after 30 s, pod 5 returns on probation, and if it fails again it is ejected for 60 s</div>
 <div class="admonition note">
 <p class="admonition-title">What the system guarantees after this failure path</p>
 <p>A slow-but-alive backend receives a rapidly shrinking share of traffic (latency-weighted P2C) and is removed after consecutive failures (passive ejection), without waiting for active health checks that report it as "UP." Retries never re-send non-idempotent requests, always go to a different instance, and are capped by a fleet-wide budget. Ejection never removes more than half the pool, so a shared-dependency failure can't empty it.</p>
 </div>
 <h3 id="34-state-backend-endpoint-health-in-the-balancer">3.4 State: backend endpoint health in the balancer<a class="headerlink" href="#34-state-backend-endpoint-health-in-the-balancer" title="Permanent link">&para;</a></h3>
-<pre class="mermaid"><code>stateDiagram-v2
+<div class="diagram">stateDiagram-v2
     [*] --&gt; HEALTHY: discovered + ready
     HEALTHY --&gt; DEGRADED: EWMA latency high (P2C avoids)
     DEGRADED --&gt; HEALTHY: latency recovers
@@ -5600,7 +5602,7 @@
     EJECTED --&gt; PROBATION: ejection time elapsed
     PROBATION --&gt; HEALTHY: successes
     PROBATION --&gt; EJECTED: failure (ejection time doubles, capped)
-    HEALTHY --&gt; [*]: removed from discovery (scale-in, not ready)</code></pre>
+    HEALTHY --&gt; [*]: removed from discovery (scale-in, not ready)</div>
 <hr />
 <h2 id="4-design-document-excerpt-platform-edge-api-gateway">4. Design Document Excerpt: Platform Edge &amp; API Gateway<a class="headerlink" href="#4-design-document-excerpt-platform-edge-api-gateway" title="Permanent link">&para;</a></h2>
 <table>
@@ -7395,6 +7397,10 @@
     
     
       <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+      
+        <script src="../../javascripts/playbook-diagrams.js"></script>
       
     
   </body>
