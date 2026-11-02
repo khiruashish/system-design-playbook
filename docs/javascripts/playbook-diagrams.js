@@ -1,8 +1,8 @@
 /*
  * Diagram renderer for the playbook.
  *
- * Mermaid blocks are emitted as <div class="diagram"> (see mkdocs.yml superfences config) so that we, not the theme,
- * control rendering. That lets us:
+ * Mermaid blocks are emitted as <div class="diagram"> or <pre class="diagram"> (see mkdocs.yml superfences config)
+ * so that we, not the theme, control rendering. That lets us:
  *   - use a custom light/dark palette with larger, readable fonts
  *   - give nodes a raised "3D" look (gradient fill + soft drop shadow)
  *   - keep diagrams at natural size (no shrinking into unreadable text) with horizontal scroll when needed
@@ -237,6 +237,14 @@
 
   async function renderAll() {
     if (!window.mermaid) return;
+    /* Sites that minify HTML must emit diagrams as <pre class="diagram"> (whitespace inside <pre> survives
+       minification; inside <div> it is collapsed and the Mermaid source breaks). Normalise to <div>. */
+    document.querySelectorAll("pre.diagram").forEach(function (pre) {
+      var div = document.createElement("div");
+      div.className = "diagram";
+      div.dataset.source = pre.textContent.trim();
+      pre.replaceWith(div);
+    });
     var nodes = document.querySelectorAll("div.diagram");
     if (!nodes.length) return;
     ensureDefs();
