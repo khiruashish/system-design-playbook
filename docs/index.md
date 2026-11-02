@@ -1,6 +1,124 @@
-# System Design Enterprise Handbook
+---
+title: Home
+---
 
-**From your first `@RestController` to defending a national-scale architecture in a Principal Engineer review.**
+<div class="pb-hero" markdown>
+<div markdown>
+
+<span class="pb-kicker">Java 25 · Spring Boot 4 · beginner to architect</span>
+
+<h1>System Design Enterprise Handbook</h1>
+
+<p class="pb-lead">From your first <code>@RestController</code> to defending a national-scale architecture in a Principal Engineer review, with production code, design documents and interview answers.</p>
+
+[How to use this handbook](00-orientation/00-how-to-use-this-handbook.md){ .md-button .md-button--primary }
+[Case studies](05-case-studies/38-url-shortener-and-short-links.md){ .md-button }
+[Interview framework](07-interview/57-the-system-design-interview-framework.md){ .md-button }
+
+</div>
+<div class="pb-stack" aria-hidden="true">
+<div class="pb-stack-plane">
+<div class="pb-layer l-cpu">Data layer<small>databases · queues · object storage</small></div>
+<div class="pb-layer l-car">Services &amp; caches<small>stateless · replicated · cached</small></div>
+<div class="pb-layer l-fjp">Edge<small>CDN · load balancer · API gateway</small></div>
+<div class="pb-layer l-vt">Clients<small>web · mobile · partners</small></div>
+</div>
+<div class="pb-stack-legend">The tiers every design in this<br>handbook is built from</div>
+</div>
+</div>
+
+<div class="pb-stats">
+<div class="pb-stat"><b>88</b><span>pages</span></div>
+<div class="pb-stat"><b>10</b><span>sections</span></div>
+<div class="pb-stat"><b>323</b><span>diagrams</span></div>
+<div class="pb-stat"><b>222</b><span>Java source files</span></div>
+</div>
+
+## Explore the handbook
+
+<div class="pb-cards" markdown>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-compass:</span>
+
+[Orientation](00-orientation/00-how-to-use-this-handbook.md){ .pb-title }
+
+How to Use This Handbook, What System Design Is…
+</div>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-sprout:</span>
+
+[Foundations](01-foundations/02-back-of-the-envelope-estimation.md){ .pb-title }
+
+Back-of-the-Envelope Estimation, Networking Essentials, API Design, Relational Databases Deep Dive…
+</div>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-lan:</span>
+
+[Distributed Core](02-distributed-core/10-replication.md){ .pb-title }
+
+Replication, Partitioning & Sharding, Consistency, Time & Consensus, Distributed Transactions…
+</div>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-factory:</span>
+
+[Production](03-production/21-data-at-scale.md){ .pb-title }
+
+Data at Scale, Search Systems, Security Architecture, Observability…
+</div>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-city-variant:</span>
+
+[Architect](04-architect/31-architecture-decision-making.md){ .pb-title }
+
+Architecture Decision Making, Design Documents & Architecture Communication, Domain-Driven Design, Modern Architecture Styles…
+</div>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-briefcase-search:</span>
+
+[Case Studies](05-case-studies/38-url-shortener-and-short-links.md){ .pb-title }
+
+URL Shortener & SMS Short Links, Distributed Rate Limiter, Notification System, Chat — Customer–Rider Messaging…
+</div>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-trophy:</span>
+
+[Capstone](06-capstone/56-capstone-grocery-marketplace-end-to-end.md){ .pb-title }
+
+The Grocery Marketplace, End to End…
+</div>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-account-tie:</span>
+
+[Interview](07-interview/57-the-system-design-interview-framework.md){ .pb-title }
+
+The System Design Interview Framework, Level Expectations, Interview Q&A Bank, Mock Interviews…
+</div>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-office-building:</span>
+
+[Industry Designs](08-industry/index.md){ .pb-title }
+
+I01. Amazon-Style Global Marketplace, I01b. Amazon — How It Works, I02. Flipkart-Style Sale-Day E-Commerce, I02b. Flipkart — How It Works…
+</div>
+
+<div class="pb-card" markdown>
+<span class="pb-icon">:material-bookshelf:</span>
+
+[Appendix](99-appendix/qa-index.md){ .pb-title }
+
+Glossary, Lab Catalogue…
+</div>
+
+</div>
 
 This handbook teaches system design the way it is practised in enterprise Java shops. Every concept is explained from intuition to internals. It is implemented in Java 25 / Spring Boot 4, stress-tested against production failure modes, and turned into interview answers that hold up at the 15-year level.
 
