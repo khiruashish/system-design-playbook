@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: coding-interview
+  threads:
+    virtual:
+      enabled: true          # request handling on virtual threads (Java 21+)
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  mvc:
+    problemdetails:
+      enabled: true          # RFC 9457 error bodies
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+ci:
+  shortener:
+    base-url: https://sho.rt/
+    id-block-size: 1000
+  rate-limit:
+    limit: 10
+    window: 60s
+  snowflake:
+    epoch: 2024-01-01T00:00:00Z
+    worker-lease: 30s
+  quorum:
+    n: 3
+    w: 2
+    r: 2
+    timeout: 200ms
+    replicas:                # in production: three separate storage nodes
+      - http://localhost:${server.port:8080}/internal/replicas/a
+      - http://localhost:${server.port:8080}/internal/replicas/b
+      - http://localhost:${server.port:8080}/internal/replicas/c

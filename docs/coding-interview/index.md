@@ -72,3 +72,15 @@ flowchart TD
 coding-interview/run-all.sh          # runs all 12, writes outputs/
 coding-interview/run-all.sh --check  # what CI runs: fails on any failure or changed output
 ```
+
+## Then ship it: Spring Boot 4 versions
+
+Every page also has a **"Solve it with Spring Boot 4"** section: the same problem as a production service in one
+**Spring Boot 4.1** application, with state in **Redis** (atomic Lua scripts, GEO, sorted sets, HyperLogLog), REST APIs with
+`ProblemDetail` errors, virtual threads, and an integration test against a real Redis whose transcript is shown on the page.
+Start with the [Spring Boot 4 overview](spring-boot.md) for the stack, the interview-to-production mapping, and how to run it.
+
+```bash
+docker run -d -p 6379:6379 redis:7
+coding-interview/spring-boot/check-outputs.sh --check   # what CI runs: 12 integration tests + transcript comparison
+```

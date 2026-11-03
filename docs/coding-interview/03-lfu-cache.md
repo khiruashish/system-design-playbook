@@ -59,6 +59,74 @@ java coding-interview/src/LfuCache.java      # JDK 21+ single-file launcher, no 
 --8<-- "coding-interview/outputs/LfuCache.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+The interview class plugs into **Spring's cache abstraction** as a custom `Cache`, so any method can use it with
+`@Cacheable`. The same `CacheManager` also registers a **Caffeine** cache, which is what you would actually run: its
+W-TinyLFU policy is an LFU with an admission filter and frequency decay.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant P as ProductController
+    participant X as Cache proxy (@Cacheable)
+    participant L as LfuSpringCache (capacity 3)
+    participant D as ProductService.find (DB)
+    C->>P: GET /api/v1/products/d
+    P->>X: find("d")
+    X->>L: get("d", loader) [locked]
+    L-->>X: miss
+    X->>D: load (sync = true: once per key)
+    D-->>X: Product d
+    X->>L: put("d") -> evict min-frequency, oldest (c)
+    X-->>C: 200 Product D
+```
+
+=== "Spring Cache adapter"
+
+    ```java title="LfuSpringCache.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p03lfu/LfuSpringCache.java"
+    ```
+
+=== "CacheManager"
+
+    ```java title="CacheConfig.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p03lfu/CacheConfig.java"
+    ```
+
+=== "@Cacheable service"
+
+    ```java title="ProductService.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p03lfu/ProductService.java"
+    ```
+
+=== "LFU core"
+
+    ```java title="LfuCache.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p03lfu/LfuCache.java"
+    ```
+
+### Run it as a service
+
+The integration test [`LfuCacheIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p03lfu/LfuCacheIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/LfuCacheSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| single-threaded class | one `ReentrantLock` (a `get` also mutates frequency buckets, so reads need it too) |
+| callers call `get`/`put` | `@Cacheable(sync = true)`: concurrent misses load once (no cache stampede) |
+| no invalidation | `@CacheEvict` on writes |
+| pure LFU (old popular items stick forever) | Caffeine **W-TinyLFU**: frequency sketch with ageing + LRU window. Prefer it in production |
+
+For a cache shared by many instances, put Redis behind the same abstraction (`spring.cache.type=redis`, eviction policy
+`allkeys-lfu`) and keep Caffeine as a small L1.
+
 ## Common mistakes
 
 * Using a heap for eviction. That's O(log n) and needs a decrease-key operation.

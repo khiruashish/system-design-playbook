@@ -1,0 +1,25 @@
+N=3 replicas (a, b, c), W=2, R=2 -> R + W > N, so every read overlaps the latest write
+> PUT /api/v1/kv/cart:42  {"value":"2 items"}
+< 200  {"version":1768471200000,"acks":2,"required":2}
+> PUT /internal/replicas/c/down?value=true
+< 200
+replica c goes down
+> PUT /api/v1/kv/cart:42  {"value":"3 items"}
+< 200  {"version":1768471200001,"acks":2,"required":2}
+> PUT /internal/replicas/c/down?value=false
+< 200
+> PUT /internal/replicas/a/down?value=true
+< 200
+c comes back (still holding '2 items'), a goes down
+> GET /api/v1/kv/cart:42
+< 200  {"value":"3 items","version":1768471200001,"replies":2,"required":2,"repaired":["c"]}
+> PUT /internal/replicas/b/down?value=true
+< 200
+a and b down: only 1 of 3 replicas can ack
+> PUT /api/v1/kv/cart:42  {"value":"4 items"}
+< 503  {"detail":"write quorum not met: 1/2 acks","instance":"/api/v1/kv/cart:42","status":503,"title":"Service Unavailable"}
+> PUT /internal/replicas/a/down?value=false
+< 200
+> PUT /internal/replicas/b/down?value=false
+< 200
+PASS

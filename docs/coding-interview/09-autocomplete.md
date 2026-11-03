@@ -55,6 +55,64 @@ java coding-interview/src/AutocompleteTrie.java      # JDK 21+ single-file launc
 --8<-- "coding-interview/outputs/AutocompleteTrie.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+Each trie node becomes a **small sorted set per prefix** that holds only that prefix's **top K** terms (the "cached top-K per node"
+from the solution). A lookup is a single `ZREVRANGE`. All the work happens on write, in one Lua script, and responses carry
+`Cache-Control` so a CDN can absorb the read traffic.
+
+```mermaid
+sequenceDiagram
+    participant Log as Search log / selections
+    participant S as AutocompleteService
+    participant R as Redis
+    participant C as Client
+    Log->>S: recordSearch("iphone 15 pro")
+    S->>R: autocomplete-record.lua: ZINCRBY ac:counts, then for each prefix i, ip, iph... ZADD + trim to top 5
+    C->>S: GET /api/v1/autocomplete?q=iph
+    S->>R: ZREVRANGE ac:prefix:iph 0 4
+    S-->>C: 200 Cache-Control: max-age=60, public ["iphone 15 pro", ...]
+```
+
+=== "Record (Lua)"
+
+    ```lua title="autocomplete-record.lua"
+    --8<-- "coding-interview/spring-boot/src/main/resources/scripts/autocomplete-record.lua"
+    ```
+
+=== "Service"
+
+    ```java title="AutocompleteService.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p09autocomplete/AutocompleteService.java"
+    ```
+
+=== "Controller"
+
+    ```java title="AutocompleteController.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p09autocomplete/AutocompleteController.java"
+    ```
+
+### Run it as a service
+
+The integration test [`AutocompleteIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p09autocomplete/AutocompleteIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/AutocompleteSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| trie nodes with a top-K list | one Redis sorted set per prefix (≤ 10 characters), holding at most K terms |
+| update on every keystroke | update from the **search log** (submitted queries), ideally batched |
+| no normalisation | lower-case, trim, collapse spaces; filter for prefixes longer than 10 characters |
+| no caching | `Cache-Control: public, max-age=60`. Most prefixes are shared by millions of users |
+
+Memory is bounded: prefixes × K entries. Add per-user personalisation as a second, small set merged at read time, and
+remove offensive terms through a deny-list filter on write.
+
 ## Common mistakes
 
 * A DFS on every keystroke for one-letter prefixes, which can mean millions of nodes.

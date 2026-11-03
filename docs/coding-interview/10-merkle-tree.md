@@ -53,6 +53,72 @@ java coding-interview/src/MerkleTree.java      # JDK 21+ single-file launcher, n
 --8<-- "coding-interview/outputs/MerkleTree.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+Each replica's keys are split into **16 bucket hashes in Redis**, so a Merkle leaf is one bucket and repairing a leaf
+reads only that bucket. The service compares two replicas top-down, repairs the differing buckets with last-writer-wins,
+and can run on a schedule (`ci.anti-entropy.enabled=true`).
+
+```mermaid
+sequenceDiagram
+    participant J as AntiEntropyService (@Scheduled)
+    participant A as Replica a buckets
+    participant B as Replica b buckets
+    J->>A: build tree (16 leaf hashes -> root)
+    J->>B: build tree
+    J->>J: compare roots -> differ -> descend only into differing subtrees
+    J->>A: HGETALL replica:a:b8 (differing buckets only)
+    J->>B: HGETALL replica:b:b8
+    J->>A: write newer versions (LWW)
+    J->>B: write newer versions
+    Note over J: second run: roots equal, 1 comparison, nothing transferred
+```
+
+=== "Anti-entropy"
+
+    ```java title="AntiEntropyService.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p10merkle/AntiEntropyService.java"
+    ```
+
+=== "Merkle tree"
+
+    ```java title="MerkleTree.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p10merkle/MerkleTree.java"
+    ```
+
+=== "Replica store"
+
+    ```java title="ReplicaStore.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p10merkle/ReplicaStore.java"
+    ```
+
+=== "Controller & job"
+
+    ```java title="AntiEntropyController.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p10merkle/AntiEntropyController.java"
+    ```
+
+### Run it as a service
+
+The integration test [`MerkleIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p10merkle/MerkleIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/MerkleTreeSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| two in-memory maps | replica data in bucketed Redis hashes; a leaf = a bucket you can fetch alone |
+| diff only | **repair** with last-writer-wins by version, written to whichever side is behind |
+| run once | `@Scheduled` job, enabled per environment with `@ConditionalOnProperty` |
+
+Result: 4 of 16 buckets differed, so 495 of 2,002 key copies were read instead of all of them, and a second run needed one
+comparison. In a real cluster each node maintains its own tree incrementally and only **hashes** cross the network until a
+differing leaf is found (Cassandra repair, Dynamo anti-entropy, Riak AAE).
+
 ## Common mistakes
 
 * Bucketing by insertion order instead of by key. The two replicas then bucket differently and everything appears to differ.

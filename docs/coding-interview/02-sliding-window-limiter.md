@@ -59,6 +59,83 @@ java coding-interview/src/SlidingWindowRateLimiter.java      # JDK 21+ single-fi
 --8<-- "coding-interview/outputs/SlidingWindowRateLimiter.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+The algorithms move into **Redis Lua scripts**, so "count, compare, record" is one atomic step shared by every instance.
+A Spring MVC **`HandlerInterceptor`** applies the limit before the controller and returns `429` with `Retry-After` and
+`RateLimit-*` headers. The algorithm is a property: `ci.rate-limit.algorithm=SLIDING_LOG | SLIDING_COUNTER`.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant I as RateLimitInterceptor
+    participant L as RedisRateLimiter
+    participant R as Redis (Lua)
+    participant Q as QuoteController
+    C->>I: GET /api/v1/quotes/INFY [X-User-Id: asha]
+    I->>L: tryAcquire("asha")
+    L->>R: EVALSHA sliding-log.lua (ZREMRANGEBYSCORE, ZCARD, ZADD)
+    R-->>L: {allowed, remaining, retryAfterMs}
+    alt allowed
+      I->>Q: continue
+      Q-->>C: 200 + RateLimit-Remaining
+    else over the limit
+      I-->>C: 429 + Retry-After (ProblemDetail)
+    end
+```
+
+=== "Sliding log (Lua)"
+
+    ```lua title="sliding-log.lua"
+    --8<-- "coding-interview/spring-boot/src/main/resources/scripts/sliding-log.lua"
+    ```
+
+=== "Sliding counter (Lua)"
+
+    ```lua title="sliding-counter.lua"
+    --8<-- "coding-interview/spring-boot/src/main/resources/scripts/sliding-counter.lua"
+    ```
+
+=== "Limiter"
+
+    ```java title="RedisRateLimiter.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p02ratelimit/RedisRateLimiter.java"
+    ```
+
+=== "Interceptor"
+
+    ```java title="RateLimitInterceptor.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p02ratelimit/RateLimitInterceptor.java"
+    ```
+
+=== "Wiring"
+
+    ```java title="RateLimitConfig.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p02ratelimit/RateLimitConfig.java"
+    ```
+
+### Run it as a service
+
+The integration test [`RateLimitIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p02ratelimit/RateLimitIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/RateLimitSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| `Map<String, Deque<Long>>` per JVM | Redis sorted set per user: one limit across **all** instances |
+| check then add (racy across servers) | **one Lua script** = atomic check-and-record |
+| `System.currentTimeMillis()` | injected `Clock` (tests move time; or use Redis `TIME` inside the script) |
+| returns `boolean` | interceptor → `429`, `Retry-After`, `RateLimit-Limit/Remaining` |
+| unbounded memory for idle users | `PEXPIRE` on every key: idle users cost nothing |
+
+The two counter keys share the `{userId}` **hash tag** so they hash to the same Redis Cluster slot, a requirement for
+multi-key scripts in a cluster. Gateways (Spring Cloud Gateway's `RequestRateLimiter`) ship a Redis token bucket built the same way.
+
 ## Common mistakes
 
 * A fixed window. Clients can send 2N within a second around each boundary.

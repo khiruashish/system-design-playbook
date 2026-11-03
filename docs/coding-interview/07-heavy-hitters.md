@@ -55,6 +55,62 @@ java coding-interview/src/HeavyHitters.java      # JDK 21+ single-file launcher,
 --8<-- "coding-interview/outputs/HeavyHitters.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+The sketch lives in a **Redis hash per hourly window** (`row:col` → count) and a **top-K sorted set** beside it. One Lua call
+increments the d counters, takes the minimum as the estimate, and updates the top-K, all atomically. Old windows expire on their own.
+
+```mermaid
+sequenceDiagram
+    participant E as View events (Kafka consumer / API)
+    participant T as TrendingService
+    participant R as Redis (cms-topk.lua)
+    participant C as Client
+    E->>T: record("product-7")
+    T->>R: HINCRBY cms:{hour} r:c x5, min -> estimate, ZADD topk:{hour}, trim to K
+    C->>T: GET /api/v1/trending?k=5
+    T->>R: ZREVRANGE topk:{hour} 0 4 WITHSCORES
+    T-->>C: [{item, estimate}]
+```
+
+=== "Sketch + top-K (Lua)"
+
+    ```lua title="cms-topk.lua"
+    --8<-- "coding-interview/spring-boot/src/main/resources/scripts/cms-topk.lua"
+    ```
+
+=== "Service"
+
+    ```java title="TrendingService.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p07trending/TrendingService.java"
+    ```
+
+=== "Controller"
+
+    ```java title="TrendingController.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p07trending/TrendingController.java"
+    ```
+
+### Run it as a service
+
+The integration test [`TrendingIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p07trending/TrendingIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/HeavyHittersSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| `long[d][w]` + `PriorityQueue` | Redis hash (5 x 2,000 counters) + sorted set, shared by all consumers |
+| one stream forever | **per-hour windows** with TTL; "last hour" = current window (or sum the last 2 for sliding) |
+| separate increment and heap update | one Lua script: no lost updates between instances |
+
+Measured: max overcount **3** against the bound e/w·N = 28, and the top 5 matched the exact counts. At very high event
+rates, pre-aggregate in the consumer (count locally for 1 s, then one `HINCRBY` per item) to cut Redis calls.
+
 ## Common mistakes
 
 * Using the sketch for rare items. The *relative* error is large when the true count is small compared with N.

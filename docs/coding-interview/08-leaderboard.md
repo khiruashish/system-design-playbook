@@ -53,6 +53,56 @@ java coding-interview/src/Leaderboard.java      # JDK 21+ single-file launcher, 
 --8<-- "coding-interview/outputs/Leaderboard.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+A Redis **sorted set** gives exactly the interview operations, each O(log n): `ZINCRBY` (add points), `ZREVRANK` (your rank),
+`ZREVRANGE` (top N and the players around you).
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant L as LeaderboardService
+    participant R as Redis ZSET lb:weekly
+    C->>L: POST /scores {player: ravi, points: 300}
+    L->>R: ZINCRBY lb:weekly 300 ravi
+    C->>L: GET /players/zoya
+    L->>R: ZREVRANK lb:weekly zoya -> 5 (0-based)
+    L->>R: ZREVRANGE lb:weekly 3 7 WITHSCORES
+    L->>R: ZCARD lb:weekly
+    L-->>C: {you: #6, neighbours: #4..#8, players: 8}
+```
+
+=== "Service"
+
+    ```java title="LeaderboardService.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p08leaderboard/LeaderboardService.java"
+    ```
+
+=== "Controller"
+
+    ```java title="LeaderboardController.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p08leaderboard/LeaderboardController.java"
+    ```
+
+### Run it as a service
+
+The integration test [`LeaderboardIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p08leaderboard/LeaderboardIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/LeaderboardSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| `TreeMap` + Fenwick tree for ranks | Redis sorted set (skip list + hash): rank queries are built in |
+| one board | one key per board/period (`lb:weekly`, `lb:2026-w03`), with `EXPIRE` for old periods |
+| ties by insertion order | Redis breaks score ties lexicographically; encode `score * 10^k + (MAX_TS - ts)` for "first to reach it wins" |
+
+Tens of millions of players fit in one sorted set. Beyond that, shard by score range or region and merge the top-N per shard.
+
 ## Common mistakes
 
 * Sorting the whole list on every query (O(n log n)), which falls over at millions of players.

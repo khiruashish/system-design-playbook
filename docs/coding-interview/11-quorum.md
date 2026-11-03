@@ -59,6 +59,82 @@ java coding-interview/src/QuorumReplication.java      # JDK 21+ single-file laun
 --8<-- "coding-interview/outputs/QuorumReplication.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+A coordinator fans out every request to **N replica services over HTTP** with `RestClient`, on **virtual threads**, and
+answers as soon as **W** writes or **R** reads succeed within the timeout. Reads return the newest version and **read-repair**
+stale replicas. In the test, the replicas are real HTTP endpoints that can be taken down, so failures behave like separate nodes.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant Q as QuorumCoordinator
+    participant A as replica a
+    participant B as replica b
+    participant R3 as replica c
+    C->>Q: PUT /api/v1/kv/cart:42 {"3 items"}
+    par fan-out (virtual threads)
+      Q->>A: PUT v2
+      Q->>B: PUT v2
+      Q->>R3: PUT v2
+    end
+    A-->>Q: 200
+    B-->>Q: 200
+    Q-->>C: 200 {acks: 2} (W reached; c's call continues in background)
+    C->>Q: GET /api/v1/kv/cart:42 (a down)
+    Q->>B: GET -> v2
+    Q->>R3: GET -> v1 (stale)
+    Q->>R3: PUT v2 (read repair)
+    Q-->>C: {"3 items", repaired: [c]}
+```
+
+=== "Coordinator"
+
+    ```java title="QuorumCoordinator.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p11quorum/QuorumCoordinator.java"
+    ```
+
+=== "Replica node"
+
+    ```java title="ReplicaNodeController.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p11quorum/ReplicaNodeController.java"
+    ```
+
+=== "Properties"
+
+    ```java title="QuorumProperties.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p11quorum/QuorumProperties.java"
+    ```
+
+=== "Client config"
+
+    ```java title="QuorumConfig.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p11quorum/QuorumConfig.java"
+    ```
+
+### Run it as a service
+
+The integration test [`QuorumIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p11quorum/QuorumIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/QuorumSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| replicas are objects in a list | separate services called over HTTP with connect/read **timeouts** |
+| sequential calls | parallel fan-out on **virtual threads**; return at W/R successes, don't wait for the slowest replica |
+| version counter | per-coordinator monotonic version (LWW). Real systems use vector clocks or hybrid logical clocks |
+| failure = exception | `503 ProblemDetail` "write quorum not met" (safe to retry: the replica only accepts newer versions) |
+| validated in code | `QuorumProperties` rejects invalid N/W/R at startup |
+
+**Two things the test exposed** (see the [Spring Boot overview](spring-boot.md#lessons-the-tests-taught-they-apply-to-interviews-too)):
+a 200 ms timeout fails on a cold JVM, and the N − W calls still in flight can update a "stale" replica after the
+coordinator has answered. Missing pieces you should name: **hinted handoff** for writes to down nodes, and sloppy quorums.
+
 ## Common mistakes
 
 * Thinking R + W > N gives linearizability. It doesn't on its own: concurrent writes, sloppy quorums and clock-based versions can still misbehave.

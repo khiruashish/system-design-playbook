@@ -57,6 +57,56 @@ java coding-interview/src/HyperLogLog.java      # JDK 21+ single-file launcher, 
 --8<-- "coding-interview/outputs/HyperLogLog.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+Redis has HyperLogLog built in: **`PFADD`** per visit and **`PFCOUNT`** per query, about **12 KB per key** whatever the
+cardinality, with 0.81% standard error. One key per page per day; `PFCOUNT k1 k2 …` unions days on the fly with no double counting.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant V as UniqueVisitorService
+    participant R as Redis
+    C->>V: POST /api/v1/pages/home/visits {visitorId}
+    V->>R: PFADD hll:{home}:2026-01-15 u-1
+    C->>V: GET /unique-visitors?from=2026-01-14&to=2026-01-15
+    V->>R: PFCOUNT hll:{home}:2026-01-14 hll:{home}:2026-01-15
+    R-->>V: ~130,000 (union, overlap counted once)
+    V-->>C: {uniqueVisitors}
+```
+
+=== "Service"
+
+    ```java title="UniqueVisitorService.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p12hll/UniqueVisitorService.java"
+    ```
+
+=== "Controller"
+
+    ```java title="UniqueVisitorController.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p12hll/UniqueVisitorController.java"
+    ```
+
+### Run it as a service
+
+The integration test [`HyperLogLogIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p12hll/HyperLogLogIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/HyperLogLogSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| 2^14 registers in an array | Redis HLL string (sparse when small, 12,304 bytes dense), shared by every instance |
+| merge two sketches | `PFCOUNT` over many keys (or `PFMERGE` into a weekly key) |
+| add one at a time | `PFADD` is variadic: batch 1,000 ids per call when back-filling |
+| no key layout | `hll:{page}:{date}`: the `{page}` hash tag keeps a page's days on one cluster slot for multi-key `PFCOUNT` |
+
+Measured: 0.17% error for 100,000 visitors and 0.36% for the two-day union, both well inside the 3σ ≈ 2.4% band.
+
 ## Common mistakes
 
 * A weak hash (for example `String.hashCode`). HyperLogLog depends on uniformly distributed bits.

@@ -54,6 +54,75 @@ java coding-interview/src/UrlShortener.java      # JDK 21+ single-file launcher,
 --8<-- "coding-interview/outputs/UrlShortener.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+The counter becomes **Redis `INCRBY` in blocks** so every instance can mint ids without a round trip per link, custom
+aliases are claimed with an atomic **`SET NX`**, and the redirect path is served from a **Caffeine `@Cacheable`** cache.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as ShortenerController
+    participant S as ShortenerService
+    participant I as IdBlockAllocator
+    participant R as Redis
+    C->>A: POST /api/v1/urls {url}
+    A->>S: shorten(url, alias)
+    S->>I: nextId()
+    I-->>R: INCRBY shortener:id-block 1000 (once per 1,000 ids)
+    S->>R: SET shortener:code:{base62(id)} url
+    A-->>C: 201 Location: https://sho.rt/{code}
+    C->>A: GET /s/{code}
+    A->>S: resolve(code) [@Cacheable short-urls]
+    S->>R: GET shortener:code:{code} (cache miss only)
+    A-->>C: 302 Location: long URL
+```
+
+=== "Service"
+
+    ```java title="ShortenerService.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p01shortener/ShortenerService.java"
+    ```
+
+=== "Id blocks"
+
+    ```java title="IdBlockAllocator.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p01shortener/IdBlockAllocator.java"
+    ```
+
+=== "Controller"
+
+    ```java title="ShortenerController.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p01shortener/ShortenerController.java"
+    ```
+
+=== "Base62"
+
+    ```java title="Base62.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p01shortener/Base62.java"
+    ```
+
+### Run it as a service
+
+The integration test [`ShortenerIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p01shortener/ShortenerIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/ShortenerSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| `long counter++` in one JVM | `INCRBY` id **blocks**: unique across instances, 1 Redis call per 1,000 links |
+| `HashMap` alias check then put | `SET NX`: claim-the-alias is atomic, so two users can't both win |
+| lookup in a map | Caffeine cache in front of Redis (links are immutable, so no invalidation needed) |
+| return a string | `201 Created` + `Location`, `302` redirects, `ProblemDetail` for 400 / 404 / 409 |
+
+**Trade-off to mention:** sequential ids are guessable. Shuffle them (e.g. multiply by a constant modulo 62^7) or use
+random 7-character codes with `SET NX` retry if links must not be enumerable.
+
 ## Common mistakes
 
 * Using a hash of the URL (MD5 truncated to 7 characters) without handling collisions. With billions of URLs, birthday collisions are certain.

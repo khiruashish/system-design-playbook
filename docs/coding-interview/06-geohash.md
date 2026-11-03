@@ -57,6 +57,59 @@ java coding-interview/src/Geohash.java      # JDK 21+ single-file launcher, no b
 --8<-- "coding-interview/outputs/Geohash.txt"
 ```
 
+## Solve it with Spring Boot 4
+
+Redis **GEO** is the interview structure ready-made: a sorted set scored by a **52-bit interleaved geohash**.
+`GEOSEARCH` scans the centre cell and its neighbours, then filters by true distance, which is the same algorithm as the solution above.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as RestaurantGeoController
+    participant S as RestaurantGeoService
+    participant R as Redis GEO
+    C->>G: PUT /api/v1/restaurants/{id}/location {lat, lon}
+    G->>S: upsert -> GEOADD geo:restaurants lon lat id
+    C->>G: GET /api/v1/restaurants/near?lat&lon&km=3
+    G->>S: near(...)
+    S->>R: GEOSEARCH FROMLONLAT lon lat BYRADIUS 3 km ASC COUNT 5 WITHDIST
+    S->>R: GEOHASH (for display)
+    S-->>C: [{id, km, geohash}] nearest first
+```
+
+=== "Service"
+
+    ```java title="RestaurantGeoService.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p06geo/RestaurantGeoService.java"
+    ```
+
+=== "Controller"
+
+    ```java title="RestaurantGeoController.java"
+    --8<-- "coding-interview/spring-boot/src/main/java/com/sdp/ci/p06geo/RestaurantGeoController.java"
+    ```
+
+### Run it as a service
+
+The integration test [`GeoIT.java`](https://github.com/khiruashish/system-design-playbook/blob/main/coding-interview/spring-boot/src/test/java/com/sdp/ci/p06geo/GeoIT.java) drives the API against a
+real Redis. This is its transcript (`>` request, `<` response):
+
+```text
+--8<-- "coding-interview/spring-boot/outputs/GeohashSpringBoot.txt"
+```
+
+### What changes from the interview version
+
+| Interview | Production (Spring Boot 4) |
+|---|---|
+| encode + 9 neighbour cells + haversine filter | `GEOSEARCH ... BYRADIUS` does all three server-side |
+| in-memory list | Redis sorted set: O(log n) moves when a restaurant (or a rider) updates its location |
+| no validation | `@DecimalMin/@DecimalMax` on lat/lon via MVC method validation, giving a 400 `ProblemDetail` |
+
+The geohashes in the output (`tdr1v…` and `tdr1t…`) share the prefix `tdr1`: nearby places share prefixes,
+which is the property that makes geohash work. For polygons ("delivers to this zone") or ranking by more than distance, move
+to PostGIS or Elasticsearch `geo_shape`.
+
 ## Common mistakes
 
 * Searching only the user's own cell, which misses places 10 m away across the boundary.

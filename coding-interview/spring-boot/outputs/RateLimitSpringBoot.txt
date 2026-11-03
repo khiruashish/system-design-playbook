@@ -1,0 +1,18 @@
+limit 10 requests / 60 s per user (sliding log in a Redis Lua script)
+> GET /api/v1/quotes/INFY  [X-User-Id: asha]
+< 200  RateLimit-Remaining: 9  {"symbol":"INFY","price":1234.5}
+... 8 more allowed requests ...
+> GET /api/v1/quotes/INFY  [X-User-Id: asha]
+< 200  RateLimit-Remaining: 0  {"symbol":"INFY","price":1234.5}
+> GET /api/v1/quotes/INFY  [X-User-Id: asha]
+< 429  RateLimit-Remaining: 0  Retry-After: 60  {"detail":"rate limit of 10 per 60s exceeded; retry in 60s","instance":"/api/v1/quotes/INFY","status":429,"title":"Too Many Requests"}
+> GET /api/v1/quotes/INFY  [X-User-Id: ravi]
+< 200  RateLimit-Remaining: 9  {"symbol":"INFY","price":1234.5}
++30 s
+> GET /api/v1/quotes/INFY  [X-User-Id: asha]
+< 429  RateLimit-Remaining: 0  Retry-After: 30  {"detail":"rate limit of 10 per 60s exceeded; retry in 30s","instance":"/api/v1/quotes/INFY","status":429,"title":"Too Many Requests"}
++30 s: the first requests slide out of the window
+> GET /api/v1/quotes/INFY  [X-User-Id: asha]
+< 200  RateLimit-Remaining: 9  {"symbol":"INFY","price":1234.5}
+boundary burst, 20 requests in 200 ms: sliding log allowed 10, sliding counter allowed 11
+PASS

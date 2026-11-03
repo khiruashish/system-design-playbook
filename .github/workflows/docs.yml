@@ -14,6 +14,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      redis:                       # real Redis for the Spring Boot integration tests
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,9 +29,13 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: maven
 
       - name: Run coding-interview solutions (each must print PASS; outputs must match the docs)
         run: coding-interview/run-all.sh --check
+
+      - name: Run Spring Boot 4 solutions against Redis (tests must pass; transcripts must match the docs)
+        run: coding-interview/spring-boot/check-outputs.sh --check
 
       - uses: actions/setup-python@v5
         with:

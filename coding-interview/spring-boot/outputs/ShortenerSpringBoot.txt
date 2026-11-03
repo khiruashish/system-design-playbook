@@ -1,0 +1,19 @@
+> POST /api/v1/urls  {"url":"https://shop.example.com/sale/diwali?utm=mail"}
+< 201  Location: https://sho.rt/1  {"code":"1","shortUrl":"https://sho.rt/1","url":"https://shop.example.com/sale/diwali?utm=mail"}
+> POST /api/v1/urls  {"url":"https://docs.example.com/a/very/long/path"}
+< 201  Location: https://sho.rt/2  {"code":"2","shortUrl":"https://sho.rt/2","url":"https://docs.example.com/a/very/long/path"}
+> POST /api/v1/urls  {"url":"https://shop.example.com/","alias":"big-sale"}
+< 201  Location: https://sho.rt/big-sale  {"code":"big-sale","shortUrl":"https://sho.rt/big-sale","url":"https://shop.example.com/"}
+> POST /api/v1/urls  {"url":"https://other.example.com/","alias":"big-sale"}
+< 409  {"detail":"alias 'big-sale' is taken","instance":"/api/v1/urls","status":409,"title":"Conflict"}
+> POST /api/v1/urls  {"url":"ftp://nope"}
+< 400  {"detail":"Invalid request content.","instance":"/api/v1/urls","status":400,"title":"Bad Request"}
+> GET /s/1
+< 302  Location: https://shop.example.com/sale/diwali?utm=mail
+> GET /s/zzzzzz
+< 404  {"detail":"no link for code 'zzzzzz'","instance":"/s/zzzzzz","status":404,"title":"Not Found"}
+> GET /s/1
+< 302  Location: https://shop.example.com/sale/diwali?utm=mail
+(Redis key deleted, redirect still served from the Caffeine cache: links are immutable, so this is safe)
+2,502 ids allocated with 3 Redis INCRBY calls (block size 1,000)
+PASS
