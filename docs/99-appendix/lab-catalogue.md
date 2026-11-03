@@ -1,7 +1,7 @@
 # Lab Catalogue
 
 !!! abstract "About this catalogue"
-    Every chapter from 01 to 61 solves one problem at four levels (L1–L4) in its §5. This page lists all **244 labs** with their band, the programs they show, and what each needs to run.
+    Every chapter from 01 to 62 solves one problem at four levels (L1–L4) in its §5. This page lists all **248 labs** with their band, the programs they show, and what each needs to run.
 
     **How it's built.** `LabCatalog` (in `labs/appendix-tools/`) generates this page from the chapters. It detects the "Needs" column from the code itself: JDBC URLs, Redis clients, `HttpServer`/`HttpClient`, Spring and Testcontainers imports, and child-JVM launches.
 
@@ -10,7 +10,7 @@
     **Where the code lives.**
 
     - **Chapters 01–09:** the labs appear only in the chapter text.
-    - **Chapters 10–61:** each also has a `labs/chNN-*` folder with the runnable programs, their recorded outputs and a README.
+    - **Chapters 10–62:** each also has a `labs/chNN-*` folder with the runnable programs, their recorded outputs and a README.
 
     **Services used when recording:**
 
@@ -20,7 +20,7 @@
 
     Adjust the connection settings in each program for your machine.
 
-    **Totals by requirement** (a lab can need several): {HTTP (local)=33, JDK only=141, Kafka client=5, PostgreSQL=36, Redis=25, Spring=43, Testcontainers=14, child JVM=4}.
+    **Totals by requirement** (a lab can need several): {HTTP (local)=33, JDK only=145, Kafka client=5, PostgreSQL=36, Redis=25, Spring=43, Testcontainers=14, child JVM=4}.
 
 ## Part 0 · Orientation
 
@@ -271,6 +271,15 @@
 | [55](../05-case-studies/55-order-matching-engine.md) | **L2** Determinism through sequencing | B4 | `DeterminismL2.java` | JDK only |
 | [55](../05-case-studies/55-order-matching-engine.md) | **L3** Where the credit check runs | B4 | `RiskL3.java` | JDK only |
 | [55](../05-case-studies/55-order-matching-engine.md) | **L4** Market data that can't lie silently | B4 | `MarketDataL4.java` | JDK only |
+
+## Part VII · Interview
+
+| Ch | Lab | Band | Programs | Needs |
+|---|---|---|---|---|
+| [62](../05-case-studies/62-genai-assistant-platform.md) | **L1** Retrieval for RAG | B2 | `RetrievalL1.java` | JDK only |
+| [62](../05-case-studies/62-genai-assistant-platform.md) | **L2** Serving on GPUs | B3 | `ServingL2.java` | JDK only |
+| [62](../05-case-studies/62-genai-assistant-platform.md) | **L3** Cost controls that don't cost correctness | B3 | `CostControlsL3.java` | JDK only |
+| [62](../05-case-studies/62-genai-assistant-platform.md) | **L4** Agents that cannot be talked into moving money | B4 | `AgentToolsL4.java` | JDK only |
 
 ## Part VI · Capstone
 

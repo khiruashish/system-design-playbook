@@ -1,0 +1,34 @@
+# Services the automatable labs were recorded against (see run-labs.py and each chapter's README):
+#   PostgreSQL 16 on :5581, database "shop", user "claude", trust auth (JDBC: jdbc:postgresql://localhost:5581/shop?user=claude);
+#   postgres-init.sql adds the "postgres" role that Ch 28-30 labs use
+#   Redis 7 on :6390 (some labs FLUSHALL it: never point the labs at a Redis you care about)
+#
+#   docker compose -f labs/docker-compose.yml up -d
+#   labs/run-labs.py --tier postgres,redis,postgres+redis
+#   docker compose -f labs/docker-compose.yml down -v
+#
+# Labs marked "manual" in labs.json use their own chapter setup scripts (other ports, logical replication, etcd, NATS,
+# SeaweedFS, Meilisearch, cgroups); their READMEs explain those.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: claude
+      POSTGRES_DB: shop
+      POSTGRES_HOST_AUTH_METHOD: trust
+    command: ["postgres", "-c", "max_connections=200"]
+    ports: ["5581:5432"]
+    volumes:
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "claude", "-d", "shop"]
+      interval: 5s
+      retries: 20
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports: ["6390:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20

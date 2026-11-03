@@ -615,6 +615,7 @@ public class HealthL2 {
         System.out.println("\n   → readiness gates ROUTING (don't send traffic to an instance that's starting or has lost a dependency);");
         System.out.println("     liveness gates RESTARTS (kill and replace a hung/deadlocked instance); a startup probe protects a slow boot");
         System.out.println("     from a trigger-happy liveness check. Getting these wrong causes the errors above — or restart loops.");
+        System.exit(0);   // the simulated hung handlers and HTTP servers are non-daemon threads: don't wait for them
     }
     static void report(String name, long[] r) { long tot = r[0]+r[1]; System.out.printf("   %-46s %10d %10d %11.1f%%%n", name, r[0], r[1], tot==0?0:100.0*r[1]/tot); }
 }

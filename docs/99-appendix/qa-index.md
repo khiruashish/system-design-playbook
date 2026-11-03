@@ -1282,6 +1282,29 @@
 - **Q19** `B4` What does market surveillance need from the system?
 - **Q20** `B4` What makes a matching engine trustworthy?
 
+### [62. Case Study: GenAI Shopping Assistant (RAG & LLM Serving)](../05-case-studies/62-genai-assistant-platform.md)
+
+- **Q1** `B2` ⭐ Design a ChatGPT-style assistant for a grocery app — main components?
+- **Q2** `B2` What is RAG and why not just fine-tune the model?
+- **Q3** `B2` How do you choose the chunk size?
+- **Q4** `B2` What do TTFT and tokens per second mean, and which matters more?
+- **Q5** `B2` Why stream responses?
+- **Q6** `B2` ⭐ Why hybrid search instead of only vector search?
+- **Q7** `B2` How do you evaluate a RAG system?
+- **Q8** `B2` What is the KV cache and why does it limit concurrency?
+- **Q9** `B2` How do you handle a provider outage?
+- **Q10** `B3` ⭐ How do you size the GPU fleet?
+- **Q11** `B3` Explain continuous batching and paged attention.
+- **Q12** `B3` ⭐ Should we add a semantic cache?
+- **Q13** `B3` How do you cut the model bill without losing quality?
+- **Q14** `B3` How do you keep the index fresh?
+- **Q15** `B4` ⭐ How do you stop prompt injection from causing harm?
+- **Q16** `B4` Build or buy the model?
+- **Q17** `B4` What must never happen, and how do you guarantee it?
+- **Q18** `B4` How do you design multi-step agents (plan, call tools, reflect)?
+- **Q19** `B4` How do privacy and compliance shape the design?
+- **Q20** `B4` What makes an AI assistant trustworthy?
+
 ## Part VI · Capstone
 
 ### [56. Capstone: The Grocery Marketplace, End to End](../06-capstone/56-capstone-grocery-marketplace-end-to-end.md)

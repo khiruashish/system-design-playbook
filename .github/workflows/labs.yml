@@ -1,0 +1,111 @@
+name: Labs
+
+# Runs every automatable lab the way its README says and checks it still prints the results its chapter quotes
+# (labs/run-labs.py + labs/labs.json). Labs marked "manual" need chapter-specific setup and are not run here.
+on:
+  push:
+    branches: [main]
+    paths: ["labs/**", ".github/workflows/labs.yml"]
+  pull_request:
+    paths: ["labs/**", ".github/workflows/labs.yml"]
+  schedule:
+    - cron: "17 3 * * 1"        # weekly: catches drift from JDK / image updates
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  jdk:
+    name: JDK 21 labs (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@v4
+        with:
+          path: labs/.cache
+          key: lab-jars-${{ hashFiles('labs/run-labs.py') }}
+      - name: Install redis-server (labs whose README starts an extra Redis, e.g. Ch 18 L3 on :6391)
+        run: sudo apt-get install -y -qq redis-server >/dev/null
+      - run: python3 labs/run-labs.py --tier jdk --shard ${{ matrix.shard }}/4 --report report.json
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jdk-report-${{ matrix.shard }}
+          path: report.json
+
+  jdk25:
+    name: JDK 25 labs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - id: jdk25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: python3 labs/run-labs.py --tier jdk25 --report report.json
+        env:
+          JAVA25_HOME: ${{ steps.jdk25.outputs.path }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jdk25-report
+          path: report.json
+
+  services:
+    name: PostgreSQL / Redis labs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:                     # same as labs/docker-compose.yml
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: claude
+          POSTGRES_DB: shop
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5581:5432"]
+        options: >-
+          --health-cmd "pg_isready -U claude -d shop" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6390:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@v4
+        with:
+          path: labs/.cache
+          key: lab-jars-${{ hashFiles('labs/run-labs.py') }}
+      - name: Configure PostgreSQL like the chapters' setup scripts (max_connections, postgres role)
+        run: |
+          sudo apt-get install -y -qq postgresql-client >/dev/null
+          psql -h localhost -p 5581 -U claude -d shop -c "ALTER SYSTEM SET max_connections = 200"
+          psql -h localhost -p 5581 -U claude -d shop -f labs/postgres-init.sql
+          docker restart "$(docker ps -q --filter ancestor=postgres:16)"
+          until pg_isready -h localhost -p 5581 -U claude; do sleep 1; done
+      - run: python3 labs/run-labs.py --tier postgres,redis --report report.json
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: services-report
+          path: report.json

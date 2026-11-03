@@ -3,10 +3,10 @@
 !!! abstract "Chapter at a glance"
     **Reader bands:** B1 → B4 · **Prerequisites:** [Ch 57](57-the-system-design-interview-framework.md), [Ch 58](58-level-expectations.md)
 
-    **What you get:** the whole handbook's interview material as one bank you can drill. **Every chapter's §8 and every industry design's Q&A (1,580 questions) is parsed by a program** into two companion pages, and re-running the program after any edit keeps them in step with the chapters:
+    **What you get:** the whole handbook's interview material as one bank you can drill. **Every chapter's §8 and every industry design's Q&A (1,600 questions) is parsed by a program** into two companion pages, and re-running the program after any edit keeps them in step with the chapters:
 
-    - **[⭐ Drill Bank](qa-bank-starred.md):** all **495** high-frequency (⭐) questions with their 30-second answers, grouped by part and chapter.
-    - **[Full Question Index](../99-appendix/qa-index.md):** all 1,580 questions by part, chapter and level, with links back to the full answers.
+    - **[⭐ Drill Bank](qa-bank-starred.md):** all **500** high-frequency (⭐) questions with their 30-second answers, grouped by part and chapter.
+    - **[Full Question Index](../99-appendix/qa-index.md):** all 1,600 questions by part, chapter and level, with links back to the full answers.
 
     This chapter explains how to use the bank. It covers:
 
@@ -175,8 +175,8 @@ If you only have a week, drill these ⭐ questions first. Each is fully answered
 ```mermaid
 flowchart LR
     CH[Chapters 01 to 61 - section 8 Q and A] --> P[QaBankL1 parser]
-    P --> B[qa-bank-starred.md - 495 star answers]
-    P --> X[qa-index.md - all 1580 questions]
+    P --> B[qa-bank-starred.md - 500 star answers]
+    P --> X[qa-index.md - all 1600 questions]
     P --> S[Coverage report - per part and band]
     B --> D[DrillL3 - 12-question drills per band and seed]
     D --> R[Spaced review - L4 plan]

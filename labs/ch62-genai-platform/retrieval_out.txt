@@ -1,0 +1,27 @@
+Corpus: 310 documents (10 help articles, 300 product pages); 60 judged questions (exact-id: 20, keyword: 10, paraphrase: 20, product-name: 10).
+
+A. Chunk size x retriever, top 5 chunks sent to the LLM
+   recall@5 = right document retrieved; answer@5 = EVERY key fact of the answer is in the retrieved text
+   chunk       retriever             recall@5  answer@5     MRR   prompt tokens/q
+   25 words    BM25                     86.7%     53.3%   0.818               124
+   25 words    embeddings (toy)         66.7%     40.0%   0.642               143
+   25 words    hybrid RRF (k=60)        98.3%     66.7%   0.800               142
+   120 words   BM25                     85.0%     75.0%   0.788               414
+   120 words   embeddings (toy)         66.7%     65.0%   0.642               355
+   120 words   hybrid RRF (k=60)        98.3%     93.3%   0.792               417
+   400 words   BM25                     88.3%     88.3%   0.801               774
+   400 words   embeddings (toy)         63.3%     63.3%   0.596               567
+   400 words   hybrid RRF (k=60)        98.3%     98.3%   0.767               749
+
+B. Where each retriever fails (120-word chunks): recall@5 by question type
+   question type        BM25   embeddings (toy)           hybrid RRF
+   exact-id (20)       100%                0%                100%
+   keyword (10)        100%              100%                100%
+   paraphrase (20)       55%              100%                 95%
+   product-name (10)      100%              100%                100%
+
+   -> hybrid search over 120-word chunks puts the complete answer in the prompt for 93% of questions.
+     BM25 nails exact identifiers (SKU codes) and misses paraphrases; embeddings do the opposite.
+     Fusing ranks (RRF) needs no score calibration and keeps both strengths.
+     Tiny chunks split the answer: the right page is found but half the facts never reach the model.
+     Huge chunks carry the whole answer but multiply prompt tokens (cost and time to first token) and bury it in noise.

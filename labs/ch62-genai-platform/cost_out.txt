@@ -1,0 +1,28 @@
+20,000 assistant questions from 7 intent families, 5 phrasings each (simulated traffic).
+Entity-specific: 52% (order status, stock by area, recipes by dish).
+
+A. Semantic cache: reuse an answer when a new question's embedding is close to a cached one
+   wrong = served an answer cached for a DIFFERENT intent or entity (another customer's order, another area's stock)
+   cache policy                                     hit rate      wrong    LLM calls
+   semantic, threshold 0.6, cache everything           99.9%     40.21%           24
+   semantic, threshold 0.7, cache everything           99.8%     39.04%           37
+   semantic, threshold 0.8, cache everything           99.7%     27.39%           67
+   semantic, threshold 0.9, cache everything           99.6%     22.59%           85
+   semantic, threshold 0.99, cache everything          99.6%     22.56%           90
+   exact text match only                               77.2%      0.00%         4554
+   key = intent + entities (NLU), personal never       62.2%      0.00%         7561
+   (last row: answers for stock would also carry a short TTL in production)
+   Similarity of the toy embedding: paraphrases of one question 0.60-0.78; same template with another area or dish
+   0.71-0.75; another customer's order number 0.99. The ranges overlap, so no threshold separates them.
+
+B. Model routing: send easy questions to a small model (ILLUSTRATIVE prices and quality)
+   small: $0.10 / 1M tokens, correct on easy 97%, hard 72%; large: $2.50 / 1M tokens, easy 99%, hard 95%
+   routing                                       cost / 1k     answers OK    hard answers OK
+   everything to the large model                    $8.10          98.5%              94.9%
+   everything to the small model                    $0.32          94.5%              71.7%
+   router: large only for multi-step questions       $1.18          96.8%              94.9%
+   router + escalate when small model unsure        $0.96          98.8%              93.2%
+
+   -> a semantic cache is a correctness feature before it is a cost feature: similarity is not equality.
+     Key the cache by what the answer depends on (intent + entities + user scope), and never share personal answers.
+     Routing most traffic to a small model keeps quality if the hard tail is detected and escalated.

@@ -1,0 +1,41 @@
+One GPU serving the assistant (8B model, illustrative cost model). Prompt = 1,200-token shared system prompt
++ ~1,600 tokens of retrieved context + question; answers ~220 tokens (capped at 512). SLO: TTFT p99 <= 2 s.
+
+A. Load sweep (requests/s offered to one GPU): time to first token (TTFT) and goodput
+   policy                                    req/s   TTFT p50   TTFT p99     tokens/s     avg batch
+   one at a time                               0.1        53ms   21653ms           19           1.0
+   one at a time                               4.0    332126ms     >60 s           44           1.0
+   one at a time                               9.0    344413ms     >60 s           44           1.0
+   static batch of 16                          0.1       103ms    8748ms           20           1.2
+   static batch of 16                          4.0    244483ms     >60 s          555          15.8
+   static batch of 16                          9.0    298229ms     >60 s          559          15.9
+   continuous batching, reserve 16k KV         0.1        50ms      80ms           19           1.2
+   continuous batching, reserve 16k KV         4.0     27688ms   50839ms          780          27.0
+   continuous batching, reserve 16k KV         9.0    208704ms     >60 s          795          27.9
+   continuous batching, paged KV               0.1        50ms      80ms           19           1.2
+   continuous batching, paged KV               4.0        79ms     153ms          841          30.6
+   continuous batching, paged KV               9.0     51295ms     >60 s         1608         142.3
+   paged KV + prefix cache                     0.1        40ms      59ms           19           1.2
+   paged KV + prefix cache                     4.0        67ms     108ms          842          28.6
+   paged KV + prefix cache                     9.0       179ms    1165ms         1864         184.4
+
+B. Capacity at the SLO, and the fleet for the dinner-time peak (180 requests/s)
+   policy                                    max req/s/GPU       GPUs cost per 1k answers
+   one at a time                                       0.0        n/a                n/a
+   static batch of 16                                  0.0        n/a                n/a
+   continuous batching, reserve 16k KV                 2.0         90             $0.347
+   continuous batching, paged KV                       7.0         26             $0.099
+   paged KV + prefix cache                             9.0         20             $0.077
+
+   KV cache budget: 458,752 tokens (56 GB at 128 KB/token). Reserving the 16,384-token context window per request fits 28
+   requests at once; paging in 16-token blocks allocates only what is used (~151 typical requests).
+
+C. Long-context requests (order history + documents, ~9,000-token prompts): memory per request is 3x larger
+   policy                                    max req/s/GPU   max concurrent
+   continuous batching, reserve 16k KV                2.25               28
+   continuous batching, paged KV                      3.25               49
+   paged KV + prefix cache                            3.75               45
+
+   -> the model is the same in every row: scheduling alone changes how many GPUs you buy.
+     Static batches wait for their slowest member; continuous batching admits work every iteration.
+     Paged KV memory raises concurrency; prefix caching skips re-reading the 1,200-token system prompt.

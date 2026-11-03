@@ -1410,6 +1410,24 @@
     Gateways, sequencer with replicated journal, deterministic single-threaded engines partitioned by instrument, in-path risk, market data with sequenced deltas/retransmit/snapshots, hot standbys with fenced failover, opening/closing auctions, post-trade clearing and settlement, audit trail and surveillance, latency engineering.
 
 
+**[62. Case Study: GenAI Shopping Assistant (RAG & LLM Serving)](../05-case-studies/62-genai-assistant-platform.md)**
+
+??? example "B2 · Design a ChatGPT-style assistant for a grocery app — main components?"
+    A chat gateway (auth, rate limits, streaming) → an orchestrator that detects intent, retrieves context with hybrid search, assembles the prompt and runs the tool loop → a model gateway that routes, caches and falls back across self-hosted and provider models → an inference fleet with continuous batching → a policy layer in front of order and refund APIs; plus ingestion, evaluation and observability.
+
+??? example "B2 · Why hybrid search instead of only vector search?"
+    Embeddings match meaning but represent rare tokens poorly, so SKU codes and order ids vanish (0% in L1); BM25 matches words exactly but misses paraphrases (55%). Reciprocal rank fusion combines the two rankings without calibrating scores and keeps both strengths.
+
+??? example "B3 · How do you size the GPU fleet?"
+    From the peak request rate and the per-GPU capacity at the TTFT SLO under your scheduler and token mix: in L2, 180 req/s needs 90 GPUs with KV reservation, 26 with paged KV and 20 with a prefix cache too. Measure capacity with your real prompt and output lengths, then add headroom and warm spares because model loading takes minutes.
+
+??? example "B3 · Should we add a semantic cache?"
+    Only with great care: similarity is not equality. In L3, paraphrases scored 0.60–0.78 while another customer's order scored 0.99, so every threshold served 22–40% wrong answers. Cache exact matches, or key the cache by intent plus extracted entities plus user scope, never share personal answers, and set TTLs by freshness.
+
+??? example "B4 · How do you stop prompt injection from causing harm?"
+    Assume it will succeed at the model and contain the damage: tools are enabled by the user's detected intent (never by retrieved text), every argument is checked against what this user owns and the policy, side effects need a UI-rendered confirmation and an idempotency key, and tools run with the user's permissions. In L4 those layers took unauthorized actions from 527 to 0.
+
+
 ### Part VI · Capstone
 
 **[56. Capstone: The Grocery Marketplace, End to End](../06-capstone/56-capstone-grocery-marketplace-end-to-end.md)**

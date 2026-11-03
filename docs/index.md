@@ -138,7 +138,7 @@ This handbook teaches system design the way it is practised in enterprise Java s
 | **II · Distributed Core** | Replication, sharding, consensus, transactions, messaging, microservices, resilience | B2 |
 | **III · Production** | Data at scale, search, security, observability, performance, deployment, DR | B3 |
 | **IV · Architect** | Decisions, design docs, DDD, modern styles, AI-era design, compliance, leadership | B4 |
-| **V · Case Studies** | 18 classic and domain designs, from URL shortener to order matching | All |
+| **V · Case Studies** | 19 classic and domain designs, from URL shortener to order matching and a GenAI assistant | All |
 | **VI · Capstone** | The full grocery marketplace, end to end | B3–B4 |
 | **VII · Interview** | Framework, level expectations, Q&A bank, mock interviews, behavioural & leadership | All |
 | **Industry Designs** | Sector designs: Amazon-style marketplace, Flipkart-style sales, banking, healthcare and more | B2–B4 |
@@ -148,13 +148,15 @@ Start with [Chapter 00 — How to Use This Handbook](00-orientation/00-how-to-us
 
 ## At a glance
 
-- **62 chapters** (00–61), each with runnable labs whose outputs are quoted verbatim in the text.
-- **1,580 interview questions** (1,220 in the chapters plus 360 in the industry designs), 495 marked ⭐ high-frequency.
-- **244 labs** (four per chapter), catalogued in the [Lab Catalogue](99-appendix/lab-catalogue.md); **189 terms** in the [Glossary](99-appendix/glossary.md).
+- **63 chapters** (00–62); every chapter from 01 has four labs whose outputs are quoted verbatim in the text.
+- **1,600 interview questions** (1,240 in the chapters plus 360 in the industry designs), 500 marked ⭐ high-frequency.
+- **248 labs**, catalogued in the [Lab Catalogue](99-appendix/lab-catalogue.md) and checked by CI with `labs/run-labs.py` (see the [labs README](https://github.com/khiruashish/system-design-playbook/tree/main/labs)); **189 terms** in the [Glossary](99-appendix/glossary.md).
+- **Coding Interview tab:** 12 system-design data structures as runnable Java, each with a Spring Boot 4 production version ([start here](coding-interview/index.md)).
 
 ## Industry designs
 
 - [Industry Designs tab](08-industry/index.md): end-to-end designs per sector, starting with the [Amazon-Style Global Marketplace](08-industry/i01-amazon-style-global-marketplace.md).
+- New: [Ch 62 — GenAI Shopping Assistant](05-case-studies/62-genai-assistant-platform.md): RAG retrieval, LLM serving on GPUs, cost controls and safe agents.
 
 ## Quick links for interview preparation
 

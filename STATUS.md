@@ -1,4 +1,9 @@
 === STATUS ===
+Completed: (1) Lab verification: labs/labs.json manifest (every README command, tier, recorded output, checked result lines), labs/run-labs.py runner (tiers jdk/jdk25/postgres/redis, sharding, jar cache, pre/post steps, cleanup, --record), labs/docker-compose.yml (PostgreSQL 16 :5581, Redis 7 :6390), .github/workflows/labs.yml (4 JDK shards, JDK 25, service-container job; weekly + on labs/** changes), labs/README.md. (2) Ch 62 Case Study: GenAI Shopping Assistant (RAG & LLM Serving) with 4 deterministic labs in labs/ch62-genai-platform and 20 Q&As; lab catalogue (248 labs), Q&A index (1,600) and drill bank (500 ⭐) regenerated; home page and Ch 59 totals updated.
+Next: optional - remaining review items (labs for I04-I18, deeper case studies, Ticket Booking and File Sync case studies).
+
+--- prior status ---
+=== STATUS ===
 Completed: Coding Interview tab - "Solve it with Spring Boot 4" for all 12 problems. New Spring Boot 4.1.2 app in coding-interview/spring-boot (one package per problem, Redis-backed, ProblemDetail errors, virtual threads), 12 integration tests against real Redis whose transcripts are shown on each page; new overview page coding-interview/spring-boot.md; docs workflow runs check-outputs.sh --check with a redis:7 service.
 Next: nothing planned.
 
