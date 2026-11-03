@@ -110,6 +110,7 @@ public class DeployL1 {
         System.out.println("\n   → recreate has downtime AND full exposure; rolling avoids downtime but still exposes everyone as it completes;");
         System.out.println("     blue-green makes the bad build catchable by a smoke test before the flip (and gives instant rollback by flipping back);");
         System.out.println("     canary limits the blast radius to a small % and rolls back automatically on an SLO breach — the safest for risky changes.");
+        System.exit(0);   // the instances' HTTP servers are non-daemon threads: don't wait for them
     }
 
     static int port() { return BASE + 1 + (int)(Math.random()*4000); }

@@ -572,6 +572,7 @@ public class WalL2 {
         System.out.println("child JVM appends 128-byte records, acks each; parent SIGKILLs it after 2.5 s and recovers the log.\n");
         System.out.printf("   %-50s %12s %12s %14s %14s%n", "ack policy", "acked", "recovered", "ACKED BUT LOST", "acks/s");
         String[] names = {"M1) buffered in the process, ack at once", "M2) write() to the OS each record, no fsync", "M3) fsync every record", "M4) group commit: 8 writers, one fsync per batch"};
+        Files.createDirectories(Paths.get("/tmp/kvlab"));                                         // logs and ack files live here
         for (int m = 1; m <= 4; m++) {
             Path log = Paths.get("/tmp/kvlab/wal-" + m + ".log"); Files.deleteIfExists(log);
             Path ackFile = Paths.get("/tmp/kvlab/acks-" + m + ".txt"); Files.deleteIfExists(ackFile);

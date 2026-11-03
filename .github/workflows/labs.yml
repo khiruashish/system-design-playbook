@@ -37,6 +37,9 @@ jobs:
       - name: Install redis-server (labs whose README starts an extra Redis, e.g. Ch 18 L3 on :6391)
         run: sudo apt-get install -y -qq redis-server >/dev/null
       - run: python3 labs/run-labs.py --tier jdk --shard ${{ matrix.shard }}/4 --report report.json
+      - name: Failed labs
+        if: failure()
+        run: python3 -c "import json; [print('FAIL', r['id'], r['code'], r['missing']) for r in json.load(open('report.json')) if not r['ok']]"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -61,6 +64,9 @@ jobs:
       - run: python3 labs/run-labs.py --tier jdk25 --report report.json
         env:
           JAVA25_HOME: ${{ steps.jdk25.outputs.path }}
+      - name: Failed labs
+        if: failure()
+        run: python3 -c "import json; [print('FAIL', r['id'], r['code'], r['missing']) for r in json.load(open('report.json')) if not r['ok']]"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -104,6 +110,9 @@ jobs:
           docker restart "$(docker ps -q --filter ancestor=postgres:16)"
           until pg_isready -h localhost -p 5581 -U claude; do sleep 1; done
       - run: python3 labs/run-labs.py --tier postgres,redis --report report.json
+      - name: Failed labs
+        if: failure()
+        run: python3 -c "import json; [print('FAIL', r['id'], r['code'], r['missing']) for r in json.load(open('report.json')) if not r['ok']]"
       - if: always()
         uses: actions/upload-artifact@v4
         with:

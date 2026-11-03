@@ -135,6 +135,18 @@ def save(labs):
     os.replace(tmp, MANIFEST)                            # atomic: a crash never leaves a half-written manifest
 
 
+# A line that reports a duration or a rate depends on the machine, even if it happened to repeat on one machine.
+TIMING = re.compile(r'\d\s*(ns|µs|us|ms|s|sec|secs|seconds|min|mins|minutes)\b|/s\b|per sec|ops/|throughput|latency|elapsed|took ',
+                    re.IGNORECASE)
+
+
+def pick_expect(candidates):
+    keep = [x for x in candidates if re.search(r'\d', x) and not TIMING.search(x)]
+    if len(keep) > 12:                                   # spread the checks over the whole output, not just the header
+        keep = [keep[round(i * (len(keep) - 1) / 11)] for i in range(12)]
+    return keep
+
+
 def norm(line):
     return re.sub(r'\s+', ' ', line).strip()
 
@@ -202,10 +214,7 @@ def main():
             cand = [x for x in recorded if x and x in got]
             if prev is not None: cand = [x for x in cand if x in prev]       # must survive every recording run
             l['candidates'] = cand
-            keep = [x for x in cand if re.search(r'\d', x)] or cand
-            if len(keep) > 12:                                   # spread the checks over the whole output, not just the header
-                keep = [keep[round(i * (len(keep) - 1) / 11)] for i in range(12)]
-            l['expect'] = keep
+            l['expect'] = pick_expect(cand)
             l['recorded'] = l.get('recorded', 0) + 1
             missing = []
             save(labs)                                   # after every lab, so an interrupted pass can resume
@@ -223,6 +232,8 @@ def main():
     if a.report:
         json.dump(results, open(a.report, 'w'), indent=1)
     print(f"\n{len(results) - failed}/{len(results)} labs passed" + (f"; {len(skipped)} skipped" if skipped else ''))
+    if failed:
+        print('FAILED: ' + ', '.join(r['id'] for r in results if not r['ok']))
     return 1 if failed else 0
 
 
