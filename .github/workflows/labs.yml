@@ -106,6 +106,10 @@ jobs:
         run: |
           sudo apt-get install -y -qq postgresql-client >/dev/null
           psql -h localhost -p 5581 -U claude -d shop -c "ALTER SYSTEM SET max_connections = 200"
+          # the labs provoke constraint violations on purpose; don't log each one (it buries the job's own output)
+          psql -h localhost -p 5581 -U claude -d shop -c "ALTER SYSTEM SET log_min_error_statement = 'panic'"
+          psql -h localhost -p 5581 -U claude -d shop -c "ALTER SYSTEM SET log_min_messages = 'fatal'"
+          psql -h localhost -p 5581 -U claude -d shop -c "ALTER SYSTEM SET log_checkpoints = off"
           psql -h localhost -p 5581 -U claude -d shop -f labs/postgres-init.sql
           docker restart "$(docker ps -q --filter ancestor=postgres:16)"
           until pg_isready -h localhost -p 5581 -U claude; do sleep 1; done
