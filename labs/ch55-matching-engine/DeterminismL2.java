@@ -37,6 +37,7 @@ public class DeterminismL2 {
         System.out.printf("   %-52s %22d %24s %,14.0f%n", "D1) gateways call the book directly, under a lock", hashes.size(), "n/a (no journal)", rate);
         // D2
         hashes.clear(); boolean allReplay = true;
+        Files.createDirectories(Paths.get("/tmp/melab"));                                       // journals live here
         for (int run = 0; run < 3; run++) {
             Path journal = Paths.get("/tmp/melab/journal-" + run + ".bin"); Files.deleteIfExists(journal);
             BlockingQueue<Ev> seqQ = new ArrayBlockingQueue<>(65_536); LadderBook live = new LadderBook(); long t0 = System.nanoTime();

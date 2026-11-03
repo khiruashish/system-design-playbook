@@ -128,6 +128,13 @@ def _run(lab, cmd, cwd):
     return code, out, time.time() - start
 
 
+def save(labs):
+    tmp = MANIFEST + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(labs, f, indent=1, ensure_ascii=False)
+    os.replace(tmp, MANIFEST)                            # atomic: a crash never leaves a half-written manifest
+
+
 def norm(line):
     return re.sub(r'\s+', ' ', line).strip()
 
@@ -139,6 +146,8 @@ def main():
     ap.add_argument('--shard', help='i/n: run the i-th of n slices')
     ap.add_argument('--list', action='store_true')
     ap.add_argument('--record', action='store_true', help='recompute expected lines (maintainers)')
+    ap.add_argument('--pass', dest='pass_no', type=int, default=0,
+                    help='with --record: this is recording pass N; skip labs already recorded N times (resumable)')
     ap.add_argument('--report', help='write a JSON report here')
     a = ap.parse_args()
 
@@ -160,6 +169,8 @@ def main():
         sel = [l for l in sel if l['id'].startswith(prefixes)]
     skipped = [l for l in sel if not set(l['needs']) <= have]
     sel = [l for l in sel if set(l['needs']) <= have]
+    if a.record and a.pass_no:
+        sel = [l for l in sel if l.get('recorded', 0) < a.pass_no]
     if a.shard:
         i, n = map(int, a.shard.split('/'))
         sel = sel[i - 1::n]
@@ -195,7 +206,9 @@ def main():
             if len(keep) > 12:                                   # spread the checks over the whole output, not just the header
                 keep = [keep[round(i * (len(keep) - 1) / 11)] for i in range(12)]
             l['expect'] = keep
+            l['recorded'] = l.get('recorded', 0) + 1
             missing = []
+            save(labs)                                   # after every lab, so an interrupted pass can resume
         ok = code == 0 and not missing
         failed += not ok
         results.append({'id': l['id'], 'ok': ok, 'code': code, 'seconds': round(secs, 1), 'checked': len(expect),
@@ -206,7 +219,7 @@ def main():
         print(f"{mark}  {l['id']:28} {secs:6.1f}s  {detail}", flush=True)
 
     if a.record:
-        json.dump(labs, open(MANIFEST, 'w'), indent=1, ensure_ascii=False)
+        save(labs)
     if a.report:
         json.dump(results, open(a.report, 'w'), indent=1)
     print(f"\n{len(results) - failed}/{len(results)} labs passed" + (f"; {len(skipped)} skipped" if skipped else ''))
