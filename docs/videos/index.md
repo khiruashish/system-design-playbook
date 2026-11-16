@@ -1,7 +1,7 @@
 # Video Course
 
 !!! abstract "Every chapter as a narrated video"
-    3 videos, about 33 minutes in all. Each walks through its chapter: the
+    4 videos, about 110 minutes in all. Each walks through its chapter: the
     concepts, tables, diagrams, code and the interview Q&A (question + 30-second answer), with English
     captions. Each chapter page also shows its video under the title. The MP4 files are served from the
     repository's `videos` branch.
@@ -24,7 +24,7 @@
 
 ## Orientation
 
-1 videos · about 19 min
+2 videos · about 96 min
 
 <div class="ssp-video-grid">
 
@@ -34,6 +34,14 @@
 <track kind="captions" srclang="en" label="English" src="00-orientation/00-how-to-use-this-handbook.vtt" default>
 </video>
 <figcaption><strong>00. How to Use This Handbook</strong> · 18:54 · <a href="https://raw.githubusercontent.com/khiruashish/system-design-playbook/videos/00-orientation/00-how-to-use-this-handbook.mp4">open MP4</a></figcaption>
+</figure>
+
+<figure class="ssp-video">
+<video controls preload="none" playsinline poster="00-orientation/01-what-system-design-is.jpg">
+<source src="https://raw.githubusercontent.com/khiruashish/system-design-playbook/videos/00-orientation/01-what-system-design-is.mp4" type="video/mp4">
+<track kind="captions" srclang="en" label="English" src="00-orientation/01-what-system-design-is.vtt" default>
+</video>
+<figcaption><strong>01. What System Design Is</strong> · 76:52 · <a href="https://raw.githubusercontent.com/khiruashish/system-design-playbook/videos/00-orientation/01-what-system-design-is.mp4">open MP4</a></figcaption>
 </figure>
 
 </div>
