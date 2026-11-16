@@ -1,10 +1,26 @@
 # Video Course
 
 !!! abstract "Every chapter as a narrated video"
-    1 videos, about 8 minutes in all. Each walks through its chapter: the
+    2 videos, about 14 minutes in all. Each walks through its chapter: the
     concepts, tables, diagrams, code and the interview Q&A (question + 30-second answer), with English
     captions. Each chapter page also shows its video under the title. The MP4 files are served from the
     repository's `videos` branch.
+
+## Start here
+
+1 videos · about 6 min
+
+<div class="ssp-video-grid">
+
+<figure class="ssp-video">
+<video controls preload="none" playsinline poster="index.jpg">
+<source src="https://raw.githubusercontent.com/khiruashish/system-design-playbook/videos/index.mp4" type="video/mp4">
+<track kind="captions" srclang="en" label="English" src="index.vtt" default>
+</video>
+<figcaption><strong>Home</strong> · 6:09 · <a href="https://raw.githubusercontent.com/khiruashish/system-design-playbook/videos/index.mp4">open MP4</a></figcaption>
+</figure>
+
+</div>
 
 ## Coding Interview
 
