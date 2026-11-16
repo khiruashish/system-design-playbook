@@ -1,0 +1,490 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.651
+Quorum Replication:
+
+2
+00:00:01.931 --> 00:00:03.403
+R + W N.
+
+3
+00:00:03.683 --> 00:00:07.929
+Chapter 11, from the Coding Interview part of the System Design Playbook.
+
+4
+00:00:09.679 --> 00:00:10.532
+Part 1.
+
+5
+00:00:10.812 --> 00:00:11.708
+Problem.
+
+6
+00:00:12.958 --> 00:00:19.294
+Simulate Dynamo-style replication with N replicas, write quorum W and read quorum R.
+
+7
+00:00:19.574 --> 00:00:29.003
+Show that R + W N gives reads the latest acknowledged write, that weaker settings can read stale data, and how failures affect availability.
+
+8
+00:00:30.353 --> 00:00:31.228
+Part 2.
+
+9
+00:00:31.508 --> 00:00:32.425
+Key idea.
+
+10
+00:00:33.675 --> 00:00:43.659
+When R + W N, every read set overlaps every write set in at least one replica, so the highest-versioned value seen is the latest acknowledged write.
+
+11
+00:00:43.939 --> 00:00:46.585
+The read also repairs stale replicas it saw.
+
+12
+00:00:46.865 --> 00:00:54.118
+With R + W at most N you get lower latency and higher availability, but stale reads become possible.
+
+13
+00:00:54.398 --> 00:00:58.174
+Each operation needs enough live replicas to reach its quorum.
+
+14
+00:00:59.524 --> 00:01:00.868
+Here is the diagram.
+
+15
+00:01:04.718 --> 00:01:05.614
+Part 3.
+
+16
+00:01:05.894 --> 00:01:06.747
+Solution.
+
+17
+00:01:07.997 --> 00:01:11.325
+Here is the Java code, QuorumReplication.java.
+
+18
+00:01:11.605 --> 00:01:15.445
+It runs to 95 lines; the full listing is in the chapter.
+
+19
+00:01:15.725 --> 00:01:16.600
+Problem:
+
+20
+00:01:16.880 --> 00:01:25.669
+Dynamo-style replication with N replicas, write quorum W and read quorum R; show why R + W N gives fresh reads.
+
+21
+00:01:28.519 --> 00:01:29.437
+Part 4.
+
+22
+00:01:29.717 --> 00:01:30.549
+Walkthrough.
+
+23
+00:01:31.799 --> 00:01:33.164
+Here is a quick table:
+
+24
+00:01:33.444 --> 00:01:34.511
+Code, and Why.
+
+25
+00:01:34.791 --> 00:01:37.052
+Versioned(value, ++clock):
+
+26
+00:01:37.332 --> 00:01:40.468
+Each write carries a version, and reads pick the maximum.
+
+27
+00:01:40.748 --> 00:01:55.063
+Real systems use per-key vector clocks or hybrid logical clocks, because one counter isn't available in a distributed cluster. for (int i: reachableOrder)... if (++acks == w) return true:
+
+28
+00:01:55.343 --> 00:01:58.521
+The write succeeds once W replicas acknowledge.
+
+29
+00:01:58.801 --> 00:02:11.601
+The rest are updated later (or not, as in the demo, which leaves r0 stale). if (v == null v.version() newest.version()) rep.data.put(key, newest); repairs.add(rep.name);:
+
+30
+00:02:11.881 --> 00:02:15.700
+Read repair: the read path fixes the stale replicas it touched.
+
+31
+00:02:15.980 --> 00:02:20.375
+N=3 W=1 R=1, then read v1:
+
+32
+00:02:20.655 --> 00:02:25.391
+The read set r0 and write set r1 don't overlap, so the read is stale.
+
+33
+00:02:25.671 --> 00:02:27.527
+It's the cost of the fastest settings.
+
+34
+00:02:28.877 --> 00:02:31.117
+2 of 3 down: write ok? false:
+
+35
+00:02:31.397 --> 00:02:35.130
+With W=2, two failures make writes unavailable.
+
+36
+00:02:35.410 --> 00:02:37.885
+That's the CAP trade-off in a single line.
+
+37
+00:02:39.235 --> 00:02:40.195
+Part 5.
+
+38
+00:02:40.475 --> 00:02:41.413
+Complexity.
+
+39
+00:02:42.663 --> 00:02:44.029
+Here is a quick table:
+
+40
+00:02:44.309 --> 00:02:47.103
+Approach, and Time, and Space. write or read.
+
+41
+00:02:47.383 --> 00:02:48.130
+Time:
+
+42
+00:02:48.410 --> 00:02:51.183
+O(N) messages, waits for W or R.
+
+43
+00:02:51.463 --> 00:02:52.317
+Space:
+
+44
+00:02:52.597 --> 00:02:53.578
+N copies.
+
+45
+00:02:54.928 --> 00:02:55.867
+Part 6.
+
+46
+00:02:56.147 --> 00:02:56.872
+Run it.
+
+47
+00:02:58.122 --> 00:02:59.445
+Here is the shell code.
+
+48
+00:03:02.295 --> 00:03:03.212
+On screen:
+
+49
+00:03:03.492 --> 00:03:10.212
+N=3 W=2 R=2 - read v2:apple,milk, read-repaired r0.
+
+50
+00:03:10.492 --> 00:03:18.983
+N=3 W=1 R=1 - read v1 -- stale: read set r0 and write set r1 don't overlap.
+
+51
+00:03:19.263 --> 00:03:22.932
+1 of 3 down: write ok? true, read = v3.
+
+52
+00:03:23.212 --> 00:03:25.345
+2 of 3 down: write ok? false.
+
+53
+00:03:25.625 --> 00:03:26.372
+PASS.
+
+54
+00:03:29.222 --> 00:03:30.161
+Part 7.
+
+55
+00:03:30.441 --> 00:03:32.105
+Solve it with Spring Boot 4.
+
+56
+00:03:33.355 --> 00:03:46.261
+A coordinator fans out every request to N replica services over HTTP with RestClient, on virtual threads, and answers as soon as W writes or R reads succeed within the timeout.
+
+57
+00:03:46.541 --> 00:03:50.424
+Reads return the newest version and read-repair stale replicas.
+
+58
+00:03:50.704 --> 00:03:58.469
+In the test, the replicas are real HTTP endpoints that can be taken down, so failures behave like separate nodes.
+
+59
+00:03:59.819 --> 00:04:00.779
+Coordinator.
+
+60
+00:04:01.059 --> 00:04:04.259
+Here is the Java code, QuorumCoordinator.java.
+
+61
+00:04:04.539 --> 00:04:08.571
+It runs to 120 lines; the full listing is in the chapter.
+
+62
+00:04:08.851 --> 00:04:22.931
+Dynamo-style coordinator: fan out to all N replicas in parallel (virtual threads), succeed after W write. acks or R read replies within the timeout, return the newest version and repair stale replicas.
+
+63
+00:04:25.781 --> 00:04:26.848
+Replica node.
+
+64
+00:04:27.128 --> 00:04:30.605
+Here is the Java code, ReplicaNodeController.java.
+
+65
+00:04:30.885 --> 00:04:34.640
+It runs to 45 lines; the full listing is in the chapter.
+
+66
+00:04:34.920 --> 00:04:36.285
+The storage-node side.
+
+67
+00:04:36.565 --> 00:04:49.024
+In production every replica is a separate service; here one app hosts nodes a or b or c. on different paths so a single process can show real HTTP fan-out, timeouts and failures.
+
+68
+00:04:51.874 --> 00:04:52.770
+Properties.
+
+69
+00:04:53.050 --> 00:04:55.951
+Here is the Java code, QuorumProperties.java.
+
+70
+00:04:56.231 --> 00:04:59.730
+It runs to 15 lines; the full listing is in the chapter.
+
+71
+00:05:00.010 --> 00:05:03.231
+N replicas, write quorum W, read quorum R.
+
+72
+00:05:03.511 --> 00:05:07.586
+R + W N guarantees a read overlaps the latest write.
+
+73
+00:05:10.436 --> 00:05:11.567
+Client config.
+
+74
+00:05:11.847 --> 00:05:14.812
+Here is the Java code, QuorumConfig.java.
+
+75
+00:05:15.092 --> 00:05:18.591
+It runs to 15 lines; the full listing is in the chapter.
+
+76
+00:05:21.441 --> 00:05:22.785
+Run it as a service.
+
+77
+00:05:23.065 --> 00:05:28.483
+The integration test QuorumIT.java drives the API against a real Redis.
+
+78
+00:05:28.763 --> 00:05:31.451
+This is its transcript ( request, response):
+
+79
+00:05:32.801 --> 00:05:33.719
+On screen:
+
+80
+00:05:33.999 --> 00:05:43.108
+N=3 replicas (a, b, c), W=2, R=2 - R + W N, so every read overlaps the latest write.
+
+81
+00:05:43.388 --> 00:05:48.593
+PUT or api or v1 or kv or cart:42 value:2 items.
+
+82
+00:05:48.873 --> 00:05:57.876
+200 version:1768471200000,acks:2,required:2.
+
+83
+00:05:58.156 --> 00:06:02.529
+PUT or internal or replicas or c or down?value=true.
+
+84
+00:06:02.809 --> 00:06:05.284
+200. replica c goes down.
+
+85
+00:06:05.564 --> 00:06:10.876
+PUT or api or v1 or kv or cart:42 value:3 items.
+
+86
+00:06:11.156 --> 00:06:20.436
+200 version:1768471200001,acks:2,required:2.
+
+87
+00:06:20.716 --> 00:06:25.132
+PUT or internal or replicas or c or down?value=false.
+
+88
+00:06:25.412 --> 00:06:26.329
+200.
+
+89
+00:06:26.609 --> 00:06:30.748
+PUT or internal or replicas or a or down?value=true.
+
+90
+00:06:31.028 --> 00:06:34.975
+200. c comes back (still holding '2 items'), a goes down.
+
+91
+00:06:35.255 --> 00:06:36.769
+The rest is in the chapter.
+
+92
+00:06:39.619 --> 00:06:41.710
+What changes from the interview version.
+
+93
+00:06:41.990 --> 00:06:43.355
+Here is a quick table:
+
+94
+00:06:43.635 --> 00:07:06.057
+Interview, and Production (Spring Boot 4). replicas are objects in a list: separate services called over HTTP with connect or read timeouts. sequential calls: parallel fan-out on virtual threads; return at W or R successes, don't wait for the slowest replica. version counter: per-coordinator monotonic version (LWW).
+
+95
+00:07:06.337 --> 00:07:11.883
+Real systems use vector clocks or hybrid logical clocks. failure = exception:
+
+96
+00:07:12.163 --> 00:07:20.953
+503 ProblemDetail write quorum not met (safe to retry: the replica only accepts newer versions). validated in code:
+
+97
+00:07:21.233 --> 00:07:25.670
+QuorumProperties rejects invalid N or W or R at startup.
+
+98
+00:07:27.020 --> 00:07:41.207
+Two things the test exposed (see the Spring Boot overview): a 200 ms timeout fails on a cold JVM, and the N minus W calls still in flight can update a stale replica after the coordinator has answered.
+
+99
+00:07:41.487 --> 00:07:46.585
+Missing pieces you should name: hinted handoff for writes to down nodes, and sloppy quorums.
+
+100
+00:07:47.935 --> 00:07:48.810
+Part 8.
+
+101
+00:07:49.090 --> 00:07:50.199
+Common mistakes.
+
+102
+00:07:51.449 --> 00:07:54.713
+Thinking R + W N gives linearizability.
+
+103
+00:07:54.993 --> 00:08:01.009
+It doesn't on its own: concurrent writes, sloppy quorums and clock-based versions can still misbehave.
+
+104
+00:08:01.289 --> 00:08:06.260
+Last-write-wins with wall-clock timestamps, which silently drops concurrent updates.
+
+105
+00:08:06.540 --> 00:08:10.252
+Use vector clocks plus application merge, or CRDTs.
+
+106
+00:08:10.532 --> 00:08:15.673
+Forgetting that a failed quorum write may still have reached some replicas, so it may appear later.
+
+107
+00:08:15.953 --> 00:08:19.409
+Clients must treat a failed write as unknown, not didn't happen.
+
+108
+00:08:20.759 --> 00:08:21.655
+Part 9.
+
+109
+00:08:21.935 --> 00:08:23.279
+Follow-up questions.
+
+110
+00:08:24.529 --> 00:08:25.404
+Question.
+
+111
+00:08:25.684 --> 00:08:27.711
+Sloppy quorum and hinted handoff?
+
+112
+00:08:27.991 --> 00:08:29.356
+Thirty-second answer:
+
+113
+00:08:29.636 --> 00:08:38.383
+If home replicas are down, a sloppy quorum writes to other healthy nodes, which keep a hint and hand the data back when the home replica returns.
+
+114
+00:08:38.663 --> 00:08:44.572
+Availability goes up, but R + W N no longer guarantees overlap with the home replicas.
+
+115
+00:08:45.922 --> 00:08:46.797
+Question.
+
+116
+00:08:47.077 --> 00:08:50.021
+How do Cassandra's consistency levels map to this?
+
+117
+00:08:50.301 --> 00:08:51.666
+Thirty-second answer:
+
+118
+00:08:51.946 --> 00:08:58.858
+ONE, QUORUM, ALL per query, plus LOCALQUORUM (a quorum within one data centre) for multi-region setups.
+
+119
+00:08:59.138 --> 00:09:09.186
+A common choice is LOCALQUORUM for both reads and writes with RF = 3, which gives strong consistency within a DC and survives one node failure.
+
+120
+00:09:10.536 --> 00:09:12.136
+That's the end of this chapter.
+
+121
+00:09:12.416 --> 00:09:18.539
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+122
+00:09:18.819 --> 00:09:20.269
+See you in the next chapter.
+

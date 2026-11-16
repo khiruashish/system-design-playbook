@@ -1,0 +1,4586 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.249
+Microservices Architecture.
+
+2
+00:00:02.529 --> 00:00:06.966
+Chapter 16, from the Distributed Core part of the System Design Playbook.
+
+3
+00:00:08.716 --> 00:00:09.676
+At a glance:
+
+4
+00:00:09.956 --> 00:00:11.129
+Chapter at a glance.
+
+5
+00:00:11.409 --> 00:00:12.412
+Reader bands:
+
+6
+00:00:12.692 --> 00:00:14.975
+B2, then B4, Prerequisites:
+
+7
+00:00:15.255 --> 00:00:20.631
+Ch 09, Ch 13, Ch 14, Ch 15, What you will build:
+
+8
+00:00:20.911 --> 00:00:28.996
+The decomposition of the grocery platform into 26 services, and the machinery that keeps it from becoming a distributed monolith.
+
+9
+00:00:29.276 --> 00:00:34.460
+L1 quantifies what synchronous call chains do to availability and tail latency.
+
+10
+00:00:34.740 --> 00:00:45.385
+L2 runs architecture fitness functions over the service graph: synchronous cycles, chain depth, shared databases and fan-in, before and after redrawing boundaries.
+
+11
+00:00:45.665 --> 00:00:52.087
+L3 is a modular monolith whose boundaries are enforced by the Java compiler (JPMS).
+
+12
+00:00:52.367 --> 00:01:00.239
+Reaching into another module's internals, an undeclared dependency and a cycle are all compile errors, shown verbatim.
+
+13
+00:01:01.589 --> 00:01:17.909
+L4 uses real HTTP on localhost for three things: service discovery with heartbeats versus a static list while an instance dies, API composition with a latency budget, and a strangler-fig migration with shadow diffing and a canary.
+
+14
+00:01:18.189 --> 00:01:21.111
+Every program was run, and outputs are verbatim.
+
+15
+00:01:21.391 --> 00:01:22.373
+Reading time:
+
+16
+00:01:22.653 --> 00:01:24.445
+110 min + code.
+
+17
+00:01:25.795 --> 00:01:26.648
+Part 1.
+
+18
+00:01:26.928 --> 00:01:28.848
+Introduction and Why It Matters.
+
+19
+00:01:30.098 --> 00:01:31.015
+A story:
+
+20
+00:01:31.295 --> 00:01:33.749
+14 services, one deploy train.
+
+21
+00:01:34.029 --> 00:01:42.775
+Two years after moving to microservices, the grocery platform had 14 services, and every release still went out together on Thursday night.
+
+22
+00:01:43.055 --> 00:01:44.037
+What had happened:
+
+23
+00:01:44.317 --> 00:01:46.877
+Three services shared the orders database.
+
+24
+00:01:47.157 --> 00:01:51.317
+Order, fulfilment and invoicing all read and wrote the same tables.
+
+25
+00:01:51.597 --> 00:01:58.530
+Adding a column needed three teams in one meeting, and a slow invoicing query locked rows that checkout needed.
+
+26
+00:01:59.880 --> 00:02:01.117
+Synchronous cycles.
+
+27
+00:02:01.397 --> 00:02:05.771
+Order called payment to capture, and payment called order back to fetch the amount.
+
+28
+00:02:06.051 --> 00:02:08.248
+Fulfilment and order called each other.
+
+29
+00:02:08.528 --> 00:02:14.757
+When payment slowed down, order threads piled up, fulfilment's calls to order timed out, and checkout failed.
+
+30
+00:02:15.037 --> 00:02:18.323
+A checkout needed 10 services to be up at the same time.
+
+31
+00:02:18.603 --> 00:02:30.272
+At 99.9 % each, that's roughly 99.0 % for checkout, or about 7 hours of failed checkouts a month, even though every service met its own SLO.
+
+32
+00:02:31.622 --> 00:02:36.230
+The order-details page called order, payment and tracking one after another.
+
+33
+00:02:36.510 --> 00:02:41.310
+Tracking had occasional 2-second stalls, which became the page's p99.
+
+34
+00:02:41.590 --> 00:02:51.233
+The architecture had the costs of microservices (network calls, partial failures, distributed data) without the benefit (independent deployability).
+
+35
+00:02:51.513 --> 00:02:53.326
+It was a distributed monolith.
+
+36
+00:02:53.606 --> 00:02:55.782
+The fix wasn't more microservices.
+
+37
+00:02:56.062 --> 00:02:57.491
+It was better boundaries:
+
+38
+00:02:57.771 --> 00:02:59.371
+One database per service.
+
+39
+00:02:59.651 --> 00:03:04.302
+Facts flow as events (Ch 14), not as shared tables or callbacks.
+
+40
+00:03:05.652 --> 00:03:13.225
+Synchronous calls only where the caller needs an answer now, with no cycles, a shallow depth and timeouts (Ch 18).
+
+41
+00:03:13.505 --> 00:03:19.479
+Pages that call several services do it in parallel, with a latency budget and partial results.
+
+42
+00:03:19.759 --> 00:03:24.495
+New capabilities start in a modular monolith with enforced module boundaries.
+
+43
+00:03:24.775 --> 00:03:30.919
+They're extracted into services only when there's a reason (a team, scaling, a different release cadence).
+
+44
+00:03:31.199 --> 00:03:38.089
+Legacy paths are replaced piece by piece with a strangler fig: a routing facade, shadow traffic and canaries.
+
+45
+00:03:39.439 --> 00:03:40.122
+Quote:
+
+46
+00:03:40.402 --> 00:03:42.066
+The thesis of this chapter.
+
+47
+00:03:42.346 --> 00:03:48.021
+Microservices are a way to let teams change and deploy parts of a system independently.
+
+48
+00:03:48.301 --> 00:03:57.474
+Everything else follows from that: boundaries along business capabilities, a database per service, asynchronous facts, few and shallow synchronous calls.
+
+49
+00:03:57.754 --> 00:04:08.015
+If services can't be deployed independently, or a request needs ten of them to be up, you've built a distributed monolith, and a modular monolith would have served you better.
+
+50
+00:04:09.365 --> 00:04:11.669
+Where this lives in the grocery platform.
+
+51
+00:04:11.949 --> 00:04:18.477
+The 26 services and their bounded contexts are listed in Ch 00 §3.3.
+
+52
+00:04:18.757 --> 00:04:23.472
+This chapter explains why they're split that way and what rules keep them independent:
+
+53
+00:04:24.822 --> 00:04:26.166
+Here is a quick table:
+
+54
+00:04:26.446 --> 00:04:28.195
+Rule, and Example, and Check.
+
+55
+00:04:28.475 --> 00:04:31.611
+Split by business capability or bounded context.
+
+56
+00:04:31.891 --> 00:04:36.819
+Example: pricing-service owns prices and GST rates; catalog doesn't.
+
+57
+00:04:37.099 --> 00:04:37.782
+Check:
+
+58
+00:04:38.062 --> 00:04:39.982
+Ownership in the service catalog.
+
+59
+00:04:40.262 --> 00:04:41.862
+One database per service.
+
+60
+00:04:42.142 --> 00:04:46.835
+Example: invoice-service has invoicedb and builds what it needs from events.
+
+61
+00:04:47.115 --> 00:04:47.798
+Check:
+
+62
+00:04:48.078 --> 00:04:50.830
+Fitness function: no shared DB (L2).
+
+63
+00:04:51.110 --> 00:04:53.265
+Facts as events, commands as calls.
+
+64
+00:04:53.545 --> 00:04:58.622
+Example: order.order.placed.v1, then fulfilment, invoicing, notifications.
+
+65
+00:04:58.902 --> 00:04:59.585
+Check:
+
+66
+00:04:59.865 --> 00:05:01.785
+Async edges in the service graph.
+
+67
+00:05:02.065 --> 00:05:04.646
+No synchronous cycles; depth at most 4.
+
+68
+00:05:04.926 --> 00:05:05.801
+Example:
+
+69
+00:05:06.081 --> 00:05:10.219
+Checkout calls cart, pricing, inventory, payment, order in parallel.
+
+70
+00:05:10.499 --> 00:05:11.182
+Check:
+
+71
+00:05:11.462 --> 00:05:13.083
+Fitness function (L2).
+
+72
+00:05:13.363 --> 00:05:15.817
+Pages compose in parallel with budgets.
+
+73
+00:05:16.097 --> 00:05:16.971
+Example:
+
+74
+00:05:17.251 --> 00:05:21.027
+Order details: order + payment required, tracking optional.
+
+75
+00:05:21.307 --> 00:05:23.675
+Check: p99 SLO (L4 B).
+
+76
+00:05:25.025 --> 00:05:27.585
+Start modular, extract when justified.
+
+77
+00:05:27.865 --> 00:05:28.740
+Example:
+
+78
+00:05:29.020 --> 00:05:33.095
+New subscription capability starts as a module in order-service.
+
+79
+00:05:33.375 --> 00:05:34.057
+Check:
+
+80
+00:05:34.337 --> 00:05:37.559
+JPMS or Modulith boundary checks (L3).
+
+81
+00:05:37.839 --> 00:05:40.079
+Replace legacy with a strangler fig.
+
+82
+00:05:40.359 --> 00:05:41.233
+Example:
+
+83
+00:05:41.513 --> 00:05:45.951
+Order history moved off the legacy PHP admin behind the gateway.
+
+84
+00:05:46.231 --> 00:05:46.913
+Check:
+
+85
+00:05:47.193 --> 00:05:50.628
+Shadow diff = 0 before cutover (L4 C).
+
+86
+00:05:51.978 --> 00:05:53.301
+Learning objectives.
+
+87
+00:05:53.581 --> 00:05:54.925
+Here is a quick table:
+
+88
+00:05:55.205 --> 00:05:57.402
+Band, and After this chapter you can....
+
+89
+00:05:57.682 --> 00:05:58.557
+B2:
+
+90
+00:05:58.837 --> 00:06:07.157
+Explain what microservices are for, decompose by business capability, and state the database-per-service rule and its consequences.
+
+91
+00:06:07.437 --> 00:06:08.333
+B3:
+
+92
+00:06:08.613 --> 00:06:17.701
+Design service discovery, externalized configuration and API composition; detect distributed-monolith smells with fitness functions.
+
+93
+00:06:17.981 --> 00:06:18.877
+B4:
+
+94
+00:06:19.157 --> 00:06:28.799
+Choose between a modular monolith and microservices, plan a strangler-fig migration, and align service boundaries with team topology (Conway's law).
+
+95
+00:06:30.149 --> 00:06:31.024
+Part 2.
+
+96
+00:06:31.304 --> 00:06:33.181
+Core Concepts, Beginner to Deep.
+
+97
+00:06:34.431 --> 00:06:37.482
+Intuition: one big kitchen versus a food court.
+
+98
+00:06:37.762 --> 00:06:43.351
+A big restaurant kitchen (a monolith) has one head chef, one menu and one set of equipment.
+
+99
+00:06:43.631 --> 00:06:49.029
+Coordination is easy (shout across the room), and changing the menu is one decision.
+
+100
+00:06:49.309 --> 00:06:54.578
+But every new dish means the whole kitchen retrains, and a fire at the grill stops everything.
+
+101
+00:06:54.858 --> 00:07:01.663
+A food court (microservices) is independent stalls, each with its own staff, menu, suppliers and hours.
+
+102
+00:07:01.943 --> 00:07:05.847
+The dosa stall can change its recipe without asking the pizza stall.
+
+103
+00:07:06.127 --> 00:07:15.151
+But a combo meal needs several stalls to coordinate, the customer walks between counters, and if the drinks stall is closed, the combo is incomplete.
+
+104
+00:07:16.501 --> 00:07:23.947
+A food court where every stall shares one fridge and must ask the next stall for every ingredient is the distributed monolith.
+
+105
+00:07:24.227 --> 00:07:26.851
+You get all the walking and none of the independence.
+
+106
+00:07:27.131 --> 00:07:36.539
+A big kitchen with clearly separated stations, each with its own shelf and a rule that nobody takes from another station's shelf, is the modular monolith.
+
+107
+00:07:36.819 --> 00:07:43.901
+It keeps the easy coordination and most of the independence, and it can become a food court later, station by station.
+
+108
+00:07:45.251 --> 00:07:47.811
+What microservices are, and what they're for.
+
+109
+00:07:48.091 --> 00:07:58.033
+A microservice is an independently deployable unit that owns a business capability and its data, and communicates through well-defined APIs and events.
+
+110
+00:07:58.313 --> 00:08:07.529
+The defining property is independent deployability: a team can change, test and release its service without coordinating a release with other teams.
+
+111
+00:08:08.879 --> 00:08:10.223
+Here is a quick table:
+
+112
+00:08:10.503 --> 00:08:11.996
+Benefit, and Only if....
+
+113
+00:08:12.276 --> 00:08:14.537
+Team autonomy and parallel delivery:
+
+114
+00:08:14.817 --> 00:08:18.465
+Boundaries match teams (Conway's law), contracts are versioned.
+
+115
+00:08:18.745 --> 00:08:20.004
+Independent scaling:
+
+116
+00:08:20.284 --> 00:08:23.847
+Services have different load shapes (search versus invoicing).
+
+117
+00:08:24.127 --> 00:08:25.364
+Fault isolation:
+
+118
+00:08:25.644 --> 00:08:30.145
+Calls have timeouts and fallbacks, and dependencies are few (Ch 18).
+
+119
+00:08:30.425 --> 00:08:31.641
+Technology fit:
+
+120
+00:08:31.921 --> 00:08:35.527
+The platform can support more than one stack (usually: don't).
+
+121
+00:08:35.807 --> 00:08:37.151
+Smaller codebases:
+
+122
+00:08:37.431 --> 00:08:39.500
+Boundaries are stable and cohesive.
+
+123
+00:08:40.850 --> 00:08:42.194
+Here is a quick table:
+
+124
+00:08:42.474 --> 00:08:43.882
+Cost, and Consequence.
+
+125
+00:08:44.162 --> 00:08:46.317
+Network calls instead of method calls:
+
+126
+00:08:46.597 --> 00:08:49.882
+Latency, partial failure, retries, serialization.
+
+127
+00:08:50.162 --> 00:08:51.442
+Distributed data:
+
+128
+00:08:51.722 --> 00:09:00.298
+No joins or transactions across services: sagas (Ch 13), events (Ch 14), CQRS (Ch 15).
+
+129
+00:09:00.578 --> 00:09:01.602
+Operations:
+
+130
+00:09:01.882 --> 00:09:07.685
+N deployments, dashboards, on-calls, CVEs, pipelines (Ch 24, 26).
+
+131
+00:09:07.965 --> 00:09:08.797
+Testing:
+
+132
+00:09:09.077 --> 00:09:12.917
+Contracts, environments, end-to-end cost (Ch 29).
+
+133
+00:09:13.197 --> 00:09:14.455
+Availability math:
+
+134
+00:09:14.735 --> 00:09:17.978
+Every synchronous dependency multiplies in (L1).
+
+135
+00:09:19.328 --> 00:09:21.461
+L1 puts numbers on the last line:
+
+136
+00:09:21.741 --> 00:09:23.405
+Availability multiplies:
+
+137
+00:09:23.685 --> 00:09:33.861
+5 synchronous services in series at 99.9 % each gives 99.50 % (216 min per month of failures).
+
+138
+00:09:34.141 --> 00:09:36.659
+12 gives 98.81 %.
+
+139
+00:09:36.939 --> 00:09:39.392
+Latency adds up when calls are sequential:
+
+140
+00:09:39.672 --> 00:09:44.259
+8 calls go from p50 20 ms to 178 ms.
+
+141
+00:09:44.539 --> 00:09:48.507
+Parallel calls take the maximum instead, but the tail still grows:
+
+142
+00:09:48.787 --> 00:09:55.549
+26 parallel calls give 23 % of page loads that hit at least one dependency's p99.
+
+143
+00:09:56.899 --> 00:10:00.590
+Decomposition: business capabilities and bounded contexts.
+
+144
+00:10:00.870 --> 00:10:03.451
+By business capability: what the business does.
+
+145
+00:10:03.731 --> 00:10:12.926
+Examples: catalog management, pricing, promotions, ordering, fulfilment, delivery dispatch, payments, settlements, invoicing, customer support.
+
+146
+00:10:13.206 --> 00:10:19.201
+By bounded context (DDD, Ch 33): where a model and its language are consistent.
+
+147
+00:10:19.481 --> 00:10:22.553
+Product in the catalog has descriptions and images.
+
+148
+00:10:22.833 --> 00:10:26.779
+In pricing, it has MRP, selling price and GST slab.
+
+149
+00:10:27.059 --> 00:10:30.281
+In inventory, it's a SKU with stock per dark store.
+
+150
+00:10:31.631 --> 00:10:34.319
+In fulfilment, it's a pick location and weight.
+
+151
+00:10:34.599 --> 00:10:38.481
+These are four models of one real-world thing, in four contexts.
+
+152
+00:10:38.761 --> 00:10:43.241
+Forcing one shared Product model across them is how the monolith got coupled.
+
+153
+00:10:43.521 --> 00:10:45.079
+Heuristics for boundaries:
+
+154
+00:10:46.429 --> 00:10:47.773
+Here is a quick table:
+
+155
+00:10:48.053 --> 00:10:50.506
+Heuristic, and Good sign, and Bad sign.
+
+156
+00:10:50.786 --> 00:10:52.919
+Change together, then belong together.
+
+157
+00:10:53.199 --> 00:10:54.053
+Good sign:
+
+158
+00:10:54.333 --> 00:10:56.146
+A feature touches one service.
+
+159
+00:10:56.426 --> 00:10:57.407
+Bad sign:
+
+160
+00:10:57.687 --> 00:10:59.863
+Every feature touches 3 services.
+
+161
+00:11:00.143 --> 00:11:01.295
+Data ownership.
+
+162
+00:11:01.575 --> 00:11:02.429
+Good sign:
+
+163
+00:11:02.709 --> 00:11:04.415
+Each table has one writer.
+
+164
+00:11:04.695 --> 00:11:05.677
+Bad sign:
+
+165
+00:11:05.957 --> 00:11:08.261
+Several services write the same table.
+
+166
+00:11:08.541 --> 00:11:09.607
+Transactions.
+
+167
+00:11:09.887 --> 00:11:10.741
+Good sign:
+
+168
+00:11:11.021 --> 00:11:13.709
+Invariants are enforced inside one service.
+
+169
+00:11:13.989 --> 00:11:14.970
+Bad sign:
+
+170
+00:11:15.250 --> 00:11:17.661
+Invariants need cross-service transactions.
+
+171
+00:11:17.941 --> 00:11:18.837
+Language.
+
+172
+00:11:19.117 --> 00:11:19.970
+Good sign:
+
+173
+00:11:20.250 --> 00:11:22.362
+Terms mean one thing inside the service.
+
+174
+00:11:22.642 --> 00:11:23.623
+Bad sign:
+
+175
+00:11:23.903 --> 00:11:25.333
+Order means three things.
+
+176
+00:11:25.613 --> 00:11:26.338
+Team.
+
+177
+00:11:26.618 --> 00:11:27.471
+Good sign:
+
+178
+00:11:27.751 --> 00:11:29.458
+One team owns it end to end.
+
+179
+00:11:29.738 --> 00:11:30.719
+Bad sign:
+
+180
+00:11:30.999 --> 00:11:32.813
+Several teams commit to it weekly.
+
+181
+00:11:33.093 --> 00:11:34.031
+Chattiness.
+
+182
+00:11:34.311 --> 00:11:35.165
+Good sign:
+
+183
+00:11:35.445 --> 00:11:37.301
+A few coarse calls per use case.
+
+184
+00:11:37.581 --> 00:11:38.562
+Bad sign:
+
+185
+00:11:38.842 --> 00:11:40.549
+Dozens of fine-grained calls.
+
+186
+00:11:41.899 --> 00:11:44.373
+Granularity: start coarser than you think.
+
+187
+00:11:44.653 --> 00:11:49.752
+Splitting a service later is easier than merging services that share nothing but pain.
+
+188
+00:11:50.032 --> 00:11:55.472
+The grocery platform's 26 services map to about 8 teams (Ch 37).
+
+189
+00:11:55.752 --> 00:11:59.229
+A team owning 3 to 4 cohesive services is normal.
+
+190
+00:11:59.509 --> 00:12:03.541
+A service per entity (address-service, gst-rate-service) isn't.
+
+191
+00:12:04.891 --> 00:12:06.321
+Database per service.
+
+192
+00:12:06.601 --> 00:12:08.265
+Each service owns its data.
+
+193
+00:12:08.545 --> 00:12:12.726
+Other services access it only through the owner's API or events.
+
+194
+00:12:13.006 --> 00:12:15.075
+They never read or write its tables.
+
+195
+00:12:15.355 --> 00:12:26.001
+Why: schema changes stay local, the owner enforces invariants, the owner chooses the right storage (Ch 06), and a noisy neighbour can't lock your rows.
+
+196
+00:12:26.281 --> 00:12:36.563
+Private tables on a shared server is an acceptable start: separate schemas and users on one PostgreSQL cluster, as long as grants enforce the separation.
+
+197
+00:12:36.843 --> 00:12:39.019
+It's the shared tables that are the problem.
+
+198
+00:12:39.299 --> 00:12:41.155
+Consequences, and their patterns:
+
+199
+00:12:42.505 --> 00:12:51.572
+Cross-service queries, then API composition (§2.8) or a CQRS read model built from events (Ch 15).
+
+200
+00:12:51.852 --> 00:12:56.311
+Cross-service transactions, then sagas + outbox (Ch 13).
+
+201
+00:12:56.591 --> 00:13:07.663
+Reference data (pincodes, GST rates), then owned by one service, replicated to others via event-carried state transfer (Ch 15), and cached with versions.
+
+202
+00:13:07.943 --> 00:13:14.812
+Reporting, then CDC into the warehouse (Ch 21), never live joins across service databases.
+
+203
+00:13:16.162 --> 00:13:27.895
+L2's before graph had two shared databases (ordersdb used by order, fulfilment and invoice; catalogdb used by catalog and pricing), and the fitness check failed on them.
+
+204
+00:13:29.245 --> 00:13:30.632
+Communication styles.
+
+205
+00:13:30.912 --> 00:13:32.256
+Here is a quick table:
+
+206
+00:13:32.536 --> 00:13:34.755
+Style, and Use for, and Watch out for.
+
+207
+00:13:35.035 --> 00:13:40.773
+Synchronous request or response (REST, gRPC; Ch 04, 17).
+
+208
+00:13:41.053 --> 00:13:41.907
+Use for:
+
+209
+00:13:42.187 --> 00:13:47.712
+Queries and commands where the caller needs the answer now (price, stock check, payment result).
+
+210
+00:13:47.992 --> 00:13:49.037
+Watch out for:
+
+211
+00:13:49.317 --> 00:13:53.115
+Availability multiplication, cascading latency, cycles.
+
+212
+00:13:53.395 --> 00:13:55.656
+Asynchronous events (Ch 14).
+
+213
+00:13:55.936 --> 00:13:56.789
+Use for:
+
+214
+00:13:57.069 --> 00:14:00.077
+Facts others react to (order placed, price changed).
+
+215
+00:14:00.357 --> 00:14:01.403
+Watch out for:
+
+216
+00:14:01.683 --> 00:14:04.456
+Eventual consistency, duplicates, ordering.
+
+217
+00:14:04.736 --> 00:14:07.061
+Asynchronous commands or jobs (queues).
+
+218
+00:14:07.341 --> 00:14:08.195
+Use for:
+
+219
+00:14:08.475 --> 00:14:12.037
+Work for one owner, later (send SMS, generate invoice).
+
+220
+00:14:12.317 --> 00:14:13.363
+Watch out for:
+
+221
+00:14:13.643 --> 00:14:15.072
+Retries, DLQs.
+
+222
+00:14:16.422 --> 00:14:18.065
+Rules the platform follows:
+
+223
+00:14:18.345 --> 00:14:19.774
+No synchronous cycles.
+
+224
+00:14:20.054 --> 00:14:26.582
+A calls B, and B calls A is a single deployable unit in disguise, and a deadlock or cascade risk.
+
+225
+00:14:26.862 --> 00:14:35.801
+L2 found two cycles in the before graph (order ↔ payment ↔ fulfilment, catalog ↔ inventory).
+
+226
+00:14:36.081 --> 00:14:40.881
+Shallow synchronous depth: gateway, then aggregator, then leaf ( at most 4 hops).
+
+227
+00:14:41.161 --> 00:14:48.841
+The before graph had a 6-hop chain (gateway, then checkout, then order, then invoice, then pricing, then catalog, then inventory).
+
+228
+00:14:50.191 --> 00:14:51.983
+Invert dependencies with events.
+
+229
+00:14:52.263 --> 00:14:59.473
+Instead of payment calling order back, payment publishes payment.payment.captured.v1, and the order saga reacts.
+
+230
+00:14:59.753 --> 00:15:06.239
+Every call has a timeout, and retries only on idempotent operations with backoff (Ch 18).
+
+231
+00:15:06.519 --> 00:15:08.737
+Keep the synchronous blast radius small:
+
+232
+00:15:09.017 --> 00:15:14.308
+L2's after graph cut the services a checkout needs synchronously from 10 to 6.
+
+233
+00:15:15.658 --> 00:15:18.047
+Service discovery and load balancing.
+
+234
+00:15:18.327 --> 00:15:24.301
+Instances come and go (autoscaling, deploys, crashes), so callers need the current, healthy set.
+
+235
+00:15:25.651 --> 00:15:26.995
+Here is a quick table:
+
+236
+00:15:27.275 --> 00:15:29.195
+Approach, and How, and Examples.
+
+237
+00:15:29.475 --> 00:15:32.547
+Platform DNS + L4 or L7 LB.
+
+238
+00:15:32.827 --> 00:15:33.488
+How:
+
+239
+00:15:33.768 --> 00:15:39.315
+A stable name resolves to a virtual IP or load balancer; the platform tracks health.
+
+240
+00:15:39.595 --> 00:15:40.555
+Examples:
+
+241
+00:15:40.835 --> 00:15:43.224
+Kubernetes Services, cloud LBs.
+
+242
+00:15:43.504 --> 00:15:44.955
+Client-side discovery.
+
+243
+00:15:45.235 --> 00:15:45.896
+How:
+
+244
+00:15:46.176 --> 00:15:50.101
+The client asks a registry for instances and balances itself.
+
+245
+00:15:50.381 --> 00:15:51.341
+Examples:
+
+246
+00:15:51.621 --> 00:15:54.565
+Eureka + Spring Cloud LoadBalancer, Consul.
+
+247
+00:15:54.845 --> 00:15:55.869
+Service mesh.
+
+248
+00:15:56.149 --> 00:15:56.811
+How:
+
+249
+00:15:57.091 --> 00:16:03.427
+A sidecar or ambient proxy does discovery, retries, mTLS and outlier detection.
+
+250
+00:16:03.707 --> 00:16:04.667
+Examples:
+
+251
+00:16:04.947 --> 00:16:06.483
+Istio, Linkerd, Cilium.
+
+252
+00:16:07.833 --> 00:16:10.457
+Whatever the mechanism, three behaviours matter:
+
+253
+00:16:10.737 --> 00:16:18.139
+Dead instances are removed quickly: health checks, heartbeats with a TTL, readiness probes (Ch 26).
+
+254
+00:16:18.419 --> 00:16:21.982
+Callers retry on another instance for idempotent requests.
+
+255
+00:16:22.262 --> 00:16:24.481
+Clients don't cache instance lists forever.
+
+256
+00:16:24.761 --> 00:16:31.033
+L4 A made 3,000 calls to three catalog instances, and one crashed after call 500:
+
+257
+00:16:32.383 --> 00:16:38.228
+A static instance list failed 833 calls (every third call went to the dead instance).
+
+258
+00:16:38.508 --> 00:16:43.969
+A registry with a 300 ms heartbeat TTL plus one retry failed 0.
+
+259
+00:16:44.249 --> 00:16:48.943
+On Kubernetes, the Service or Endpoints mechanism does the registry part.
+
+260
+00:16:49.223 --> 00:16:58.289
+Readiness probes must fail before an instance stops accepting traffic (graceful shutdown), or the same failures appear during every deploy.
+
+261
+00:16:59.639 --> 00:17:01.474
+Externalized configuration.
+
+262
+00:17:01.754 --> 00:17:11.226
+Configuration (URLs, timeouts, feature flags, limits) lives outside the artifact, so one build runs in every environment (12-factor).
+
+263
+00:17:11.506 --> 00:17:25.074
+Sources: environment variables and ConfigMaps (Kubernetes), Spring Cloud Config, Consul or etcd (Ch 12), and a secrets manager for credentials (Vault, cloud KMS; Ch 23).
+
+264
+00:17:25.354 --> 00:17:35.914
+Dynamic config and flags (rate limits, kill switches) are versioned and audited, with safe defaults when the config store is unreachable, and validated before rollout.
+
+265
+00:17:36.194 --> 00:17:37.901
+A config push is a deployment.
+
+266
+00:17:39.251 --> 00:17:43.197
+Avoid a config service that every request depends on synchronously.
+
+267
+00:17:43.477 --> 00:17:47.061
+Load it at startup and on change (watch), then serve from memory.
+
+268
+00:17:48.411 --> 00:17:50.694
+API composition and the gateway.
+
+269
+00:17:50.974 --> 00:17:53.897
+Many screens need data from several services.
+
+270
+00:17:54.177 --> 00:17:55.051
+Options:
+
+271
+00:17:55.331 --> 00:18:03.438
+Client-side composition (the app calls several APIs): chatty over mobile networks, and it exposes internal APIs.
+
+272
+00:18:03.718 --> 00:18:16.667
+API composition in a gateway or BFF (backend-for-frontend): one call from the app, and the BFF calls services in parallel, with a latency budget and partial results for optional parts.
+
+273
+00:18:16.947 --> 00:18:25.630
+A CQRS read model (Ch 15) when the combined view is requested often or needs filtering or sorting across services.
+
+274
+00:18:25.910 --> 00:18:27.510
+It's pre-joined by events.
+
+275
+00:18:28.860 --> 00:18:39.591
+L4 B, 500 order-details page loads (order 20 ms, payment 30 ms, tracking 25 ms, but 3 % of tracking calls take 2 s):
+
+276
+00:18:40.941 --> 00:18:42.285
+Here is a quick table:
+
+277
+00:18:42.565 --> 00:18:46.597
+Strategy, and p50, and p99, and Partial pages.
+
+278
+00:18:46.877 --> 00:18:48.477
+Sequential. p50:
+
+279
+00:18:48.757 --> 00:18:51.231
+79 ms. p99:
+
+280
+00:18:51.511 --> 00:18:53.303
+2,054 ms.
+
+281
+00:18:53.583 --> 00:18:54.757
+Partial pages:
+
+282
+00:18:55.037 --> 00:18:55.783
+0.
+
+283
+00:18:56.063 --> 00:18:57.429
+Parallel. p50:
+
+284
+00:18:57.709 --> 00:19:00.013
+31 ms. p99:
+
+285
+00:19:00.293 --> 00:19:01.786
+2,002 ms.
+
+286
+00:19:02.066 --> 00:19:03.239
+Partial pages:
+
+287
+00:19:03.519 --> 00:19:04.266
+0.
+
+288
+00:19:04.546 --> 00:19:09.453
+Parallel + 250 ms budget for the optional part. p50:
+
+289
+00:19:09.733 --> 00:19:12.037
+31 ms. p99:
+
+290
+00:19:12.317 --> 00:19:14.002
+251 ms.
+
+291
+00:19:14.282 --> 00:19:15.455
+Partial pages:
+
+292
+00:19:15.735 --> 00:19:17.741
+10 (tracking shown as updating...).
+
+293
+00:19:19.091 --> 00:19:20.989
+Parallelism fixes the median.
+
+294
+00:19:21.269 --> 00:19:23.531
+Budgets and optional parts fix the tail.
+
+295
+00:19:23.811 --> 00:19:29.037
+Decide per field whether it's required (fail the page) or optional (degrade gracefully).
+
+296
+00:19:29.317 --> 00:19:30.704
+That's a product decision.
+
+297
+00:19:32.054 --> 00:19:35.339
+The distributed monolith: smells and fitness functions.
+
+298
+00:19:35.619 --> 00:19:36.963
+Here is a quick table:
+
+299
+00:19:37.243 --> 00:19:39.590
+Smell, and Symptom, and Measure (L2).
+
+300
+00:19:39.870 --> 00:19:41.171
+Lock-step deploys.
+
+301
+00:19:41.451 --> 00:19:42.262
+Symptom:
+
+302
+00:19:42.542 --> 00:19:45.017
+Release train; services versioned together.
+
+303
+00:19:45.297 --> 00:19:46.470
+Measure (L2):
+
+304
+00:19:46.750 --> 00:19:50.697
+Deploys per service per week; % releases touching 1 service.
+
+305
+00:19:50.977 --> 00:19:52.129
+Shared database.
+
+306
+00:19:52.409 --> 00:19:53.219
+Symptom:
+
+307
+00:19:53.499 --> 00:19:55.761
+Schema changes need cross-team meetings.
+
+308
+00:19:56.041 --> 00:19:57.214
+Measure (L2):
+
+309
+00:19:57.494 --> 00:20:00.182
+Tables with 1 writer; shared databases.
+
+310
+00:20:00.462 --> 00:20:01.699
+Synchronous cycles.
+
+311
+00:20:01.979 --> 00:20:02.790
+Symptom:
+
+312
+00:20:03.070 --> 00:20:05.587
+Cascading failures, deadlock-like stalls.
+
+313
+00:20:05.867 --> 00:20:08.278
+Measure (L2): synchronous cycles.
+
+314
+00:20:08.558 --> 00:20:09.817
+Deep call chains.
+
+315
+00:20:10.097 --> 00:20:10.907
+Symptom:
+
+316
+00:20:11.187 --> 00:20:13.641
+Latency and availability multiply.
+
+317
+00:20:13.921 --> 00:20:17.910
+Measure (L2): longest sync chain, services a checkout needs.
+
+318
+00:20:18.190 --> 00:20:19.513
+Chatty interfaces.
+
+319
+00:20:19.793 --> 00:20:20.603
+Symptom:
+
+320
+00:20:20.883 --> 00:20:22.547
+Hundreds of calls per page.
+
+321
+00:20:22.827 --> 00:20:24.001
+Measure (L2):
+
+322
+00:20:24.281 --> 00:20:27.267
+Calls per request (tracing, Ch 24).
+
+323
+00:20:28.617 --> 00:20:30.025
+Shared domain library.
+
+324
+00:20:30.305 --> 00:20:31.116
+Symptom:
+
+325
+00:20:31.396 --> 00:20:33.785
+One common-model jar in every service.
+
+326
+00:20:34.065 --> 00:20:35.239
+Measure (L2):
+
+327
+00:20:35.519 --> 00:20:37.055
+Dependency analysis.
+
+328
+00:20:37.335 --> 00:20:38.295
+Hub service.
+
+329
+00:20:38.575 --> 00:20:39.385
+Symptom:
+
+330
+00:20:39.665 --> 00:20:41.969
+Everyone calls one service synchronously.
+
+331
+00:20:42.249 --> 00:20:44.681
+Measure (L2): highest sync fan-in.
+
+332
+00:20:46.031 --> 00:21:04.591
+Architecture fitness functions (Ford, Parsons and Kua, Building Evolutionary Architectures) turn these into CI checks over a machine-readable catalog of services, dependencies and databases (Backstage catalog, OpenAPI or AsyncAPI specs, tracing data).
+
+333
+00:21:04.871 --> 00:21:18.781
+L2 shows the before graph FAIL (2 cycles, 6-hop chain, 2 shared databases, 10 synchronous dependencies for checkout) and the after graph PASS (no cycles, 2 hops, no shared databases, 6 dependencies).
+
+334
+00:21:20.131 --> 00:21:21.539
+The modular monolith.
+
+335
+00:21:21.819 --> 00:21:36.581
+One deployable unit made of modules with enforced boundaries: each module owns its data (its own schema and tables), exposes a small API, and communicates with others through that API or in-process events.
+
+336
+00:21:37.931 --> 00:21:39.275
+Here is a quick table:
+
+337
+00:21:39.555 --> 00:21:44.249
+Monolith (big ball of mud), and Modular monolith, and Microservices.
+
+338
+00:21:44.529 --> 00:21:45.403
+Deploy.
+
+339
+00:21:45.683 --> 00:21:47.539
+Monolith (big ball of mud):
+
+340
+00:21:47.819 --> 00:21:48.694
+One unit.
+
+341
+00:21:48.974 --> 00:21:50.318
+Modular monolith:
+
+342
+00:21:50.598 --> 00:21:51.473
+One unit.
+
+343
+00:21:51.753 --> 00:21:52.990
+Microservices:
+
+344
+00:21:53.270 --> 00:21:54.251
+Independent.
+
+345
+00:21:54.531 --> 00:21:55.470
+Boundaries.
+
+346
+00:21:55.750 --> 00:21:57.606
+Monolith (big ball of mud):
+
+347
+00:21:57.886 --> 00:21:59.401
+Conventions, eroded.
+
+348
+00:21:59.681 --> 00:22:01.025
+Modular monolith:
+
+349
+00:22:01.305 --> 00:22:05.315
+Enforced (compiler or JPMS, ArchUnit, Spring Modulith).
+
+350
+00:22:05.595 --> 00:22:06.833
+Microservices:
+
+351
+00:22:07.113 --> 00:22:07.923
+Network.
+
+352
+00:22:08.203 --> 00:22:09.547
+Calls between parts.
+
+353
+00:22:09.827 --> 00:22:11.683
+Monolith (big ball of mud):
+
+354
+00:22:11.963 --> 00:22:13.307
+Method calls anywhere.
+
+355
+00:22:13.587 --> 00:22:14.931
+Modular monolith:
+
+356
+00:22:15.211 --> 00:22:17.899
+Method calls to published APIs, events.
+
+357
+00:22:18.179 --> 00:22:19.417
+Microservices:
+
+358
+00:22:19.697 --> 00:22:20.785
+Network calls.
+
+359
+00:22:21.065 --> 00:22:22.729
+Transactions across parts.
+
+360
+00:22:23.009 --> 00:22:24.865
+Monolith (big ball of mud):
+
+361
+00:22:25.145 --> 00:22:25.891
+Easy.
+
+362
+00:22:26.171 --> 00:22:27.515
+Modular monolith:
+
+363
+00:22:27.795 --> 00:22:30.355
+Possible, but discouraged across modules.
+
+364
+00:22:30.635 --> 00:22:31.873
+Microservices:
+
+365
+00:22:32.153 --> 00:22:33.049
+Sagas.
+
+366
+00:22:33.329 --> 00:22:34.673
+Operational cost.
+
+367
+00:22:34.953 --> 00:22:36.809
+Monolith (big ball of mud):
+
+368
+00:22:37.089 --> 00:22:37.814
+Low.
+
+369
+00:22:38.094 --> 00:22:39.438
+Modular monolith:
+
+370
+00:22:39.718 --> 00:22:40.443
+Low.
+
+371
+00:22:40.723 --> 00:22:41.961
+Microservices:
+
+372
+00:22:42.241 --> 00:22:42.923
+High.
+
+373
+00:22:43.203 --> 00:22:44.377
+Extraction later.
+
+374
+00:22:44.657 --> 00:22:46.513
+Monolith (big ball of mud):
+
+375
+00:22:46.793 --> 00:22:47.518
+Hard.
+
+376
+00:22:47.798 --> 00:22:49.142
+Modular monolith:
+
+377
+00:22:49.422 --> 00:22:51.129
+A module becomes a service.
+
+378
+00:22:52.479 --> 00:22:56.831
+L3 enforces the boundaries with the Java Platform Module System.
+
+379
+00:22:57.111 --> 00:23:11.063
+Each module exports only its api package. grocery.order requires grocery.catalog and grocery.shared, but not grocery.inventory, and it reaches inventory only by publishing OrderPlaced.
+
+380
+00:23:11.343 --> 00:23:15.567
+Then three violations are attempted, and the compiler rejects each one:
+
+381
+00:23:15.847 --> 00:23:24.380
+Importing com.grocery.catalog.internal.ProductRepository, then package com.grocery.catalog.internal is not visible.
+
+382
+00:23:24.660 --> 00:23:31.380
+Using inventory without declaring it, then package com.grocery.inventory.api is not visible.
+
+383
+00:23:32.730 --> 00:23:39.258
+Adding requires grocery.order to catalog, then cyclic dependence involving grocery.catalog.
+
+384
+00:23:39.538 --> 00:23:45.981
+In Spring Boot, Spring Modulith gives the same idea with packages instead of JPMS modules:
+
+385
+00:23:46.261 --> 00:23:51.807
+ApplicationModules.of(App.class).verify() fails the build on illegal dependencies.
+
+386
+00:23:52.087 --> 00:24:03.138
+It also offers @ApplicationModuleListener for transactional in-process events with an event publication registry (outbox semantics), and documentation of the module graph.
+
+387
+00:24:04.488 --> 00:24:22.237
+When to extract a module into a service: a different team owns it and needs its own release cadence, its load or scaling profile differs sharply, it needs different technology or isolation (PCI scope for payments), or failure isolation justifies the network hop.
+
+388
+00:24:22.517 --> 00:24:24.245
+It feels big isn't on the list.
+
+389
+00:24:25.595 --> 00:24:27.494
+Migrating: the strangler fig.
+
+390
+00:24:27.774 --> 00:24:33.406
+Martin Fowler's strangler fig replaces a legacy system gradually, not in a big-bang rewrite:
+
+391
+00:24:33.686 --> 00:24:37.633
+Put a facade in front (the API gateway or a routing proxy).
+
+392
+00:24:37.913 --> 00:24:39.534
+All traffic flows through it.
+
+393
+00:24:39.814 --> 00:24:46.833
+Pick a slice: one capability, and ideally one that's read-heavy first (order history), not the most entangled.
+
+394
+00:24:47.113 --> 00:24:53.598
+Build the new service, and feed it data via CDC or events from the legacy DB (Ch 13).
+
+395
+00:24:54.948 --> 00:24:57.807
+Shadow: the facade sends real requests to both.
+
+396
+00:24:58.087 --> 00:25:00.903
+The legacy answers, and the responses are diffed.
+
+397
+00:25:01.183 --> 00:25:02.185
+L4 C:
+
+398
+00:25:02.465 --> 00:25:10.508
+468 mismatches in 2,000 requests, all for large baskets, a rounding bug found before any user saw it.
+
+399
+00:25:10.788 --> 00:25:13.860
+Canary: after the fix, route a small share (L4:
+
+400
+00:25:14.140 --> 00:25:19.644
+214 of 2,000) to the new service while still diffing (0 mismatches).
+
+401
+00:25:19.924 --> 00:25:20.948
+Then ramp up.
+
+402
+00:25:21.228 --> 00:25:23.447
+Cut over and retire the legacy path.
+
+403
+00:25:23.727 --> 00:25:25.519
+Delete the dead code and tables.
+
+404
+00:25:25.799 --> 00:25:27.313
+Repeat with the next slice.
+
+405
+00:25:27.593 --> 00:25:37.663
+Writes are harder: move the write path only after reads are stable, and use CDC in the reverse direction during the transition if the legacy still needs the data.
+
+406
+00:25:39.013 --> 00:25:48.271
+Anti-corruption layer (ACL): translate the legacy's model to the new context's model at the boundary, so legacy concepts don't leak into the new service.
+
+407
+00:25:49.621 --> 00:25:51.307
+Microservices and teams.
+
+408
+00:25:51.587 --> 00:25:57.240
+Conway's law: systems mirror the communication structure of the organizations that build them.
+
+409
+00:25:57.520 --> 00:26:01.979
+The inverse Conway manoeuvre designs teams to get the architecture you want.
+
+410
+00:26:02.259 --> 00:26:07.635
+Team Topologies (Skelton and Pais): stream-aligned teams own services end to end.
+
+411
+00:26:07.915 --> 00:26:13.952
+A platform team provides paved roads (CI or CD, observability, the service template).
+
+412
+00:26:14.232 --> 00:26:19.373
+Enabling teams coach, and complicated-subsystem teams own things like search ranking.
+
+413
+00:26:19.653 --> 00:26:21.787
+Cognitive load is the real limit.
+
+414
+00:26:22.067 --> 00:26:28.424
+If one team owns 9 services and 4 of them page at night, the boundaries (or the team count) are wrong.
+
+415
+00:26:29.774 --> 00:26:46.286
+A service template (golden path) is how 26 services stay consistent: the four-layer structure, logging, tracing, health, config, security, the outbox or inbox library and the CI pipeline, generated from one template (Ch 37).
+
+416
+00:26:47.636 --> 00:26:48.532
+Part 3.
+
+417
+00:26:48.812 --> 00:26:50.540
+Architecture and Diagrams.
+
+418
+00:26:51.790 --> 00:26:55.481
+Component view: checkout's synchronous core and asynchronous periphery.
+
+419
+00:26:55.761 --> 00:26:57.105
+Here is the diagram.
+
+420
+00:27:00.955 --> 00:27:04.859
+Solid arrows are synchronous calls, and there are no cycles among them.
+
+421
+00:27:05.139 --> 00:27:06.675
+Dotted arrows are events.
+
+422
+00:27:06.955 --> 00:27:09.771
+Every service has its own database (not drawn).
+
+423
+00:27:11.121 --> 00:27:14.854
+Sequence: happy path, the order-details page with a budget.
+
+424
+00:27:15.134 --> 00:27:17.929
+The sequence diagram walks through it step by step.
+
+425
+00:27:18.209 --> 00:27:19.062
+A to B:
+
+426
+00:27:19.342 --> 00:27:21.326
+GET order details ord-42.
+
+427
+00:27:21.606 --> 00:27:22.502
+B to O:
+
+428
+00:27:22.782 --> 00:27:25.406
+GET order ord-42, timeout 1 s.
+
+429
+00:27:25.686 --> 00:27:27.777
+O to B: order, items, status.
+
+430
+00:27:28.057 --> 00:27:29.038
+B to P:
+
+431
+00:27:29.318 --> 00:27:32.198
+GET payment for ord-42, timeout 1 s.
+
+432
+00:27:32.478 --> 00:27:34.569
+P to B: paid via UPI.
+
+433
+00:27:34.849 --> 00:27:35.830
+B to T:
+
+434
+00:27:36.110 --> 00:27:37.817
+GET eta for ord-42.
+
+435
+00:27:38.097 --> 00:27:39.931
+T to B: eta 12 min.
+
+436
+00:27:40.211 --> 00:27:43.625
+B to A: composed view, 31 ms p50.
+
+437
+00:27:47.475 --> 00:27:51.955
+Sequence: failure path, a slow optional dependency and a dead instance.
+
+438
+00:27:52.235 --> 00:27:55.029
+The sequence diagram walks through it step by step.
+
+439
+00:27:55.309 --> 00:27:57.763
+B to D: instances of order-service.
+
+440
+00:27:58.043 --> 00:28:00.155
+D to B: pod-1, pod-2.
+
+441
+00:28:00.435 --> 00:28:01.480
+B to O1:
+
+442
+00:28:01.760 --> 00:28:03.339
+GET order ord-42.
+
+443
+00:28:03.619 --> 00:28:06.691
+O1 to B: connection refused, pod-1 died.
+
+444
+00:28:06.971 --> 00:28:10.128
+B to O2: retry idempotent GET on pod-2.
+
+445
+00:28:10.408 --> 00:28:11.923
+O2 to B: order.
+
+446
+00:28:12.203 --> 00:28:13.184
+B to T:
+
+447
+00:28:13.464 --> 00:28:15.896
+GET eta, budget 250 ms.
+
+448
+00:28:16.176 --> 00:28:19.269
+B to A: order view with tracking marked as updating.
+
+449
+00:28:19.549 --> 00:28:23.496
+D to D: pod-1 missed heartbeats, evicted after TTL.
+
+450
+00:28:27.346 --> 00:28:30.823
+State: a capability's journey from module to service.
+
+451
+00:28:31.103 --> 00:28:32.447
+Here is the diagram.
+
+452
+00:28:36.297 --> 00:28:43.956
+Merging services back is a legitimate move when two services always change together, share data or call each other in cycles.
+
+453
+00:28:45.306 --> 00:28:46.223
+Part 4.
+
+454
+00:28:46.503 --> 00:28:48.125
+Design Document Excerpt:
+
+455
+00:28:48.405 --> 00:28:50.965
+Service Boundaries for the Grocery Platform.
+
+456
+00:28:52.215 --> 00:28:53.559
+Here is a quick table:
+
+457
+00:28:53.839 --> 00:28:55.140
+Field, and Value.
+
+458
+00:28:55.420 --> 00:28:56.764
+Author or Reviewers:
+
+459
+00:28:57.044 --> 00:29:00.799
+Principal engineer or all team leads, SRE, Security.
+
+460
+00:29:01.079 --> 00:29:01.975
+Status:
+
+461
+00:29:02.255 --> 00:29:03.129
+Approved.
+
+462
+00:29:03.409 --> 00:29:04.732
+Related ADRs:
+
+463
+00:29:05.012 --> 00:29:28.863
+ADR-063 Decompose by bounded context (26 services, 8 teams); ADR-064 Database per service; ADR-065 Synchronous-call rules and fitness functions; ADR-066 Modular monolith first for new capabilities; ADR-067 Strangler fig for legacy admin.
+
+464
+00:29:30.213 --> 00:29:30.853
+1.
+
+465
+00:29:31.133 --> 00:29:32.541
+Context and Problem.
+
+466
+00:29:32.821 --> 00:29:35.445
+14 services deployed together weekly.
+
+467
+00:29:35.725 --> 00:29:47.799
+Three services shared ordersdb, there were synchronous cycles, checkout depended on 10 services, and page p99s were dominated by optional data (§1.1).
+
+468
+00:29:48.079 --> 00:29:48.783
+2.
+
+469
+00:29:49.063 --> 00:29:50.407
+Goals or Non-Goals.
+
+470
+00:29:50.687 --> 00:30:09.418
+Goals: any service deployable alone on any day; checkout available ≥ 99.9 %; order-details page p99 at most 300 ms; clear ownership of every table and API; a repeatable way to add capabilities and retire legacy.
+
+471
+00:30:09.698 --> 00:30:17.655
+Non-goals: polyglot stacks (Java or Spring for all backend services); splitting services below team granularity.
+
+472
+00:30:19.005 --> 00:30:19.752
+3.
+
+473
+00:30:20.032 --> 00:30:20.992
+Requirements.
+
+474
+00:30:22.342 --> 00:30:23.686
+Here is a quick table:
+
+475
+00:30:23.966 --> 00:30:25.438
+ID, and Requirement.
+
+476
+00:30:25.718 --> 00:30:26.763
+NFR-1:
+
+477
+00:30:27.043 --> 00:30:35.171
+0 synchronous cycles; synchronous depth at most 4; checkout synchronous dependencies at most 6 (CI fitness function).
+
+478
+00:30:35.451 --> 00:30:36.497
+NFR-2:
+
+479
+00:30:36.777 --> 00:30:41.641
+0 tables with more than one writing service (DB grant audit in CI).
+
+480
+00:30:41.921 --> 00:30:47.531
+NFR-3: ≥ 90 % of releases touch exactly one service.
+
+481
+00:30:47.811 --> 00:30:48.899
+NFR-4:
+
+482
+00:30:49.179 --> 00:30:54.043
+Every synchronous call has a timeout; optional data has a budget and a fallback.
+
+483
+00:30:54.323 --> 00:30:55.369
+NFR-5:
+
+484
+00:30:55.649 --> 00:31:03.478
+Dead instances are removed from rotation in at most 5 s; deploys cause 0 failed requests (graceful shutdown).
+
+485
+00:31:03.758 --> 00:31:04.846
+NFR-6:
+
+486
+00:31:05.126 --> 00:31:13.489
+Legacy endpoints are migrated only after a shadow diff of 0 mismatches over ≥ 7 days of traffic.
+
+487
+00:31:14.839 --> 00:31:15.543
+4.
+
+488
+00:31:15.823 --> 00:31:17.913
+Capacity and latency estimates.
+
+489
+00:31:19.263 --> 00:31:20.607
+Here is a quick table:
+
+490
+00:31:20.887 --> 00:31:23.191
+Item, and Calculation, and Result.
+
+491
+00:31:23.471 --> 00:31:24.794
+Checkout availability.
+
+492
+00:31:25.074 --> 00:31:26.141
+Calculation:
+
+493
+00:31:26.421 --> 00:31:31.775
+6 synchronous services times 99.95 % (tier-1 SLO).
+
+494
+00:31:32.055 --> 00:31:41.293
+Result: about 99.70 %, then need retries or fallbacks on idempotent reads to reach 99.9 %.
+
+495
+00:31:41.573 --> 00:31:43.365
+Order-details p99.
+
+496
+00:31:43.645 --> 00:31:52.797
+Calculation: max(order, payment) p99 about 80 ms + BFF overhead; tracking budget 250 ms.
+
+497
+00:31:53.077 --> 00:31:55.125
+Result: at most 300 ms.
+
+498
+00:31:55.405 --> 00:31:57.090
+Service count versus teams.
+
+499
+00:31:57.370 --> 00:31:58.437
+Calculation:
+
+500
+00:31:58.717 --> 00:32:00.871
+26 services or 8 teams.
+
+501
+00:32:01.151 --> 00:32:03.349
+Result: ~3 per team (OK).
+
+502
+00:32:03.629 --> 00:32:05.293
+Deploy frequency target.
+
+503
+00:32:05.573 --> 00:32:06.639
+Calculation:
+
+504
+00:32:06.919 --> 00:32:09.159
+26 services times 3 or week.
+
+505
+00:32:09.439 --> 00:32:15.135
+Result: ~80 deploys or week, needs a paved-road pipeline (Ch 26).
+
+506
+00:32:16.485 --> 00:32:17.253
+5.
+
+507
+00:32:17.533 --> 00:32:18.728
+Proposed design.
+
+508
+00:32:19.008 --> 00:32:19.947
+Boundaries:
+
+509
+00:32:20.227 --> 00:32:32.707
+26 services as in Ch 00 §3.3, grouped under 8 stream-aligned teams, with a platform team for gateway, discovery, observability and the service template.
+
+510
+00:32:32.987 --> 00:32:37.616
+Data: a database (or at least a schema with exclusive grants) per service.
+
+511
+00:32:37.896 --> 00:32:40.669
+Reference data is replicated via events.
+
+512
+00:32:40.949 --> 00:32:43.531
+Reporting goes through CDC to the warehouse.
+
+513
+00:32:44.881 --> 00:32:48.678
+Communication: events for facts (outbox, Ch 13).
+
+514
+00:32:48.958 --> 00:32:55.657
+Synchronous calls only where an answer is needed now; no cycles, depth at most 4, timeouts everywhere.
+
+515
+00:32:55.937 --> 00:33:00.843
+Payment, then order callbacks are replaced by payment.payment.captured.v1.
+
+516
+00:33:01.123 --> 00:33:02.019
+Discovery:
+
+517
+00:33:02.299 --> 00:33:11.473
+Kubernetes Services, readiness probes, graceful shutdown (preStop + drain), client retries for idempotent calls on another instance.
+
+518
+00:33:11.753 --> 00:33:21.566
+Composition: a mobile BFF and a web BFF with parallel calls, per-field required or optional classification, budgets, partial responses.
+
+519
+00:33:22.916 --> 00:33:32.964
+Fitness functions in CI: service catalog + OpenAPI or AsyncAPI, then cycle, depth, fan-in and shared-DB checks (L2).
+
+520
+00:33:33.244 --> 00:33:37.084
+Spring Modulith verify() inside each service with modules.
+
+521
+00:33:37.364 --> 00:33:39.519
+New capabilities start as modules.
+
+522
+00:33:39.799 --> 00:33:43.169
+Extraction criteria are an ADR per extraction.
+
+523
+00:33:43.449 --> 00:33:50.937
+Legacy admin is migrated by strangler fig through the gateway: shadow, then canary, then cutover, slice by slice.
+
+524
+00:33:51.217 --> 00:33:51.964
+7.
+
+525
+00:33:52.244 --> 00:33:53.759
+Alternatives considered.
+
+526
+00:33:55.109 --> 00:33:56.453
+Here is a quick table:
+
+527
+00:33:56.733 --> 00:33:59.271
+Option, and Pros, and Cons, and Verdict.
+
+528
+00:33:59.551 --> 00:34:01.706
+Stay with the current 14 services.
+
+529
+00:34:01.986 --> 00:34:02.839
+Pros:
+
+530
+00:34:03.119 --> 00:34:04.271
+No migration.
+
+531
+00:34:04.551 --> 00:34:05.362
+Cons:
+
+532
+00:34:05.642 --> 00:34:07.647
+Distributed monolith costs stay.
+
+533
+00:34:07.927 --> 00:34:08.738
+Verdict:
+
+534
+00:34:09.018 --> 00:34:09.935
+Rejected.
+
+535
+00:34:10.215 --> 00:34:13.970
+Bounded-context services + rules + fitness functions.
+
+536
+00:34:14.250 --> 00:34:15.103
+Pros:
+
+537
+00:34:15.383 --> 00:34:17.623
+Autonomy, isolation, measurable.
+
+538
+00:34:17.903 --> 00:34:18.714
+Cons:
+
+539
+00:34:18.994 --> 00:34:20.637
+More services to operate.
+
+540
+00:34:20.917 --> 00:34:21.727
+Verdict:
+
+541
+00:34:22.007 --> 00:34:22.839
+Chosen.
+
+542
+00:34:23.119 --> 00:34:25.722
+Consolidate into one modular monolith.
+
+543
+00:34:26.002 --> 00:34:26.855
+Pros:
+
+544
+00:34:27.135 --> 00:34:29.397
+Simplest ops, local transactions.
+
+545
+00:34:29.677 --> 00:34:30.487
+Cons:
+
+546
+00:34:30.767 --> 00:34:35.077
+8 teams on one deploy pipeline; scaling of search or tracking differs.
+
+547
+00:34:35.357 --> 00:34:36.167
+Verdict:
+
+548
+00:34:36.447 --> 00:34:39.754
+Rejected for the whole platform; used within services.
+
+549
+00:34:40.034 --> 00:34:42.317
+Finer-grained services (per entity).
+
+550
+00:34:42.597 --> 00:34:43.450
+Pros:
+
+551
+00:34:43.730 --> 00:34:44.989
+Small codebases.
+
+552
+00:34:45.269 --> 00:34:46.079
+Cons:
+
+553
+00:34:46.359 --> 00:34:48.727
+Chattiness, cycles, cognitive load.
+
+554
+00:34:49.007 --> 00:34:49.818
+Verdict:
+
+555
+00:34:50.098 --> 00:34:51.015
+Rejected.
+
+556
+00:34:52.365 --> 00:34:53.539
+Service mesh now.
+
+557
+00:34:53.819 --> 00:34:54.672
+Pros:
+
+558
+00:34:54.952 --> 00:34:57.213
+Uniform retries or mTLS.
+
+559
+00:34:57.493 --> 00:34:58.304
+Cons:
+
+560
+00:34:58.584 --> 00:35:00.227
+Operational complexity.
+
+561
+00:35:00.507 --> 00:35:01.317
+Verdict:
+
+562
+00:35:01.597 --> 00:35:05.907
+Deferred; revisit with the mTLS requirement (Ch 23).
+
+563
+00:35:07.257 --> 00:35:07.939
+8.
+
+564
+00:35:08.219 --> 00:35:09.371
+Failure modes.
+
+565
+00:35:09.651 --> 00:35:15.219
+A dependency is down: required, then fail fast with a clear error, optional, then degrade.
+
+566
+00:35:15.499 --> 00:35:20.811
+An instance dies: removed by readiness or endpoints, and idempotent calls retry.
+
+567
+00:35:21.091 --> 00:35:24.121
+Config store down: serve the last known config.
+
+568
+00:35:24.401 --> 00:35:29.051
+Legacy and new disagree during migration: shadow diff blocks the cutover.
+
+569
+00:35:29.331 --> 00:35:30.035
+10.
+
+570
+00:35:30.315 --> 00:35:31.403
+Observability.
+
+571
+00:35:31.683 --> 00:35:46.851
+A service dependency graph from tracing (actual versus declared), calls per request, synchronous depth per endpoint, deploys per service, % multi-service releases, error budget per service, partial-response rate per BFF field.
+
+572
+00:35:48.201 --> 00:35:49.055
+14.
+
+573
+00:35:49.335 --> 00:35:53.921
+Decision (ADR-063 to 067 summary).
+
+574
+00:35:54.201 --> 00:36:00.089
+The platform is 26 bounded-context services owned by 8 teams, each with its own data.
+
+575
+00:36:00.369 --> 00:36:01.777
+Facts flow as events.
+
+576
+00:36:02.057 --> 00:36:08.884
+Synchronous calls follow no-cycle or shallow or timeout rules enforced by fitness functions in CI.
+
+577
+00:36:09.164 --> 00:36:11.895
+New capabilities start as enforced modules.
+
+578
+00:36:12.175 --> 00:36:15.652
+Legacy is replaced by strangler fig with shadow diffing.
+
+579
+00:36:17.002 --> 00:36:17.962
+Part 5.
+
+580
+00:36:18.242 --> 00:36:20.226
+Hands-On Code, Level Ladder.
+
+581
+00:36:21.476 --> 00:36:22.820
+Here is a quick table:
+
+582
+00:36:23.100 --> 00:36:25.788
+Level, and New requirement that forces the step.
+
+583
+00:36:26.068 --> 00:36:26.900
+L1:
+
+584
+00:36:27.180 --> 00:36:31.575
+What does splitting a request across services do to availability and latency?
+
+585
+00:36:31.855 --> 00:36:32.921
+(plain Java).
+
+586
+00:36:33.201 --> 00:36:34.012
+L2:
+
+587
+00:36:34.292 --> 00:36:37.919
+Detect distributed-monolith smells automatically, in CI.
+
+588
+00:36:38.199 --> 00:36:39.649
+(graph fitness functions).
+
+589
+00:36:39.929 --> 00:36:40.783
+L3:
+
+590
+00:36:41.063 --> 00:36:45.073
+Start the new capability modular, with boundaries nobody can bypass.
+
+591
+00:36:45.353 --> 00:36:47.273
+(JPMS, real javac).
+
+592
+00:36:47.553 --> 00:36:48.428
+L4:
+
+593
+00:36:48.708 --> 00:36:53.977
+Find healthy instances, compose pages within a budget, and migrate legacy safely.
+
+594
+00:36:54.257 --> 00:36:55.708
+(real HTTP).
+
+595
+00:36:57.058 --> 00:36:57.826
+Info:
+
+596
+00:36:58.106 --> 00:37:00.282
+How the code in this chapter was verified.
+
+597
+00:37:00.562 --> 00:37:02.823
+L1 and L2 are plain Java.
+
+598
+00:37:03.103 --> 00:37:10.570
+L3 is a real multi-module build with javac --module-source-path, and the compiler errors are copied verbatim.
+
+599
+00:37:10.850 --> 00:37:25.655
+L4 starts real HTTP servers (the JDK's com.sun.net.httpserver) on localhost and calls them with java.net.http.HttpClient on virtual threads (Java 21).
+
+600
+00:37:25.935 --> 00:37:33.167
+The Spring Modulith or Spring Cloud snippets weren't compiled here (no Maven Central access) and are marked VERIFY.
+
+601
+00:37:34.517 --> 00:37:38.869
+L1, Concept: the arithmetic of splitting a request (plain Java).
+
+602
+00:37:39.149 --> 00:37:40.664
+Here is the Java code.
+
+603
+00:37:40.944 --> 00:37:44.720
+It runs to 46 lines; the full listing is in the chapter.
+
+604
+00:37:45.000 --> 00:37:49.672
+CallChainL1.java, run with: java CallChainL1.java.
+
+605
+00:37:49.952 --> 00:37:54.709
+What splitting a request across services does to availability and tail latency.
+
+606
+00:37:54.989 --> 00:37:56.184
+One service call:
+
+607
+00:37:56.464 --> 00:38:03.760
+99.9 % available; latency lognormal-ish with median ~20 ms and a slow tail.
+
+608
+00:38:06.610 --> 00:38:08.402
+Actual output from running it:
+
+609
+00:38:09.752 --> 00:38:10.669
+On screen:
+
+610
+00:38:10.949 --> 00:38:11.568
+A.
+
+611
+00:38:11.848 --> 00:38:16.541
+Synchronous dependencies in SERIES, each 99.9 % available.
+
+612
+00:38:16.821 --> 00:38:24.395
+1 services on the request path, then 99.90 % available ( 43 min of downtime a month).
+
+613
+00:38:24.675 --> 00:38:32.973
+3 services on the request path, then 99.70 % available ( 129 min of downtime a month).
+
+614
+00:38:33.253 --> 00:38:41.573
+5 services on the request path, then 99.50 % available ( 216 min of downtime a month).
+
+615
+00:38:41.853 --> 00:38:49.853
+8 services on the request path, then 99.20 % available ( 344 min of downtime a month).
+
+616
+00:38:50.133 --> 00:38:58.133
+12 services on the request path, then 98.81 % available ( 516 min of downtime a month).
+
+617
+00:38:58.413 --> 00:38:59.096
+B.
+
+618
+00:38:59.376 --> 00:39:04.603
+Latency of one page that calls N services (each median ~20 ms).
+
+619
+00:39:04.883 --> 00:39:15.421
+N=1 sequential p50 20 ms p99 64 ms parallel p50 20 ms p99 64 ms.
+
+620
+00:39:15.701 --> 00:39:27.008
+N=4 sequential p50 87 ms p99 162 ms parallel p50 33 ms p99 82 ms.
+
+621
+00:39:27.288 --> 00:39:39.256
+N=8 sequential p50 178 ms p99 277 ms parallel p50 40 ms p99 91 ms.
+
+622
+00:39:39.536 --> 00:39:40.219
+C.
+
+623
+00:39:40.499 --> 00:39:46.792
+Fan-out: chance that at least one of N parallel calls hits its own p99 (tail at. scale).
+
+624
+00:39:47.072 --> 00:39:53.323
+N= 1, then 1.0 % of page loads see a p99-slow dependency.
+
+625
+00:39:53.603 --> 00:39:55.117
+The rest is in the chapter.
+
+626
+00:39:57.967 --> 00:40:05.818
+What L1 shows: each synchronous dependency in series costs availability multiplicatively and latency additively.
+
+627
+00:40:06.098 --> 00:40:18.877
+Parallel calls turn the sum into a maximum, but the more dependencies a page fans out to, the more often one of them is having a bad moment (23 % of page loads at 26 dependencies).
+
+628
+00:40:19.157 --> 00:40:24.021
+That's why the platform minimizes synchronous dependencies and budgets optional ones.
+
+629
+00:40:25.371 --> 00:40:28.016
+L2, Fitness functions for the service graph.
+
+630
+00:40:28.296 --> 00:40:39.709
+Requirement: detect distributed-monolith smells automatically on every merge, from the service catalog (dependencies and databases), not from opinions in design reviews.
+
+631
+00:40:41.059 --> 00:40:42.574
+Here is the Java code.
+
+632
+00:40:42.854 --> 00:40:47.163
+It runs to 161 lines; the full listing is in the chapter.
+
+633
+00:40:47.443 --> 00:40:51.518
+FitnessL2.java, run with: java FitnessL2.java.
+
+634
+00:40:51.798 --> 00:40:58.475
+Architecture fitness functions over the platform's service graph: the distributed monolith smells as numbers.
+
+635
+00:40:58.755 --> 00:41:07.353
+The same checks run in CI against a machine-readable service catalog (Backstage catalog-info, OpenAPI clients, etcetera.).
+
+636
+00:41:10.203 --> 00:41:11.995
+Actual output from running it:
+
+637
+00:41:13.345 --> 00:41:14.262
+On screen:
+
+638
+00:41:14.542 --> 00:41:18.425
+BEFORE: the 'microservices' that grew out of the monolith. edges:
+
+639
+00:41:18.705 --> 00:41:29.627
+16 sync, 0 async (events). synchronous cycles: catalog-service, inventory-service, fulfilment-service. order-service, payment-service. longest sync chain:
+
+640
+00:41:29.907 --> 00:41:40.339
+6 hops api-gateway, checkout-service, order-service. invoice-service, pricing-service, catalog-service, inventory-service. a checkout needs, synchronously:
+
+641
+00:41:40.619 --> 00:42:03.254
+10 services, then 99.00 % available if each is 99.9 %. shared databases: catalogdb=catalog-service, pricing-service. ordersdb=fulfilment-service, invoice-service, order-service. highest sync fan-in: order-service (4 callers). fitness (no cycles, no shared DB, chain at most 4):
+
+642
+00:42:03.534 --> 00:42:04.302
+FAIL.
+
+643
+00:42:04.582 --> 00:42:08.273
+AFTER: boundaries redrawn, facts flow as events. edges:
+
+644
+00:42:08.553 --> 00:42:10.622
+7 sync, 8 async (events).
+
+645
+00:42:10.902 --> 00:42:12.417
+The rest is in the chapter.
+
+646
+00:42:15.267 --> 00:42:16.077
+Before:
+
+647
+00:42:16.357 --> 00:42:17.744
+Two synchronous cycles.
+
+648
+00:42:18.024 --> 00:42:24.787
+Payment calls order back, fulfilment and order call each other, and inventory calls catalog, which calls inventory.
+
+649
+00:42:25.067 --> 00:42:31.829
+A 6-hop chain: invoicing, reached from order during checkout, calls pricing, then catalog, then inventory.
+
+650
+00:42:32.109 --> 00:42:33.603
+Two shared databases.
+
+651
+00:42:33.883 --> 00:42:41.371
+A checkout needs 10 services up at once (99.00 % at 99.9 % each).
+
+652
+00:42:42.721 --> 00:42:43.531
+After:
+
+653
+00:42:43.811 --> 00:42:49.550
+Callbacks became events (payment.payment.captured.v1, fulfilment.order.packed.v1).
+
+654
+00:42:49.830 --> 00:42:53.222
+Catalog pushes changes as events instead of being called.
+
+655
+00:42:53.502 --> 00:42:55.721
+Invoicing builds its data from events.
+
+656
+00:42:56.001 --> 00:42:58.497
+Checkout calls its dependencies in parallel.
+
+657
+00:42:58.777 --> 00:43:03.875
+Result: no cycles, depth 2, no shared databases, 6 services for a checkout.
+
+658
+00:43:04.155 --> 00:43:04.902
+PASS.
+
+659
+00:43:06.252 --> 00:43:09.367
+In CI, the graph comes from a machine-readable catalog:
+
+660
+00:43:09.647 --> 00:43:18.820
+Backstage catalog-info.yaml with dependsOn or providesApis or consumesApis, plus the OpenAPI or AsyncAPI specs.
+
+661
+00:43:19.100 --> 00:43:24.796
+Tracing data (Ch 24) verifies that the declared graph matches the actual one.
+
+662
+00:43:26.146 --> 00:43:31.223
+L3, A modular monolith with compiler-enforced boundaries (real javac).
+
+663
+00:43:31.503 --> 00:43:37.007
+Requirement: the new subscriptions capability starts inside order-service as modules.
+
+664
+00:43:37.287 --> 00:43:41.191
+Boundaries must be impossible to bypass, not just documented.
+
+665
+00:43:42.541 --> 00:43:44.525
+module-info.java files.
+
+666
+00:43:44.805 --> 00:43:46.320
+Here is the Java code.
+
+667
+00:43:46.600 --> 00:44:02.579
+It runs to 30 lines; the full listing is in the chapter. src or grocery.shared or module-info.java. src or grocery.catalog or module-info.java. src or grocery.inventory or module-info.java.
+
+668
+00:44:05.429 --> 00:44:06.495
+Module code.
+
+669
+00:44:06.775 --> 00:44:08.290
+Here is the Java code.
+
+670
+00:44:08.570 --> 00:44:18.127
+It runs to 110 lines; the full listing is in the chapter. src or grocery.app or com or grocery or app or Main.java.
+
+671
+00:44:20.977 --> 00:44:24.604
+build.sh (builds, runs, then tries three violations).
+
+672
+00:44:24.884 --> 00:44:26.207
+Here is the shell code.
+
+673
+00:44:26.487 --> 00:44:30.135
+It runs to 32 lines; the full listing is in the chapter.
+
+674
+00:44:30.415 --> 00:44:36.431
+Modular monolith with the Java Platform Module System: boundaries enforced by the COMPILER.
+
+675
+00:44:39.281 --> 00:44:42.374
+Actual output from running./build.sh:
+
+676
+00:44:43.724 --> 00:44:56.524
+On screen: == 1. build and run the legal module graph. placed: ord-1 Whole wheat atta 5 kg x3 = 960 rupees. inventory after the event:
+
+677
+00:44:56.804 --> 00:45:23.556
+ATTA-5KG available = 37. module graph: grocery.app, grocery.catalog, grocery.inventory, grocery.order. grocery.shared. == 2. order-service code reaches into catalog's internals (the classic shortcut). src or grocery.order or com or grocery per order or api or OrderModule.java:4: error: package. com.grocery.catalog.internal is not visible.
+
+678
+00:45:23.836 --> 00:45:42.481
+1 error. == 3. order calls inventory directly without declaring the dependency. src or grocery.order or com or grocery per order or api or OrderModule.java:4: error: package. com.grocery.inventory.api is not visible.
+
+679
+00:45:42.761 --> 00:45:43.636
+1 error.
+
+680
+00:45:43.916 --> 00:45:45.431
+The rest is in the chapter.
+
+681
+00:45:48.281 --> 00:45:57.539
+The legal graph builds and runs: order uses catalog's published API, and inventory reacts to OrderPlaced without order knowing it exists.
+
+682
+00:45:57.819 --> 00:45:59.974
+Stock went 40, then 37.
+
+683
+00:46:00.254 --> 00:46:09.875
+Each shortcut is a compile error, not a code-review comment: internals are invisible, undeclared dependencies are invisible, and cycles are rejected.
+
+684
+00:46:10.155 --> 00:46:23.787
+Extracting grocery.inventory into a service later means turning its exported API into an HTTP or gRPC contract and the in-process OrderPlaced into a Kafka event (Ch 14).
+
+685
+00:46:24.067 --> 00:46:25.817
+The boundary already exists.
+
+686
+00:46:27.167 --> 00:46:28.937
+The same idea in Spring Boot:
+
+687
+00:46:29.217 --> 00:46:32.161
+Spring Modulith, with packages as modules.
+
+688
+00:46:33.511 --> 00:46:35.026
+Here is the Java code.
+
+689
+00:46:35.306 --> 00:46:48.639
+It runs to 28 lines; the full listing is in the chapter. src or test or java or com or grocery per order or ModularityTests.java, VERIFY against your Spring Modulith version.
+
+690
+00:46:51.489 --> 00:46:56.503
+L4, Discovery, composition and the strangler fig over real HTTP.
+
+691
+00:46:56.783 --> 00:46:57.721
+Requirement:
+
+692
+00:46:58.001 --> 00:47:00.519
+Callers must keep working when an instance dies.
+
+693
+00:47:00.799 --> 00:47:05.641
+The order-details page must meet its p99 even when tracking is slow.
+
+694
+00:47:05.921 --> 00:47:11.361
+Order history must move off the legacy system without a single wrong answer reaching users.
+
+695
+00:47:12.711 --> 00:47:14.226
+Here is the Java code.
+
+696
+00:47:14.506 --> 00:47:18.794
+It runs to 211 lines; the full listing is in the chapter.
+
+697
+00:47:19.074 --> 00:47:24.237
+HttpL4.java, run with: java HttpL4.java.
+
+698
+00:47:24.517 --> 00:47:31.898
+Real HTTP on localhost (JDK HttpServer + HttpClient, virtual threads):
+
+699
+00:47:32.178 --> 00:47:38.706
+A. service discovery with heartbeats or TTL versus a static instance list, while an instance dies.
+
+700
+00:47:41.556 --> 00:47:43.348
+Actual output from running it:
+
+701
+00:47:44.698 --> 00:47:45.615
+On screen:
+
+702
+00:47:45.895 --> 00:47:46.514
+A.
+
+703
+00:47:46.794 --> 00:47:55.007
+3,000 calls to catalog-service (3 instances); instance 2 crashes after call 500. static instance list:
+
+704
+00:47:55.287 --> 00:48:03.714
+2,167 ok, 833 failed. registry (TTL 300 ms) + retry:
+
+705
+00:48:03.994 --> 00:48:06.277
+3,000 ok, 0 failed.
+
+706
+00:48:06.557 --> 00:48:07.239
+B.
+
+707
+00:48:07.519 --> 00:48:42.863
+Order-details page = order (20 ms) + payment (30 ms) + tracking (25 ms, 3 % of. calls take 2 s); 500 page loads each. sequential p50 79 ms p99 2054 ms partial pages 0. parallel p50 31 ms p99 2002 ms partial pages 0. parallel + 250 ms budget for tracking p50 31 ms p99 251 ms partial pages 10.
+
+708
+00:48:43.143 --> 00:48:43.825
+C.
+
+709
+00:48:44.105 --> 00:48:51.785
+Strangler fig for GET or orders/id/history: monolith versus new order-history-service. shadow phase:
+
+710
+00:48:52.065 --> 00:49:03.521
+2,000 requests served by the monolith, new service diffed, then 468. mismatches (for example, orders 13, 14, 15). after the fix, canary:
+
+711
+00:49:03.801 --> 00:49:09.604
+214 of 2,000 served by the new service, 0 mismatches, then route.
+
+712
+00:49:09.884 --> 00:49:12.871
+100 %, then retire the monolith path.
+
+713
+00:49:15.721 --> 00:49:16.339
+A.
+
+714
+00:49:16.619 --> 00:49:20.822
+With a static list, every third call after the crash went to a dead instance:
+
+715
+00:49:21.102 --> 00:49:22.894
+833 failures.
+
+716
+00:49:23.174 --> 00:49:31.089
+With heartbeats (100 ms), a 300 ms TTL and one retry on another instance for this idempotent GET:
+
+717
+00:49:31.369 --> 00:49:32.521
+0 failures.
+
+718
+00:49:32.801 --> 00:49:41.974
+On Kubernetes, the endpoints controller and readiness probes play the registry's role, and the retry belongs in the client or mesh (Ch 18).
+
+719
+00:49:42.254 --> 00:49:42.937
+B.
+
+720
+00:49:43.217 --> 00:49:54.481
+Parallel calls fixed the median (79, then 31 ms) but not the p99 (~2 s), because the slow optional call still gated the response.
+
+721
+00:49:54.761 --> 00:50:04.723
+A 250 ms budget for tracking made the p99 251 ms, with 10 of 500 pages showing tracking updating.
+
+722
+00:50:06.073 --> 00:50:06.756
+C.
+
+723
+00:50:07.036 --> 00:50:16.828
+Shadowing found 468 mismatches in 2,000 requests, all for baskets where the new service rounded differently, before any customer saw them.
+
+724
+00:50:17.108 --> 00:50:27.220
+After the fix, a 10 % canary (214 requests) plus continued diffing showed 0 mismatches, so the route can go to 100 %.
+
+725
+00:50:27.500 --> 00:50:30.337
+Spring equivalents (not compiled here, VERIFY):
+
+726
+00:50:30.617 --> 00:50:31.513
+Discovery:
+
+727
+00:50:31.793 --> 00:50:40.945
+Kubernetes Services + spring.cloud.kubernetes.discovery, or @LoadBalanced RestClient.Builder with Spring Cloud LoadBalancer.
+
+728
+00:50:41.225 --> 00:50:42.164
+Composition:
+
+729
+00:50:42.444 --> 00:50:49.804
+StructuredTaskScope (preview in 21, check your JDK) or CompletableFuture.allOf with per-call timeouts.
+
+730
+00:50:51.154 --> 00:50:52.349
+Strangler routing:
+
+731
+00:50:52.629 --> 00:51:05.535
+Spring Cloud Gateway predicates (Path=/orders//history, Weight=history, 10), with shadow traffic via a gateway filter that mirrors requests asynchronously and logs diffs.
+
+732
+00:51:06.885 --> 00:51:09.019
+What changed from L1 to L4.
+
+733
+00:51:09.299 --> 00:51:10.643
+Here is a quick table:
+
+734
+00:51:10.923 --> 00:51:14.379
+Concern, and L1, and L2, and L3, and L4.
+
+735
+00:51:14.659 --> 00:51:15.725
+Availability.
+
+736
+00:51:16.005 --> 00:51:16.837
+L1:
+
+737
+00:51:17.117 --> 00:51:20.616
+12 serial deps, then 98.81 %.
+
+738
+00:51:20.896 --> 00:51:21.707
+L2:
+
+739
+00:51:21.987 --> 00:51:23.800
+Checkout deps 10, then 6.
+
+740
+00:51:24.080 --> 00:51:24.933
+L3:
+
+741
+00:51:25.213 --> 00:51:26.941
+One process, no network.
+
+742
+00:51:27.221 --> 00:51:28.096
+L4:
+
+743
+00:51:28.376 --> 00:51:29.400
+Dead instance:
+
+744
+00:51:29.680 --> 00:51:32.475
+833, then 0 failed calls.
+
+745
+00:51:32.755 --> 00:51:33.672
+Latency.
+
+746
+00:51:33.952 --> 00:51:34.784
+L1:
+
+747
+00:51:35.064 --> 00:51:38.520
+Serial 8 calls p50 178 ms.
+
+748
+00:51:38.800 --> 00:51:39.611
+L2:
+
+749
+00:51:39.891 --> 00:51:41.192
+Depth 6, then 2.
+
+750
+00:51:41.472 --> 00:51:42.325
+L3:
+
+751
+00:51:42.605 --> 00:51:43.608
+Method calls.
+
+752
+00:51:43.888 --> 00:51:44.763
+L4:
+
+753
+00:51:45.043 --> 00:51:49.949
+Page p99 2,054, then 251 ms.
+
+754
+00:51:50.229 --> 00:51:50.997
+Coupling.
+
+755
+00:51:51.277 --> 00:51:52.088
+L2:
+
+756
+00:51:52.368 --> 00:51:54.971
+2 cycles, 2 shared DBs, then 0.
+
+757
+00:51:55.251 --> 00:51:56.104
+L3:
+
+758
+00:51:56.384 --> 00:51:58.304
+Violations are compile errors.
+
+759
+00:51:58.584 --> 00:51:59.459
+L4:
+
+760
+00:51:59.739 --> 00:52:02.576
+Facade decouples clients from where logic lives.
+
+761
+00:52:02.856 --> 00:52:03.923
+Change safety.
+
+762
+00:52:04.203 --> 00:52:05.013
+L2:
+
+763
+00:52:05.293 --> 00:52:06.744
+Fitness checks in CI.
+
+764
+00:52:07.024 --> 00:52:07.877
+L3:
+
+765
+00:52:08.157 --> 00:52:10.184
+Boundaries enforced by javac.
+
+766
+00:52:10.464 --> 00:52:11.339
+L4:
+
+767
+00:52:11.619 --> 00:52:15.373
+Shadow diff (468, then 0) before cutover.
+
+768
+00:52:16.723 --> 00:52:17.662
+Part 6.
+
+769
+00:52:17.942 --> 00:52:19.222
+Production Concerns.
+
+770
+00:52:20.472 --> 00:52:21.624
+Failure modes.
+
+771
+00:52:21.904 --> 00:52:23.248
+Here is a quick table:
+
+772
+00:52:23.528 --> 00:52:27.411
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+773
+00:52:27.691 --> 00:52:30.037
+Cascading failure through synchronous chains.
+
+774
+00:52:30.317 --> 00:52:31.512
+Detection signal:
+
+775
+00:52:31.792 --> 00:52:34.779
+Latency or error spikes propagating up the graph.
+
+776
+00:52:35.059 --> 00:52:36.275
+Blast radius:
+
+777
+00:52:36.555 --> 00:52:38.325
+Every caller of the slow service.
+
+778
+00:52:38.605 --> 00:52:39.608
+Mitigation:
+
+779
+00:52:39.888 --> 00:52:44.517
+Timeouts, bulkheads, circuit breakers (Ch 18), shallow graphs (L2).
+
+780
+00:52:44.797 --> 00:52:45.971
+Synchronous cycle.
+
+781
+00:52:46.251 --> 00:52:47.445
+Detection signal:
+
+782
+00:52:47.725 --> 00:52:49.965
+Thread pools exhausted on both sides.
+
+783
+00:52:50.245 --> 00:52:51.461
+Blast radius:
+
+784
+00:52:51.741 --> 00:52:53.747
+Both services, then their callers.
+
+785
+00:52:54.027 --> 00:52:55.029
+Mitigation:
+
+786
+00:52:55.309 --> 00:52:57.187
+Replace one direction with events.
+
+787
+00:52:57.467 --> 00:52:59.152
+Shared database contention.
+
+788
+00:52:59.432 --> 00:53:00.627
+Detection signal:
+
+789
+00:53:00.907 --> 00:53:03.125
+Lock waits from another service's queries.
+
+790
+00:53:03.405 --> 00:53:04.621
+Blast radius:
+
+791
+00:53:04.901 --> 00:53:06.565
+Services sharing the DB.
+
+792
+00:53:06.845 --> 00:53:07.848
+Mitigation:
+
+793
+00:53:08.128 --> 00:53:10.347
+Database per service; read models.
+
+794
+00:53:10.627 --> 00:53:12.739
+Dead instance still receiving traffic.
+
+795
+00:53:13.019 --> 00:53:14.213
+Detection signal:
+
+796
+00:53:14.493 --> 00:53:16.264
+Connection errors from one pod.
+
+797
+00:53:16.544 --> 00:53:17.760
+Blast radius:
+
+798
+00:53:18.040 --> 00:53:20.216
+1 or N of requests (L4 A:
+
+799
+00:53:20.496 --> 00:53:23.483
+833 of 2,500).
+
+800
+00:53:23.763 --> 00:53:24.765
+Mitigation:
+
+801
+00:53:25.045 --> 00:53:30.187
+Readiness probes, heartbeat TTL, retry on another instance, graceful shutdown.
+
+802
+00:53:31.537 --> 00:53:33.265
+Slow optional dependency.
+
+803
+00:53:33.545 --> 00:53:34.739
+Detection signal:
+
+804
+00:53:35.019 --> 00:53:37.835
+Page p99 tracks that dependency.
+
+805
+00:53:38.115 --> 00:53:39.331
+Blast radius:
+
+806
+00:53:39.611 --> 00:53:41.766
+Whole page latency (L4 B:
+
+807
+00:53:42.046 --> 00:53:42.899
+2 s).
+
+808
+00:53:43.179 --> 00:53:44.182
+Mitigation:
+
+809
+00:53:44.462 --> 00:53:46.297
+Budgets, partial responses.
+
+810
+00:53:46.577 --> 00:53:48.433
+Version skew between services.
+
+811
+00:53:48.713 --> 00:53:49.907
+Detection signal:
+
+812
+00:53:50.187 --> 00:53:53.579
+4xx or 5xx after one side deploys.
+
+813
+00:53:53.859 --> 00:53:55.075
+Blast radius:
+
+814
+00:53:55.355 --> 00:53:56.955
+Calls between those versions.
+
+815
+00:53:57.235 --> 00:53:58.238
+Mitigation:
+
+816
+00:53:58.518 --> 00:54:05.259
+Backward-compatible contracts, consumer-driven contract tests (Ch 29), expand or contract.
+
+817
+00:54:05.539 --> 00:54:07.587
+Config push breaks many services.
+
+818
+00:54:07.867 --> 00:54:09.062
+Detection signal:
+
+819
+00:54:09.342 --> 00:54:11.454
+Errors right after a config change.
+
+820
+00:54:11.734 --> 00:54:12.950
+Blast radius:
+
+821
+00:54:13.230 --> 00:54:15.001
+All consumers of that config.
+
+822
+00:54:15.281 --> 00:54:16.283
+Mitigation:
+
+823
+00:54:16.563 --> 00:54:19.742
+Validate, stage, and roll back config like code.
+
+824
+00:54:20.022 --> 00:54:22.753
+Legacy or new divergence during migration.
+
+825
+00:54:23.033 --> 00:54:24.227
+Detection signal:
+
+826
+00:54:24.507 --> 00:54:25.979
+Shadow diff mismatches.
+
+827
+00:54:26.259 --> 00:54:27.475
+Blast radius:
+
+828
+00:54:27.755 --> 00:54:29.505
+Users if cut over too early.
+
+829
+00:54:29.785 --> 00:54:30.787
+Mitigation:
+
+830
+00:54:31.067 --> 00:54:35.270
+Shadow, then canary, then ramp, with diff = 0 as the gate.
+
+831
+00:54:36.620 --> 00:54:37.708
+Observability.
+
+832
+00:54:37.988 --> 00:54:45.113
+Distributed tracing on every request (W3C trace context through HTTP and Kafka headers).
+
+833
+00:54:45.393 --> 00:54:50.279
+It's the only way to see the real call graph and where time goes (Ch 24).
+
+834
+00:54:50.559 --> 00:54:58.473
+RED metrics per service and per dependency (rate, errors, duration), with dashboards generated by the service template.
+
+835
+00:54:58.753 --> 00:55:02.487
+Dependency graph from traces versus the declared catalog.
+
+836
+00:55:02.767 --> 00:55:07.076
+Alert on new undeclared synchronous edges (they're how cycles creep back).
+
+837
+00:55:07.356 --> 00:55:15.612
+Deployment metrics: deploys per service, lead time, change failure rate, % multi-service releases (the release train smell).
+
+838
+00:55:16.962 --> 00:55:19.927
+BFF partial-response rate per optional field.
+
+839
+00:55:20.207 --> 00:55:23.343
+A rising rate means a dependency is degrading.
+
+840
+00:55:24.693 --> 00:55:25.632
+Security.
+
+841
+00:55:25.912 --> 00:55:36.664
+Zero trust between services: mTLS (mesh or library), service identity (SPIFFE), and authorization per endpoint (which service may call which API).
+
+842
+00:55:36.944 --> 00:55:40.677
+Don't rely on a trusted internal network (Ch 23).
+
+843
+00:55:40.957 --> 00:55:48.872
+Propagate end-user context as a token (a JWT exchanged for downstream scopes), not as trusted headers.
+
+844
+00:55:49.152 --> 00:55:55.680
+A database per service also means credentials per service, least privilege, and no shared admin users.
+
+845
+00:55:55.960 --> 00:56:05.219
+The gateway or BFF is the edge: authentication, rate limiting, input validation, and never exposing internal APIs directly.
+
+846
+00:56:06.569 --> 00:56:08.233
+Performance and tuning knobs.
+
+847
+00:56:08.513 --> 00:56:09.857
+Here is a quick table:
+
+848
+00:56:10.137 --> 00:56:12.121
+Knob, and Default here, and Effect.
+
+849
+00:56:12.401 --> 00:56:13.830
+Synchronous depth limit.
+
+850
+00:56:14.110 --> 00:56:16.094
+Default here: at most 4 hops.
+
+851
+00:56:16.374 --> 00:56:17.163
+Effect:
+
+852
+00:56:17.443 --> 00:56:19.257
+Latency and availability.
+
+853
+00:56:19.537 --> 00:56:20.689
+Per-call timeout.
+
+854
+00:56:20.969 --> 00:56:25.278
+Default here: p99.9 of the dependency + margin.
+
+855
+00:56:25.558 --> 00:56:26.347
+Effect:
+
+856
+00:56:26.627 --> 00:56:28.953
+Tail latency versus false failures.
+
+857
+00:56:29.233 --> 00:56:31.430
+Optional-part budget in BFFs.
+
+858
+00:56:31.710 --> 00:56:32.627
+Default here:
+
+859
+00:56:32.907 --> 00:56:34.422
+250 ms.
+
+860
+00:56:34.702 --> 00:56:35.491
+Effect:
+
+861
+00:56:35.771 --> 00:56:38.417
+Page p99 versus completeness.
+
+862
+00:56:38.697 --> 00:56:41.918
+Heartbeat interval or TTL (or readiness period).
+
+863
+00:56:42.198 --> 00:56:43.115
+Default here:
+
+864
+00:56:43.395 --> 00:56:48.750
+100 ms or 300 ms in the lab; 5 s or 15 s typical.
+
+865
+00:56:49.030 --> 00:56:49.819
+Effect:
+
+866
+00:56:50.099 --> 00:56:51.934
+Eviction speed versus flapping.
+
+867
+00:56:52.214 --> 00:56:54.070
+Connection pools per dependency.
+
+868
+00:56:54.350 --> 00:56:55.267
+Default here:
+
+869
+00:56:55.547 --> 00:56:57.595
+Sized per dependency (bulkheads).
+
+870
+00:56:57.875 --> 00:56:58.665
+Effect:
+
+871
+00:56:58.945 --> 00:57:01.099
+Isolation versus resource use.
+
+872
+00:57:02.449 --> 00:57:03.516
+Payload shape.
+
+873
+00:57:03.796 --> 00:57:04.713
+Default here:
+
+874
+00:57:04.993 --> 00:57:06.295
+Coarse-grained, paged.
+
+875
+00:57:06.575 --> 00:57:07.364
+Effect:
+
+876
+00:57:07.644 --> 00:57:09.393
+Fewer calls; less chattiness.
+
+877
+00:57:10.743 --> 00:57:11.469
+Cost.
+
+878
+00:57:11.749 --> 00:57:22.522
+Each service has a fixed cost: pods (at least 2 to 3 for HA), a database, pipelines, dashboards, alerts, on-call, dependency upgrades and CVE patching.
+
+879
+00:57:22.802 --> 00:57:27.133
+26 services times that fixed cost is real money and real toil.
+
+880
+00:57:27.413 --> 00:57:30.677
+The platform team's paved road is what keeps it affordable.
+
+881
+00:57:30.957 --> 00:57:36.119
+Network calls cost CPU (serialization) and cloud money (cross-AZ traffic).
+
+882
+00:57:36.399 --> 00:57:38.298
+Chatty designs show up on the bill.
+
+883
+00:57:38.578 --> 00:57:41.479
+Modular monoliths are cheaper per capability.
+
+884
+00:57:41.759 --> 00:57:47.754
+Extract a service when its benefit (autonomy, scaling, isolation) is worth that fixed cost.
+
+885
+00:57:49.104 --> 00:57:50.043
+Part 7.
+
+886
+00:57:50.323 --> 00:57:52.029
+Anti-Patterns and Pitfalls.
+
+887
+00:57:53.279 --> 00:57:53.919
+1.
+
+888
+00:57:54.199 --> 00:57:56.162
+Shared database between services.
+
+889
+00:57:56.442 --> 00:57:57.253
+Symptom:
+
+890
+00:57:57.533 --> 00:58:03.719
+Schema changes need several teams, and one service's query locks another's rows (L2 before:
+
+891
+00:58:03.999 --> 00:58:05.301
+2 shared DBs).
+
+892
+00:58:05.581 --> 00:58:06.306
+Fix:
+
+893
+00:58:06.586 --> 00:58:10.981
+Database per service; data via APIs, events or read models.
+
+894
+00:58:11.261 --> 00:58:11.965
+2.
+
+895
+00:58:12.245 --> 00:58:14.698
+Synchronous callbacks (A, then B, then A).
+
+896
+00:58:16.048 --> 00:58:28.251
+Here is the Java code. before: payment-service calls order-service back during capture, then a cycle, and cascading timeouts. after: payment publishes a fact; the order saga reacts.
+
+897
+00:58:28.531 --> 00:58:30.259
+No call back, no cycle.
+
+898
+00:58:33.109 --> 00:58:33.855
+3.
+
+899
+00:58:34.135 --> 00:58:36.951
+Sequential composition of independent calls.
+
+900
+00:58:37.231 --> 00:58:38.042
+Symptom:
+
+901
+00:58:38.322 --> 00:58:45.661
+Page latency = sum of calls (L4 B: p50 79 ms versus 31 ms parallel).
+
+902
+00:58:45.941 --> 00:58:46.666
+Fix:
+
+903
+00:58:46.946 --> 00:58:49.101
+Parallel calls with per-call timeouts.
+
+904
+00:58:49.381 --> 00:58:50.085
+4.
+
+905
+00:58:50.365 --> 00:58:52.178
+No budget for optional data.
+
+906
+00:58:52.458 --> 00:58:53.269
+Symptom:
+
+907
+00:58:53.549 --> 00:58:58.754
+The page p99 equals the slowest optional dependency (~2 s).
+
+908
+00:58:59.034 --> 00:58:59.759
+Fix:
+
+909
+00:59:00.039 --> 00:59:08.231
+Classify fields as required or optional, and budget and degrade the optional ones (p99 251 ms).
+
+910
+00:59:08.511 --> 00:59:09.279
+5.
+
+911
+00:59:09.559 --> 00:59:12.290
+Static instance lists or long-cached DNS.
+
+912
+00:59:12.570 --> 00:59:13.381
+Symptom:
+
+913
+00:59:13.661 --> 00:59:16.754
+Errors for minutes after an instance dies (L4 A:
+
+914
+00:59:17.034 --> 00:59:18.463
+833).
+
+915
+00:59:18.743 --> 00:59:19.469
+Fix:
+
+916
+00:59:19.749 --> 00:59:26.554
+Platform discovery with health checks, a short TTL, and a retry on another instance for idempotent calls.
+
+917
+00:59:27.904 --> 00:59:28.651
+6.
+
+918
+00:59:28.931 --> 00:59:31.747
+A shared common-model library across services.
+
+919
+00:59:32.027 --> 00:59:32.837
+Symptom:
+
+920
+00:59:33.117 --> 00:59:37.981
+Changing one DTO forces every service to redeploy (lock-step releases).
+
+921
+00:59:38.261 --> 00:59:38.987
+Fix:
+
+922
+00:59:39.267 --> 00:59:43.149
+Share only technical libraries (logging, tracing, the outbox).
+
+923
+00:59:43.429 --> 00:59:48.037
+Each service owns its API models, and contracts are specs, not jars.
+
+924
+00:59:48.317 --> 00:59:49.064
+7.
+
+925
+00:59:49.344 --> 00:59:52.224
+Nanoservices (one per entity or function).
+
+926
+00:59:52.504 --> 00:59:53.315
+Symptom:
+
+927
+00:59:53.595 --> 00:59:57.520
+Dozens of calls per request, and teams owning 10 plus services.
+
+928
+00:59:57.800 --> 00:59:58.525
+Fix:
+
+929
+00:59:58.805 --> 01:00:00.277
+Split by capability.
+
+930
+01:00:00.557 --> 01:00:02.904
+Merge services that always change together.
+
+931
+01:00:04.254 --> 01:00:04.937
+8.
+
+932
+01:00:05.217 --> 01:00:07.350
+Big-bang rewrite of the legacy system.
+
+933
+01:00:07.630 --> 01:00:08.441
+Symptom:
+
+934
+01:00:08.721 --> 01:00:12.582
+A multi-year project that never catches up with the moving legacy.
+
+935
+01:00:12.862 --> 01:00:13.587
+Fix:
+
+936
+01:00:13.867 --> 01:00:17.771
+A strangler fig, slice by slice, with shadow diffs (L4 C:
+
+937
+01:00:18.051 --> 01:00:20.398
+468 mismatches caught).
+
+938
+01:00:20.678 --> 01:00:21.425
+9.
+
+939
+01:00:21.705 --> 01:00:24.649
+Microservices before the domain is understood.
+
+940
+01:00:24.929 --> 01:00:25.739
+Symptom:
+
+941
+01:00:26.019 --> 01:00:29.753
+Boundaries in the wrong places, constant cross-service changes.
+
+942
+01:00:30.033 --> 01:00:30.758
+Fix:
+
+943
+01:00:31.038 --> 01:00:38.633
+A modular monolith first, with enforced boundaries (L3), extracting services when boundaries have proven stable.
+
+944
+01:00:39.983 --> 01:00:40.687
+10.
+
+945
+01:00:40.967 --> 01:00:43.335
+Boundaries enforced only by convention.
+
+946
+01:00:43.615 --> 01:00:44.425
+Symptom:
+
+947
+01:00:44.705 --> 01:00:50.103
+Just this once imports of another module's internals, which erode the architecture within a year.
+
+948
+01:00:50.383 --> 01:00:51.108
+Fix:
+
+949
+01:00:51.388 --> 01:00:57.809
+Compiler or JPMS, Spring Modulith verify(), ArchUnit or fitness functions in CI.
+
+950
+01:00:58.089 --> 01:01:00.713
+L3's three violations never compile.
+
+951
+01:01:02.063 --> 01:01:02.938
+Part 8.
+
+952
+01:01:03.218 --> 01:01:04.562
+Interview Q and A.
+
+953
+01:01:05.812 --> 01:01:06.644
+Beginner.
+
+954
+01:01:06.924 --> 01:01:07.948
+Question 1.
+
+955
+01:01:08.228 --> 01:01:11.279
+What are microservices, and why would a company use them?
+
+956
+01:01:11.559 --> 01:01:12.924
+Thirty-second answer:
+
+957
+01:01:13.204 --> 01:01:23.401
+An architecture where the system is split into small services, each owning a business capability and its data, deployed independently and communicating over the network.
+
+958
+01:01:23.681 --> 01:01:33.153
+The main reason is organizational: many teams can change and release their parts without coordinating, and services can scale and fail independently.
+
+959
+01:01:34.503 --> 01:01:35.506
+Question 2.
+
+960
+01:01:35.786 --> 01:01:38.261
+What does 'database per service' mean, and why?
+
+961
+01:01:38.541 --> 01:01:39.906
+Thirty-second answer:
+
+962
+01:01:40.186 --> 01:01:44.901
+Each service owns its tables, and no other service reads or writes them directly.
+
+963
+01:01:45.181 --> 01:01:47.698
+Others go through its API or its events.
+
+964
+01:01:47.978 --> 01:01:55.594
+It keeps schema changes local, lets the owner enforce invariants, and prevents one service's load from locking another's data.
+
+965
+01:01:56.944 --> 01:01:57.989
+Question 3.
+
+966
+01:01:58.269 --> 01:02:00.061
+What is a distributed monolith?
+
+967
+01:02:00.341 --> 01:02:01.707
+Thirty-second answer:
+
+968
+01:02:01.987 --> 01:02:14.317
+A system split into services that still can't be changed or deployed independently, because of shared databases, synchronous call chains and cycles, shared model libraries, or lock-step releases.
+
+969
+01:02:14.597 --> 01:02:18.245
+It has all the costs of microservices and none of the benefits.
+
+970
+01:02:19.595 --> 01:02:20.662
+Question 4.
+
+971
+01:02:20.942 --> 01:02:22.627
+What is a modular monolith?
+
+972
+01:02:22.907 --> 01:02:24.273
+Thirty-second answer:
+
+973
+01:02:24.553 --> 01:02:36.435
+A single deployable application divided into modules with enforced boundaries: each module owns its data and exposes a small API, and the others can't reach its internals.
+
+974
+01:02:36.715 --> 01:02:41.835
+It keeps the simplicity of one deployment while preparing clean seams for extraction later.
+
+975
+01:02:43.185 --> 01:02:44.188
+Intermediate.
+
+976
+01:02:44.468 --> 01:02:45.577
+Question 5.
+
+977
+01:02:45.857 --> 01:02:47.820
+How do you decide service boundaries?
+
+978
+01:02:48.100 --> 01:02:49.465
+Thirty-second answer:
+
+979
+01:02:49.745 --> 01:02:59.708
+By business capability and bounded context: what changes together, who owns the data and its invariants, where the language is consistent, and which team will own it.
+
+980
+01:02:59.988 --> 01:03:05.961
+Check that typical features touch one service and that invariants don't need cross-service transactions.
+
+981
+01:03:07.311 --> 01:03:08.421
+Question 6.
+
+982
+01:03:08.701 --> 01:03:10.599
+How do services find each other?
+
+983
+01:03:10.879 --> 01:03:12.245
+Thirty-second answer:
+
+984
+01:03:12.525 --> 01:03:14.018
+Through service discovery.
+
+985
+01:03:14.298 --> 01:03:24.773
+Either the platform does it (Kubernetes Services with DNS and endpoints tracking ready pods), or clients query a registry (Eureka, Consul) and load-balance.
+
+986
+01:03:25.053 --> 01:03:31.751
+Instances must be removed quickly when unhealthy, and callers retry idempotent requests on another instance.
+
+987
+01:03:33.101 --> 01:03:34.189
+Question 7.
+
+988
+01:03:34.469 --> 01:03:37.989
+How do you build a screen that needs data from several services?
+
+989
+01:03:38.269 --> 01:03:39.635
+Thirty-second answer:
+
+990
+01:03:39.915 --> 01:03:53.099
+Compose in a BFF or gateway: call the services in parallel, give each a timeout, mark optional parts with a latency budget, and return partial results with a clear unavailable state for optional parts.
+
+991
+01:03:53.379 --> 01:03:59.587
+For frequently used combined views with filtering or sorting, build a CQRS read model from events.
+
+992
+01:04:00.937 --> 01:04:01.961
+Question 8.
+
+993
+01:04:02.241 --> 01:04:05.633
+How do you handle configuration across 26 services?
+
+994
+01:04:05.913 --> 01:04:07.278
+Thirty-second answer:
+
+995
+01:04:07.558 --> 01:04:18.587
+Externalize it: environment variables or ConfigMaps for static config, a secrets manager for credentials, a versioned config or flag store for dynamic values.
+
+996
+01:04:18.867 --> 01:04:21.406
+One artifact runs in every environment.
+
+997
+01:04:21.686 --> 01:04:26.913
+Treat config changes like deployments: validated, staged, audited, reversible.
+
+998
+01:04:28.263 --> 01:04:29.329
+Question 9.
+
+999
+01:04:29.609 --> 01:04:31.316
+What's the strangler fig pattern?
+
+1000
+01:04:31.596 --> 01:04:32.961
+Thirty-second answer:
+
+1001
+01:04:33.241 --> 01:04:35.567
+Replace a legacy system incrementally.
+
+1002
+01:04:35.847 --> 01:04:49.585
+Put a routing facade in front, build the new implementation of one slice, mirror traffic to compare outputs (shadow), send a small share of real traffic (canary), then route everything and retire the legacy slice.
+
+1003
+01:04:49.865 --> 01:04:51.337
+Repeat slice by slice.
+
+1004
+01:04:52.687 --> 01:04:53.455
+Senior.
+
+1005
+01:04:53.735 --> 01:04:54.781
+Question 10.
+
+1006
+01:04:55.061 --> 01:04:58.709
+How do you prevent cascading failures in a microservice graph?
+
+1007
+01:04:58.989 --> 01:05:00.354
+Thirty-second answer:
+
+1008
+01:05:00.634 --> 01:05:19.173
+Keep the synchronous graph small (no cycles, shallow depth, few dependencies per request), put timeouts on every call, isolate resources per dependency (bulkheads), use circuit breakers and load shedding, degrade optional features, and move facts to events so failures don't propagate synchronously.
+
+1009
+01:05:20.523 --> 01:05:21.653
+Question 11.
+
+1010
+01:05:21.933 --> 01:05:24.835
+How do you detect and fix a distributed monolith?
+
+1011
+01:05:25.115 --> 01:05:26.480
+Thirty-second answer:
+
+1012
+01:05:26.760 --> 01:05:37.683
+Measure it: % of releases touching more than one service, shared tables, synchronous cycles and depth from traces, calls per request, and services with high synchronous fan-in.
+
+1013
+01:05:37.963 --> 01:05:48.992
+Then fix the worst coupling first: split shared databases, replace callbacks with events, merge services that always change together, and add fitness functions so it doesn't regress.
+
+1014
+01:05:50.342 --> 01:05:51.430
+Question 12.
+
+1015
+01:05:51.710 --> 01:05:55.465
+How do you enforce module boundaries inside a Spring Boot service?
+
+1016
+01:05:55.745 --> 01:05:57.110
+Thirty-second answer:
+
+1017
+01:05:57.390 --> 01:06:09.678
+Spring Modulith (ApplicationModules.verify() in a test) treats top-level packages as modules and fails the build on access to another module's internal packages or on cycles.
+
+1018
+01:06:09.958 --> 01:06:15.313
+ArchUnit rules are an alternative, and JPMS enforces it at the compiler level.
+
+1019
+01:06:15.593 --> 01:06:20.179
+Cross-module reactions use in-process events with transactional delivery.
+
+1020
+01:06:21.529 --> 01:06:22.809
+Question 13.
+
+1021
+01:06:23.089 --> 01:06:26.183
+What changes when you extract a module into a service?
+
+1022
+01:06:26.463 --> 01:06:27.828
+Thirty-second answer:
+
+1023
+01:06:28.108 --> 01:06:47.692
+Method calls become network calls (timeouts, retries, versioning), in-process events become broker events (outbox, idempotent consumers), the shared database schema moves to its own database (data migration, CDC during transition), and deployment, monitoring and on-call become separate.
+
+1024
+01:06:47.972 --> 01:06:50.959
+Transactions across the boundary become sagas.
+
+1025
+01:06:52.309 --> 01:06:53.503
+Question 14.
+
+1026
+01:06:53.783 --> 01:06:58.797
+How do you keep 26 services consistent without a shared library that couples them?
+
+1027
+01:06:59.077 --> 01:07:00.442
+Thirty-second answer:
+
+1028
+01:07:00.722 --> 01:07:22.567
+A golden-path service template and a platform: a generated project structure (four layers, config, health, logging, tracing, security, outbox or inbox), shared technical libraries only (versioned, backward compatible, updated by automation), and contract specs (OpenAPI or AsyncAPI) instead of shared model jars.
+
+1029
+01:07:23.917 --> 01:07:24.813
+Architect.
+
+1030
+01:07:25.093 --> 01:07:26.288
+Question 15.
+
+1031
+01:07:26.568 --> 01:07:30.707
+Modular monolith or microservices for a new grocery startup?
+
+1032
+01:07:30.987 --> 01:07:32.352
+Thirty-second answer:
+
+1033
+01:07:32.632 --> 01:07:42.744
+Start with a modular monolith (Spring Boot + Spring Modulith, one database with a schema per module, in-process events) while the domain and team are small.
+
+1034
+01:07:43.024 --> 01:07:44.795
+Enforce boundaries from day one.
+
+1035
+01:07:45.075 --> 01:07:54.845
+Extract services when team count, scaling differences (search, tracking) or isolation (payments or PCI) justify the fixed cost per service.
+
+1036
+01:07:56.195 --> 01:07:57.390
+Question 16.
+
+1037
+01:07:57.670 --> 01:08:00.422
+How does Conway's law affect your service design?
+
+1038
+01:08:00.702 --> 01:08:02.067
+Thirty-second answer:
+
+1039
+01:08:02.347 --> 01:08:05.761
+Systems end up mirroring team communication structures.
+
+1040
+01:08:06.041 --> 01:08:16.089
+So design teams and services together: stream-aligned teams own services end to end, boundaries follow teams, and a platform team provides the paved road.
+
+1041
+01:08:16.369 --> 01:08:23.430
+If the architecture you want doesn't match the org, change the org (inverse Conway) or the architecture will drift back.
+
+1042
+01:08:24.780 --> 01:08:26.124
+Question 17.
+
+1043
+01:08:26.404 --> 01:08:30.308
+Plan the migration of the legacy admin monolith to services.
+
+1044
+01:08:30.588 --> 01:08:31.953
+Thirty-second answer:
+
+1045
+01:08:32.233 --> 01:08:34.943
+Put the gateway in front as the strangler facade.
+
+1046
+01:08:35.223 --> 01:08:42.412
+Map capabilities and pick slices by value and low entanglement (order history, reports, then catalog editing).
+
+1047
+01:08:42.692 --> 01:08:51.780
+For each: feed data via CDC, build the service with an anti-corruption layer, shadow and diff, canary, cut over, delete the legacy code.
+
+1048
+01:08:52.060 --> 01:08:53.297
+Move writes last.
+
+1049
+01:08:53.577 --> 01:08:56.969
+Track progress by traffic share and deleted legacy code.
+
+1050
+01:08:58.319 --> 01:08:59.493
+Question 18.
+
+1051
+01:08:59.773 --> 01:09:03.847
+How would you set SLOs for a checkout that depends on 6 services?
+
+1052
+01:09:04.127 --> 01:09:05.493
+Thirty-second answer:
+
+1053
+01:09:05.773 --> 01:09:26.103
+Start from the user journey SLO (checkout success ≥ 99.9 %, p99 at most 1.5 s) and derive dependency SLOs: with 6 required synchronous dependencies, each needs better than 99.98 % unless calls are retried or have fallbacks.
+
+1054
+01:09:26.383 --> 01:09:32.506
+Budget latency across the parallel calls, and error-budget-alert on the journey, not just per service.
+
+1055
+01:09:33.856 --> 01:09:35.093
+Question 19.
+
+1056
+01:09:35.373 --> 01:09:38.104
+When would you merge microservices back together?
+
+1057
+01:09:38.384 --> 01:09:39.749
+Thirty-second answer:
+
+1058
+01:09:40.029 --> 01:09:53.725
+When two services always change and deploy together, share data or call each other synchronously in both directions, the split creates sagas for what should be a local transaction, or one team owns both with high cognitive load.
+
+1059
+01:09:54.005 --> 01:09:59.509
+Merging (into modules of one service) removes network costs and restores transactions.
+
+1060
+01:10:00.859 --> 01:10:01.969
+Question 20.
+
+1061
+01:10:02.249 --> 01:10:06.878
+What does the platform team need to provide for 26 services to be viable?
+
+1062
+01:10:07.158 --> 01:10:08.523
+Thirty-second answer:
+
+1063
+01:10:08.803 --> 01:10:32.483
+A paved road: a service template, CI or CD with progressive delivery, environment provisioning, discovery and config, observability (tracing, metrics, logs, dashboards by default), security (mTLS, secrets, identity), messaging with outbox or inbox libraries, a service catalog with ownership, fitness-function checks, and documentation and on-call tooling.
+
+1064
+01:10:33.833 --> 01:10:34.729
+Part 9.
+
+1065
+01:10:35.009 --> 01:10:36.417
+Summary and Practice.
+
+1066
+01:10:37.667 --> 01:10:38.755
+Key takeaways.
+
+1067
+01:10:39.035 --> 01:10:43.430
+Microservices are for independent deployability and team autonomy.
+
+1068
+01:10:43.710 --> 01:10:46.099
+Without those you have a distributed monolith.
+
+1069
+01:10:46.379 --> 01:10:51.137
+Synchronous dependencies multiply unavailability and add latency (L1:
+
+1070
+01:10:51.417 --> 01:10:58.841
+12 in series, then 98.81 %; 8 sequential, then p50 178 ms).
+
+1071
+01:10:59.121 --> 01:11:05.094
+Split by business capability or bounded context, coarser rather than finer, aligned with teams.
+
+1072
+01:11:05.374 --> 01:11:06.974
+One database per service.
+
+1073
+01:11:07.254 --> 01:11:13.227
+Queries across services use composition or read models, and updates across services use sagas.
+
+1074
+01:11:14.577 --> 01:11:16.732
+Facts as events, commands as calls.
+
+1075
+01:11:17.012 --> 01:11:20.575
+No synchronous cycles, shallow depth, timeouts everywhere.
+
+1076
+01:11:20.855 --> 01:11:23.607
+Fitness functions keep the graph healthy (L2:
+
+1077
+01:11:23.887 --> 01:11:28.601
+FAIL, then PASS: cycles, depth, shared DBs, dependencies per request).
+
+1078
+01:11:28.881 --> 01:11:35.537
+Modular monolith first, with boundaries the compiler enforces (L3), and extraction when justified.
+
+1079
+01:11:35.817 --> 01:11:41.897
+Discovery must evict dead instances fast, and callers retry idempotent requests (L4:
+
+1080
+01:11:42.177 --> 01:11:44.737
+833, then 0 failures).
+
+1081
+01:11:46.087 --> 01:11:54.706
+Compose in parallel with budgets for optional parts (L4: p99 2,054, then 251 ms).
+
+1082
+01:11:54.986 --> 01:11:59.765
+Migrate with a strangler fig: shadow, diff, canary, cut over, delete (L4:
+
+1083
+01:12:00.045 --> 01:12:03.266
+468 mismatches caught before users).
+
+1084
+01:12:04.616 --> 01:12:05.939
+Decision cheat sheet.
+
+1085
+01:12:06.219 --> 01:12:07.563
+Here is a quick table:
+
+1086
+01:12:07.843 --> 01:12:09.293
+Situation, and Choose.
+
+1087
+01:12:09.573 --> 01:12:11.515
+Small team, evolving domain:
+
+1088
+01:12:11.795 --> 01:12:14.355
+Modular monolith with enforced modules.
+
+1089
+01:12:14.635 --> 01:12:16.533
+Many teams, stable boundaries:
+
+1090
+01:12:16.813 --> 01:12:19.181
+Microservices by bounded context.
+
+1091
+01:12:19.461 --> 01:12:21.232
+Need data from another service:
+
+1092
+01:12:21.512 --> 01:12:25.309
+Its API (now) or its events (a local copy or read model).
+
+1093
+01:12:25.589 --> 01:12:27.040
+A, then B, then A calls:
+
+1094
+01:12:27.320 --> 01:12:29.283
+Replace one direction with an event.
+
+1095
+01:12:29.563 --> 01:12:31.483
+Screen needs several services:
+
+1096
+01:12:31.763 --> 01:12:35.112
+BFF composition: parallel, timeouts, budgets.
+
+1097
+01:12:35.392 --> 01:12:36.693
+Legacy replacement:
+
+1098
+01:12:36.973 --> 01:12:39.469
+Strangler fig with shadow diff and canary.
+
+1099
+01:12:39.749 --> 01:12:41.520
+Keep architecture from eroding:
+
+1100
+01:12:41.800 --> 01:12:45.832
+Fitness functions + Modulith or JPMS checks in CI.
+
+1101
+01:12:47.182 --> 01:12:48.313
+Exercises.
+
+1102
+01:12:48.593 --> 01:12:49.937
+Here is a quick table:
+
+1103
+01:12:50.217 --> 01:12:52.073
+Band, and Exercise, and Hint.
+
+1104
+01:12:52.353 --> 01:12:53.227
+B2.
+
+1105
+01:12:53.507 --> 01:12:54.574
+Exercise:
+
+1106
+01:12:54.854 --> 01:13:01.254
+Add retries with a 10 % independent failure rate per call to L1 and recompute availability.
+
+1107
+01:13:01.534 --> 01:13:02.217
+Hint:
+
+1108
+01:13:02.497 --> 01:13:04.907
+1 minus p² per retried call.
+
+1109
+01:13:05.187 --> 01:13:06.062
+B2.
+
+1110
+01:13:06.342 --> 01:13:07.409
+Exercise:
+
+1111
+01:13:07.689 --> 01:13:13.747
+Draw the grocery platform's checkout graph from Ch 00 and count synchronous dependencies.
+
+1112
+01:13:14.027 --> 01:13:14.710
+Hint:
+
+1113
+01:13:14.990 --> 01:13:17.123
+Only required, synchronous edges.
+
+1114
+01:13:17.403 --> 01:13:18.278
+B3.
+
+1115
+01:13:18.558 --> 01:13:19.625
+Exercise:
+
+1116
+01:13:19.905 --> 01:13:24.086
+Feed L2 with a Backstage-style YAML catalog instead of code.
+
+1117
+01:13:24.366 --> 01:13:25.049
+Hint:
+
+1118
+01:13:25.329 --> 01:13:26.502
+Parse dependsOn.
+
+1119
+01:13:26.782 --> 01:13:27.657
+B3.
+
+1120
+01:13:27.937 --> 01:13:29.003
+Exercise:
+
+1121
+01:13:29.283 --> 01:13:36.302
+Add a grocery.subscription module to L3 that reacts to OrderPlaced, and try to make it call order internals.
+
+1122
+01:13:36.582 --> 01:13:37.265
+Hint:
+
+1123
+01:13:37.545 --> 01:13:39.017
+Watch javac refuse.
+
+1124
+01:13:39.297 --> 01:13:40.171
+B4.
+
+1125
+01:13:40.451 --> 01:13:41.518
+Exercise:
+
+1126
+01:13:41.798 --> 01:13:47.857
+Extend L4 C with a write path (POST) migrated via dual-write + reconciliation.
+
+1127
+01:13:48.137 --> 01:13:48.819
+Hint:
+
+1128
+01:13:49.099 --> 01:13:51.787
+Outbox + CDC (Ch 13).
+
+1129
+01:13:53.137 --> 01:13:54.012
+B4.
+
+1130
+01:13:54.292 --> 01:13:55.359
+Exercise:
+
+1131
+01:13:55.639 --> 01:14:01.036
+Write the ADR for extracting search from a modular monolith, with triggers and rollback.
+
+1132
+01:14:01.316 --> 01:14:01.999
+Hint:
+
+1133
+01:14:02.279 --> 01:14:04.220
+Scaling profile, store, team.
+
+1134
+01:14:05.570 --> 01:14:06.573
+Further reading.
+
+1135
+01:14:06.853 --> 01:14:12.250
+Sam Newman, Building Microservices, 2nd ed. and Monolith to Microservices.
+
+1136
+01:14:12.530 --> 01:14:16.882
+Chris Richardson, Microservices Patterns, and microservices.io.
+
+1137
+01:14:17.162 --> 01:14:22.410
+Martin Fowler, MicroservicePremium, MonolithFirst, StranglerFigApplication.
+
+1138
+01:14:22.690 --> 01:14:29.133
+Neal Ford, Rebecca Parsons and Patrick Kua, Building Evolutionary Architectures (fitness functions).
+
+1139
+01:14:29.413 --> 01:14:32.698
+Matthew Skelton and Manuel Pais, Team Topologies.
+
+1140
+01:14:34.048 --> 01:14:41.259
+Spring Modulith reference documentation; the Java Platform Module System (JEP 261).
+
+1141
+01:14:41.539 --> 01:14:44.717
+Google SRE book, Addressing Cascading Failures.
+
+1142
+01:14:46.067 --> 01:14:47.305
+Related chapters.
+
+1143
+01:14:47.585 --> 01:15:11.627
+04, API Design, 09, Scalability Fundamentals, 13, Distributed Transactions, 14, Messaging and Event Streaming, 15, Event-Driven Architecture, CQRS and Event Sourcing, 17, Inter-Service Communication, 18, Resilience Patterns, 29, Testing Distributed Systems, 33, Domain-Driven Design, 37, Leading Architecture at Scale.
+
+1144
+01:15:12.977 --> 01:15:14.577
+That's the end of this chapter.
+
+1145
+01:15:14.857 --> 01:15:20.895
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1146
+01:15:21.175 --> 01:15:22.625
+See you in the next chapter.
+

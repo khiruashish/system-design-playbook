@@ -1,0 +1,4474 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.438
+Search Systems.
+
+2
+00:00:01.718 --> 00:00:05.814
+Chapter 22, from the Production part of the System Design Playbook.
+
+3
+00:00:07.564 --> 00:00:08.524
+At a glance:
+
+4
+00:00:08.804 --> 00:00:09.977
+Chapter at a glance.
+
+5
+00:00:10.257 --> 00:00:11.260
+Reader bands:
+
+6
+00:00:11.540 --> 00:00:13.823
+B2, then B4, Prerequisites:
+
+7
+00:00:14.103 --> 00:00:19.713
+Ch 05, Ch 13, Ch 14, Ch 21, What you will build:
+
+8
+00:00:19.993 --> 00:00:21.807
+Product search for the grocery app.
+
+9
+00:00:22.087 --> 00:00:32.455
+Customers type English, Hinglish (aata, doodh), Devanagari (आटा) and typos, and expect the right item at the top, in stock, within 100 ms.
+
+10
+00:00:32.735 --> 00:00:35.700
+All four labs are measured against 20 judged queries.
+
+11
+00:00:35.980 --> 00:00:40.204
+L1: an inverted index and BM25 written from scratch.
+
+12
+00:00:40.484 --> 00:00:47.887
+The analyzer stages took nDCG@10 from 0.367 to 1.000.
+
+13
+00:00:48.167 --> 00:00:52.199
+Naive fuzzy matching broke chai patti by matching chakki (atta).
+
+14
+00:00:52.479 --> 00:01:02.121
+The index was 194x faster than a scan, and stock or popularity boosting took out-of-stock items in the top 3 from 11 to 0.
+
+15
+00:01:03.471 --> 00:01:15.781
+L2: search inside PostgreSQL on 200,000 listings: trigram and full-text GIN indexes, autocomplete, wordsimilarity for typos, facets with grouping sets.
+
+16
+00:01:16.061 --> 00:01:18.919
+Devanagari and Hinglish returned 0 rows.
+
+17
+00:01:19.199 --> 00:01:25.855
+L3: a real engine, Meilisearch 1.11, fed from PostgreSQL through an outbox.
+
+18
+00:01:26.135 --> 00:01:36.269
+Relevance: engine defaults 0.429, with synonyms 0.779, with index-time aliases 0.979.
+
+19
+00:01:36.549 --> 00:01:44.741
+Sync: pipelined indexing kept commit-to-searchable at ~0.8 s, while waiting on each task pushed it to 22 s.
+
+20
+00:01:46.091 --> 00:01:52.277
+Two unordered indexers overwrote newer data with older 26 times and left 3 products stale.
+
+21
+00:01:52.557 --> 00:01:54.819
+Partitioning by product id fixed it.
+
+22
+00:01:55.099 --> 00:01:59.728
+A reindex with an index swap served 0 empty results and 0 errors.
+
+23
+00:02:00.008 --> 00:02:01.523
+L4: vector search.
+
+24
+00:02:01.803 --> 00:02:14.048
+HNSW written from scratch reached recall 0.991 at 34x brute-force speed, and only with the paper's neighbour heuristic (0.872 without).
+
+25
+00:02:14.328 --> 00:02:23.309
+Hybrid BM25 + vector ranking (RRF) was the only retriever good at both exact and healthy breakfast-style queries.
+
+26
+00:02:23.589 --> 00:02:24.571
+Reading time:
+
+27
+00:02:24.851 --> 00:02:26.643
+110 min + code.
+
+28
+00:02:27.993 --> 00:02:28.846
+Part 1.
+
+29
+00:02:29.126 --> 00:02:31.046
+Introduction and Why It Matters.
+
+30
+00:02:32.296 --> 00:02:34.344
+A story: aata returns nothing.
+
+31
+00:02:34.624 --> 00:02:40.875
+The week before Diwali, the search dashboard showed 23 % of searches returning zero results.
+
+32
+00:02:41.155 --> 00:02:45.293
+Looking at the top zero-result queries, it was the customers who were right:
+
+33
+00:02:46.643 --> 00:02:47.987
+Here is a quick table:
+
+34
+00:02:48.267 --> 00:02:52.555
+Query, and What they wanted, and What search did. aata, आटा.
+
+35
+00:02:52.835 --> 00:02:53.859
+What they wanted:
+
+36
+00:02:54.139 --> 00:02:55.377
+Atta (wheat flour).
+
+37
+00:02:55.657 --> 00:02:56.723
+What search did:
+
+38
+00:02:57.003 --> 00:03:01.654
+0 results: the catalog says Atta. doodh, दूध 1 litre.
+
+39
+00:03:01.934 --> 00:03:02.958
+What they wanted:
+
+40
+00:03:03.238 --> 00:03:03.985
+Milk.
+
+41
+00:03:04.265 --> 00:03:05.331
+What search did:
+
+42
+00:03:05.611 --> 00:03:07.254
+0 results. curd.
+
+43
+00:03:07.534 --> 00:03:08.558
+What they wanted:
+
+44
+00:03:08.838 --> 00:03:09.606
+Dahi.
+
+45
+00:03:09.886 --> 00:03:10.953
+What search did:
+
+46
+00:03:11.233 --> 00:03:14.710
+Only products literally named Curd. tomatos, shampo.
+
+47
+00:03:14.990 --> 00:03:16.014
+What they wanted:
+
+48
+00:03:16.294 --> 00:03:17.553
+Tomatoes, shampoo.
+
+49
+00:03:17.833 --> 00:03:18.899
+What search did:
+
+50
+00:03:19.179 --> 00:03:20.950
+0 results. potato.
+
+51
+00:03:21.230 --> 00:03:22.254
+What they wanted:
+
+52
+00:03:22.534 --> 00:03:23.494
+Potatoes.
+
+53
+00:03:23.774 --> 00:03:24.841
+What search did:
+
+54
+00:03:25.121 --> 00:03:26.550
+Potato chips first.
+
+55
+00:03:27.900 --> 00:03:36.732
+Search was PostgreSQL ILIKE '%...%', fine at launch, but it had no analyzers, no synonyms and no typo tolerance.
+
+56
+00:03:37.012 --> 00:03:48.212
+A first fix, turn on fuzzy matching, made things worse in a way nobody expected: chai started matching Chakki, the atta brand line, one edit away (L1 reproduces it).
+
+57
+00:03:48.492 --> 00:03:50.049
+The rebuild took four steps:
+
+58
+00:03:50.329 --> 00:03:56.644
+Analysis: units, stemming, Devanagari transliteration, phonetic normalisation for Hinglish.
+
+59
+00:03:56.924 --> 00:03:59.100
+Merchandised synonyms and aliases.
+
+60
+00:03:59.380 --> 00:04:02.580
+A product-type field so potato means the vegetable.
+
+61
+00:04:03.930 --> 00:04:06.959
+Business ranking that pushes out-of-stock items down.
+
+62
+00:04:07.239 --> 00:04:17.501
+Relevance on the judged set went from 0.367 to 1.0 (L1), and zero-result searches fell to under 2 % in production.
+
+63
+00:04:17.781 --> 00:04:23.669
+A dedicated engine, kept in sync through the outbox, took search load off the orders database.
+
+64
+00:04:25.019 --> 00:04:25.701
+Quote:
+
+65
+00:04:25.981 --> 00:04:27.645
+The thesis of this chapter.
+
+66
+00:04:27.925 --> 00:04:34.624
+Search quality is decided by what you index and how you analyse text, far more than by which engine you pick.
+
+67
+00:04:34.904 --> 00:04:38.787
+Every improvement should be measured against judged queries, not eyeballed.
+
+68
+00:04:39.067 --> 00:04:49.499
+Then the engineering problems are those of any derived store: keep it in sync with the source of truth, in order, with bounded lag, and be able to rebuild it without downtime.
+
+69
+00:04:50.849 --> 00:04:53.153
+Where this lives in the grocery platform.
+
+70
+00:04:53.433 --> 00:04:54.777
+Here is a quick table:
+
+71
+00:04:55.057 --> 00:04:57.019
+Capability, and Where, and Notes.
+
+72
+00:04:57.299 --> 00:04:59.625
+Product search, autocomplete, facets.
+
+73
+00:04:59.905 --> 00:05:06.710
+Where: search-service, then search engine (OpenSearch or Elasticsearch in production; Meilisearch in the lab).
+
+74
+00:05:06.990 --> 00:05:07.801
+Notes:
+
+75
+00:05:08.081 --> 00:05:12.433
+Index per region or city; store availability joined at query time.
+
+76
+00:05:12.713 --> 00:05:14.014
+Indexing pipeline.
+
+77
+00:05:14.294 --> 00:05:19.350
+Where: catalog-service and inventory-service outbox, then Kafka, then indexer.
+
+78
+00:05:19.630 --> 00:05:20.441
+Notes:
+
+79
+00:05:20.721 --> 00:05:23.537
+Partitioned by product id; version-guarded.
+
+80
+00:05:23.817 --> 00:05:25.673
+Synonyms, aliases, boosts.
+
+81
+00:05:25.953 --> 00:05:26.614
+Where:
+
+82
+00:05:26.894 --> 00:05:30.947
+Merchandising console, then config in Git, then engine settings.
+
+83
+00:05:31.227 --> 00:05:32.038
+Notes:
+
+84
+00:05:32.318 --> 00:05:35.454
+Reviewed like code; evaluated on judged queries.
+
+85
+00:05:35.734 --> 00:05:37.270
+Relevance evaluation.
+
+86
+00:05:37.550 --> 00:05:38.211
+Where:
+
+87
+00:05:38.491 --> 00:05:44.102
+Judged query set + click logs, then nDCG, zero-result rate, CTR.
+
+88
+00:05:44.382 --> 00:05:45.193
+Notes:
+
+89
+00:05:45.473 --> 00:05:48.118
+Runs in CI on every analyzer change.
+
+90
+00:05:49.468 --> 00:05:51.111
+Semantic (intent) search.
+
+91
+00:05:51.391 --> 00:05:52.052
+Where:
+
+92
+00:05:52.332 --> 00:05:56.257
+Vector field on the same index, hybrid with BM25.
+
+93
+00:05:56.537 --> 00:05:58.799
+Notes: healthy breakfast, party snacks.
+
+94
+00:05:59.079 --> 00:06:00.743
+Admin or back-office search.
+
+95
+00:06:01.023 --> 00:06:01.684
+Where:
+
+96
+00:06:01.964 --> 00:06:04.460
+PostgreSQL full-text + trigram.
+
+97
+00:06:04.740 --> 00:06:05.551
+Notes:
+
+98
+00:06:05.831 --> 00:06:07.431
+Small, exact, internal.
+
+99
+00:06:08.781 --> 00:06:10.103
+Learning objectives.
+
+100
+00:06:10.383 --> 00:06:11.727
+Here is a quick table:
+
+101
+00:06:12.007 --> 00:06:14.205
+Band, and After this chapter you can....
+
+102
+00:06:14.485 --> 00:06:15.359
+B2:
+
+103
+00:06:15.639 --> 00:06:23.682
+Explain inverted indexes and BM25, build analyzers, and use PostgreSQL full-text and trigram search.
+
+104
+00:06:23.962 --> 00:06:24.858
+B3:
+
+105
+00:06:25.138 --> 00:06:38.685
+Design analyzers for multilingual or transliterated queries, synonyms, typo tolerance, facets and autocomplete; keep an index in sync via CDC or outbox; reindex without downtime.
+
+106
+00:06:38.965 --> 00:06:39.861
+B4:
+
+107
+00:06:40.141 --> 00:06:48.887
+Evaluate relevance with judged queries and online metrics, design hybrid lexical + vector search, and choose and operate a search platform.
+
+108
+00:06:50.237 --> 00:06:51.112
+Part 2.
+
+109
+00:06:51.392 --> 00:06:53.269
+Core Concepts, Beginner to Deep.
+
+110
+00:06:54.519 --> 00:06:55.437
+Intuition.
+
+111
+00:06:55.717 --> 00:06:59.045
+An inverted index is the index at the back of a textbook.
+
+112
+00:06:59.325 --> 00:07:04.679
+Instead of reading every page for paneer, you look up paneer and get page numbers (postings).
+
+113
+00:07:04.959 --> 00:07:11.210
+L1: looking up the index was 194x faster than scanning 20,000 products.
+
+114
+00:07:11.490 --> 00:07:14.498
+Analysis is agreeing on spelling before looking up.
+
+115
+00:07:14.778 --> 00:07:20.261
+Aata, atta and आटा must end up as the same index entry, or the lookup misses.
+
+116
+00:07:20.541 --> 00:07:25.447
+The same applies to 5kg and 5 kg, and to tomatoes and tomato.
+
+117
+00:07:26.797 --> 00:07:29.549
+Relevance ranking is the shopkeeper's judgement.
+
+118
+00:07:29.829 --> 00:07:33.797
+Of the 2,000 items that mention oil, which 10 do you show first?
+
+119
+00:07:34.077 --> 00:07:39.709
+Rarer words matter more (IDF), and repeated words matter less each time (saturation).
+
+120
+00:07:39.989 --> 00:07:43.573
+Then business sense applies: in stock first, popular first.
+
+121
+00:07:44.923 --> 00:07:46.203
+The inverted index.
+
+122
+00:07:46.483 --> 00:07:47.379
+Structure:
+
+123
+00:07:47.659 --> 00:07:51.521
+A term dictionary (sorted terms, often an FST in Lucene).
+
+124
+00:07:51.801 --> 00:07:59.694
+For each term, a postings list of documents (plus term frequencies, positions for phrase queries, and offsets for highlighting).
+
+125
+00:07:59.974 --> 00:08:04.646
+Postings are compressed (delta + bit packing) and intersected with skip lists.
+
+126
+00:08:05.996 --> 00:08:06.849
+Segments:
+
+127
+00:08:07.129 --> 00:08:10.073
+Lucene-based engines write immutable segments.
+
+128
+00:08:10.353 --> 00:08:20.209
+New documents go into a new segment, which becomes searchable after a refresh (1 s by default in Elasticsearch or OpenSearch, hence near-real-time).
+
+129
+00:08:20.489 --> 00:08:25.268
+Deletes are tombstones, and background merges combine segments and purge deletes.
+
+130
+00:08:25.548 --> 00:08:32.247
+Doc values or columnar fields support sorting, facets and aggregations without the inverted index.
+
+131
+00:08:33.597 --> 00:08:38.930
+Sharding: an index is split into shards (hash of id by default) and replicated.
+
+132
+00:08:39.210 --> 00:08:44.330
+A query fans out to all shards and merges the top-k (scatter-gather, Ch 11).
+
+133
+00:08:44.610 --> 00:08:53.527
+L1's toy index for 20,000 products has 160 terms and 113,296 postings.
+
+134
+00:08:53.807 --> 00:08:58.010
+Real catalogs have millions of terms, but the mechanism is the same.
+
+135
+00:08:59.360 --> 00:09:01.771
+Analysis: tokenizers and filters.
+
+136
+00:09:02.051 --> 00:09:14.424
+An analyzer is a character filter, then tokenizer, then token filters, applied at index time and at query time (usually the same one, sometimes different, as with synonyms or edge n-grams).
+
+137
+00:09:15.774 --> 00:09:17.118
+Here is a quick table:
+
+138
+00:09:17.398 --> 00:09:19.915
+Stage, and Examples, and Grocery need.
+
+139
+00:09:20.195 --> 00:09:21.390
+Character filters.
+
+140
+00:09:21.670 --> 00:09:22.630
+Examples:
+
+141
+00:09:22.910 --> 00:09:28.073
+Unicode normalisation (NFC or NFKC), HTML strip, mapping.
+
+142
+00:09:28.353 --> 00:09:29.398
+Grocery need:
+
+143
+00:09:29.678 --> 00:09:32.217
+Devanagari normalisation, and, then and.
+
+144
+00:09:32.497 --> 00:09:33.499
+Tokenizer.
+
+145
+00:09:33.779 --> 00:09:34.739
+Examples:
+
+146
+00:09:35.019 --> 00:09:38.923
+Standard (Unicode word boundaries), whitespace, ICU, n-gram.
+
+147
+00:09:39.203 --> 00:09:40.249
+Grocery need:
+
+148
+00:09:40.529 --> 00:09:42.214
+Hindi words, product codes.
+
+149
+00:09:42.494 --> 00:09:43.625
+Token filters.
+
+150
+00:09:43.905 --> 00:09:44.865
+Examples:
+
+151
+00:09:45.145 --> 00:09:50.201
+Lowercase, ASCII folding, stop words, stemming, synonyms, phonetic, edge n-grams.
+
+152
+00:09:50.481 --> 00:09:51.526
+Grocery need:
+
+153
+00:09:51.806 --> 00:09:54.707
+Plurals, units, Hinglish spellings, autocomplete.
+
+154
+00:09:56.057 --> 00:10:02.009
+L1 adds stages one at a time and measures nDCG@10 on 20 judged queries:
+
+155
+00:10:03.359 --> 00:10:04.703
+Here is a quick table:
+
+156
+00:10:04.983 --> 00:10:09.015
+Analyzer, and nDCG@10, and Zero-result queries.
+
+157
+00:10:09.295 --> 00:10:12.090
+Lowercase + split. nDCG@10:
+
+158
+00:10:12.370 --> 00:10:14.055
+0.367.
+
+159
+00:10:14.335 --> 00:10:15.743
+Zero-result queries:
+
+160
+00:10:16.023 --> 00:10:22.829
+11. + unit normalisation (5kg, 1 litre) + plural stemming. nDCG@10:
+
+161
+00:10:23.109 --> 00:10:24.922
+0.457.
+
+162
+00:10:25.202 --> 00:10:26.610
+Zero-result queries:
+
+163
+00:10:26.890 --> 00:10:33.205
+10. + Devanagari transliteration + phonetic normalisation. nDCG@10:
+
+164
+00:10:33.485 --> 00:10:35.383
+0.607.
+
+165
+00:10:35.663 --> 00:10:37.071
+Zero-result queries:
+
+166
+00:10:37.351 --> 00:10:40.253
+7. + synonyms. nDCG@10:
+
+167
+00:10:40.533 --> 00:10:42.581
+0.900.
+
+168
+00:10:42.861 --> 00:10:44.269
+Zero-result queries:
+
+169
+00:10:44.549 --> 00:10:47.621
+1. + fuzzy, naive. nDCG@10:
+
+170
+00:10:47.901 --> 00:10:49.949
+0.900.
+
+171
+00:10:50.229 --> 00:10:51.637
+Zero-result queries:
+
+172
+00:10:51.917 --> 00:11:01.794
+0, but chai patti now fails. + fuzzy, guarded (≥ 5 chars, score times 0.5). nDCG@10:
+
+173
+00:11:02.074 --> 00:11:03.887
+0.950.
+
+174
+00:11:04.167 --> 00:11:05.575
+Zero-result queries:
+
+175
+00:11:05.855 --> 00:11:10.186
+0. + product-type field (boost 3). nDCG@10:
+
+176
+00:11:10.466 --> 00:11:12.258
+1.000.
+
+177
+00:11:12.538 --> 00:11:13.946
+Zero-result queries:
+
+178
+00:11:14.226 --> 00:11:14.973
+0.
+
+179
+00:11:16.323 --> 00:11:25.795
+Stemming versus lemmatisation: stemmers (Porter or Snowball) chop suffixes by rule (tomatoes, then tomato, fine; news, then new, wrong).
+
+180
+00:11:26.075 --> 00:11:30.384
+PostgreSQL's english config and Lucene's analyzers use Snowball.
+
+181
+00:11:30.664 --> 00:11:36.083
+For product names, light stemming (plurals only) is usually safer than aggressive stemming.
+
+182
+00:11:37.433 --> 00:11:40.270
+Indian languages, transliteration and Hinglish.
+
+183
+00:11:40.550 --> 00:11:43.963
+Indian grocery search mixes three forms of the same word:
+
+184
+00:11:44.243 --> 00:11:45.374
+English (flour);.
+
+185
+00:11:45.654 --> 00:11:49.771
+Hindi in Latin script, spelled inconsistently (aata, atta, ata);.
+
+186
+00:11:50.051 --> 00:11:51.971
+Devanagari (आटा).
+
+187
+00:11:52.251 --> 00:11:56.795
+Regional languages (Tamil, Telugu, Kannada, Bengali) add more scripts.
+
+188
+00:11:57.075 --> 00:11:58.014
+The techniques:
+
+189
+00:11:59.364 --> 00:12:03.588
+Transliteration to a common script at both index and query time.
+
+190
+00:12:03.868 --> 00:12:08.732
+L1 maps Devanagari to Latin (ITRANS-like, with the word-final schwa dropped).
+
+191
+00:12:09.012 --> 00:12:14.815
+ICU's Devanagari-Latin transform or IndicNLP libraries do this properly.
+
+192
+00:12:15.095 --> 00:12:27.681
+Phonetic normalisation of Latin Hinglish spellings: collapse long vowels (aa, then a, ee, then i, oo, then u) and double consonants, and map w, then v, z, then j, ph, then f.
+
+193
+00:12:27.961 --> 00:12:36.132
+L1: आटा, aata and Atta all become ata. दूध and doodh become dudh. मूंग and moong become mung.
+
+194
+00:12:36.412 --> 00:12:42.897
+Phonetic algorithms like Soundex or Metaphone are designed for English names and do poorly on Hinglish.
+
+195
+00:12:44.247 --> 00:12:51.266
+Synonyms bridging languages (milk ↔ doodh, curd ↔ dahi, sugar ↔ chini).
+
+196
+00:12:51.546 --> 00:12:59.034
+They're applied at query time so they can change without reindexing, and they're keyed on the normalised form so all spellings match.
+
+197
+00:12:59.314 --> 00:13:08.039
+Index-time enrichment: add an aliases field per product type (aata atta आटा gehun flour), maintained by merchandising.
+
+198
+00:13:08.319 --> 00:13:16.575
+In L3 this took a stock engine from 0.779 to 0.979 without writing an analyzer.
+
+199
+00:13:16.855 --> 00:13:17.687
+Limits:
+
+200
+00:13:19.037 --> 00:13:26.163
+Medial schwa deletion is irregular: नमकीन transliterates to namakin, but people type namkeen.
+
+201
+00:13:26.443 --> 00:13:30.539
+So transliteration plus fuzziness or aliases are complementary.
+
+202
+00:13:30.819 --> 00:13:36.621
+Neither replaces a query log review: the top zero-result queries each week are the to-do list.
+
+203
+00:13:37.971 --> 00:13:38.867
+Relevance:
+
+204
+00:13:39.147 --> 00:13:41.985
+TF-IDF, BM25, field boosts.
+
+205
+00:13:42.265 --> 00:13:50.990
+BM25 (the default in Lucene, Elasticsearch or OpenSearch and most engines) scores a document for a query term t:
+
+206
+00:13:52.340 --> 00:14:02.196
+On screen: score(t, d) = IDF(t), tf, (k1 + 1) / (tf + k1, (1 minus b + b, d/avgdl)).
+
+207
+00:14:02.476 --> 00:14:10.391
+IDF(t) = ln(1 + (N minus df + 0.5)/(df + 0.5)).
+
+208
+00:14:13.241 --> 00:14:15.033
+IDF: rare terms matter more.
+
+209
+00:14:15.313 --> 00:14:17.275
+Paneer discriminates more than fresh.
+
+210
+00:14:17.555 --> 00:14:22.675
+TF saturation (k1, ~1.2): the 5th occurrence adds little.
+
+211
+00:14:22.955 --> 00:14:30.891
+Length normalisation (b, ~0.75): a match in a short name counts more than one in a long description.
+
+212
+00:14:31.171 --> 00:14:36.547
+Field boosts (BM25F): a match in name counts more than one in description.
+
+213
+00:14:36.827 --> 00:14:43.995
+L1 uses name times 2, brand or category or size times 1, and a curated type field times 3.
+
+214
+00:14:44.275 --> 00:14:45.641
+Query-side choices:
+
+215
+00:14:46.991 --> 00:15:04.185
+AND versus OR, minimumshouldmatch;. phrase and proximity boosts (toor dal as a phrase);. multimatch types (bestfields versus crossfields);. scoring each expansion (synonym or fuzzy) as the max, not the sum, so an expanded term doesn't count twice (L1).
+
+216
+00:15:05.535 --> 00:15:06.837
+Query understanding.
+
+217
+00:15:07.117 --> 00:15:10.466
+Most relevance problems are about understanding the query:
+
+218
+00:15:10.746 --> 00:15:21.370
+Attribute extraction: paneer 200g: the product is paneer and the size is 200 g. atta 5kg, then type atta, size 5 kg.
+
+219
+00:15:21.650 --> 00:15:28.327
+L1's unit normaliser turns 5 kg, 5kg and 5 kgs into one token.
+
+220
+00:15:28.607 --> 00:15:33.578
+Product-type or category intent: potato is a vegetable query, not chips.
+
+221
+00:15:33.858 --> 00:15:38.253
+A curated type field (or a query classifier trained on clicks) fixed it:
+
+222
+00:15:38.533 --> 00:15:43.162
+0.950, then 1.000 in L1.
+
+223
+00:15:44.512 --> 00:15:49.355
+Spell correction from the query log (did-you-mean), rather than blind fuzzy matching.
+
+224
+00:15:49.635 --> 00:15:51.235
+Guard rails on fuzziness:
+
+225
+00:15:51.515 --> 00:15:53.243
+No fuzziness for short terms:
+
+226
+00:15:53.523 --> 00:15:59.773
+Lucene's AUTO fuzziness allows 0 edits for 1 to 2 chars and 1 edit for 3 to 5.
+
+227
+00:16:00.053 --> 00:16:02.933
+Penalise fuzzy matches below exact matches.
+
+228
+00:16:03.213 --> 00:16:05.389
+Never fuzz brand names or numbers.
+
+229
+00:16:06.739 --> 00:16:15.891
+L1's naive fuzzy expanded chai, then chaki (Chakki Atta) because chai isn't in the product vocabulary (only its synonym tea is).
+
+230
+00:16:17.241 --> 00:16:19.567
+Business ranking, filters and facets.
+
+231
+00:16:19.847 --> 00:16:22.023
+Text relevance gets you the candidates.
+
+232
+00:16:22.303 --> 00:16:34.783
+The final order also uses business signals: in stock at the customer's dark store;. popularity and conversion;. margin and promotions (with care);. personalisation (past purchases).
+
+233
+00:16:36.133 --> 00:16:47.290
+Function score: final = textscore times f(popularity) times stockfactor, or a learned model (learning to rank) re-ranking the top 100 to 1,000.
+
+234
+00:16:47.570 --> 00:17:05.874
+L1: multiplying by 1 + 0.1, ln(1 pluspopularity) and demoting out-of-stock times 0.3 took out-of-stock in the top 3 from 11 of 60 to 0, with nDCG 1.000, then 0.992.
+
+235
+00:17:06.154 --> 00:17:07.733
+Filters versus queries:
+
+236
+00:17:08.013 --> 00:17:15.863
+Filters (category = Masala, instock = true, storeid =...) don't affect scores and can be cached as bitsets.
+
+237
+00:17:16.143 --> 00:17:17.189
+Queries score.
+
+238
+00:17:17.469 --> 00:17:19.495
+Put structured constraints in filters.
+
+239
+00:17:20.845 --> 00:17:30.147
+Facets: counts per attribute value for the current result set (Masala 1,022, Snacks 240), computed from doc values.
+
+240
+00:17:30.427 --> 00:17:31.941
+They're shown for refinement.
+
+241
+00:17:32.221 --> 00:17:34.824
+L1, L2 and L3 all show them.
+
+242
+00:17:35.104 --> 00:17:43.744
+In L3, Meilisearch's estimatedTotalHits capped at 1,000 while the facet counts summed to 1,262.
+
+243
+00:17:44.024 --> 00:17:45.965
+Know your engine's approximations.
+
+244
+00:17:47.315 --> 00:17:49.513
+Autocomplete and typo tolerance.
+
+245
+00:17:49.793 --> 00:17:51.137
+Here is a quick table:
+
+246
+00:17:51.417 --> 00:17:53.273
+Technique, and How, and Trade-off.
+
+247
+00:17:53.553 --> 00:17:55.622
+Prefix query on the term dictionary.
+
+248
+00:17:55.902 --> 00:17:56.926
+How: sham.
+
+249
+00:17:57.206 --> 00:17:58.102
+Trade-off:
+
+250
+00:17:58.382 --> 00:18:01.049
+Simple; can be slow for very short prefixes.
+
+251
+00:18:01.329 --> 00:18:03.121
+Edge n-grams at index time.
+
+252
+00:18:03.401 --> 00:18:05.641
+How: shampoo, then sh, sha, sham,...
+
+253
+00:18:05.921 --> 00:18:06.817
+Trade-off:
+
+254
+00:18:07.097 --> 00:18:08.910
+Fast queries; bigger index.
+
+255
+00:18:09.190 --> 00:18:11.387
+Completion suggester (FST).
+
+256
+00:18:11.667 --> 00:18:12.329
+How:
+
+257
+00:18:12.609 --> 00:18:15.126
+A dedicated in-memory structure with weights.
+
+258
+00:18:15.406 --> 00:18:16.302
+Trade-off:
+
+259
+00:18:16.582 --> 00:18:19.675
+Fastest; separate field, no filters (or limited).
+
+260
+00:18:19.955 --> 00:18:22.473
+Trigram similarity (pgtrgm).
+
+261
+00:18:22.753 --> 00:18:23.414
+How:
+
+262
+00:18:23.694 --> 00:18:25.315
+Similarity of trigram sets.
+
+263
+00:18:25.595 --> 00:18:26.491
+Trade-off:
+
+264
+00:18:26.771 --> 00:18:29.907
+Typo-tolerant; PostgreSQL-native (L2).
+
+265
+00:18:30.187 --> 00:18:32.107
+Search-as-you-type from a query log.
+
+266
+00:18:32.387 --> 00:18:33.049
+How:
+
+267
+00:18:33.329 --> 00:18:35.718
+Suggest popular queries, not products.
+
+268
+00:18:35.998 --> 00:18:36.894
+Trade-off:
+
+269
+00:18:37.174 --> 00:18:39.649
+Best UX; needs logs and moderation.
+
+270
+00:18:40.999 --> 00:18:47.100
+Latency budget: autocomplete fires on every keystroke, so target 50 ms end to end.
+
+271
+00:18:47.380 --> 00:18:54.996
+Debounce on the client (100 to 150 ms), cache popular prefixes, and cancel superseded requests.
+
+272
+00:18:56.346 --> 00:18:58.287
+Search inside PostgreSQL.
+
+273
+00:18:58.567 --> 00:19:08.935
+PostgreSQL is a reasonable first search engine (L2, 200,000 rows): pgtrgm + GIN for substring and fuzzy match:
+
+274
+00:19:09.215 --> 00:19:27.135
+ILIKE '%paneer%' 28, then 14 ms (11 MB index). wordsimilarity('shampo', name) finds Shampoo at 0.86. tsvector + GIN with websearchtotsquery, tsrank and weights (A for name, B for brand or category).
+
+275
+00:19:27.415 --> 00:19:31.575
+The english config stems tomatoes and even tomatos to tomato.
+
+276
+00:19:31.855 --> 00:19:34.842
+Facets with GROUP BY GROUPING SETS in one round trip.
+
+277
+00:19:35.122 --> 00:19:35.954
+Limits:
+
+278
+00:19:37.304 --> 00:19:44.536
+No transliteration or Hindi stemming out of the box: आटा gave an empty query and aata 0 rows.
+
+279
+00:19:44.816 --> 00:19:48.144
+Relevance tuning is coarser than in a dedicated engine.
+
+280
+00:19:48.424 --> 00:19:51.389
+Search load competes with OLTP (Ch 21).
+
+281
+00:19:51.669 --> 00:19:54.528
+A good fit for admin tools and small catalogs.
+
+282
+00:19:54.808 --> 00:19:58.413
+Customer-facing search at scale moves to a dedicated engine.
+
+283
+00:19:59.763 --> 00:20:01.235
+Keeping the index in sync.
+
+284
+00:20:01.515 --> 00:20:05.611
+The search index is a derived store, a read model (Ch 15).
+
+285
+00:20:05.891 --> 00:20:08.793
+The source of truth stays in the service databases.
+
+286
+00:20:09.073 --> 00:20:10.054
+The patterns:
+
+287
+00:20:11.404 --> 00:20:12.748
+Here is a quick table:
+
+288
+00:20:13.028 --> 00:20:15.289
+Pattern, and Consistency, and Notes.
+
+289
+00:20:15.569 --> 00:20:18.321
+Dual write (service writes DB, then index).
+
+290
+00:20:18.601 --> 00:20:19.625
+Consistency:
+
+291
+00:20:19.905 --> 00:20:22.529
+Can diverge on any failure (Ch 13).
+
+292
+00:20:22.809 --> 00:20:23.620
+Notes:
+
+293
+00:20:23.900 --> 00:20:24.561
+Don't.
+
+294
+00:20:24.841 --> 00:20:27.892
+Outbox or CDC, then Kafka, then indexer.
+
+295
+00:20:28.172 --> 00:20:29.196
+Consistency:
+
+296
+00:20:29.476 --> 00:20:31.823
+Eventually consistent, ordered per key.
+
+297
+00:20:32.103 --> 00:20:32.913
+Notes:
+
+298
+00:20:33.193 --> 00:20:34.644
+The standard (L3).
+
+299
+00:20:34.924 --> 00:20:36.481
+Periodic full reindex.
+
+300
+00:20:36.761 --> 00:20:37.785
+Consistency:
+
+301
+00:20:38.065 --> 00:20:39.345
+Stale between runs.
+
+302
+00:20:39.625 --> 00:20:40.436
+Notes:
+
+303
+00:20:40.716 --> 00:20:42.935
+Also needed for rebuilds and backfills.
+
+304
+00:20:44.285 --> 00:20:46.205
+The rules L3 demonstrates:
+
+305
+00:20:46.485 --> 00:20:47.701
+Batch and pipeline.
+
+306
+00:20:47.981 --> 00:20:51.586
+Engines have high per-request overhead (segment refresh, commit).
+
+307
+00:20:51.866 --> 00:20:59.333
+An indexer that waited for each 20-document task lagged 22 s (p50) at 200 updates per second.
+
+308
+00:20:59.613 --> 00:21:03.901
+Pipelined (enqueue and continue), lag was ~0.8 s.
+
+309
+00:21:04.181 --> 00:21:05.887
+Preserve order per document.
+
+310
+00:21:06.167 --> 00:21:14.765
+Two indexers taking alternating chunks of the outbox applied 26 older versions over newer ones and left 3 of 20 products stale.
+
+311
+00:21:15.045 --> 00:21:19.887
+Partitioning by product id (Kafka key = product id) gave 0.
+
+312
+00:21:21.237 --> 00:21:28.235
+Engines with external versioning (Elasticsearch versiontype=external) can also reject older writes.
+
+313
+00:21:28.515 --> 00:21:32.803
+Deletes and unpublishes must flow through the same path (tombstone events).
+
+314
+00:21:33.083 --> 00:21:38.629
+Joins: search documents are denormalised (product + brand + category + stock).
+
+315
+00:21:38.909 --> 00:21:45.437
+A change to a brand name must fan out to all its products, which is a reindex job, not a per-event update.
+
+316
+00:21:46.787 --> 00:21:55.086
+Fast-changing, per-store data (stock) is often kept out of the document and applied as a filter from a separate store at query time.
+
+317
+00:21:56.436 --> 00:21:58.164
+Reindexing without downtime.
+
+318
+00:21:58.444 --> 00:22:02.028
+Analyzer or mapping changes require a full reindex.
+
+319
+00:22:02.308 --> 00:22:03.332
+The process:
+
+320
+00:22:03.612 --> 00:22:06.215
+Build productsv2 alongside productsv1.
+
+321
+00:22:06.495 --> 00:22:14.068
+Replay recent changes into both (dual indexing from the stream, or catch-up from the outbox position recorded at the start).
+
+322
+00:22:14.348 --> 00:22:19.596
+Validate: doc counts, judged-query nDCG, a shadow query comparison.
+
+323
+00:22:19.876 --> 00:22:26.148
+Atomically switch an alias (Elasticsearch or OpenSearch aliases, Meilisearch swap-indexes).
+
+324
+00:22:26.428 --> 00:22:28.860
+Keep v1 for rollback, then delete it.
+
+325
+00:22:30.210 --> 00:22:41.239
+L3: rebuild + swap in ~5 s while four clients searched continuously, with 6,604 successful queries, 0 empty, 0 errors.
+
+326
+00:22:42.589 --> 00:22:44.189
+Vector search and ANN.
+
+327
+00:22:44.469 --> 00:22:50.357
+Embedding models map text (and images) to vectors, so that semantically similar items are close.
+
+328
+00:22:50.637 --> 00:22:54.840
+That catches healthy breakfast, then oats and poha, which share no words.
+
+329
+00:22:55.120 --> 00:22:58.896
+Search becomes nearest neighbours by cosine or dot product.
+
+330
+00:22:59.176 --> 00:23:01.949
+Exact k-NN is O(N, d) per query.
+
+331
+00:23:02.229 --> 00:23:03.104
+L4:
+
+332
+00:23:03.384 --> 00:23:11.811
+100,000 times 64 dims took ~4 ms or query, fine for small collections and too slow at 50M.
+
+333
+00:23:12.091 --> 00:23:14.032
+Approximate NN (ANN):
+
+334
+00:23:14.312 --> 00:23:18.493
+HNSW: a multi-layer proximity graph searched greedily.
+
+335
+00:23:18.773 --> 00:23:24.768
+The default in Lucene or OpenSearch k-NN, pgvector, Qdrant, Weaviate and Milvus.
+
+336
+00:23:26.118 --> 00:23:28.422
+IVF: cluster and search the nearest lists.
+
+337
+00:23:28.702 --> 00:23:31.155
+Product quantisation compresses vectors.
+
+338
+00:23:31.435 --> 00:23:33.227
+HNSW parameters:
+
+339
+00:23:33.507 --> 00:23:42.083
+M (links per node): memory and recall. efConstruction: build time and graph quality. efSearch: query time versus recall.
+
+340
+00:23:42.363 --> 00:23:43.707
+L4, from scratch:
+
+341
+00:23:45.057 --> 00:23:46.401
+Here is a quick table:
+
+342
+00:23:46.681 --> 00:23:51.695
+Neighbour selection, and efSearch, and Recall@10, and Speed versus brute force.
+
+343
+00:23:51.975 --> 00:23:54.279
+Simple (closest M). efSearch:
+
+344
+00:23:54.559 --> 00:23:55.348
+40.
+
+345
+00:23:55.628 --> 00:23:56.759
+Recall@10:
+
+346
+00:23:57.039 --> 00:23:58.681
+0.872.
+
+347
+00:23:58.961 --> 00:24:00.497
+Speed versus brute force:
+
+348
+00:24:00.777 --> 00:24:01.951
+33x.
+
+349
+00:24:02.231 --> 00:24:03.553
+Simple. efSearch:
+
+350
+00:24:03.833 --> 00:24:05.092
+160.
+
+351
+00:24:05.372 --> 00:24:06.503
+Recall@10:
+
+352
+00:24:06.783 --> 00:24:08.489
+0.945.
+
+353
+00:24:08.769 --> 00:24:10.305
+Speed versus brute force:
+
+354
+00:24:10.585 --> 00:24:11.652
+11x.
+
+355
+00:24:11.932 --> 00:24:14.940
+Heuristic (paper's Algorithm 4). efSearch:
+
+356
+00:24:15.220 --> 00:24:16.009
+40.
+
+357
+00:24:16.289 --> 00:24:17.420
+Recall@10:
+
+358
+00:24:17.700 --> 00:24:19.300
+0.991.
+
+359
+00:24:19.580 --> 00:24:21.116
+Speed versus brute force:
+
+360
+00:24:21.396 --> 00:24:22.569
+34x.
+
+361
+00:24:22.849 --> 00:24:24.364
+Heuristic. efSearch:
+
+362
+00:24:24.644 --> 00:24:25.433
+80.
+
+363
+00:24:25.713 --> 00:24:26.844
+Recall@10:
+
+364
+00:24:27.124 --> 00:24:28.916
+1.000.
+
+365
+00:24:29.196 --> 00:24:30.732
+Speed versus brute force:
+
+366
+00:24:31.012 --> 00:24:31.951
+20x.
+
+367
+00:24:33.301 --> 00:24:43.839
+The neighbour-selection heuristic (prefer links in diverse directions) was the difference between a plateau at 0.945 and 1.000.
+
+368
+00:24:44.119 --> 00:24:48.898
+Implementation details matter, which is one reason to use a mature library.
+
+369
+00:24:49.178 --> 00:24:57.797
+Memory: vectors (100K times 64 times 4 B = 25 MB) plus graph links (~10 MB).
+
+370
+00:24:58.077 --> 00:25:04.178
+At 768 dims and 50M items that's ~150 GB of floats.
+
+371
+00:25:04.458 --> 00:25:10.645
+Quantisation (int8, binary) and disk-based indexes (DiskANN) exist for that reason.
+
+372
+00:25:10.925 --> 00:25:13.847
+Filtering + ANN (in-stock, store) is hard.
+
+373
+00:25:14.127 --> 00:25:19.205
+Pre-filtering breaks graph connectivity, and post-filtering may return too few results.
+
+374
+00:25:19.485 --> 00:25:23.538
+Engines offer filtered HNSW or adaptive strategies.
+
+375
+00:25:23.818 --> 00:25:26.058
+Test with realistic filter selectivity.
+
+376
+00:25:27.408 --> 00:25:28.517
+Hybrid search.
+
+377
+00:25:28.797 --> 00:25:31.763
+Lexical and semantic retrieval fail differently:
+
+378
+00:25:32.043 --> 00:25:40.363
+BM25 is excellent at exact tokens (brands, sizes, SKU codes, atta 5kg), and blind to meaning.
+
+379
+00:25:40.643 --> 00:25:46.189
+Vectors are good at intent (party snacks), and weak at exact attributes and rare terms.
+
+380
+00:25:46.469 --> 00:25:48.517
+Hybrid runs both and fuses them.
+
+381
+00:25:48.797 --> 00:25:51.528
+Reciprocal Rank Fusion is the common default:
+
+382
+00:25:52.878 --> 00:25:53.795
+On screen:
+
+383
+00:25:54.075 --> 00:26:01.521
+RRF(d) = Σ over retrievers r: wr / (k + rankr(d)) with k about 60.
+
+384
+00:26:04.371 --> 00:26:10.493
+L4 (with toy hand-written concept embeddings, so the shape of the result is the point, not the numbers):
+
+385
+00:26:11.843 --> 00:26:13.187
+Here is a quick table:
+
+386
+00:26:13.467 --> 00:26:17.286
+Retriever, and 20 lexical queries, and 8 intent queries.
+
+387
+00:26:17.566 --> 00:26:18.867
+BM25.
+
+388
+00:26:19.147 --> 00:26:20.662
+20 lexical queries:
+
+389
+00:26:20.942 --> 00:26:22.734
+1.000.
+
+390
+00:26:23.014 --> 00:26:24.294
+8 intent queries:
+
+391
+00:26:24.574 --> 00:26:26.238
+0.542.
+
+392
+00:26:26.518 --> 00:26:27.286
+Vector.
+
+393
+00:26:27.566 --> 00:26:29.081
+20 lexical queries:
+
+394
+00:26:29.361 --> 00:26:30.875
+0.289.
+
+395
+00:26:31.155 --> 00:26:32.435
+8 intent queries:
+
+396
+00:26:32.715 --> 00:26:34.486
+0.740.
+
+397
+00:26:34.766 --> 00:26:36.089
+Hybrid RRF.
+
+398
+00:26:36.369 --> 00:26:37.883
+20 lexical queries:
+
+399
+00:26:38.163 --> 00:26:39.998
+0.903.
+
+400
+00:26:40.278 --> 00:26:41.558
+8 intent queries:
+
+401
+00:26:41.838 --> 00:26:43.523
+0.769.
+
+402
+00:26:43.803 --> 00:26:46.769
+Hybrid RRF, vector weight 0.5.
+
+403
+00:26:47.049 --> 00:26:48.563
+20 lexical queries:
+
+404
+00:26:48.843 --> 00:26:50.635
+1.000.
+
+405
+00:26:50.915 --> 00:26:52.195
+8 intent queries:
+
+406
+00:26:52.475 --> 00:26:54.267
+0.797.
+
+407
+00:26:55.617 --> 00:26:59.820
+Plain RRF diluted the exact queries, and weighting restored them.
+
+408
+00:27:00.100 --> 00:27:01.871
+Tune weights on held-out queries:
+
+409
+00:27:02.151 --> 00:27:06.417
+L4 tuned on the same queries it reports, which overstates the gain.
+
+410
+00:27:06.697 --> 00:27:15.892
+Beyond RRF: score normalisation plus a linear blend, or a cross-encoder or learning-to-rank model re-ranking the fused top 100.
+
+411
+00:27:17.242 --> 00:27:18.501
+Measuring relevance.
+
+412
+00:27:18.781 --> 00:27:19.634
+Offline:
+
+413
+00:27:19.914 --> 00:27:28.533
+A judged query set: queries sampled from logs (head, torso, tail, zero-result), with graded judgments (0 or 1 or 2).
+
+414
+00:27:28.813 --> 00:27:34.893
+Metrics: nDCG@k, precision@k, recall@k, MRR, zero-result rate.
+
+415
+00:27:35.173 --> 00:27:38.991
+Run it in CI on every analyzer, synonym or boost change.
+
+416
+00:27:39.271 --> 00:27:41.511
+That's what every table in this chapter does.
+
+417
+00:27:41.791 --> 00:27:42.645
+Online:
+
+418
+00:27:43.995 --> 00:27:51.653
+Click-through rate, add-to-cart rate from search, searches per session (reformulations), time to first add, revenue per search.
+
+419
+00:27:51.933 --> 00:27:58.888
+A or B tests, or interleaving (mixing two rankers' results in one list, which is more sensitive with less traffic).
+
+420
+00:27:59.168 --> 00:27:59.915
+Beware:
+
+421
+00:28:00.195 --> 00:28:03.160
+Position bias in clicks (use it or correct it).
+
+422
+00:28:03.440 --> 00:28:05.019
+Judged sets that go stale.
+
+423
+00:28:06.369 --> 00:28:08.097
+Overfitting to your own judgments.
+
+424
+00:28:08.377 --> 00:28:13.219
+L1 reached 1.000 on queries its author also wrote.
+
+425
+00:28:13.499 --> 00:28:18.129
+Real sets need many more queries, fresh samples and independent judges.
+
+426
+00:28:19.479 --> 00:28:20.375
+Part 3.
+
+427
+00:28:20.655 --> 00:28:22.383
+Architecture and Diagrams.
+
+428
+00:28:23.633 --> 00:28:24.678
+Component view.
+
+429
+00:28:24.958 --> 00:28:26.302
+Here is the diagram.
+
+430
+00:28:30.152 --> 00:28:32.840
+Sequence: happy path, a Devanagari query.
+
+431
+00:28:33.120 --> 00:28:35.915
+The sequence diagram walks through it step by step.
+
+432
+00:28:36.195 --> 00:28:37.069
+A to S:
+
+433
+00:28:37.349 --> 00:28:43.899
+GET or search?q=आटा 5kg and store=BLR17.
+
+434
+00:28:44.179 --> 00:28:49.640
+S to S: normalise, transliterate to ata, units 5kg, type intent atta.
+
+435
+00:28:49.920 --> 00:28:55.275
+S to E: query name, aliases, type boosted, filter category, top 200.
+
+436
+00:28:55.555 --> 00:28:59.672
+E to S: candidates with BM25 scores and facets.
+
+437
+00:28:59.952 --> 00:29:04.197
+S to I: stock for candidate SKUs at BLR17.
+
+438
+00:29:04.477 --> 00:29:06.205
+I to S: availability.
+
+439
+00:29:06.485 --> 00:29:10.411
+S to S: re-rank by stock and popularity, cut to 20.
+
+440
+00:29:10.691 --> 00:29:13.464
+S to A: results, facets, did-you-mean none.
+
+441
+00:29:17.314 --> 00:29:20.493
+Sequence: failure path, out-of-order index updates.
+
+442
+00:29:20.773 --> 00:29:23.567
+The sequence diagram walks through it step by step.
+
+443
+00:29:23.847 --> 00:29:28.754
+DB to W2: chunk A, sku-7 price 47, version 5.
+
+444
+00:29:29.034 --> 00:29:34.026
+DB to W1: chunk B, sku-7 price 39, version 6.
+
+445
+00:29:34.306 --> 00:29:38.210
+W1 to E: upsert sku-7 price 39 v6.
+
+446
+00:29:38.490 --> 00:29:42.629
+W2 to E: upsert sku-7 price 47 v5.
+
+447
+00:29:42.909 --> 00:29:46.471
+E to E: newer data overwritten, index shows 47.
+
+448
+00:29:50.321 --> 00:29:52.391
+State: a search index lifecycle.
+
+449
+00:29:52.671 --> 00:29:54.015
+Here is the diagram.
+
+450
+00:29:57.865 --> 00:29:58.782
+Part 4.
+
+451
+00:29:59.062 --> 00:30:00.683
+Design Document Excerpt:
+
+452
+00:30:00.963 --> 00:30:02.777
+Grocery Product Search v2.
+
+453
+00:30:04.027 --> 00:30:05.371
+Here is a quick table:
+
+454
+00:30:05.651 --> 00:30:06.952
+Field, and Value.
+
+455
+00:30:07.232 --> 00:30:08.576
+Author or Reviewers:
+
+456
+00:30:08.856 --> 00:30:12.952
+Search team or catalog, inventory, merchandising, SRE.
+
+457
+00:30:13.232 --> 00:30:14.128
+Status:
+
+458
+00:30:14.408 --> 00:30:15.283
+Approved.
+
+459
+00:30:15.563 --> 00:30:16.885
+Related ADRs:
+
+460
+00:30:17.165 --> 00:30:49.585
+ADR-093 Dedicated search engine (OpenSearch) fed by outbox or Kafka; ADR-094 Analyzer with transliteration, phonetic normalisation, units; ADR-095 Synonyms or aliases as reviewed config with judged-query CI; ADR-096 Stock applied at query time from the inventory read model; ADR-097 Hybrid BM25 + vector with RRF, behind a flag.
+
+461
+00:30:50.935 --> 00:30:51.575
+1.
+
+462
+00:30:51.855 --> 00:30:53.263
+Context and Problem.
+
+463
+00:30:53.543 --> 00:31:04.445
+23 % zero-result searches, Hinglish or Devanagari or typos unsupported, out-of-stock items ranked first, and search load on the orders database.
+
+464
+00:31:04.725 --> 00:31:05.429
+2.
+
+465
+00:31:05.709 --> 00:31:07.053
+Goals or Non-Goals.
+
+466
+00:31:07.333 --> 00:31:27.215
+Goals: zero-result rate 3 %; nDCG@10 ≥ 0.85 on the judged set (≥ 500 queries); p99 150 ms for search and 50 ms for autocomplete; price or stock changes searchable within 5 s.
+
+467
+00:31:27.495 --> 00:31:31.783
+Non-goals: a full recommendation system; voice search (a later phase).
+
+468
+00:31:32.063 --> 00:31:32.810
+3.
+
+469
+00:31:33.090 --> 00:31:34.050
+Requirements.
+
+470
+00:31:35.400 --> 00:31:36.744
+Here is a quick table:
+
+471
+00:31:37.024 --> 00:31:38.496
+ID, and Requirement.
+
+472
+00:31:38.776 --> 00:31:39.715
+FR-1:
+
+473
+00:31:39.995 --> 00:31:46.267
+Queries in English, Hinglish and Devanagari (later Kannada, Tamil, Telugu) match the same products.
+
+474
+00:31:46.547 --> 00:31:47.485
+FR-2:
+
+475
+00:31:47.765 --> 00:31:54.976
+Typos of one edit on terms ≥ 5 characters; never on brands, numbers or short terms.
+
+476
+00:31:55.256 --> 00:31:56.237
+FR-3:
+
+477
+00:31:56.517 --> 00:32:01.296
+Facets: category, brand, price band, dietary tags; filters are exact.
+
+478
+00:32:01.576 --> 00:32:02.557
+FR-4:
+
+479
+00:32:02.837 --> 00:32:06.421
+Out-of-stock at the customer's store never ranks in the top 3.
+
+480
+00:32:06.701 --> 00:32:07.747
+NFR-1:
+
+481
+00:32:08.027 --> 00:32:13.552
+Commit, then searchable p99 at most 5 s; per-product update order preserved.
+
+482
+00:32:13.832 --> 00:32:14.877
+NFR-2:
+
+483
+00:32:15.157 --> 00:32:18.827
+Reindex with zero failed or empty queries (alias swap).
+
+484
+00:32:19.107 --> 00:32:20.173
+NFR-3:
+
+485
+00:32:20.453 --> 00:32:27.344
+Every relevance change passes judged-query CI (no nDCG regression 0.01).
+
+486
+00:32:28.694 --> 00:32:29.398
+4.
+
+487
+00:32:29.678 --> 00:32:30.958
+Capacity estimates.
+
+488
+00:32:32.308 --> 00:32:33.652
+Here is a quick table:
+
+489
+00:32:33.932 --> 00:32:36.236
+Item, and Calculation, and Result.
+
+490
+00:32:36.516 --> 00:32:37.455
+Documents.
+
+491
+00:32:37.735 --> 00:32:38.801
+Calculation:
+
+492
+00:32:39.081 --> 00:32:43.369
+400K SKUs times 12 cities (city-level assortments).
+
+493
+00:32:43.649 --> 00:32:50.028
+Result: ~5M documents, ~2 KB each, then ~10 GB per replica.
+
+494
+00:32:50.308 --> 00:32:51.289
+Query rate.
+
+495
+00:32:51.569 --> 00:32:52.636
+Calculation:
+
+496
+00:32:52.916 --> 00:32:57.012
+10M sessions per day times 3 searches, peak 4x average.
+
+497
+00:32:57.292 --> 00:33:03.820
+Result: ~350 QPS average, ~1,400 QPS peak.
+
+498
+00:33:04.100 --> 00:33:05.167
+Autocomplete.
+
+499
+00:33:05.447 --> 00:33:09.905
+Calculation: ~5 keystroke requests per search after debounce.
+
+500
+00:33:10.185 --> 00:33:14.452
+Result: ~7,000 QPS peak, cacheable prefixes.
+
+501
+00:33:14.732 --> 00:33:15.713
+Update rate.
+
+502
+00:33:15.993 --> 00:33:17.060
+Calculation:
+
+503
+00:33:17.340 --> 00:33:19.580
+Price or stock or catalog changes.
+
+504
+00:33:19.860 --> 00:33:25.449
+Result: ~200 per second average, ~2,000 per second at sale start.
+
+505
+00:33:25.729 --> 00:33:27.159
+Vectors (phase 2).
+
+506
+00:33:27.439 --> 00:33:28.505
+Calculation:
+
+507
+00:33:28.785 --> 00:33:34.396
+5M times 384 dims times 4 B (+ HNSW links).
+
+508
+00:33:34.676 --> 00:33:42.889
+Result: ~7.7 GB + ~1 GB per replica; int8 quantisation, then ~2 GB.
+
+509
+00:33:44.239 --> 00:33:45.007
+5.
+
+510
+00:33:45.287 --> 00:33:46.482
+Proposed design.
+
+511
+00:33:46.762 --> 00:33:56.767
+Engine: an OpenSearch cluster, one index alias per city, 3 primaries times 2 replicas, dedicated coordinating nodes for autocomplete bursts.
+
+512
+00:33:57.047 --> 00:33:58.029
+Analyzer:
+
+513
+00:33:58.309 --> 00:34:11.045
+ICU normalisation, then ICU tokenizer, then Devanagari, then Latin transform, then a custom Hinglish phonetic filter, then lowercase, then a unit filter, then light plural stemming.
+
+514
+00:34:11.325 --> 00:34:14.994
+An aliases field and a type field (keyword + analysed).
+
+515
+00:34:16.344 --> 00:34:33.112
+Query: multimatch over name^2, aliases^1.5, type^3, brand, category; search-time synonyms (updateable); fuzziness AUTO:5,8; function score with popularity; stock applied by a filter or re-rank from the inventory read model.
+
+516
+00:34:33.392 --> 00:34:45.829
+Indexing: the outbox, then Kafka keyed by product id, then an indexer with bulk requests ( at most 5 MB or 1,000 docs), pipelined, with external versioning on version.
+
+517
+00:34:46.109 --> 00:34:47.475
+Tombstones for deletes.
+
+518
+00:34:47.755 --> 00:34:48.864
+Relevance ops:
+
+519
+00:34:50.214 --> 00:34:58.235
+A judged set of 500 queries, refreshed monthly from logs, and CI that runs nDCG and the zero-result rate.
+
+520
+00:34:58.515 --> 00:35:00.905
+An interleaving framework for online tests.
+
+521
+00:35:01.185 --> 00:35:04.833
+A weekly zero-result review feeding aliases and synonyms.
+
+522
+00:35:05.113 --> 00:35:21.049
+Hybrid (phase 2): a 384-dim multilingual embedding model on name + aliases + category, HNSW (M=16, efSearch=100), RRF with the vector weight tuned on held-out queries.
+
+523
+00:35:21.329 --> 00:35:22.075
+7.
+
+524
+00:35:22.355 --> 00:35:23.870
+Alternatives considered.
+
+525
+00:35:25.220 --> 00:35:26.564
+Here is a quick table:
+
+526
+00:35:26.844 --> 00:35:29.383
+Option, and Pros, and Cons, and Verdict.
+
+527
+00:35:29.663 --> 00:35:32.223
+PostgreSQL FTS + trigram.
+
+528
+00:35:32.503 --> 00:35:33.356
+Pros:
+
+529
+00:35:33.636 --> 00:35:34.767
+No new system.
+
+530
+00:35:35.047 --> 00:35:35.857
+Cons:
+
+531
+00:35:36.137 --> 00:35:40.532
+No transliteration, limited relevance tooling, load on OLTP (L2).
+
+532
+00:35:40.812 --> 00:35:41.623
+Verdict:
+
+533
+00:35:41.903 --> 00:35:43.247
+Admin tools only.
+
+534
+00:35:43.527 --> 00:35:45.276
+OpenSearch or Elasticsearch.
+
+535
+00:35:45.556 --> 00:35:46.409
+Pros:
+
+536
+00:35:46.689 --> 00:35:50.615
+Full analyzer control, aggregations, k-NN, mature ops.
+
+537
+00:35:50.895 --> 00:35:51.705
+Cons:
+
+538
+00:35:51.985 --> 00:35:53.308
+Operational weight.
+
+539
+00:35:53.588 --> 00:35:54.399
+Verdict:
+
+540
+00:35:54.679 --> 00:35:55.511
+Chosen.
+
+541
+00:35:55.791 --> 00:35:57.476
+Meilisearch or Typesense.
+
+542
+00:35:57.756 --> 00:35:58.609
+Pros:
+
+543
+00:35:58.889 --> 00:36:01.919
+Great defaults (typo tolerance, prefix), simple.
+
+544
+00:36:02.199 --> 00:36:03.009
+Cons:
+
+545
+00:36:03.289 --> 00:36:06.127
+Less analyzer control, single-node focus.
+
+546
+00:36:06.407 --> 00:36:07.217
+Verdict:
+
+547
+00:36:07.497 --> 00:36:09.652
+Good for smaller catalogs (L3).
+
+548
+00:36:11.002 --> 00:36:12.389
+Managed search SaaS.
+
+549
+00:36:12.669 --> 00:36:13.522
+Pros:
+
+550
+00:36:13.802 --> 00:36:14.783
+Least ops.
+
+551
+00:36:15.063 --> 00:36:15.874
+Cons:
+
+552
+00:36:16.154 --> 00:36:18.309
+Cost per query, data residency.
+
+553
+00:36:18.589 --> 00:36:19.399
+Verdict:
+
+554
+00:36:19.679 --> 00:36:22.389
+Rejected (DPDP residency, cost).
+
+555
+00:36:22.669 --> 00:36:23.906
+Vector-only search.
+
+556
+00:36:24.186 --> 00:36:25.039
+Pros:
+
+557
+00:36:25.319 --> 00:36:26.535
+Handles intent.
+
+558
+00:36:26.815 --> 00:36:27.626
+Cons:
+
+559
+00:36:27.906 --> 00:36:29.933
+Poor on exact queries (L4:
+
+560
+00:36:30.213 --> 00:36:31.791
+0.289).
+
+561
+00:36:32.071 --> 00:36:32.882
+Verdict:
+
+562
+00:36:33.162 --> 00:36:34.741
+Only as part of hybrid.
+
+563
+00:36:36.091 --> 00:36:36.773
+8.
+
+564
+00:36:37.053 --> 00:36:38.205
+Failure modes.
+
+565
+00:36:38.485 --> 00:36:42.837
+Indexer lag, then alert at 5 s; search still serves (slightly stale).
+
+566
+00:36:43.117 --> 00:36:50.541
+Engine unavailable, then degraded mode: cached popular results, then a PostgreSQL fallback for exact names.
+
+567
+00:36:50.821 --> 00:36:56.517
+Bad synonym deploy, then caught by judged-query CI, with rollback by config revert.
+
+568
+00:36:56.797 --> 00:37:01.299
+Hot shard during a sale, then replicas + adaptive replica selection.
+
+569
+00:37:01.579 --> 00:37:02.283
+10.
+
+570
+00:37:02.563 --> 00:37:03.651
+Observability.
+
+571
+00:37:05.001 --> 00:37:17.011
+Query: p50 or p99 latency, zero-result rate by language or script, top zero-result queries, CTR@k, add-to-cart from search, reformulation rate.
+
+572
+00:37:17.291 --> 00:37:22.923
+Indexing: lag, bulk rejections, version conflicts (a proxy for out-of-order events).
+
+573
+00:37:23.203 --> 00:37:26.659
+Engine: segment count, merge time, heap, cache hit rates.
+
+574
+00:37:26.939 --> 00:37:27.793
+14.
+
+575
+00:37:28.073 --> 00:37:32.531
+Decision (ADR-093 to 097 summary).
+
+576
+00:37:32.811 --> 00:37:36.097
+A dedicated engine fed by an ordered outbox stream.
+
+577
+00:37:36.377 --> 00:37:39.086
+Analyzers built for Hinglish and Devanagari.
+
+578
+00:37:39.366 --> 00:37:42.118
+Synonyms and aliases as tested config.
+
+579
+00:37:42.398 --> 00:37:44.062
+Stock applied at query time.
+
+580
+00:37:44.342 --> 00:37:48.523
+Hybrid retrieval behind a flag, evaluated offline and online.
+
+581
+00:37:49.873 --> 00:37:50.833
+Part 5.
+
+582
+00:37:51.113 --> 00:37:53.097
+Hands-On Code, Level Ladder.
+
+583
+00:37:54.347 --> 00:37:55.691
+Here is a quick table:
+
+584
+00:37:55.971 --> 00:37:58.659
+Level, and New requirement that forces the step.
+
+585
+00:37:58.939 --> 00:37:59.771
+L1:
+
+586
+00:38:00.051 --> 00:38:03.401
+Understand what search does, and fix relevance measurably.
+
+587
+00:38:03.681 --> 00:38:09.078
+(inverted index + BM25 + analyzers from scratch, judged queries).
+
+588
+00:38:09.358 --> 00:38:10.169
+L2:
+
+589
+00:38:10.449 --> 00:38:12.177
+Can PostgreSQL do it?
+
+590
+00:38:12.457 --> 00:38:16.723
+(trigram, full-text, autocomplete, facets on 200K rows).
+
+591
+00:38:17.003 --> 00:38:17.857
+L3:
+
+592
+00:38:18.137 --> 00:38:21.401
+Use a real engine and keep it in sync with the database.
+
+593
+00:38:21.681 --> 00:38:25.585
+(Meilisearch, outbox indexer, ordering, reindex with swap).
+
+594
+00:38:25.865 --> 00:38:26.739
+L4:
+
+595
+00:38:27.019 --> 00:38:28.641
+Understand intent queries.
+
+596
+00:38:28.921 --> 00:38:34.361
+(HNSW from scratch, hybrid BM25 + vector with RRF).
+
+597
+00:38:35.711 --> 00:38:38.484
+All labs ran on a 2 vCPU container:
+
+598
+00:38:38.764 --> 00:38:50.860
+JDK 25 (Temurin), which launches multi-file source programs, so SearchL1.java, MeiliL3.java and VectorL4.java share Catalog.java.
+
+599
+00:38:51.140 --> 00:38:55.108
+PostgreSQL 16 (:5543).
+
+600
+00:38:55.388 --> 00:39:01.255
+Meilisearch 1.11.3 (:7700, from its GitHub release).
+
+601
+00:39:01.535 --> 00:39:11.177
+The catalog is 20,000 generated products (invented brands) for L1 or L3 or L4, and 200,000 listings for L2.
+
+602
+00:39:11.457 --> 00:39:13.335
+The outputs below are verbatim.
+
+603
+00:39:13.615 --> 00:39:16.985
+Lab files are in labs or ch22-search/.
+
+604
+00:39:18.335 --> 00:39:29.749
+The shared catalog, judged queries and analyzer building blocks (tokeniser, unit normaliser, plural stemmer, Devanagari transliterator, Hinglish phonetic normaliser, synonyms):
+
+605
+00:39:31.099 --> 00:39:33.616
+Here is the Java code, Catalog.java.
+
+606
+00:39:33.896 --> 00:39:38.504
+It runs to 277 lines; the full listing is in the chapter.
+
+607
+00:39:38.784 --> 00:39:48.832
+Catalog.java, shared by the Ch 22 labs (JDK 25 multi-file source launch: java SearchL1.java finds this file).
+
+608
+00:39:49.112 --> 00:40:04.621
+A deterministic grocery catalog (invented brands), the judged query set, and the analyzer building blocks: tokenising, unit normalisation, plural stemming, Devanagari, then Latin transliteration, phonetic normalisation, synonyms.
+
+609
+00:40:07.471 --> 00:40:11.994
+L1, Inverted index, BM25 and analyzers, measured.
+
+610
+00:40:12.274 --> 00:40:13.213
+Requirement:
+
+611
+00:40:13.493 --> 00:40:17.418
+Customers type 'aata', 'आटा', 'doodh 1 litre', 'tomatos'.
+
+612
+00:40:17.698 --> 00:40:20.855
+Make search find the right products, and prove it with numbers.
+
+613
+00:40:22.205 --> 00:40:24.979
+Here is the Java code, SearchL1.java.
+
+614
+00:40:25.259 --> 00:40:29.589
+It runs to 224 lines; the full listing is in the chapter.
+
+615
+00:40:29.869 --> 00:40:43.608
+SearchL1.java, run with: /opt or jdk25 or bin or java SearchL1.java (JDK 22 plus launches multi-file programs: uses Catalog.java).
+
+616
+00:40:43.888 --> 00:40:52.592
+An inverted index with BM25 over 20,000 grocery products, built from scratch, evaluated on 20 judged queries.
+
+617
+00:40:52.872 --> 00:40:55.837
+(English, Hinglish, Devanagari, typos, units).
+
+618
+00:40:56.117 --> 00:41:01.003
+Part A adds analyzer stages one at a time and measures nDCG@10.
+
+619
+00:41:03.853 --> 00:41:04.770
+On screen:
+
+620
+00:41:05.050 --> 00:41:05.669
+A.
+
+621
+00:41:05.949 --> 00:41:13.373
+20 judged queries over 20,000 products: analyzer stages versus relevance (nDCG@10.
+
+622
+00:41:13.653 --> 00:41:46.201
+BM25, name boost 2). analyzer nDCG@10 zero results queries still failing (nDCG 0.5). lowercase + split 0.367 11 atta 5kg, aata, आटा, doodh, दूध 1 litre, tomatos, chini. shampo, मूंग दाल, haldi, chai patti, gur, anda. + units (5kg, 1 litre) + plural stem 0.457 10 aata, आटा, doodh, दूध 1 litre,
+
+623
+00:41:46.481 --> 00:42:20.289
+chini. shampo, मूंग दाल, haldi, chai patti, gur, anda. + Devanagari + phonetic (aata or atta or आटा) 0.607 7 doodh, दूध 1 litre, chini, shampo. haldi, chai patti, gur, anda. + synonyms (curd↔dahi, milk↔doodh...) 0.900 1 shampo, potato. + fuzzy, naive (edit distance 1, ≥ 4 chars) 0.900 0 chai patti,
+
+624
+00:42:20.569 --> 00:42:35.545
+potato. fuzzy guarded instead (≥ 5 chars, score times 0.5) 0.950 0 potato. + product-type field, boost 3 1.000 0 -.
+
+625
+00:42:35.825 --> 00:42:37.339
+The rest is in the chapter.
+
+626
+00:42:40.189 --> 00:42:41.043
+Reading it:
+
+627
+00:42:41.323 --> 00:42:44.139
+Each analyzer stage fixes a class of queries:
+
+628
+00:42:44.419 --> 00:42:47.789
+Units and plurals fix atta 5kg and tomatos.
+
+629
+00:42:48.069 --> 00:42:54.192
+Transliteration and phonetic normalisation fix aata, आटा and मूंग दाल.
+
+630
+00:42:54.472 --> 00:42:57.416
+Synonyms fix doodh, chini, haldi, gur and anda.
+
+631
+00:42:57.696 --> 00:43:04.011
+The analyzed forms line shows three spellings of atta collapsing to ata, and both forms of milk to dudh.
+
+632
+00:43:05.361 --> 00:43:17.393
+Naive fuzzy matching broke a working query. chai isn't in the product vocabulary (only its synonym tea is), so fuzzy expansion matched chaki (Chakki Fresh Atta), one edit away.
+
+633
+00:43:17.673 --> 00:43:31.433
+The guarded version (≥ 5 characters, score halved) keeps shampo, then shampoo without the false positives. potato needed query understanding: potato chips are textually excellent matches.
+
+634
+00:43:31.713 --> 00:43:35.958
+A curated product-type field (boost 3) states what the product is.
+
+635
+00:43:37.308 --> 00:43:39.911
+1.000 is not done.
+
+636
+00:43:40.191 --> 00:43:44.607
+20 queries written by the same author who tuned the analyzer will overfit.
+
+637
+00:43:44.887 --> 00:43:49.345
+Production needs hundreds of queries sampled from logs, judged by others.
+
+638
+00:43:49.625 --> 00:43:50.927
+Index versus scan:
+
+639
+00:43:51.207 --> 00:44:00.849
+631 µs versus 122 ms per query (194x), and the gap grows linearly with catalog size.
+
+640
+00:44:01.129 --> 00:44:16.873
+Business ranking: a popularity times stock function score removed all out-of-stock products from the top 3 (11, then 0 of 60 slots) at a negligible relevance cost (1.000, then 0.992).
+
+641
+00:44:18.223 --> 00:44:25.093
+Facets show masala splitting into spices and masala chips, which is exactly the refinement a customer needs.
+
+642
+00:44:26.443 --> 00:44:29.003
+L2, Search inside PostgreSQL.
+
+643
+00:44:29.283 --> 00:44:30.221
+Requirement:
+
+644
+00:44:30.501 --> 00:44:34.448
+Before adding a search engine: how far does PostgreSQL get us?
+
+645
+00:44:35.798 --> 00:44:38.913
+Here is the shell code, exp-pgsearch.sh.
+
+646
+00:44:39.193 --> 00:44:42.755
+It runs to 70 lines; the full listing is in the chapter.
+
+647
+00:44:43.035 --> 00:44:48.006
+Search inside PostgreSQL 16 (:5543):
+
+648
+00:44:48.286 --> 00:44:57.267
+LIKE scans versus pgtrgm, full-text search (tsvector or GIN, tsrank), autocomplete, typo tolerance, facets.
+
+649
+00:44:57.547 --> 00:45:04.011
+200,000 product listings from ExportCatalog.java (many sellers listing the same items).
+
+650
+00:45:06.861 --> 00:45:08.973
+On screen: == 1.
+
+651
+00:45:09.253 --> 00:45:10.363
+Substring search:
+
+652
+00:45:10.643 --> 00:45:13.843
+LIKE '%paneer%'. no index (seq scan):
+
+653
+00:45:14.123 --> 00:45:19.072
+28.043 ms, 4952 rows.
+
+654
+00:45:19.352 --> 00:45:20.952
+GIN trigram index:
+
+655
+00:45:21.232 --> 00:45:29.040
+13.966 ms, 4952 rows (index 11 MB). == 2.
+
+656
+00:45:29.320 --> 00:45:36.637
+Full-text search: tsvector (english stemming on name, weight A; brand+category. weight B), GIN, tsrank.
+
+657
+00:45:36.917 --> 00:45:43.744
+'fresh paneer', then 'fresh' and 'paneer' 12.186 ms, 2486 rows.
+
+658
+00:45:44.024 --> 00:45:50.339
+'tomatoes', then 'tomato' 14.833 ms, 4981 rows.
+
+659
+00:45:50.619 --> 00:45:56.869
+'tomatos', then 'tomato' 14.838 ms, 4981 rows.
+
+660
+00:45:57.149 --> 00:46:04.424
+'masala chips', then 'masala' and 'chip' 11.844 ms, 2477 rows.
+
+661
+00:46:04.704 --> 00:46:10.272
+'आटा', then (empty: no lexemes) 1.824 ms, 0 rows.
+
+662
+00:46:10.552 --> 00:46:15.629
+'aata', then 'aata' 2.326 ms, 0 rows. == 3.
+
+663
+00:46:15.909 --> 00:46:18.427
+Autocomplete and typos. prefix 'sham:':
+
+664
+00:46:18.707 --> 00:46:24.744
+16.995 ms, then Nirmal Herbal ShampooUjjwal Herbal ShampooPrakriti.
+
+665
+00:46:25.024 --> 00:46:26.539
+The rest is in the chapter.
+
+666
+00:46:29.389 --> 00:46:30.242
+Reading it:
+
+667
+00:46:30.522 --> 00:46:36.218
+Trigram GIN halves ILIKE '%paneer%' here (28, then 14 ms).
+
+668
+00:46:36.498 --> 00:46:42.685
+The term matches ~2.5 % of rows; for rarer terms the gap is orders of magnitude.
+
+669
+00:46:42.965 --> 00:46:51.711
+Full-text search stems tomatoes and even tomatos to tomato (Snowball English), ranks by weighted fields, and handles AND semantics.
+
+670
+00:46:51.991 --> 00:47:07.437
+But आटा produces no lexemes at all, and aata finds nothing. wordsimilarity finds shampoo for shampo (0.86) and Toor Dal for toor daal (0.80), which is good typo tolerance for admin tools.
+
+671
+00:47:07.717 --> 00:47:10.383
+Autocomplete via prefix tsquery works.
+
+672
+00:47:11.733 --> 00:47:14.165
+Facets in one round trip with GROUPING SETS.
+
+673
+00:47:14.445 --> 00:47:23.320
+The ceiling: no transliteration, coarse relevance controls, and all of it competes with OLTP traffic on the same instance (Ch 21).
+
+674
+00:47:23.600 --> 00:47:26.843
+Right for back-office search, not for the customer app at scale.
+
+675
+00:47:28.193 --> 00:47:32.054
+L3, A real engine, kept in sync from PostgreSQL.
+
+676
+00:47:32.334 --> 00:47:33.273
+Requirement:
+
+677
+00:47:33.553 --> 00:47:44.881
+Customer search on a dedicated engine: good defaults, facets, typo tolerance, updates visible in seconds, correct under parallel indexing, and reindexable without downtime.
+
+678
+00:47:45.161 --> 00:47:50.217
+Meilisearch was chosen for the lab because it ships as a single binary on GitHub.
+
+679
+00:47:50.497 --> 00:47:53.761
+The lessons are the same on OpenSearch or Elasticsearch.
+
+680
+00:47:54.041 --> 00:47:56.430
+Part A evaluates the same judged queries.
+
+681
+00:47:57.780 --> 00:48:09.023
+Parts C and D run a writer that updates catalogitem + catalogoutbox in one transaction (Ch 13) and indexers that ship outbox rows to the engine.
+
+682
+00:48:09.303 --> 00:48:13.399
+Lag is measured from each row's commit time to the engine task's finishedAt.
+
+683
+00:48:13.679 --> 00:48:19.801
+Part D counts, in the engine's task order, how many writes replaced a newer version with an older one.
+
+684
+00:48:21.151 --> 00:48:23.967
+Here is the Java code, MeiliL3.java.
+
+685
+00:48:24.247 --> 00:48:28.727
+It runs to 364 lines; the full listing is in the chapter.
+
+686
+00:48:29.007 --> 00:48:43.621
+MeiliL3.java, run with: /opt or jdk25 or bin or java -Duser.timezone=UTC -cp pgjdbc.jar MeiliL3.java (uses Catalog.java).
+
+687
+00:48:43.901 --> 00:48:54.333
+A real search engine (Meilisearch 1.11 on:7700) fed from real PostgreSQL (:5543).
+
+688
+00:48:54.613 --> 00:49:04.682
+A. relevance on the 20 judged queries: engine defaults, then + synonyms, then + index-time enrichment (Hinglish or Devanagari aliases).
+
+689
+00:49:07.532 --> 00:49:08.449
+On screen:
+
+690
+00:49:08.729 --> 00:49:09.348
+A.
+
+691
+00:49:09.628 --> 00:49:36.465
+Meilisearch 1.11 on the 20 judged queries (typo tolerance and prefix search are on. by default). configuration nDCG@10 zero results index time queries still failing (nDCG 0.5). engine defaults 0.429 11 3,588 ms aata, आटा, doodh, दूध 1 litre, cooking oil. chini, मूंग दाल, haldi, chai patti, gur,
+
+692
+00:49:36.745 --> 00:49:59.785
+anda. + synonyms setting 0.779 4 3,352 ms आटा, दूध 1 litre, cooking oil, मूंग दाल. + enrichment: aliases field (Hinglish, Hindi) 0.979 0 3,671 ms -. engine-reported processing time for 'shampo':
+
+693
+00:50:00.065 --> 00:50:01.089
+0 ms.
+
+694
+00:50:01.369 --> 00:50:02.052
+B.
+
+695
+00:50:02.332 --> 00:50:03.676
+Facets and filters.
+
+696
+00:50:03.956 --> 00:50:17.652
+'masala', then estimatedTotalHits 1000, facetDistribution. category:Masala:1022,Snacks:240,instock:false:194,true:1068.
+
+697
+00:50:17.932 --> 00:50:24.439
+'masala' + filter category = Masala AND instock = true, then 876 hits.
+
+698
+00:50:24.719 --> 00:50:25.401
+C.
+
+699
+00:50:25.681 --> 00:50:26.449
+Sync:
+
+700
+00:50:26.729 --> 00:50:33.620
+200 price or stock updates per second for 10 s, then outbox, then indexer (poll every 50.
+
+701
+00:50:33.900 --> 00:50:35.415
+The rest is in the chapter.
+
+702
+00:50:38.265 --> 00:50:39.118
+Reading it:
+
+703
+00:50:39.398 --> 00:50:40.294
+Relevance:
+
+704
+00:50:40.574 --> 00:50:55.657
+The engine's defaults (typo tolerance, prefix matching, a good ranking pipeline) give 0.429, below L1's hand-built stages at 0.607, because nothing handles Hinglish or Devanagari.
+
+705
+00:50:55.937 --> 00:50:59.286
+The synonyms setting reaches 0.779.
+
+706
+00:50:59.566 --> 00:51:09.571
+Index-time enrichment (an aliases field per product type, maintained by merchandising) reaches 0.979 with no custom analyzer.
+
+707
+00:51:09.851 --> 00:51:12.859
+When you can't change the analyzer, change the documents.
+
+708
+00:51:14.209 --> 00:51:17.367
+Facets work, and estimatedTotalHits is an estimate:
+
+709
+00:51:17.647 --> 00:51:22.105
+1,000 versus the 1,262 the facets count.
+
+710
+00:51:22.385 --> 00:51:24.305
+Sync throughput is about pipelining:
+
+711
+00:51:24.585 --> 00:51:35.167
+Waiting for each 20-document task to finish capped the indexer below the write rate, so lag grew to 22 s (p50) / 43 s (p99).
+
+712
+00:51:35.447 --> 00:51:47.116
+Enqueuing and moving on (the engine auto-batches queued tasks) kept lag at ~0.8 s or 1.1 s, whether batches held 20 or 500 documents.
+
+713
+00:51:47.396 --> 00:51:51.471
+The same is true of Elasticsearch bulk requests and refresh intervals.
+
+714
+00:51:52.821 --> 00:51:53.503
+Order:
+
+715
+00:51:53.783 --> 00:52:04.407
+Two indexers pulling alternating chunks applied 26 older versions over newer ones, and 3 of 20 hot products ended the run with the wrong price in the index.
+
+716
+00:52:04.687 --> 00:52:09.509
+Partitioning by product id (what Kafka keying gives you) gave 0 and 0.
+
+717
+00:52:09.789 --> 00:52:15.442
+Reindex: productsv2 was built with new settings and swapped atomically while 4 clients searched:
+
+718
+00:52:15.722 --> 00:52:20.117
+6,604 queries, 0 empty, 0 errors.
+
+719
+00:52:21.467 --> 00:52:22.917
+L4, Vector search:
+
+720
+00:52:23.197 --> 00:52:26.184
+HNSW from scratch, and hybrid retrieval.
+
+721
+00:52:26.464 --> 00:52:27.403
+Requirement:
+
+722
+00:52:27.683 --> 00:52:33.528
+Customers search for intents ('healthy breakfast', 'something for chai', 'party snacks'), not just products.
+
+723
+00:52:33.808 --> 00:52:37.413
+Add semantic retrieval without losing exact-match quality.
+
+724
+00:52:37.693 --> 00:52:49.939
+Part A builds HNSW twice (simple versus heuristic neighbour selection) over 100,000 clustered 64-dim unit vectors, and measures recall@10 against brute force.
+
+725
+00:52:51.289 --> 00:53:01.827
+Part B compares BM25 (L1's final analyzer), vector search and RRF fusion on the 20 lexical queries plus 8 intent queries.
+
+726
+00:53:02.107 --> 00:53:13.478
+The embeddings in Part B are a toy: hand-written concept vectors per product type (breakfast, dairy, snack, protein...) with a small keyword, then concept lexicon for queries.
+
+727
+00:53:13.758 --> 00:53:18.729
+They stand in for a learned model (a multilingual sentence-embedding model in production).
+
+728
+00:53:19.009 --> 00:53:23.126
+The point is how the retrievers fail differently, not the absolute numbers.
+
+729
+00:53:24.476 --> 00:53:27.399
+Here is the Java code, VectorL4.java.
+
+730
+00:53:27.679 --> 00:53:32.308
+It runs to 347 lines; the full listing is in the chapter.
+
+731
+00:53:32.588 --> 00:53:45.537
+VectorL4.java, run with: /opt or jdk25 or bin or java -Xmx3g VectorL4.java (uses Catalog.java and SearchL1.java).
+
+732
+00:53:45.817 --> 00:53:47.993
+Part A: approximate nearest neighbours.
+
+733
+00:53:48.273 --> 00:53:55.015
+An HNSW graph written from scratch versus exact brute force over 100,000 vectors.
+
+734
+00:53:55.295 --> 00:54:01.332
+(64 dimensions, clustered): recall@10, latency and build cost as efSearch grows.
+
+735
+00:54:04.182 --> 00:54:05.099
+On screen:
+
+736
+00:54:05.379 --> 00:54:05.998
+A.
+
+737
+00:54:06.278 --> 00:54:21.190
+100,000 vectors times 64 dims (200 clusters), 200 queries, top-10 by cosine. brute force (exact): recall 1.000, 3.97 ms or query.
+
+738
+00:54:21.470 --> 00:54:31.369
+HNSW, simple neighbour selection (M=16, efConstruction=100): build 23,204 ms.
+
+739
+00:54:31.649 --> 00:55:07.397
+2,505,761 links (~9,788 KB on top of 25,000 KB of vectors). efSearch=10: recall@10 0.686, 0.070 ms or query (56x faster than brute force). efSearch=20: recall@10 0.795, 0.079 ms or query (50x faster than brute force). efSearch=40: recall@10 0.872,
+
+740
+00:55:07.677 --> 00:55:32.275
+0.122 ms or query (33x faster than brute force). efSearch=80: recall@10 0.923, 0.217 ms or query (18x faster than brute force). efSearch=160: recall@10 0.945, 0.357 ms or query (11x faster than brute force).
+
+741
+00:55:32.555 --> 00:55:43.029
+HNSW, heuristic neighbour selection (M=16, efConstruction=100): build 35,383 ms.
+
+742
+00:55:43.309 --> 00:56:13.895
+2,611,810 links (~10,202 KB on top of 25,000 KB of vectors). efSearch=10: recall@10 0.858, 0.076 ms or query (52x faster than brute force). efSearch=20: recall@10 0.953, 0.096 ms or query (41x faster than brute force).
+
+743
+00:56:14.175 --> 00:56:15.690
+The rest is in the chapter.
+
+744
+00:56:18.540 --> 00:56:19.393
+Reading it:
+
+745
+00:56:19.673 --> 00:56:20.868
+ANN trade-off:
+
+746
+00:56:21.148 --> 00:56:24.945
+With the simple keep the M closest neighbour lists, recall plateaus:
+
+747
+00:56:25.225 --> 00:56:31.433
+0.945 at efSearch 160, where the graph clusters and search gets stuck.
+
+748
+00:56:31.713 --> 00:56:39.863
+The paper's heuristic keeps a neighbour only if it's closer to the node than to already-kept neighbours, so links point in diverse directions.
+
+749
+00:56:40.143 --> 00:56:51.428
+That reaches 0.991 at efSearch 40 (34x faster than brute force) and 1.000 at 80, for 50 % more build time.
+
+750
+00:56:52.778 --> 00:57:02.250
+Use mature libraries (Lucene HNSW, FAISS, hnswlib, pgvector), and still measure recall on your data and filters.
+
+751
+00:57:02.530 --> 00:57:03.341
+Hybrid:
+
+752
+00:57:03.621 --> 00:57:09.935
+BM25 is perfect on the lexical set and weak on intents (0.542).
+
+753
+00:57:10.215 --> 00:57:15.762
+Vectors are the reverse (0.289 versus 0.740).
+
+754
+00:57:16.042 --> 00:57:23.871
+Plain RRF helps intents (0.769) but dilutes exact queries (0.903).
+
+755
+00:57:24.151 --> 00:57:34.327
+Down-weighting the vector list keeps exact queries at 1.000 and lifts intents to 0.797, better than either retriever alone.
+
+756
+00:57:35.677 --> 00:57:38.493
+The weight was tuned on the same queries it reports.
+
+757
+00:57:38.773 --> 00:57:43.232
+In production, tune on a held-out set and confirm online with interleaving.
+
+758
+00:57:44.582 --> 00:57:45.222
+Tip:
+
+759
+00:57:45.502 --> 00:57:47.102
+Spring shapes (VERIFY:
+
+760
+00:57:47.382 --> 00:57:59.009
+OpenSearch client and Spring Data not downloadable here). // search-service: query with analyzer-aware multimatch, synonyms at search time, function score, filters.
+
+761
+00:57:59.289 --> 00:58:22.286
+SearchResponseProductDoc r = client.search(s - s.index(products- + city). .query(q - q.functionScore(fs - fs. .query(inner - inner.bool(b - b. .must(m - m.multiMatch(mm - mm.query(userQuery).fields(name^2, aliases^1.5, type^3, brand, category). .fuzziness(AUTO:5,8).analyzer(grocerysearch))).
+
+762
+00:58:23.636 --> 00:58:49.449
+.filter(f - f.term(t - t.field(availablestores).value(storeId))))). .functions(fn - fn.fieldValueFactor(fv - fv.field(popularity).modifier(FieldValueFactorModifier.Log1p).factor(0.1))). .boostMode(FunctionBoostMode.Multiply))). .aggregations(category, a - a.terms(t - t.field(category))). .size(20), ProductDoc.class);. // indexer:
+
+763
+00:58:49.729 --> 00:58:55.575
+Kafka keyed by productId, then bulk with external versioning (older versions rejected).
+
+764
+00:58:56.925 --> 00:59:19.410
+@KafkaListener(topics = catalog.product.changed.v1, groupId = search-indexer, batch = true). void index(ListProductChanged events) throws IOException. var bulk = new BulkRequest.Builder();. for (var e: events) bulk.operations(op - op.index(i - i.index(products- + e.city()).id(e.productId()).
+
+765
+00:59:19.690 --> 00:59:27.861
+.version(e.version()).versionType(VersionType.External).document(ProductDoc.from(e))));. client.bulk(bulk.build());.
+
+766
+00:59:30.561 --> 00:59:31.499
+Part 6.
+
+767
+00:59:31.779 --> 00:59:33.059
+Production Concerns.
+
+768
+00:59:34.309 --> 00:59:35.461
+Failure modes.
+
+769
+00:59:35.741 --> 00:59:37.085
+Here is a quick table:
+
+770
+00:59:37.365 --> 00:59:40.352
+Failure, and Symptom, and Cause, and Mitigation.
+
+771
+00:59:40.632 --> 00:59:42.573
+Zero results for common intents.
+
+772
+00:59:42.853 --> 00:59:43.664
+Symptom:
+
+773
+00:59:43.944 --> 00:59:46.376
+High zero-result rate, lost orders.
+
+774
+00:59:46.656 --> 00:59:47.424
+Cause:
+
+775
+00:59:47.704 --> 00:59:51.480
+No transliteration or synonyms, vocabulary mismatch.
+
+776
+00:59:51.760 --> 00:59:52.763
+Mitigation:
+
+777
+00:59:53.043 --> 00:59:58.397
+Analyzer stages (L1), aliases (L3), weekly zero-result review.
+
+778
+00:59:58.677 --> 01:00:01.323
+Relevance regression after a config change.
+
+779
+01:00:01.603 --> 01:00:02.413
+Symptom:
+
+780
+01:00:02.693 --> 01:00:04.507
+CTR drops, complaints.
+
+781
+01:00:04.787 --> 01:00:05.555
+Cause:
+
+782
+01:00:05.835 --> 01:00:10.549
+Untested synonym or boost or fuzzy change (L1: fuzzy broke chai).
+
+783
+01:00:10.829 --> 01:00:11.832
+Mitigation:
+
+784
+01:00:12.112 --> 01:00:15.440
+Judged-query CI, staged rollout, config in Git.
+
+785
+01:00:15.720 --> 01:00:17.107
+Out-of-stock at the top.
+
+786
+01:00:17.387 --> 01:00:18.197
+Symptom:
+
+787
+01:00:18.477 --> 01:00:19.629
+Low add-to-cart.
+
+788
+01:00:19.909 --> 01:00:20.677
+Cause:
+
+789
+01:00:20.957 --> 01:00:22.835
+Ranking ignores availability.
+
+790
+01:00:23.115 --> 01:00:24.117
+Mitigation:
+
+791
+01:00:24.397 --> 01:00:27.768
+Stock filter or demotion at query time (L1 C).
+
+792
+01:00:28.048 --> 01:00:29.029
+Index lag.
+
+793
+01:00:29.309 --> 01:00:30.120
+Symptom:
+
+794
+01:00:30.400 --> 01:00:32.469
+Old prices or stock in results.
+
+795
+01:00:32.749 --> 01:00:33.517
+Cause:
+
+796
+01:00:33.797 --> 01:00:38.107
+Indexer synchronous per request, bulk too small, refresh too frequent.
+
+797
+01:00:38.387 --> 01:00:39.389
+Mitigation:
+
+798
+01:00:39.669 --> 01:00:41.845
+Pipelining, bulk sizing (L3:
+
+799
+01:00:42.125 --> 01:00:45.581
+22 s, then 0.8 s), refresh interval.
+
+800
+01:00:46.931 --> 01:00:48.190
+Stale documents.
+
+801
+01:00:48.470 --> 01:00:49.281
+Symptom:
+
+802
+01:00:49.561 --> 01:00:51.950
+Index disagrees with DB permanently.
+
+803
+01:00:52.230 --> 01:00:52.998
+Cause:
+
+804
+01:00:53.278 --> 01:00:55.113
+Out-of-order updates (L3:
+
+805
+01:00:55.393 --> 01:00:57.697
+26 regressions), lost deletes.
+
+806
+01:00:57.977 --> 01:00:58.979
+Mitigation:
+
+807
+01:00:59.259 --> 01:01:04.593
+Key-partitioned stream, external versions, tombstones, periodic reconciliation.
+
+808
+01:01:04.873 --> 01:01:06.025
+Reindex outage.
+
+809
+01:01:06.305 --> 01:01:07.115
+Symptom:
+
+810
+01:01:07.395 --> 01:01:09.102
+Empty results during rebuild.
+
+811
+01:01:09.382 --> 01:01:10.150
+Cause:
+
+812
+01:01:10.430 --> 01:01:11.582
+In-place rebuild.
+
+813
+01:01:11.862 --> 01:01:12.865
+Mitigation:
+
+814
+01:01:13.145 --> 01:01:15.726
+Build new index + alias swap (L3:
+
+815
+01:01:16.006 --> 01:01:17.094
+0 errors).
+
+816
+01:01:17.374 --> 01:01:19.337
+Hot shard or GC pauses.
+
+817
+01:01:19.617 --> 01:01:22.198
+Symptom: p99 spikes during sales.
+
+818
+01:01:22.478 --> 01:01:23.246
+Cause:
+
+819
+01:01:23.526 --> 01:01:27.195
+Large shards, deep pagination, expensive aggregations.
+
+820
+01:01:27.475 --> 01:01:28.478
+Mitigation:
+
+821
+01:01:28.758 --> 01:01:34.177
+Shard sizing (10 to 50 GB), searchafter instead of deep from, circuit breakers.
+
+822
+01:01:34.457 --> 01:01:36.611
+ANN recall collapse with filters.
+
+823
+01:01:36.891 --> 01:01:37.702
+Symptom:
+
+824
+01:01:37.982 --> 01:01:40.819
+Few or wrong results for filtered vector queries.
+
+825
+01:01:41.099 --> 01:01:41.867
+Cause:
+
+826
+01:01:42.147 --> 01:01:45.454
+Pre-filtering breaks HNSW graph connectivity.
+
+827
+01:01:45.734 --> 01:01:46.737
+Mitigation:
+
+828
+01:01:47.017 --> 01:01:52.393
+Engine's filtered-ANN mode; fall back to exact search for highly selective filters.
+
+829
+01:01:53.743 --> 01:01:54.745
+Query-of-death.
+
+830
+01:01:55.025 --> 01:01:55.836
+Symptom:
+
+831
+01:01:56.116 --> 01:01:57.908
+Cluster CPU saturates.
+
+832
+01:01:58.188 --> 01:01:58.956
+Cause:
+
+833
+01:01:59.236 --> 01:02:02.500
+Leading wildcards, huge OR expansions, regexes.
+
+834
+01:02:02.780 --> 01:02:03.783
+Mitigation:
+
+835
+01:02:04.063 --> 01:02:08.329
+Query validation, disallow leading wildcards, limits on expansion.
+
+836
+01:02:09.679 --> 01:02:10.767
+Observability.
+
+837
+01:02:11.047 --> 01:02:25.277
+Quality: zero-result rate (by script or language, by city), CTR@k, add-to-cart per search, reformulation rate, nDCG on the judged set per deploy, top zero-result queries (a daily report).
+
+838
+01:02:25.557 --> 01:02:36.458
+Latency: p50 or p99 for search and autocomplete; engine-side took-time versus service-side total (network, re-ranking, inventory lookups).
+
+839
+01:02:36.738 --> 01:02:48.258
+Indexing: end-to-end lag (commit, then searchable), bulk rejections, version conflicts (a proxy for out-of-order events), document count versus source count (reconciliation).
+
+840
+01:02:49.608 --> 01:02:55.539
+Engine health: heap, GC, segment count, merge throttling, query cache hit rates, shard balance.
+
+841
+01:02:56.889 --> 01:02:57.827
+Security.
+
+842
+01:02:58.107 --> 01:03:00.198
+Treat queries as untrusted input.
+
+843
+01:03:00.478 --> 01:03:06.323
+Build queries with the client's typed API, never by concatenating a query DSL string.
+
+844
+01:03:06.603 --> 01:03:11.105
+Disallow scripting and leading wildcards, and cap query length and expansions.
+
+845
+01:03:11.385 --> 01:03:21.411
+Document-level security: customers must never see unpublished products, other sellers' drafts or restricted items (age-restricted, region-restricted).
+
+846
+01:03:21.691 --> 01:03:25.403
+Use filters applied server-side, not client-provided ones.
+
+847
+01:03:25.683 --> 01:03:28.051
+Don't index PII into product search.
+
+848
+01:03:28.331 --> 01:03:37.377
+Back-office search over customers or orders is a separate, access-controlled index with audit logging (Ch 23, Ch 36).
+
+849
+01:03:38.727 --> 01:03:44.337
+Logs: search queries can contain personal data (names, phone numbers typed into the box).
+
+850
+01:03:44.617 --> 01:03:47.860
+Redact before storing query logs, and set retention.
+
+851
+01:03:49.210 --> 01:03:50.874
+Performance and tuning knobs.
+
+852
+01:03:51.154 --> 01:03:52.498
+Here is a quick table:
+
+853
+01:03:52.778 --> 01:03:53.994
+Knob, and Guidance.
+
+854
+01:03:54.274 --> 01:03:55.341
+Shard size:
+
+855
+01:03:55.621 --> 01:04:01.146
+10 to 50 GB per shard; shards times replicas sized to QPS and data.
+
+856
+01:04:01.426 --> 01:04:02.493
+Refresh interval:
+
+857
+01:04:02.773 --> 01:04:08.533
+1 s default; raise during bulk loads (or -1), lower only if the product needs it.
+
+858
+01:04:08.813 --> 01:04:09.794
+Bulk size:
+
+859
+01:04:10.074 --> 01:04:14.618
+5 to 15 MB per request; pipeline several in flight (L3).
+
+860
+01:04:14.898 --> 01:04:15.751
+Fuzziness:
+
+861
+01:04:16.031 --> 01:04:21.322
+AUTO:5,8 style; prefixlength 1 to 2; max expansions at most 50.
+
+862
+01:04:21.602 --> 01:04:22.626
+Result window:
+
+863
+01:04:22.906 --> 01:04:27.279
+Avoid deep from; use searchafter or scroll or PIT for exports.
+
+864
+01:04:27.559 --> 01:04:28.455
+Filters:
+
+865
+01:04:28.735 --> 01:04:32.405
+Put exact constraints in filter context (cached, not scored).
+
+866
+01:04:32.685 --> 01:04:33.645
+Re-ranking:
+
+867
+01:04:33.925 --> 01:04:39.087
+Re-rank only the top 100 to 1,000 with expensive features or models.
+
+868
+01:04:39.367 --> 01:04:40.605
+HNSW:
+
+869
+01:04:40.885 --> 01:04:49.418
+M 16 to 32, efConstruction 100 to 200, efSearch tuned to recall target (L4); quantise for memory.
+
+870
+01:04:50.768 --> 01:04:51.835
+Autocomplete:
+
+871
+01:04:52.115 --> 01:04:58.088
+Client debounce 100 to 150 ms, prefix cache, a dedicated lightweight index.
+
+872
+01:04:59.438 --> 01:05:00.163
+Cost.
+
+873
+01:05:00.443 --> 01:05:07.270
+Search clusters are memory-hungry (heap + OS page cache for segments), and vector fields multiply that.
+
+874
+01:05:07.550 --> 01:05:15.059
+Quantisation and dimension choice (384 versus 1,536) are cost decisions.
+
+875
+01:05:15.339 --> 01:05:17.451
+Replicas cost the same as primaries.
+
+876
+01:05:17.731 --> 01:05:21.443
+Scale replicas for QPS and primaries for data size.
+
+877
+01:05:21.723 --> 01:05:27.569
+The cheapest relevance gains in this chapter came from data: aliases, synonyms, a type field.
+
+878
+01:05:27.849 --> 01:05:30.601
+They cost merchandising hours, not machines.
+
+879
+01:05:31.951 --> 01:05:32.889
+Part 7.
+
+880
+01:05:33.169 --> 01:05:34.876
+Anti-Patterns and Pitfalls.
+
+881
+01:05:36.126 --> 01:05:36.766
+1.
+
+882
+01:05:37.046 --> 01:05:39.499
+LIKE '%term%' as product search.
+
+883
+01:05:40.849 --> 01:05:53.265
+Here is the SQL code. before: sequential scan, no ranking, no typos, no transliteration. after (small scale): trigram + full-text with ranking; (large scale) a search engine.
+
+884
+01:05:56.115 --> 01:05:56.819
+2.
+
+885
+01:05:57.099 --> 01:06:00.641
+Different analyzers at index and query time by accident.
+
+886
+01:06:00.921 --> 01:06:07.875
+If the index lowercases and transliterates but the query path doesn't (or the reverse), matches silently vanish.
+
+887
+01:06:08.155 --> 01:06:14.278
+Define analyzers once, in the index settings, and test them with the analyze API in CI.
+
+888
+01:06:14.558 --> 01:06:15.305
+3.
+
+889
+01:06:15.585 --> 01:06:18.550
+Unbounded fuzziness (L1: chai, then chakki).
+
+890
+01:06:19.900 --> 01:06:27.857
+Here is the JSON code. after: no edits for short terms, first chars exact, fuzzy matches score lower than exact ones.
+
+891
+01:06:30.707 --> 01:06:31.411
+4.
+
+892
+01:06:31.691 --> 01:06:34.166
+Synonyms edited in production without tests.
+
+893
+01:06:34.446 --> 01:06:38.649
+One bad rule (oil ↔ ghee) reshapes thousands of queries.
+
+894
+01:06:38.929 --> 01:06:46.737
+Keep synonyms in Git, run judged-query CI, and deploy with search-time synonym sets that can be reloaded and rolled back.
+
+895
+01:06:47.017 --> 01:06:47.785
+5.
+
+896
+01:06:48.065 --> 01:06:49.814
+Ranking by text score alone.
+
+897
+01:06:50.094 --> 01:06:53.657
+Out-of-stock and unpopular items float to the top (L1:
+
+898
+01:06:53.937 --> 01:06:56.603
+11 of 60 top-3 slots out of stock).
+
+899
+01:06:56.883 --> 01:07:02.259
+Combine text relevance with availability and popularity in a function score, or re-rank.
+
+900
+01:07:02.539 --> 01:07:03.286
+6.
+
+901
+01:07:03.566 --> 01:07:05.763
+Dual writes from the service to the index.
+
+902
+01:07:07.113 --> 01:07:13.940
+Here is the Java code. after: outbox in the same transaction, indexer consumes it (Ch 13).
+
+903
+01:07:16.790 --> 01:07:17.537
+7.
+
+904
+01:07:17.817 --> 01:07:20.846
+Parallel indexers without per-key ordering (L3:
+
+905
+01:07:21.126 --> 01:07:23.259
+26 regressions, 3 stale).
+
+906
+01:07:24.609 --> 01:07:36.257
+Here is the Java code. before: workers grab any batch. after: partition by product id (Kafka key) and or or send external versions so older writes are rejected.
+
+907
+01:07:39.107 --> 01:07:39.790
+8.
+
+908
+01:07:40.070 --> 01:07:43.377
+Synchronous indexing, one request per change (L3:
+
+909
+01:07:43.657 --> 01:07:45.001
+22 s lag).
+
+910
+01:07:45.281 --> 01:07:46.497
+Batch and pipeline.
+
+911
+01:07:46.777 --> 01:07:49.913
+Let the engine's queue and bulk API absorb bursts.
+
+912
+01:07:50.193 --> 01:07:50.939
+9.
+
+913
+01:07:51.219 --> 01:07:52.585
+Reindexing in place.
+
+914
+01:07:52.865 --> 01:07:57.110
+Deleting and rebuilding the live index shows customers empty results.
+
+915
+01:07:57.390 --> 01:08:00.739
+Build alongside, validate, swap the alias (L3).
+
+916
+01:08:01.019 --> 01:08:01.723
+10.
+
+917
+01:08:02.003 --> 01:08:03.241
+Vector-only search.
+
+918
+01:08:04.591 --> 01:08:10.884
+On screen: atta 5kg, then vector search, then rice, poha, oats (all staple grains) (L4:
+
+919
+01:08:11.164 --> 01:08:14.983
+0.289 on. lexical queries). hybrid:
+
+920
+01:08:15.263 --> 01:08:22.025
+BM25 for exact tokens + vectors for intent, fused with weighted RRF (L4:
+
+921
+01:08:22.305 --> 01:08:27.191
+1.000 lexical, 0.797 intent).
+
+922
+01:08:30.041 --> 01:08:30.873
+11.
+
+923
+01:08:31.153 --> 01:08:34.715
+Trusting relevance numbers from a tiny, self-written judged set.
+
+924
+01:08:34.995 --> 01:08:37.385
+L1 hit 1.000.
+
+925
+01:08:37.665 --> 01:08:44.086
+Real evaluation needs hundreds of sampled queries, independent judges, and online confirmation.
+
+926
+01:08:44.366 --> 01:08:45.155
+12.
+
+927
+01:08:45.435 --> 01:08:52.497
+Deep pagination with from/size. from=10000 makes every shard collect 10,020 hits.
+
+928
+01:08:52.777 --> 01:08:57.449
+Use searchafter with a point-in-time for exports, and cap UI pagination.
+
+929
+01:08:58.799 --> 01:08:59.673
+Part 8.
+
+930
+01:08:59.953 --> 01:09:01.297
+Interview Q and A.
+
+931
+01:09:02.547 --> 01:09:03.379
+Beginner.
+
+932
+01:09:03.659 --> 01:09:04.683
+Question 1.
+
+933
+01:09:04.963 --> 01:09:06.499
+What is an inverted index?
+
+934
+01:09:06.779 --> 01:09:08.145
+Thirty-second answer:
+
+935
+01:09:08.425 --> 01:09:15.849
+A map from each term to the list of documents that contain it (a postings list), often with term frequencies and positions.
+
+936
+01:09:16.129 --> 01:09:22.017
+To search, you look up each query term's postings and combine them, instead of scanning every document.
+
+937
+01:09:22.297 --> 01:09:27.182
+It's how search engines answer queries over millions of documents in milliseconds.
+
+938
+01:09:28.532 --> 01:09:29.535
+Question 2.
+
+939
+01:09:29.815 --> 01:09:32.097
+What is an analyzer, and why does it matter?
+
+940
+01:09:32.377 --> 01:09:33.743
+Thirty-second answer:
+
+941
+01:09:34.023 --> 01:09:44.881
+The pipeline that turns text into index terms: normalise characters, split into tokens, then filter (lowercase, stem, synonyms, remove stop words, transliterate).
+
+942
+01:09:45.161 --> 01:09:51.903
+The same analysis must happen to documents at index time and to queries at search time, or they won't match.
+
+943
+01:09:52.183 --> 01:09:54.615
+It's the biggest single lever on search quality.
+
+944
+01:09:55.965 --> 01:09:57.010
+Question 3.
+
+945
+01:09:57.290 --> 01:09:58.911
+What is BM25?
+
+946
+01:09:59.191 --> 01:10:00.557
+Thirty-second answer:
+
+947
+01:10:00.837 --> 01:10:03.973
+The standard relevance-scoring function in search engines.
+
+948
+01:10:04.253 --> 01:10:06.045
+It scores a document higher when:
+
+949
+01:10:07.395 --> 01:10:08.461
+Question 4.
+
+950
+01:10:08.741 --> 01:10:09.808
+What are facets?
+
+951
+01:10:10.088 --> 01:10:11.453
+Thirty-second answer:
+
+952
+01:10:11.733 --> 01:10:20.821
+Counts of results per attribute value for the current query, such as Masala 1,022, Snacks 240 or brand and price bands.
+
+953
+01:10:21.101 --> 01:10:24.216
+They're shown as filters so customers can narrow down.
+
+954
+01:10:24.496 --> 01:10:29.552
+They're computed from columnar doc values in the engine, or with GROUP BY in SQL.
+
+955
+01:10:30.902 --> 01:10:31.905
+Intermediate.
+
+956
+01:10:32.185 --> 01:10:33.294
+Question 5.
+
+957
+01:10:33.574 --> 01:10:37.414
+How would you support Hindi, Hinglish and typos in grocery search?
+
+958
+01:10:38.764 --> 01:10:39.873
+Question 6.
+
+959
+01:10:40.153 --> 01:10:43.225
+How do you keep a search index in sync with the database?
+
+960
+01:10:43.505 --> 01:10:44.871
+Thirty-second answer:
+
+961
+01:10:45.151 --> 01:10:47.561
+Treat the index as a derived read model.
+
+962
+01:10:47.841 --> 01:10:51.831
+The service writes the entity and an outbox row in one transaction.
+
+963
+01:10:52.111 --> 01:10:57.103
+CDC or a relay publishes events to Kafka keyed by product id.
+
+964
+01:10:57.383 --> 01:11:07.388
+An indexer consumes them and sends bulk upserts or deletes to the engine, preserving per-product order (or using external versions so older writes are rejected).
+
+965
+01:11:07.668 --> 01:11:15.028
+A periodic reconciliation compares counts and checksums, and full rebuilds go to a new index behind an alias.
+
+966
+01:11:16.378 --> 01:11:17.466
+Question 7.
+
+967
+01:11:17.746 --> 01:11:20.306
+When is PostgreSQL full-text search enough?
+
+968
+01:11:20.586 --> 01:11:21.951
+Thirty-second answer:
+
+969
+01:11:22.231 --> 01:11:29.890
+For small-to-medium catalogs, internal or admin tools, and when you want transactional consistency and one fewer system:
+
+970
+01:11:31.240 --> 01:11:32.264
+Question 8.
+
+971
+01:11:32.544 --> 01:11:34.443
+How do you implement autocomplete?
+
+972
+01:11:34.723 --> 01:11:36.088
+Thirty-second answer:
+
+973
+01:11:36.368 --> 01:11:37.243
+Options:
+
+974
+01:11:38.593 --> 01:11:39.659
+Question 9.
+
+975
+01:11:39.939 --> 01:11:42.691
+How do you combine text relevance with business signals?
+
+976
+01:11:42.971 --> 01:11:44.337
+Thirty-second answer:
+
+977
+01:11:44.617 --> 01:11:47.731
+Retrieve candidates by text relevance, then adjust.
+
+978
+01:11:48.011 --> 01:11:58.422
+A function score multiplies BM25 by functions of popularity, recency or margin, and availability becomes a filter or a strong demotion.
+
+979
+01:11:58.702 --> 01:12:03.417
+Or re-rank the top N with a learning-to-rank model trained on clicks and purchases.
+
+980
+01:12:03.697 --> 01:12:08.689
+Keep filters for hard constraints (the store's assortment), and scores for preferences.
+
+981
+01:12:10.039 --> 01:12:10.807
+Senior.
+
+982
+01:12:11.087 --> 01:12:12.132
+Question 10.
+
+983
+01:12:12.412 --> 01:12:16.039
+How do you evaluate and improve search relevance systematically?
+
+984
+01:12:17.389 --> 01:12:18.519
+Question 11.
+
+985
+01:12:18.799 --> 01:12:22.106
+Explain how HNSW works and how you tune it.
+
+986
+01:12:22.386 --> 01:12:23.751
+Thirty-second answer:
+
+987
+01:12:24.031 --> 01:12:25.930
+A multi-layer proximity graph.
+
+988
+01:12:26.210 --> 01:12:30.797
+Upper layers are sparse, long-range links, and layer 0 has all nodes.
+
+989
+01:12:31.077 --> 01:12:39.183
+A search greedily walks from the top entry point down, then does a best-first search with a candidate list of size efSearch on layer 0.
+
+990
+01:12:39.463 --> 01:12:40.402
+Parameters:
+
+991
+01:12:41.752 --> 01:12:42.840
+Question 12.
+
+992
+01:12:43.120 --> 01:12:46.085
+Two indexers update the same product out of order.
+
+993
+01:12:46.365 --> 01:12:48.435
+What happens and how do you prevent it?
+
+994
+01:12:48.715 --> 01:12:50.080
+Thirty-second answer:
+
+995
+01:12:50.360 --> 01:12:59.619
+The engine applies the later-arriving write, even if it carries older data, so the index shows a stale price until the next update, which may never come.
+
+996
+01:12:59.899 --> 01:13:00.944
+Prevent it by:
+
+997
+01:13:02.294 --> 01:13:03.574
+Question 13.
+
+998
+01:13:03.854 --> 01:13:07.843
+How do you reindex a live index with new analyzers without downtime?
+
+999
+01:13:09.193 --> 01:13:10.388
+Question 14.
+
+1000
+01:13:10.668 --> 01:13:15.404
+Should product search results reflect real-time stock at the customer's dark store?
+
+1001
+01:13:15.684 --> 01:13:16.345
+How?
+
+1002
+01:13:16.625 --> 01:13:17.991
+Thirty-second answer:
+
+1003
+01:13:18.271 --> 01:13:21.577
+Yes: showing unavailable items first loses orders.
+
+1004
+01:13:21.857 --> 01:13:26.572
+But don't reindex product documents on every stock change across hundreds of stores.
+
+1005
+01:13:26.852 --> 01:13:27.727
+Options:
+
+1006
+01:13:29.077 --> 01:13:29.973
+Architect.
+
+1007
+01:13:30.253 --> 01:13:31.447
+Question 15.
+
+1008
+01:13:31.727 --> 01:13:37.530
+Design product search for a grocery platform with 400K SKUs in 12 cities.
+
+1009
+01:13:38.880 --> 01:13:40.075
+Question 16.
+
+1010
+01:13:40.355 --> 01:13:45.219
+Lexical, vector or hybrid: how do you decide, and how do you fuse results?
+
+1011
+01:13:45.499 --> 01:13:46.864
+Thirty-second answer:
+
+1012
+01:13:47.144 --> 01:13:53.309
+Lexical (BM25) wins on exact tokens: brands, sizes, SKUs, rare words.
+
+1013
+01:13:53.589 --> 01:13:55.915
+Vectors win on intent and paraphrase.
+
+1014
+01:13:56.195 --> 01:13:58.029
+Most product search needs both.
+
+1015
+01:13:58.309 --> 01:14:06.629
+Run both retrievers and fuse with reciprocal rank fusion (k about 60), weighted by retriever, or normalise scores and blend.
+
+1016
+01:14:06.909 --> 01:14:12.157
+Optionally re-rank the fused top 100 with a cross-encoder or LTR model.
+
+1017
+01:14:12.437 --> 01:14:16.107
+Decide weights on held-out judged queries and confirm online.
+
+1018
+01:14:17.457 --> 01:14:18.801
+Question 17.
+
+1019
+01:14:19.081 --> 01:14:22.515
+Search latency p99 doubles during a flash sale.
+
+1020
+01:14:22.795 --> 01:14:24.694
+How do you investigate and fix it?
+
+1021
+01:14:24.974 --> 01:14:26.339
+Thirty-second answer:
+
+1022
+01:14:26.619 --> 01:14:32.721
+Split the latency into engine took-time versus service time (re-ranking, stock lookups, network).
+
+1023
+01:14:34.071 --> 01:14:35.244
+Question 18.
+
+1024
+01:14:35.524 --> 01:14:40.431
+How do you handle multi-tenant search for 2,000 sellers' back-office catalogs?
+
+1025
+01:14:40.711 --> 01:14:42.076
+Thirty-second answer:
+
+1026
+01:14:42.356 --> 01:14:45.001
+Choose by tenant size and isolation needs:
+
+1027
+01:14:46.351 --> 01:14:47.589
+Question 19.
+
+1028
+01:14:47.869 --> 01:14:52.029
+How would you build 'did you mean' and synonyms from data rather than by hand?
+
+1029
+01:14:53.379 --> 01:14:54.488
+Question 20.
+
+1030
+01:14:54.768 --> 01:14:59.504
+What would you put in a search platform's 'definition of done' for any relevance change?
+
+1031
+01:15:00.854 --> 01:15:01.750
+Part 9.
+
+1032
+01:15:02.030 --> 01:15:03.438
+Summary and Practice.
+
+1033
+01:15:04.688 --> 01:15:05.776
+Key takeaways.
+
+1034
+01:15:06.056 --> 01:15:09.747
+Search = inverted index + analysis + ranking.
+
+1035
+01:15:10.027 --> 01:15:12.096
+The index makes it fast (L1:
+
+1036
+01:15:12.376 --> 01:15:16.131
+194x); analysis and ranking make it right.
+
+1037
+01:15:16.411 --> 01:15:22.512
+Measure relevance with judged queries (nDCG@10, zero-result rate) on every change.
+
+1038
+01:15:22.792 --> 01:15:24.520
+Eyeballing misses regressions.
+
+1039
+01:15:24.800 --> 01:15:32.608
+For Indian grocery: transliterate, normalise Hinglish phonetics, normalise units, and add cross-language synonyms (L1:
+
+1040
+01:15:32.888 --> 01:15:36.749
+0.367, then 0.900).
+
+1041
+01:15:37.029 --> 01:15:40.549
+Fuzziness needs guard rails (L1: chai, then chakki).
+
+1042
+01:15:40.829 --> 01:15:42.749
+Prefer spell correction from logs.
+
+1043
+01:15:44.099 --> 01:15:51.289
+Query understanding (type intent, attributes) fixes what text scoring can't (potato versus potato chips).
+
+1044
+01:15:51.569 --> 01:15:59.953
+Business ranking: stock and popularity via a function score or re-ranking (L1: out-of-stock in the top 3, 11, then 0).
+
+1045
+01:16:00.233 --> 01:16:09.022
+PostgreSQL FTS + trigram suits admin and small catalogs, but has no transliteration and shares load with OLTP (L2).
+
+1046
+01:16:09.302 --> 01:16:16.790
+Index sync: outbox, then keyed stream, then pipelined bulk indexer, per-key order or external versions (L3:
+
+1047
+01:16:17.070 --> 01:16:22.147
+22 s, then 0.8 s lag; 26, then 0 regressions).
+
+1048
+01:16:22.427 --> 01:16:26.225
+Reindex by building alongside and swapping an alias (L3:
+
+1049
+01:16:26.505 --> 01:16:27.593
+0 errors).
+
+1050
+01:16:28.943 --> 01:16:31.844
+Vectors add intent; hybrid keeps exactness.
+
+1051
+01:16:32.124 --> 01:16:35.580
+HNSW recall depends on details (L4:
+
+1052
+01:16:35.860 --> 01:16:43.113
+0.945 versus 0.991), and weighted RRF beat either retriever alone.
+
+1053
+01:16:44.463 --> 01:16:45.786
+Decision cheat sheet.
+
+1054
+01:16:46.066 --> 01:16:47.410
+Here is a quick table:
+
+1055
+01:16:47.690 --> 01:16:49.205
+Situation, and Choice.
+
+1056
+01:16:49.485 --> 01:16:52.599
+Admin or back-office search, at most 1M rows:
+
+1057
+01:16:52.879 --> 01:16:56.271
+PostgreSQL FTS + pgtrgm.
+
+1058
+01:16:56.551 --> 01:16:58.343
+Customer product search at scale:
+
+1059
+01:16:58.623 --> 01:17:03.765
+OpenSearch or Elasticsearch (or Meilisearch or Typesense for smaller catalogs).
+
+1060
+01:17:04.045 --> 01:17:05.581
+Hinglish or Indic scripts:
+
+1061
+01:17:05.861 --> 01:17:10.682
+Transliteration + phonetic normalisation + aliases + synonyms.
+
+1062
+01:17:10.962 --> 01:17:11.815
+Typos:
+
+1063
+01:17:12.095 --> 01:17:17.301
+Fuzziness AUTO:5,8, prefixlength 1, penalised; did-you-mean from logs.
+
+1064
+01:17:17.581 --> 01:17:19.287
+Freshness of price or stock:
+
+1065
+01:17:19.567 --> 01:17:25.221
+Outbox, then Kafka (key = product id), then bulk indexer; stock at query time.
+
+1066
+01:17:25.501 --> 01:17:26.759
+Analyzer change:
+
+1067
+01:17:27.039 --> 01:17:28.746
+New index + alias swap.
+
+1068
+01:17:30.096 --> 01:17:31.163
+Intent queries:
+
+1069
+01:17:31.443 --> 01:17:37.565
+Hybrid BM25 + vectors (weighted RRF), evaluated on held-out queries.
+
+1070
+01:17:38.915 --> 01:17:40.046
+Exercises.
+
+1071
+01:17:40.326 --> 01:17:41.670
+Here is a quick table:
+
+1072
+01:17:41.950 --> 01:17:43.806
+Band, and Exercise, and Hint.
+
+1073
+01:17:44.086 --> 01:17:44.961
+B2.
+
+1074
+01:17:45.241 --> 01:17:46.307
+Exercise:
+
+1075
+01:17:46.587 --> 01:17:53.009
+Add edge n-gram autocomplete to L1 and measure latency for 2-, 3- and 4-letter prefixes.
+
+1076
+01:17:53.289 --> 01:17:53.971
+Hint:
+
+1077
+01:17:54.251 --> 01:17:55.702
+Index-time prefixes.
+
+1078
+01:17:55.982 --> 01:17:56.857
+B2.
+
+1079
+01:17:57.137 --> 01:17:58.203
+Exercise:
+
+1080
+01:17:58.483 --> 01:18:03.433
+In L2, add a Hindi synonym dictionary to a custom text search configuration.
+
+1081
+01:18:03.713 --> 01:18:04.395
+Hint:
+
+1082
+01:18:04.675 --> 01:18:06.318
+CREATE TEXT SEARCH DICTIONARY.
+
+1083
+01:18:06.598 --> 01:18:07.473
+B3.
+
+1084
+01:18:07.753 --> 01:18:08.819
+Exercise:
+
+1085
+01:18:09.099 --> 01:18:16.395
+Extend the judged set to 60 queries (add Kannada or Tamil transliterations) and re-run L1's stages.
+
+1086
+01:18:16.675 --> 01:18:17.358
+Hint:
+
+1087
+01:18:17.638 --> 01:18:19.195
+Extend the transliterator.
+
+1088
+01:18:19.475 --> 01:18:20.350
+B3.
+
+1089
+01:18:20.630 --> 01:18:21.697
+Exercise:
+
+1090
+01:18:21.977 --> 01:18:32.259
+In L3, add a version guard to the unordered indexers (skip updates older than the last applied version per id, tracked in Redis) and compare with partitioning.
+
+1091
+01:18:32.539 --> 01:18:33.222
+Hint:
+
+1092
+01:18:33.502 --> 01:18:35.145
+Race between check and write.
+
+1093
+01:18:36.495 --> 01:18:37.369
+B4.
+
+1094
+01:18:37.649 --> 01:18:38.716
+Exercise:
+
+1095
+01:18:38.996 --> 01:18:49.343
+Add filtered search to L4's HNSW (only in-stock items, 10 % selectivity): compare pre-filtering, post-filtering and exact search.
+
+1096
+01:18:49.623 --> 01:18:50.305
+Hint:
+
+1097
+01:18:50.585 --> 01:18:52.249
+Recall versus latency.
+
+1098
+01:18:52.529 --> 01:18:53.404
+B4.
+
+1099
+01:18:53.684 --> 01:18:54.751
+Exercise:
+
+1100
+01:18:55.031 --> 01:19:03.009
+Replace the toy embeddings with a real embedding model's vectors (if available) and re-tune RRF weights on a held-out split.
+
+1101
+01:19:03.289 --> 01:19:03.972
+Hint:
+
+1102
+01:19:04.252 --> 01:19:05.703
+Held-out evaluation.
+
+1103
+01:19:07.053 --> 01:19:08.055
+Further reading.
+
+1104
+01:19:08.335 --> 01:19:17.231
+Introduction to Information Retrieval (Manning, Raghavan, Schütze): inverted indexes, BM25, evaluation (free online).
+
+1105
+01:19:17.511 --> 01:19:21.373
+Robertson and Zaragoza, The Probabilistic Relevance Framework:
+
+1106
+01:19:21.653 --> 01:19:23.551
+BM25 and Beyond.
+
+1107
+01:19:23.831 --> 01:19:28.887
+Relevant Search (Turnbull and Berryman); AI-Powered Search (Grainger, Turnbull, Irwin).
+
+1108
+01:19:29.167 --> 01:19:37.061
+Elasticsearch or OpenSearch reference: analyzers, ICU plugin, synonyms, function score, aliases, k-NN.
+
+1109
+01:19:38.411 --> 01:19:48.608
+Malkov and Yashunin, Efficient and robust approximate nearest neighbor search using HNSW graphs (2016 or 2018).
+
+1110
+01:19:48.888 --> 01:19:57.571
+Cormack, Clarke and Büttcher, Reciprocal Rank Fusion outperforms Condorcet and individual rank learning methods (SIGIR 2009).
+
+1111
+01:19:57.851 --> 01:19:59.451
+PostgreSQL docs:
+
+1112
+01:19:59.731 --> 01:20:05.832
+Full Text Search, pgtrgm; Meilisearch docs: ranking rules, synonyms, index swap.
+
+1113
+01:20:06.112 --> 01:20:10.549
+IndicNLP library and ICU transliteration for Indian scripts.
+
+1114
+01:20:11.899 --> 01:20:13.137
+Related chapters.
+
+1115
+01:20:13.417 --> 01:20:36.307
+05, Relational Databases, 07, Caching, 11, Partitioning and Sharding, 13, Distributed Transactions or Outbox, 14, Messaging and Event Streaming, 15, CQRS and Read Models, 20, Idempotency, IDs and Locks, 21, Data at Scale, 23, Security Architecture, 46, Checkout and Inventory Reservation.
+
+1116
+01:20:37.657 --> 01:20:39.257
+That's the end of this chapter.
+
+1117
+01:20:39.537 --> 01:20:45.575
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1118
+01:20:45.855 --> 01:20:47.305
+See you in the next chapter.
+

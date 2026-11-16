@@ -1,0 +1,3558 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:04.129
+URL Shortener and SMS Short Links.
+
+3
+00:00:04.409 --> 00:00:08.633
+Chapter 38, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:10.383 --> 00:00:11.343
+At a glance:
+
+5
+00:00:11.623 --> 00:00:12.796
+Chapter at a glance.
+
+6
+00:00:13.076 --> 00:00:14.079
+Reader bands:
+
+7
+00:00:14.359 --> 00:00:16.663
+B1, then B4, Prerequisites:
+
+8
+00:00:16.943 --> 00:00:22.404
+Ch 02, Ch 07, Ch 11, Ch 20, What you will build:
+
+9
+00:00:22.684 --> 00:00:25.927
+The grocery platform's short-link service, gro.cr.
+
+10
+00:00:26.207 --> 00:00:31.775
+It carries every order-tracking, slot-reminder and refund SMS, plus marketing campaigns.
+
+11
+00:00:32.055 --> 00:00:45.068
+This is the classic first interview case study, done properly: requirements, estimation, code generation, the redirect path, caching under campaign spikes, click analytics, abuse prevention and expiry.
+
+12
+00:00:45.348 --> 00:00:50.127
+Four runnable labs, one with a real HTTP server on PostgreSQL.
+
+13
+00:00:51.477 --> 00:00:53.055
+L1: minting codes.
+
+14
+00:00:53.335 --> 00:01:01.655
+Over 2 million codes, 6-character truncated MD5 hashes produced 40 collisions (the birthday bound predicts 35).
+
+15
+00:01:01.935 --> 00:01:08.570
+A plain counter gives 5-character codes, but 100% of their neighbours are other customers' live links.
+
+16
+00:01:08.850 --> 00:01:18.429
+A counter passed through a keyed Feistel permutation is unique by construction, needs no lookup, and neighbour guesses hit 0.00%.
+
+17
+00:01:19.779 --> 00:01:21.464
+L2: a real shortener.
+
+18
+00:01:21.744 --> 00:01:25.136
+JDK HttpServer and PostgreSQL.
+
+19
+00:01:25.416 --> 00:01:35.379
+A retried create returned the same code. http, a grocery.in@evil.example userinfo trick and a look-alike domain were all refused.
+
+20
+00:01:35.659 --> 00:01:40.416
+An expired link returned 410 and an unknown one 404.
+
+21
+00:01:40.696 --> 00:01:45.731
+Under 50,000 Zipf-distributed redirects the cache absorbed 85%.
+
+22
+00:01:46.011 --> 00:01:52.987
+716 of the database reads were concurrent misses on the same cold code, a small thundering herd.
+
+23
+00:01:54.337 --> 00:01:55.873
+L3: the read path.
+
+24
+00:01:56.153 --> 00:02:06.926
+An LRU cache holding 1% of links served 58.5% of 10 million clicks; 10x the memory reached only 77.7%.
+
+25
+00:02:07.206 --> 00:02:16.017
+A 20-million-SMS campaign put 27,184 req per second on one Redis shard, 49x its peers.
+
+26
+00:02:16.297 --> 00:02:20.414
+A 1-second near-cache on each node cut that to 570.
+
+27
+00:02:20.694 --> 00:02:22.294
+L4: counting clicks.
+
+28
+00:02:22.574 --> 00:02:34.521
+On PostgreSQL with durable commits, a per-click UPDATE on one hot campaign row ran at ~2,300 clicks per second with a ~67 ms p99.
+
+29
+00:02:34.801 --> 00:02:42.523
+Micro-batching made the redirect's cost a 0.01 ms memory increment and used 20x fewer statements.
+
+30
+00:02:42.803 --> 00:02:58.953
+Merged HyperLogLog sketches counted 663,668 unique devices within +0.41% in 16 KB each; adding per-node counts overstated them by 294%.
+
+31
+00:03:00.303 --> 00:03:01.284
+Reading time:
+
+32
+00:03:01.564 --> 00:03:03.185
+100 min + code.
+
+33
+00:03:04.535 --> 00:03:05.389
+Part 1.
+
+34
+00:03:05.669 --> 00:03:07.589
+Introduction and Why It Matters.
+
+35
+00:03:08.839 --> 00:03:11.228
+A story: the link that took down checkout.
+
+36
+00:03:11.508 --> 00:03:23.924
+The grocery platform's first short-link service was a weekend project: a links table with an auto-increment id, base62-encoded, and a controller that looked it up and returned a 301.
+
+37
+00:03:24.204 --> 00:03:25.313
+It worked for a year.
+
+38
+00:03:25.593 --> 00:03:28.217
+Then four things happened in one Diwali week:
+
+39
+00:03:28.497 --> 00:03:29.500
+Enumeration.
+
+40
+00:03:29.780 --> 00:03:39.849
+A security researcher noticed that gro.cr or 6laZE and gro.cr or 6laZF were both order-tracking links, for different customers.
+
+41
+00:03:40.129 --> 00:03:44.119
+Each tracking page showed the delivery address and the rider's phone number.
+
+42
+00:03:44.399 --> 00:03:48.772
+Sequential codes had turned every SMS into a key to its neighbours.
+
+43
+00:03:50.122 --> 00:03:51.338
+The campaign spike.
+
+44
+00:03:51.618 --> 00:03:56.013
+Marketing sent 20 million SMS with one offer link at 7 pm.
+
+45
+00:03:56.293 --> 00:04:00.090
+Every click hit the same row, the same Redis key, the same shard.
+
+46
+00:04:00.370 --> 00:04:09.991
+The redirect service's connection pool, shared with the order-tracking API, was exhausted, and customers opening where is my order? links saw errors.
+
+47
+00:04:10.271 --> 00:04:11.423
+Analytics lied.
+
+48
+00:04:11.703 --> 00:04:17.293
+The dashboard showed 40% fewer clicks than the SMS gateway's delivery count suggested.
+
+49
+00:04:17.573 --> 00:04:22.970
+The 301 redirects were cached by browsers: repeat clicks never reached the server.
+
+50
+00:04:23.250 --> 00:04:27.879
+At the same time WhatsApp's link-preview crawler inflated the clicks on shared links.
+
+51
+00:04:29.229 --> 00:04:30.040
+Phishing.
+
+52
+00:04:30.320 --> 00:04:34.437
+Anyone with an internal API token could shorten any URL.
+
+53
+00:04:34.717 --> 00:04:44.168
+A compromised partner account created gro.cr or kyc pointing at a look-alike login page, and the platform's own trusted domain delivered it.
+
+54
+00:04:44.448 --> 00:04:56.608
+The rebuilt service, which this chapter designs, treats a short link as what it is: a tiny, public, security-sensitive, read-heavy key-value lookup with spiky traffic and analytics on the side.
+
+55
+00:04:57.958 --> 00:04:58.641
+Quote:
+
+56
+00:04:58.921 --> 00:05:00.585
+The thesis of this chapter.
+
+57
+00:05:00.865 --> 00:05:10.721
+A URL shortener looks trivial, a map from code to URL, which is why interviewers love it: all the difficulty is in the details that production adds.
+
+58
+00:05:11.001 --> 00:05:17.337
+Code generation is a trade-off between coordination, collisions, length and guessability (L1).
+
+59
+00:05:17.617 --> 00:05:24.742
+Writes must be idempotent and validated, because retries are normal and a trusted domain is a phishing tool (L2).
+
+60
+00:05:25.022 --> 00:05:36.947
+The read path is a caching problem with a hot-key twist: skewed popularity makes a small cache effective, but a campaign concentrates load on one key that sharding cannot spread (L3).
+
+61
+00:05:37.227 --> 00:05:43.499
+Analytics must never slow the redirect: count asynchronously, and use sketches for unique counts (L4).
+
+62
+00:05:43.779 --> 00:05:47.107
+Get those four right and the simple service survives Diwali.
+
+63
+00:05:48.457 --> 00:05:50.761
+Where this lives in the grocery platform.
+
+64
+00:05:51.041 --> 00:05:52.385
+Here is a quick table:
+
+65
+00:05:52.665 --> 00:05:55.823
+Producer of links, and Volume, and Lifetime, and Notes.
+
+66
+00:05:56.103 --> 00:06:01.713
+Notification service, order tracking, OTP-free deep links, slot reminders, refunds.
+
+67
+00:06:01.993 --> 00:06:03.999
+Volume: ~2M per day.
+
+68
+00:06:04.279 --> 00:06:05.196
+Lifetime:
+
+69
+00:06:05.476 --> 00:06:06.500
+30 days.
+
+70
+00:06:06.780 --> 00:06:07.591
+Notes:
+
+71
+00:06:07.871 --> 00:06:10.815
+Personal: the page behind must still authenticate.
+
+72
+00:06:11.095 --> 00:06:14.785
+Marketing, campaign links, one per campaign or per recipient.
+
+73
+00:06:15.065 --> 00:06:15.897
+Volume:
+
+74
+00:06:16.177 --> 00:06:17.969
+1 to 20M per campaign.
+
+75
+00:06:18.249 --> 00:06:19.167
+Lifetime:
+
+76
+00:06:19.447 --> 00:06:20.492
+90 days.
+
+77
+00:06:20.772 --> 00:06:21.583
+Notes:
+
+78
+00:06:21.863 --> 00:06:25.404
+Personalised links for attribution; UTM parameters.
+
+79
+00:06:25.684 --> 00:06:27.753
+Support, links in chat and email.
+
+80
+00:06:28.033 --> 00:06:30.081
+Volume: ~50k per day.
+
+81
+00:06:30.361 --> 00:06:31.279
+Lifetime:
+
+82
+00:06:31.559 --> 00:06:32.604
+90 days.
+
+83
+00:06:32.884 --> 00:06:35.615
+Partners or vendors, store pages, offers.
+
+84
+00:06:35.895 --> 00:06:36.727
+Volume:
+
+85
+00:06:37.007 --> 00:06:37.732
+Low.
+
+86
+00:06:38.012 --> 00:06:38.929
+Lifetime:
+
+87
+00:06:39.209 --> 00:06:40.297
+Until revoked.
+
+88
+00:06:40.577 --> 00:06:41.388
+Notes:
+
+89
+00:06:41.668 --> 00:06:43.737
+Allow-listed destinations only.
+
+90
+00:06:45.087 --> 00:06:51.509
+The service sits behind the SMS pipeline (Ch 40) and in front of the web and app landing pages.
+
+91
+00:06:51.789 --> 00:07:11.927
+India's SMS rules make it part of compliance too: links in commercial and transactional SMS must be on the sender's registered, whitelisted URLs in the DLT system (TRAI, from late 2024, VERIFY current rules), so a controlled first-party shortener is effectively mandatory.
+
+92
+00:07:13.277 --> 00:07:14.600
+Learning objectives.
+
+93
+00:07:14.880 --> 00:07:16.779
+By the end you will be able to:
+
+94
+00:07:17.059 --> 00:07:25.613
+Run the interview framework on a classic problem: requirements, estimation, API, data model, high-level design, deep dives.
+
+95
+00:07:25.893 --> 00:07:33.360
+Choose a code-generation scheme and justify it with collision, coordination, length and privacy numbers (L1).
+
+96
+00:07:33.640 --> 00:07:40.339
+Build the write path: idempotent creation, destination validation, custom aliases, expiry (L2).
+
+97
+00:07:40.619 --> 00:07:41.941
+Design the read path:
+
+98
+00:07:42.221 --> 00:07:49.155
+301 versus 302, caching layers, hot keys and campaign spikes (L2, L3).
+
+99
+00:07:50.505 --> 00:07:55.945
+Design click analytics that never slows a redirect, including unique counts (L4).
+
+100
+00:07:56.225 --> 00:08:02.817
+Handle abuse, privacy and lifecycle: phishing, enumeration, bots, deletion and data retention.
+
+101
+00:08:04.167 --> 00:08:05.041
+Part 2.
+
+102
+00:08:05.321 --> 00:08:07.199
+Core Concepts, Beginner to Deep.
+
+103
+00:08:08.449 --> 00:08:10.603
+Intuition: a coat-check counter.
+
+104
+00:08:10.883 --> 00:08:12.910
+A short link is a coat-check ticket.
+
+105
+00:08:13.190 --> 00:08:17.585
+You hand over a long URL (the coat) and get a small ticket (the code).
+
+106
+00:08:17.865 --> 00:08:20.446
+Anyone holding the ticket can collect the coat.
+
+107
+00:08:20.726 --> 00:08:21.409
+So:
+
+108
+00:08:21.689 --> 00:08:23.075
+Tickets must be unique.
+
+109
+00:08:23.355 --> 00:08:25.745
+Two coats on one ticket is a disaster.
+
+110
+00:08:26.025 --> 00:08:27.326
+Tickets should be short.
+
+111
+00:08:27.606 --> 00:08:30.529
+They go into 160-character SMS.
+
+112
+00:08:30.809 --> 00:08:33.753
+Tickets should not be guessable if the coats are personal.
+
+113
+00:08:34.033 --> 00:08:37.553
+Ticket 41 shouldn't tell you that ticket 42 exists.
+
+114
+00:08:37.833 --> 00:08:42.931
+The counter must be fast at returning coats, because far more people collect than deposit.
+
+115
+00:08:44.281 --> 00:08:50.361
+Old coats are eventually cleared out, and a cleared ticket must say gone, not hand out someone else's coat.
+
+116
+00:08:51.711 --> 00:08:52.671
+Requirements.
+
+117
+00:08:52.951 --> 00:08:53.805
+Functional.
+
+118
+00:08:54.085 --> 00:09:02.234
+Create a short link for a long URL, with owner, optional custom alias and optional expiry; bulk-create for campaigns.
+
+119
+00:09:02.514 --> 00:09:05.287
+Redirect GET /code to the long URL.
+
+120
+00:09:05.567 --> 00:09:08.213
+Expire and revoke links; report abuse.
+
+121
+00:09:08.493 --> 00:09:14.679
+Click analytics per link and campaign: total clicks, unique visitors, by time, device and region.
+
+122
+00:09:14.959 --> 00:09:16.069
+Non-functional.
+
+123
+00:09:17.419 --> 00:09:25.248
+Redirect latency: p99 under 20 ms server-side; the redirect is on the path of every SMS tap.
+
+124
+00:09:25.528 --> 00:09:26.595
+Availability:
+
+125
+00:09:26.875 --> 00:09:33.147
+99.95% for redirects, since a broken tracking link becomes a support call.
+
+126
+00:09:33.427 --> 00:09:37.651
+Creation can be less available, because notification sends can retry.
+
+127
+00:09:37.931 --> 00:09:42.731
+Scale: see §2.3; spikes from campaigns matter more than averages.
+
+128
+00:09:43.011 --> 00:09:51.331
+Security: destinations limited to allow-listed domains; codes not enumerable; no personal data in codes or URLs.
+
+129
+00:09:51.611 --> 00:09:56.795
+Durability: a link must not disappear or change destination before it expires.
+
+130
+00:09:58.145 --> 00:10:04.331
+Out of scope (say so in an interview): link-in-bio pages, QR design, a public consumer shortener.
+
+131
+00:10:05.681 --> 00:10:06.727
+Estimation.
+
+132
+00:10:07.007 --> 00:10:08.948
+Using Ch 02's method:
+
+133
+00:10:10.298 --> 00:10:11.642
+Here is a quick table:
+
+134
+00:10:11.922 --> 00:10:13.351
+Quantity, and Estimate.
+
+135
+00:10:13.631 --> 00:10:14.869
+Transactional links:
+
+136
+00:10:15.149 --> 00:10:18.647
+2M per day about 23 creates per second average.
+
+137
+00:10:18.927 --> 00:10:20.357
+Personalised campaign:
+
+138
+00:10:20.637 --> 00:10:26.717
+20M links in 1 hour about 5,600 creates per second (bulk API).
+
+139
+00:10:26.997 --> 00:10:36.469
+Redirects, normal: ~3 clicks per tracking link about 6M per day about 70 per second average, a few thousand per second at evening peak.
+
+140
+00:10:36.749 --> 00:10:38.114
+Redirects, campaign:
+
+141
+00:10:38.394 --> 00:10:47.695
+20M SMS times 12% click-through, decaying over ~10 min, then ~30,000 per second peak on one code (L3).
+
+142
+00:10:47.975 --> 00:10:57.618
+Row size: code 7 B + URL ~150 B + owner, timestamps, hash about ~300 B with index overhead.
+
+143
+00:10:57.898 --> 00:10:58.965
+Live rows:
+
+144
+00:10:59.245 --> 00:11:10.402
+2M times 30 d + ~8M per day campaign times 90 d about ~780M rows about 230 GB, bounded by expiry.
+
+145
+00:11:11.752 --> 00:11:12.733
+Code space:
+
+146
+00:11:13.013 --> 00:11:19.691
+62^7 about 3.5 trillion; at 2M per day that lasts thousands of years (L1).
+
+147
+00:11:21.041 --> 00:11:22.982
+Three conclusions shape the design.
+
+148
+00:11:23.262 --> 00:11:28.681
+Reads dominate and are spiky, so the read path is cache-first and must survive hot keys.
+
+149
+00:11:28.961 --> 00:11:39.755
+Storage is modest because links expire, so a single well-run relational database (partitioned) is enough, no need to reach for a wide-column store by reflex.
+
+150
+00:11:40.035 --> 00:11:43.769
+Bulk creation needs a batch API and cheap code minting.
+
+151
+00:11:45.119 --> 00:11:46.079
+API.
+
+152
+00:11:46.359 --> 00:11:48.129
+Here is the HTTP code.
+
+153
+00:11:50.979 --> 00:11:54.158
+The redirect endpoint is public and unauthenticated.
+
+154
+00:11:54.438 --> 00:12:02.694
+The management API is internal, authenticated per service (Ch 23), and rate-limited per owner (Ch 39).
+
+155
+00:12:04.044 --> 00:12:05.303
+Generating codes.
+
+156
+00:12:05.583 --> 00:12:08.569
+L1 compares four schemes over 2 million codes:
+
+157
+00:12:09.919 --> 00:12:11.263
+Here is a quick table:
+
+158
+00:12:11.543 --> 00:12:16.642
+Scheme, and Length, and Collisions, and Uniqueness check per insert, and Guessable neighbours.
+
+159
+00:12:16.922 --> 00:12:20.165
+A) Hash of URL, truncated to 6 base62.
+
+160
+00:12:20.445 --> 00:12:21.149
+Length:
+
+161
+00:12:21.429 --> 00:12:22.175
+6.
+
+162
+00:12:22.455 --> 00:12:23.394
+Collisions:
+
+163
+00:12:23.674 --> 00:12:26.063
+40 (birthday bound about 35).
+
+164
+00:12:26.343 --> 00:12:27.922
+Uniqueness check per insert:
+
+165
+00:12:28.202 --> 00:12:30.037
+Yes (must detect and retry).
+
+166
+00:12:30.317 --> 00:12:31.511
+Guessable neighbours:
+
+167
+00:12:31.791 --> 00:12:32.474
+No.
+
+168
+00:12:32.754 --> 00:12:35.911
+B) Random 7 base62, check-and-retry.
+
+169
+00:12:36.191 --> 00:12:36.895
+Length:
+
+170
+00:12:37.175 --> 00:12:37.922
+7.
+
+171
+00:12:38.202 --> 00:12:39.141
+Collisions:
+
+172
+00:12:39.421 --> 00:12:40.935
+0 (after retry).
+
+173
+00:12:41.215 --> 00:12:42.794
+Uniqueness check per insert:
+
+174
+00:12:43.074 --> 00:12:44.461
+Yes, every insert.
+
+175
+00:12:44.741 --> 00:12:45.935
+Guessable neighbours:
+
+176
+00:12:46.215 --> 00:12:46.898
+No.
+
+177
+00:12:47.178 --> 00:12:49.311
+C) Counter, then base62.
+
+178
+00:12:49.591 --> 00:12:50.295
+Length:
+
+179
+00:12:50.575 --> 00:12:51.343
+5.
+
+180
+00:12:51.623 --> 00:12:52.562
+Collisions:
+
+181
+00:12:52.842 --> 00:12:53.589
+0.
+
+182
+00:12:53.869 --> 00:12:55.447
+Uniqueness check per insert:
+
+183
+00:12:55.727 --> 00:12:56.410
+No.
+
+184
+00:12:56.690 --> 00:12:57.885
+Guessable neighbours:
+
+185
+00:12:58.165 --> 00:12:59.423
+100%.
+
+186
+00:12:59.703 --> 00:13:03.223
+D) Counter, then keyed permutation, then base62.
+
+187
+00:13:03.503 --> 00:13:04.207
+Length:
+
+188
+00:13:04.487 --> 00:13:05.234
+7.
+
+189
+00:13:05.514 --> 00:13:06.453
+Collisions:
+
+190
+00:13:06.733 --> 00:13:07.479
+0.
+
+191
+00:13:07.759 --> 00:13:09.338
+Uniqueness check per insert:
+
+192
+00:13:09.618 --> 00:13:10.301
+No.
+
+193
+00:13:10.581 --> 00:13:11.775
+Guessable neighbours:
+
+194
+00:13:12.055 --> 00:13:14.082
+0.00%.
+
+195
+00:13:15.432 --> 00:13:22.259
+Hash truncation is attractive because it needs no coordination and dedupes identical URLs for free.
+
+196
+00:13:22.539 --> 00:13:30.411
+But collisions grow with n² or 2N, 40 in 2M codes, millions per year at scale, so you still need check-and-retry.
+
+197
+00:13:30.691 --> 00:13:37.709
+And same URL, then same code is wrong across owners anyway (different expiry, analytics, revocation).
+
+198
+00:13:37.989 --> 00:13:48.037
+Random codes are simple and unguessable, and collisions stay rare while the space is sparse (0.00006% full in L1).
+
+199
+00:13:48.317 --> 00:13:53.309
+The cost is a uniqueness check on every insert, a unique index and a retry loop.
+
+200
+00:13:53.589 --> 00:13:55.232
+That's fine for most systems.
+
+201
+00:13:56.582 --> 00:14:00.465
+Counters are perfect for the database: unique, short, no lookup.
+
+202
+00:14:00.745 --> 00:14:04.627
+They are a privacy failure for personal links (§1.1).
+
+203
+00:14:04.907 --> 00:14:09.494
+Counter + permutation keeps the counter's properties and removes the ordering.
+
+204
+00:14:09.774 --> 00:14:17.945
+A Feistel network with secret round keys is a bijection on the 62^7 space; cycle-walking keeps outputs inside it.
+
+205
+00:14:18.225 --> 00:14:27.974
+Two consecutive counter values map to unrelated-looking codes (jFF7XOx, jstj0mT, pt1IVd8...).
+
+206
+00:14:29.324 --> 00:14:40.524
+Getting counter values without a bottleneck: each node reserves a block (L2: one nextval on a sequence per 1,000 codes, 11 round-trips for 10,003 codes).
+
+207
+00:14:40.804 --> 00:14:51.257
+Alternatives are a Snowflake-style id (Ch 20), whose 64 bits are too long for 7 characters, or ranges leased from ZooKeeper or etcd.
+
+208
+00:14:51.537 --> 00:14:57.553
+Blocks waste unused values when a node restarts, irrelevant in a 3.5-trillion space.
+
+209
+00:14:58.903 --> 00:14:59.650
+Warning:
+
+210
+00:14:59.930 --> 00:15:02.639
+A permutation hides order, not existence.
+
+211
+00:15:02.919 --> 00:15:10.322
+Codes from a 3.5-trillion space with a few hundred million live links are sparse, so random guessing rarely hits.
+
+212
+00:15:10.602 --> 00:15:13.162
+But rarely isn't never at millions of guesses.
+
+213
+00:15:13.442 --> 00:15:25.773
+Rate-limit 404s per client (Ch 39), and never let a short code alone unlock personal data: the tracking page behind it still requires a signed token or login.
+
+214
+00:15:27.123 --> 00:15:28.104
+The write path.
+
+215
+00:15:28.384 --> 00:15:31.093
+Authenticate the calling service; check its quota.
+
+216
+00:15:31.373 --> 00:15:50.083
+Validate the destination (L2): parse it with a real URL parser, require https, reject user-info (https://grocery.in@evil.example points at evil.example), and require an allow-listed host, exact match, not contains grocery.
+
+217
+00:15:50.363 --> 00:15:53.883
+Optionally scan with a safe-browsing service for partner links.
+
+218
+00:15:55.233 --> 00:15:59.073
+Idempotency: the notification service retries on timeouts.
+
+219
+00:15:59.353 --> 00:16:13.134
+Either honour an Idempotency-Key header or use a natural key, L2 uses a unique (owner, sha256(url)) constraint with insert... on conflict do nothing, then reads the existing code.
+
+220
+00:16:13.414 --> 00:16:17.510
+A retry returns 200 with the same code, never a second link.
+
+221
+00:16:17.790 --> 00:16:27.774
+Mint the code (§2.5) or reserve a custom alias (checked against a reserved-word list: api, admin, login, brand names, profanity).
+
+222
+00:16:28.054 --> 00:16:32.342
+Store with owner, created or expiry timestamps and campaign id.
+
+223
+00:16:32.622 --> 00:16:36.313
+Warm the cache for campaign links created ahead of a send (L3).
+
+224
+00:16:37.663 --> 00:16:38.665
+The read path:
+
+225
+00:16:38.945 --> 00:16:41.463
+301 versus 302.
+
+226
+00:16:41.743 --> 00:16:43.087
+Here is a quick table:
+
+227
+00:16:43.367 --> 00:16:46.332
+Status, and Meaning, and Browser caching, and Use.
+
+228
+00:16:46.612 --> 00:16:48.767
+301 Moved Permanently.
+
+229
+00:16:49.047 --> 00:16:49.836
+Meaning:
+
+230
+00:16:50.116 --> 00:16:51.844
+Destination will never change.
+
+231
+00:16:52.124 --> 00:16:53.255
+Browser caching:
+
+232
+00:16:53.535 --> 00:16:56.116
+Browsers and proxies may cache indefinitely.
+
+233
+00:16:56.396 --> 00:16:57.100
+Use:
+
+234
+00:16:57.380 --> 00:17:00.452
+Rarely: you lose analytics and the ability to revoke.
+
+235
+00:17:00.732 --> 00:17:04.273
+302 Found or 307 Temporary.
+
+236
+00:17:04.553 --> 00:17:05.343
+Meaning:
+
+237
+00:17:05.623 --> 00:17:07.116
+Destination may change.
+
+238
+00:17:07.396 --> 00:17:08.527
+Browser caching:
+
+239
+00:17:08.807 --> 00:17:10.727
+Not cached unless headers say so.
+
+240
+00:17:11.007 --> 00:17:11.711
+Use:
+
+241
+00:17:11.991 --> 00:17:14.999
+Default: every click reaches you, revocation works.
+
+242
+00:17:15.279 --> 00:17:17.881
+308 Permanent (method-preserving).
+
+243
+00:17:18.161 --> 00:17:18.951
+Meaning:
+
+244
+00:17:19.231 --> 00:17:21.172
+As 301 for non-GET.
+
+245
+00:17:21.452 --> 00:17:22.583
+Browser caching:
+
+246
+00:17:22.863 --> 00:17:23.652
+Cached.
+
+247
+00:17:23.932 --> 00:17:24.636
+Use:
+
+248
+00:17:24.916 --> 00:17:26.217
+Not for short links.
+
+249
+00:17:26.497 --> 00:17:28.737
+404 or 410.
+
+250
+00:17:29.017 --> 00:17:29.807
+Meaning:
+
+251
+00:17:30.087 --> 00:17:31.623
+Unknown or gone for good.
+
+252
+00:17:31.903 --> 00:17:33.033
+Browser caching:
+
+253
+00:17:33.313 --> 00:17:34.999
+410 may be cached.
+
+254
+00:17:35.279 --> 00:17:35.983
+Use:
+
+255
+00:17:36.263 --> 00:17:38.737
+Unknown code or expired or revoked.
+
+256
+00:17:40.087 --> 00:17:45.357
+L2 returns 302 with Cache-Control: private, max-age=0.
+
+257
+00:17:45.637 --> 00:17:52.527
+The §1.1 analytics gap came from 301s: browsers served repeat clicks from cache.
+
+258
+00:17:52.807 --> 00:17:54.386
+The trade-off is explicit:
+
+259
+00:17:54.666 --> 00:17:58.911
+302 means you serve every click, so the read path must be cheap.
+
+260
+00:17:59.191 --> 00:18:00.578
+The read path, in order:
+
+261
+00:18:00.858 --> 00:18:08.090
+Edge or CDN (optional) for campaign codes, with short TTLs and the redirect logic in an edge function.
+
+262
+00:18:08.370 --> 00:18:14.365
+In-process near-cache on every redirect node, seconds of TTL, the hot-key defence (L3).
+
+263
+00:18:15.715 --> 00:18:20.643
+Distributed cache (Redis), minutes to hours of TTL, holding the working set.
+
+264
+00:18:20.923 --> 00:18:24.123
+Database, the source of truth, reached on cold misses.
+
+265
+00:18:24.403 --> 00:18:26.323
+Coalesce concurrent misses per key:
+
+266
+00:18:26.603 --> 00:18:35.413
+L2 saw 716 duplicate reads when many requests missed the same cold, popular code at once (Ch 07).
+
+267
+00:18:35.693 --> 00:18:41.709
+Negative caching for unknown codes, briefly, so enumeration attempts don't reach the database.
+
+268
+00:18:43.059 --> 00:18:44.873
+Caching under skew and hot keys.
+
+269
+00:18:45.153 --> 00:18:47.457
+Link popularity is heavily skewed.
+
+270
+00:18:47.737 --> 00:18:55.566
+L3 models it as Zipf (s = 1.0, measure your own) and replays 10 million clicks over 1 million links:
+
+271
+00:18:56.916 --> 00:18:58.260
+Here is a quick table:
+
+272
+00:18:58.540 --> 00:19:02.231
+LRU size, and % of links, and Hit ratio, and Memory.
+
+273
+00:19:02.511 --> 00:19:04.409
+1,000. % of links:
+
+274
+00:19:04.689 --> 00:19:06.204
+0.1%.
+
+275
+00:19:06.484 --> 00:19:07.529
+Hit ratio:
+
+276
+00:19:07.809 --> 00:19:09.303
+40.3%.
+
+277
+00:19:09.583 --> 00:19:10.372
+Memory:
+
+278
+00:19:10.652 --> 00:19:12.103
+0.2 MB.
+
+279
+00:19:12.383 --> 00:19:14.260
+10,000. % of links:
+
+280
+00:19:14.540 --> 00:19:15.521
+1%.
+
+281
+00:19:15.801 --> 00:19:16.847
+Hit ratio:
+
+282
+00:19:17.127 --> 00:19:18.897
+58.5%.
+
+283
+00:19:19.177 --> 00:19:19.967
+Memory:
+
+284
+00:19:20.247 --> 00:19:21.207
+2 MB.
+
+285
+00:19:21.487 --> 00:19:23.705
+100,000. % of links:
+
+286
+00:19:23.985 --> 00:19:24.945
+10%.
+
+287
+00:19:25.225 --> 00:19:26.271
+Hit ratio:
+
+288
+00:19:26.551 --> 00:19:28.513
+77.7%.
+
+289
+00:19:28.793 --> 00:19:29.583
+Memory:
+
+290
+00:19:29.863 --> 00:19:30.908
+20 MB.
+
+291
+00:19:31.188 --> 00:19:33.748
+250,000. % of links:
+
+292
+00:19:34.028 --> 00:19:35.329
+25%.
+
+293
+00:19:35.609 --> 00:19:36.655
+Hit ratio:
+
+294
+00:19:36.935 --> 00:19:38.748
+85.5%.
+
+295
+00:19:39.028 --> 00:19:39.817
+Memory:
+
+296
+00:19:40.097 --> 00:19:41.207
+50 MB.
+
+297
+00:19:42.557 --> 00:19:47.698
+The curve flattens: the head is cheap to cache, the long tail always reaches the database.
+
+298
+00:19:47.978 --> 00:19:51.093
+Size the cache for the head and the database for the tail.
+
+299
+00:19:51.373 --> 00:19:55.255
+A campaign is a different shape: one key takes most of the traffic.
+
+300
+00:19:55.535 --> 00:20:09.530
+Sharding spreads keys, not load, so every click on the offer code lands on one Redis shard, 27,184 req per second, 49x its peers in L3's 20M-SMS blast.
+
+301
+00:20:09.810 --> 00:20:28.327
+That is still within one shard's capacity (~27% of ~100k simple GETs per second, VERIFY), but the load scales with the size of the blast, not the cluster: a ~74M-SMS festival campaign would saturate it, and adding shards changes nothing.
+
+302
+00:20:28.607 --> 00:20:29.525
+Defences:
+
+303
+00:20:30.875 --> 00:20:34.757
+Near-cache on each node: at most one lookup per node per TTL.
+
+304
+00:20:35.037 --> 00:20:40.861
+With a 1-second TTL on 20 nodes, the hot shard sees 570 req per second.
+
+305
+00:20:41.141 --> 00:20:44.683
+Pre-warm scheduled campaigns on every node before the send.
+
+306
+00:20:44.963 --> 00:20:49.101
+Edge caching of the redirect with a short TTL for campaign codes.
+
+307
+00:20:49.381 --> 00:20:59.109
+Bulkheads: a separate connection pool and deployment for the redirect path, so a spike can't starve order tracking (§1.1) (Ch 18).
+
+308
+00:21:00.459 --> 00:21:02.017
+Data model and storage.
+
+309
+00:21:02.297 --> 00:21:03.897
+Here is the SQL code.
+
+310
+00:21:06.747 --> 00:21:13.403
+The access pattern is pure key-value (lookup by code), and the live set is ~230 GB.
+
+311
+00:21:13.683 --> 00:21:19.869
+A partitioned PostgreSQL with a read replica or two, fronted by caches, meets it comfortably.
+
+312
+00:21:20.149 --> 00:21:26.293
+Partitioning by expiry month turns expiry into DROP PARTITION rather than billions of deletes.
+
+313
+00:21:26.573 --> 00:21:29.859
+Put permanent (no-expiry) links in their own partition.
+
+314
+00:21:30.139 --> 00:21:33.339
+When would you choose DynamoDB or Cassandra instead?
+
+315
+00:21:33.619 --> 00:21:41.128
+When the live set reaches many terabytes, you need multi-region active-active writes, or you want native per-item TTL.
+
+316
+00:21:41.408 --> 00:21:44.032
+The key-value access pattern ports easily.
+
+317
+00:21:44.312 --> 00:21:49.325
+In an interview, name the trigger rather than picking by reflex (Ch 06).
+
+318
+00:21:50.675 --> 00:21:54.131
+Sharding, if needed, is by hash of code (Ch 11).
+
+319
+00:21:54.411 --> 00:21:58.913
+Because codes come from a permutation, they are already uniformly distributed.
+
+320
+00:22:00.263 --> 00:22:01.372
+Click analytics.
+
+321
+00:22:01.652 --> 00:22:07.049
+Marketing wants clicks, unique visitors, time series and breakdowns, in near real time.
+
+322
+00:22:07.329 --> 00:22:10.657
+The iron rule: the redirect must not wait for analytics.
+
+323
+00:22:10.937 --> 00:22:17.423
+L4 measured three ways to count 40,000 clicks against PostgreSQL with durable commits:
+
+324
+00:22:18.773 --> 00:22:20.117
+Here is a quick table:
+
+325
+00:22:20.397 --> 00:22:26.029
+Strategy, and Clicks per second, and p99 cost on the redirect, and DB statements.
+
+326
+00:22:26.309 --> 00:22:29.039
+UPDATE per click, spread over 1,000 links.
+
+327
+00:22:29.319 --> 00:22:35.762
+Clicks per second: ~12,000. p99 cost on the redirect: ~11 ms.
+
+328
+00:22:36.042 --> 00:22:37.279
+DB statements:
+
+329
+00:22:37.559 --> 00:22:38.669
+40,000.
+
+330
+00:22:38.949 --> 00:22:41.381
+UPDATE per click, one hot campaign link.
+
+331
+00:22:41.661 --> 00:22:49.127
+Clicks per second: ~2,300. p99 cost on the redirect: ~67 ms.
+
+332
+00:22:49.407 --> 00:22:50.645
+DB statements:
+
+333
+00:22:50.925 --> 00:22:52.034
+40,000.
+
+334
+00:22:52.314 --> 00:22:54.703
+Buffer + 1 s micro-batch upsert.
+
+335
+00:22:54.983 --> 00:22:59.634
+Clicks per second: paced 10,000. p99 cost on the redirect:
+
+336
+00:22:59.914 --> 00:23:01.791
+0.01 ms.
+
+337
+00:23:02.071 --> 00:23:04.589
+DB statements: ~2,000.
+
+338
+00:23:05.939 --> 00:23:09.672
+A synchronous counter update puts a row lock on the redirect path.
+
+339
+00:23:09.952 --> 00:23:16.779
+It degrades exactly when a campaign makes one link hot, because every commit on that row queues behind the previous one.
+
+340
+00:23:17.059 --> 00:23:18.040
+In production:
+
+341
+00:23:18.320 --> 00:23:28.581
+The redirect node emits a click event (code, timestamp, hashed device id, user agent, coarse region) to a local buffer, then to Kafka (Ch 14).
+
+342
+00:23:28.861 --> 00:23:42.067
+A stream aggregator (Flink or Kafka Streams) produces per-minute counts per link and campaign into an analytics store (ClickHouse, Druid or Pinot), and the raw events land in the lake for ad-hoc analysis.
+
+343
+00:23:43.417 --> 00:23:57.027
+Unique visitors use HyperLogLog: unique counts don't add across nodes or time windows (L4: adding 20 per-node counts overstated uniques by 294%), but HLL sketches merge.
+
+344
+00:23:57.307 --> 00:24:06.950
+L4's 16 KB sketches came within +0.41% (standard error 0.81% at p = 14).
+
+345
+00:24:07.230 --> 00:24:13.011
+Redis PFADD or PFMERGE and ClickHouse uniqHLL12 implement the same idea.
+
+346
+00:24:13.291 --> 00:24:21.334
+Bot filtering: link-preview crawlers (WhatsApp, Slack, iMessage), security scanners and prefetchers fetch links without a human.
+
+347
+00:24:21.614 --> 00:24:28.227
+Identify them by user agent and behaviour (HEAD requests, no JS beacon) and count them separately.
+
+348
+00:24:28.507 --> 00:24:30.726
+Don't block them, previews help click-through.
+
+349
+00:24:32.076 --> 00:24:35.745
+Counts are seconds behind real time; say so on the dashboard.
+
+350
+00:24:36.025 --> 00:24:43.023
+For money-related attribution (affiliate payouts), reconcile from raw events, not from the real-time counters.
+
+351
+00:24:44.373 --> 00:24:46.442
+Abuse, privacy and lifecycle.
+
+352
+00:24:46.722 --> 00:25:03.959
+Phishing and open redirects: allow-listed destination hosts, parsed properly (L2); no public creation; partner links scanned and reviewed; an abuse-report endpoint and a kill switch that revokes a code everywhere, including caches (publish invalidation events).
+
+353
+00:25:04.239 --> 00:25:13.071
+Enumeration: permuted codes (L1), rate limits on 404s, negative caching, and nothing sensitive behind a code alone.
+
+354
+00:25:14.421 --> 00:25:21.205
+Personal data: never put phone numbers, names or order details in the long URL's query string in clear.
+
+355
+00:25:21.485 --> 00:25:23.960
+Use opaque tokens resolved server-side.
+
+356
+00:25:24.240 --> 00:25:31.237
+Click events store a salted hash of the device id, with retention limits and erasure support (Ch 36).
+
+357
+00:25:31.517 --> 00:25:32.499
+Expiry:
+
+358
+00:25:32.779 --> 00:25:34.869
+410 after expiry.
+
+359
+00:25:35.149 --> 00:25:42.872
+Don't recycle codes for at least the retention period of any system that might still hold them (SMS archives, screenshots).
+
+360
+00:25:43.152 --> 00:25:47.419
+With a 3.5-trillion space there is no reason to recycle at all.
+
+361
+00:25:47.699 --> 00:25:55.037
+Revocation: a revokedat column plus a cache-invalidation event; near-caches' short TTLs bound the staleness.
+
+362
+00:25:56.387 --> 00:25:58.478
+Multi-region and availability.
+
+363
+00:25:58.758 --> 00:26:06.737
+Reads are replicated to every serving region; a region can serve redirects from its cache and replica even if the primary is down.
+
+364
+00:26:07.017 --> 00:26:13.353
+Stale reads are acceptable for links created seconds ago, except for the creator's own immediate test click.
+
+365
+00:26:13.633 --> 00:26:22.102
+Handle that with read-your-writes, by routing the first lookup of a fresh code to the primary, or by writing through the cache on create (Ch 10).
+
+366
+00:26:22.382 --> 00:26:28.313
+Writes go to one primary region, with the second region as warm standby (Ch 27).
+
+367
+00:26:28.593 --> 00:26:35.931
+Because counter blocks are reserved, the standby's minting just continues from the sequence after failover, without collisions.
+
+368
+00:26:37.281 --> 00:26:50.209
+Degraded mode: if the database is unavailable, redirects continue from caches for the working set; creation fails fast and callers retry (notifications can send without a link as a last resort).
+
+369
+00:26:50.489 --> 00:26:58.319
+SLOs: redirect availability and latency per region; creation success rate; analytics freshness (Ch 24).
+
+370
+00:26:59.669 --> 00:27:00.799
+Interview framing.
+
+371
+00:27:01.079 --> 00:27:03.639
+In a 45-minute interview, spend roughly:
+
+372
+00:27:03.919 --> 00:27:16.122
+5 min requirements, 5 min estimation, 5 min API and data model, 10 min high-level design, 15 min on two deep dives, and 5 min on failure modes and evolution.
+
+373
+00:27:16.402 --> 00:27:26.599
+The strongest deep dives are code generation (show the trade-off table, not one scheme) and hot keys or analytics (show you know the redirect path must stay cheap).
+
+374
+00:27:26.879 --> 00:27:41.578
+Staff-level signals: bounded storage via expiry, abuse and privacy as first-class requirements, choosing PostgreSQL or a KV store with a stated trigger, and bulkheads between campaign spikes and transactional links.
+
+375
+00:27:42.928 --> 00:27:43.824
+Part 3.
+
+376
+00:27:44.104 --> 00:27:45.832
+Architecture and Diagrams.
+
+377
+00:27:47.082 --> 00:27:48.127
+Component view.
+
+378
+00:27:48.407 --> 00:27:49.751
+Here is the diagram.
+
+379
+00:27:53.601 --> 00:27:55.884
+Sequence: happy path, create then click.
+
+380
+00:27:56.164 --> 00:27:58.959
+The sequence diagram walks through it step by step.
+
+381
+00:27:59.239 --> 00:28:00.092
+N to A:
+
+382
+00:28:00.372 --> 00:28:04.852
+POST or api or links url, owner, ttl 30 days.
+
+383
+00:28:05.132 --> 00:28:08.609
+A to A: validate host, mint code from reserved block.
+
+384
+00:28:08.889 --> 00:28:12.921
+A to DB: insert, on conflict owner and urlhash do nothing.
+
+385
+00:28:13.201 --> 00:28:14.972
+DB to A: inserted.
+
+386
+00:28:15.252 --> 00:28:16.127
+A to N:
+
+387
+00:28:16.407 --> 00:28:20.097
+201 gro.cr or jFF7XOx.
+
+388
+00:28:20.377 --> 00:28:21.316
+C to R:
+
+389
+00:28:21.596 --> 00:28:23.516
+GET or jFF7XOx.
+
+390
+00:28:23.796 --> 00:28:25.673
+R to R: near-cache miss.
+
+391
+00:28:25.953 --> 00:28:27.020
+R to RC:
+
+392
+00:28:27.300 --> 00:28:29.263
+GET link jFF7XOx.
+
+393
+00:28:29.543 --> 00:28:31.121
+RC to R: miss.
+
+394
+00:28:31.401 --> 00:28:35.071
+R to DB: select via replica, one loader per code.
+
+395
+00:28:35.351 --> 00:28:38.273
+DB to R: long url, expiresat.
+
+396
+00:28:38.553 --> 00:28:39.620
+R to RC:
+
+397
+00:28:39.900 --> 00:28:41.116
+SET with TTL.
+
+398
+00:28:41.396 --> 00:28:42.313
+R to C:
+
+399
+00:28:42.593 --> 00:28:45.601
+302 Location track.grocery.in.
+
+400
+00:28:45.881 --> 00:28:47.887
+R to K: click event, async.
+
+401
+00:28:51.737 --> 00:28:54.979
+Sequence: failure path, campaign spike on one code.
+
+402
+00:28:55.259 --> 00:28:58.054
+The sequence diagram walks through it step by step.
+
+403
+00:28:58.334 --> 00:29:04.457
+M to S: send 20M SMS with gro.cr or diwali at 19 00.
+
+404
+00:29:04.737 --> 00:29:07.510
+U to R: up to 30k taps per second.
+
+405
+00:29:07.790 --> 00:29:12.441
+R to RC: one lookup per node per second - near-cache TTL 1 s.
+
+406
+00:29:12.721 --> 00:29:14.342
+RC to R: link.
+
+407
+00:29:14.622 --> 00:29:15.539
+R to U:
+
+408
+00:29:15.819 --> 00:29:18.059
+302 served from near-cache.
+
+409
+00:29:21.909 --> 00:29:23.595
+State: a link's lifecycle.
+
+410
+00:29:23.875 --> 00:29:25.219
+Here is the diagram.
+
+411
+00:29:29.069 --> 00:29:29.986
+Part 4.
+
+412
+00:29:30.266 --> 00:29:34.085
+Design Document Excerpt: gro.cr Short-Link Service.
+
+413
+00:29:35.335 --> 00:29:36.081
+Note:
+
+414
+00:29:36.361 --> 00:29:39.647
+Design Document (excerpt), Short-Link Service v2.
+
+415
+00:29:39.927 --> 00:29:40.823
+Status:
+
+416
+00:29:41.103 --> 00:29:42.383
+Accepted, Authors:
+
+417
+00:29:42.663 --> 00:29:44.689
+Messaging platform team, Reviewers:
+
+418
+00:29:44.969 --> 00:29:47.316
+Security, SRE, Marketing tech.
+
+419
+00:29:47.596 --> 00:30:01.975
+Context, v1 used sequential codes (enumerable), 301 redirects (lost analytics), one shared pool (campaign spike broke order tracking), synchronous counters, and unrestricted destinations (phishing).
+
+420
+00:30:02.255 --> 00:30:06.095
+TRAI DLT requires whitelisted URLs in SMS.
+
+421
+00:30:06.375 --> 00:30:28.156
+Decision, 7-char codes from block-allocated counters through a keyed Feistel permutation; 302 redirects; allow-listed https destinations; idempotent create; near-cache + Redis + partitioned PostgreSQL; clicks via Kafka to a stream aggregator with HLL uniques; separate redirect deployment.
+
+422
+00:30:29.506 --> 00:30:54.594
+Related ADRs, ADR-240 Code scheme: counter blocks + permutation (L1); ADR-241 302 + no-store for redirects; ADR-242 Destination allow-list and idempotent create (L2); ADR-243 Three-tier read path with 1 s near-cache and campaign pre-warm (L3); ADR-244 Async click pipeline,
+
+423
+00:30:54.874 --> 00:31:13.946
+HLL for uniques (L4); ADR-245 PostgreSQL partitioned by expiry month; KV store when live set exceeds ~2 TB or multi-region writes needed; ADR-246 No code recycling; 410 after expiry.
+
+424
+00:31:14.226 --> 00:31:15.186
+Requirements.
+
+425
+00:31:15.466 --> 00:31:23.210
+R1 Redirect p99 20 ms server-side, 99.95% availability per region.
+
+426
+00:31:24.560 --> 00:31:31.216
+R2 Survive a 100M-SMS campaign on a single code without affecting transactional links.
+
+427
+00:31:31.496 --> 00:31:38.877
+R3 No destination outside the allow-list; no enumerable codes; nothing personal in codes or URLs.
+
+428
+00:31:39.157 --> 00:31:43.787
+R4 Create is idempotent; bulk create 20M links in under an hour.
+
+429
+00:31:44.067 --> 00:31:48.376
+R5 Click counts within 1 minute; unique visitors within 2%.
+
+430
+00:31:48.656 --> 00:31:50.064
+Decisions in detail.
+
+431
+00:31:51.414 --> 00:31:53.526
+Codes (ADR-240).
+
+432
+00:31:53.806 --> 00:32:04.729
+Blocks of 1,000 from a sequence; 4-round Feistel over 62^7 with keys in the secrets manager; custom aliases from a separate namespace with a reserved list.
+
+433
+00:32:05.009 --> 00:32:07.547
+Redirects (ADR-241).
+
+434
+00:32:07.827 --> 00:32:18.345
+302 with Cache-Control: private, max-age=0; 410 for expired or revoked; 404 negative-cached for 60 s.
+
+435
+00:32:18.625 --> 00:32:21.099
+Write path (ADR-242).
+
+436
+00:32:21.379 --> 00:32:30.019
+URL parsed with the platform's URL library; https, no user-info, exact host match; unique (owner, urlhash).
+
+437
+00:32:30.299 --> 00:32:32.859
+Read path (ADR-243).
+
+438
+00:32:33.139 --> 00:32:44.019
+Caffeine near-cache 1 s TTL (10k entries); Redis TTL 24 h; miss coalescing per code; campaign codes pre-warmed 10 min before send.
+
+439
+00:32:45.369 --> 00:32:47.951
+Analytics (ADR-244).
+
+440
+00:32:48.231 --> 00:32:58.108
+Click events to Kafka link-clicks keyed by code; Flink per-minute aggregates + HLL (p = 14) per link per day; bots flagged by UA list.
+
+441
+00:32:58.388 --> 00:33:00.863
+Storage (ADR-245).
+
+442
+00:33:01.143 --> 00:33:06.988
+Monthly partitions by expiresat; permanent links in a never partition; two read replicas.
+
+443
+00:33:07.268 --> 00:33:08.292
+Consequences.
+
+444
+00:33:08.572 --> 00:33:13.969
+302 means every click is served, so the read path's cost is the design's centre.
+
+445
+00:33:14.249 --> 00:33:15.721
+Counts lag by seconds.
+
+446
+00:33:16.001 --> 00:33:18.327
+Codes are 7 characters, not 5.
+
+447
+00:33:18.607 --> 00:33:24.537
+In exchange: private links, working analytics, isolation from campaigns, and bounded storage.
+
+448
+00:33:25.887 --> 00:33:26.847
+Part 5.
+
+449
+00:33:27.127 --> 00:33:29.111
+Hands-On Code, Level Ladder.
+
+450
+00:33:30.361 --> 00:33:31.129
+Info:
+
+451
+00:33:31.409 --> 00:33:32.497
+What's real here.
+
+452
+00:33:32.777 --> 00:33:35.273
+All four labs are JDK 21.
+
+453
+00:33:35.553 --> 00:33:51.788
+L2 and L4 run against a real PostgreSQL 16 (L2 also runs a real JDK HttpServer and HttpClient over TCP); L1 and L3 are deterministic simulations with a fixed seed.
+
+454
+00:33:52.068 --> 00:33:55.887
+Timings in L2 and L4 vary by machine; the shapes don't.
+
+455
+00:33:56.167 --> 00:34:03.015
+The Zipf popularity, click-through rate, Redis capacity and decay constant in L3 are stated assumptions.
+
+456
+00:34:04.365 --> 00:34:22.562
+L2 and L4 need PostgreSQL 16 on port 5581 with a database shop and the JDBC driver jar (postgresql-42.7.4.jar) in the lab folder; the lab README has a one-command Docker alternative.
+
+457
+00:34:22.842 --> 00:34:32.122
+Run every lab with -Dstdout.encoding=UTF-8; JDBC labs also need -Duser.timezone=UTC.
+
+458
+00:34:33.472 --> 00:34:35.691
+L1, Four ways to mint a short code.
+
+459
+00:34:35.971 --> 00:34:36.909
+Requirement:
+
+460
+00:34:37.189 --> 00:34:39.600
+Every order-tracking SMS carries a link.
+
+461
+00:34:39.880 --> 00:34:45.597
+Codes must be short, unique, cheap to mint, and must not let one customer find another's order.
+
+462
+00:34:45.877 --> 00:34:47.968
+Two million codes are minted four ways.
+
+463
+00:34:48.248 --> 00:35:00.941
+The permutation is a 4-round Feistel network on 42 bits with cycle-walking to stay within 62^7, a bijection, so uniqueness is guaranteed without storing or checking anything.
+
+464
+00:35:02.291 --> 00:35:05.235
+Here is the Java code, CodeGenL1.java.
+
+465
+00:35:05.515 --> 00:35:09.889
+It runs to 139 lines; the full listing is in the chapter.
+
+466
+00:35:10.169 --> 00:35:17.742
+CodeGenL1.java, run with: java CodeGenL1.java (JDK 21, no dependencies).
+
+467
+00:35:18.022 --> 00:35:19.750
+FOUR WAYS TO MINT A SHORT CODE.
+
+468
+00:35:20.030 --> 00:35:28.286
+The grocery platform sends ~2 million SMS a day with a link (order tracking, slot reminders. your refund is processed).
+
+469
+00:35:28.566 --> 00:35:34.241
+Each link needs a short, unique code: gro.cr or aZ3kP9q.
+
+470
+00:35:34.521 --> 00:35:36.483
+We mint 2,000,000 codes four ways.
+
+471
+00:35:39.333 --> 00:35:40.251
+On screen:
+
+472
+00:35:40.531 --> 00:35:42.365
+Minting 2,000,000 short codes.
+
+473
+00:35:42.645 --> 00:36:02.848
+62^6 = 56,800,235,584 62^7 = 3,521,614,606,208. strategy length collisions extra lookups neighbour guess hits.
+
+474
+00:36:03.128 --> 00:36:11.021
+A) MD5(url) truncated to 6 base62 chars 6 40 0 ~0% (random).
+
+475
+00:36:11.301 --> 00:36:17.637
+B) random 7 chars, check-and-retry 7 0 2,000,000 ~0% (random).
+
+476
+00:36:17.917 --> 00:36:23.165
+C) counter, then base62 5 0 0 100.0%.
+
+477
+00:36:23.445 --> 00:36:31.040
+D) counter, then Feistel permutation, then base62 7 0 0 0.00%.
+
+478
+00:36:31.320 --> 00:36:35.651
+First five codes minted by C and D (consecutive counter values):
+
+479
+00:36:35.931 --> 00:36:36.635
+C:
+
+480
+00:36:36.915 --> 00:36:41.651
+6laZE 6laZF 6laZG 6laZH 6laZI.
+
+481
+00:36:41.931 --> 00:36:51.147
+D: jFF7XOx jstj0mT pt1IVd8 d5RctH9 JNOJwOr.
+
+482
+00:36:51.427 --> 00:36:57.997
+Birthday estimate for A: n² or 2N = 35 expected colliding pairs (measured 40).
+
+483
+00:36:58.277 --> 00:36:59.792
+The rest is in the chapter.
+
+484
+00:37:02.642 --> 00:37:03.495
+Reading it:
+
+485
+00:37:03.775 --> 00:37:12.607
+A) Hash truncation produced 40 collisions in 2M codes, right where the birthday estimate n² or 2N = 35 says it should.
+
+486
+00:37:12.887 --> 00:37:18.946
+At a year's volume the collisions number in the tens of thousands, so hashing still needs a check-and-retry.
+
+487
+00:37:19.226 --> 00:37:31.173
+B) Random codes needed 0 retries, because the 7-character space is only 0.00006% full, but it still paid 2,000,000 uniqueness lookups.
+
+488
+00:37:31.453 --> 00:37:38.706
+C) Counter codes are 5 characters and need nothing, but 100% of sampled neighbours were other live links:
+
+489
+00:37:38.986 --> 00:37:41.823
+6laZE 6laZF 6laZG....
+
+490
+00:37:43.173 --> 00:37:45.115
+D) Counter + permutation:
+
+491
+00:37:45.395 --> 00:37:56.061
+0 collisions, 0 lookups, 0.00% neighbour hits: jFF7XOx jstj0mT pt1IVd8....
+
+492
+00:37:56.341 --> 00:37:58.347
+The cost is two extra characters.
+
+493
+00:37:59.697 --> 00:38:02.470
+L2, A real shortener on PostgreSQL.
+
+494
+00:38:02.750 --> 00:38:03.689
+Requirement:
+
+495
+00:38:03.969 --> 00:38:06.593
+Services create links, customers follow them.
+
+496
+00:38:06.873 --> 00:38:13.209
+Retries must not duplicate links; nothing may point outside our domains; expired links must say so.
+
+497
+00:38:13.489 --> 00:38:22.342
+A JDK HttpServer on virtual threads serves POST or api or links and GET /code from PostgreSQL.
+
+498
+00:38:22.622 --> 00:38:28.190
+Codes come from a sequence in blocks of 1,000 per node, passed through L1's permutation.
+
+499
+00:38:28.470 --> 00:38:36.385
+A load phase then sends 50,000 Zipf-distributed redirects over 10,000 links from 200 concurrent clients.
+
+500
+00:38:37.735 --> 00:38:40.657
+Here is the Java code, ShortenerL2.java.
+
+501
+00:38:40.937 --> 00:38:45.183
+It runs to 285 lines; the full listing is in the chapter.
+
+502
+00:38:45.463 --> 00:39:03.297
+ShortenerL2.java, run with (PostgreSQL 16 on:5581, db shop): java -cp postgresql-42.7.4.jar -Dsun.net.httpserver.nodelay=true ShortenerL2.java.
+
+503
+00:39:03.577 --> 00:39:04.751
+A REAL SHORTENER:
+
+504
+00:39:05.031 --> 00:39:08.444
+JDK HttpServer + PostgreSQL.
+
+505
+00:39:08.724 --> 00:39:13.161
+Create links with POST or api or links, follow them with GET /code.
+
+506
+00:39:16.011 --> 00:39:16.929
+On screen:
+
+507
+00:39:17.209 --> 00:39:31.758
+Shortener on http://127.0.0.1:43925 (PostgreSQL 16, JDK HttpServer on virtual threads).
+
+508
+00:39:32.038 --> 00:39:33.169
+Creating links:
+
+509
+00:39:33.449 --> 00:39:51.859
+POST https://track.grocery.in or orders or ORD-88213?t=f3a9, then 201. code:jFF7XOx,short:https://gro.cr or jFF7XOx.
+
+510
+00:39:52.139 --> 00:40:11.233
+POST https://track.grocery.in or orders or ORD-88213?t=f3a9, then 200. code:jFF7XOx,short:https://gro.cr or jFF7XOx,existing:true.
+
+511
+00:40:11.513 --> 00:40:26.211
+POST https://offers.grocery.in or diwali?utmsource=sms, then 201. code:pt1IVd8,short:https://gro.cr or pt1IVd8.
+
+512
+00:40:26.491 --> 00:40:37.414
+POST http://track.grocery.in or orders or ORD-1, then 422 error:only https. destinations are allowed.
+
+513
+00:40:37.694 --> 00:40:47.827
+POST https://grocery.in@evil.example or login, then 422 error:credentials in URL. are not allowed.
+
+514
+00:40:48.107 --> 00:40:49.622
+The rest is in the chapter.
+
+515
+00:40:52.472 --> 00:40:53.325
+Reading it:
+
+516
+00:40:53.605 --> 00:40:59.451
+The retry returned 200... existing:true with the same code jFF7XOx.
+
+517
+00:40:59.731 --> 00:41:06.109
+The unique (owner, urlhash) constraint makes a concurrent double-create impossible, not just unlikely.
+
+518
+00:41:06.389 --> 00:41:18.677
+Validation refused http://, the user-info trick (grocery.in@evil.example really points at evil.example) and the look-alike host, all before anything was stored.
+
+519
+00:41:20.027 --> 00:41:27.174
+410 for the expired reminder, 404 for an unknown code and for a path that isn't a code at all.
+
+520
+00:41:27.454 --> 00:41:33.833
+The 302 carries Cache-Control: private, max-age=0 so browsers don't cache it.
+
+521
+00:41:34.113 --> 00:41:37.590
+Under load the cache absorbed 85% of redirects.
+
+522
+00:41:37.870 --> 00:41:51.993
+Only 6,806 distinct links were requested, though, so 716 database reads were duplicates: concurrent requests missed the same cold, popular code before the first one had loaded it.
+
+523
+00:41:52.273 --> 00:41:53.787
+This is exercise 3.
+
+524
+00:41:54.067 --> 00:42:02.131
+11 sequence round-trips minted 10,003 counter values; block allocation takes the database out of the minting path.
+
+525
+00:42:03.481 --> 00:42:11.033
+Here is the Java code, VERIFY: the same redirect in Spring Boot 3 (WebFlux shown; MVC is analogous).
+
+526
+00:42:13.883 --> 00:42:17.510
+L3, The read path: cache sizing and the campaign spike.
+
+527
+00:42:17.790 --> 00:42:18.729
+Requirement:
+
+528
+00:42:19.009 --> 00:42:25.899
+How much cache do we need, and what happens at 7 pm when marketing sends 20 million SMS with one link?
+
+529
+00:42:26.179 --> 00:42:32.153
+Part 1 replays 10 million Zipf-distributed clicks through a real LRU cache at five sizes.
+
+530
+00:42:32.433 --> 00:42:41.691
+Part 2 simulates the campaign second by second against 20 redirect nodes and a 6-shard Redis cluster, with and without a 1-second near-cache.
+
+531
+00:42:43.041 --> 00:42:46.092
+Here is the Java code, ReadPathL3.java.
+
+532
+00:42:46.372 --> 00:42:50.404
+It runs to 105 lines; the full listing is in the chapter.
+
+533
+00:42:50.684 --> 00:42:58.236
+ReadPathL3.java, run with: java ReadPathL3.java (JDK 21, no dependencies).
+
+534
+00:42:58.516 --> 00:43:05.471
+THE READ PATH AT SCALE: how big a cache, and what happens when marketing sends 20 million SMS at 7 pm.
+
+535
+00:43:05.751 --> 00:43:14.817
+Part 1 replays 10,000,000 clicks over 1,000,000 links with a skewed popularity (Zipf, s = 1.0, an assumption; measure.
+
+536
+00:43:17.667 --> 00:43:18.585
+On screen:
+
+537
+00:43:18.865 --> 00:43:30.513
+Part 1, 10,000,000 clicks over 1,000,000 links (Zipf s=1.0); 762,847 distinct links. clicked at least once.
+
+538
+00:43:30.793 --> 00:43:35.977
+LRU cache size % of links hit ratio DB reads remaining cache memory.
+
+539
+00:43:36.257 --> 00:43:46.027
+1,000 0.1% 40.3% 5,969,787 0 MB.
+
+540
+00:43:46.307 --> 00:43:54.777
+10,000 1.0% 58.5% 4,149,039 2 MB.
+
+541
+00:43:55.057 --> 00:44:03.633
+50,000 5.0% 71.8% 2,820,044 10 MB.
+
+542
+00:44:03.913 --> 00:44:14.387
+100,000 10.0% 77.7% 2,228,565 20 MB.
+
+543
+00:44:14.667 --> 00:44:25.569
+250,000 25.0% 85.5% 1,448,328 50 MB.
+
+544
+00:44:25.849 --> 00:44:27.107
+Part 2, campaign:
+
+545
+00:44:27.387 --> 00:44:40.977
+20M SMS times 12% click-through = 2,400,000 clicks on ONE code. decaying over 10 min; peak 29,769 redirects per second.
+
+546
+00:44:41.257 --> 00:44:42.323
+Redis cluster:
+
+547
+00:44:42.603 --> 00:44:43.649
+6 shards.
+
+548
+00:44:43.929 --> 00:44:47.982
+A single Redis shard comfortably serves ~100k simple.
+
+549
+00:44:48.262 --> 00:44:49.777
+The rest is in the chapter.
+
+550
+00:44:52.627 --> 00:44:53.480
+Reading it:
+
+551
+00:44:53.760 --> 00:44:55.083
+Diminishing returns:
+
+552
+00:44:55.363 --> 00:45:08.504
+0.1% of links as cache already serves 40%; 1% serves 58.5%; 25x more (25%) reaches only 85.5%.
+
+553
+00:45:08.784 --> 00:45:15.653
+About 763k distinct links were clicked at least once, and that tail always reaches the database.
+
+554
+00:45:15.933 --> 00:45:24.765
+The campaign pushes 27,184 req per second onto the shard holding the offer code, 49x the other shards.
+
+555
+00:45:25.045 --> 00:45:35.861
+That is fine at this size (~27% of one shard) but scales with the blast: ~74M SMS would saturate it, whatever the shard count.
+
+556
+00:45:37.211 --> 00:45:41.563
+A 1-second near-cache caps the hot shard at one lookup per node per second:
+
+557
+00:45:41.843 --> 00:45:45.299
+570 req per second, the same as its peers.
+
+558
+00:45:46.649 --> 00:45:49.380
+L4, Counting clicks without hurting redirects.
+
+559
+00:45:49.660 --> 00:45:50.599
+Requirement:
+
+560
+00:45:50.879 --> 00:45:56.468
+Marketing wants clicks and unique visitors per link, live, without slowing a single redirect.
+
+561
+00:45:56.748 --> 00:46:05.047
+Part 1 counts 40,000 clicks against PostgreSQL with durable commits, using 32 concurrent writers, three ways.
+
+562
+00:46:05.327 --> 00:46:12.239
+Part 2 counts unique devices across 20 nodes exactly and with a HyperLogLog implemented in the lab.
+
+563
+00:46:13.589 --> 00:46:16.703
+Here is the Java code, AnalyticsL4.java.
+
+564
+00:46:16.983 --> 00:46:21.399
+It runs to 197 lines; the full listing is in the chapter.
+
+565
+00:46:21.679 --> 00:46:36.186
+AnalyticsL4.java, run with (PostgreSQL 16 on:5581, db shop): java -cp postgresql-42.7.4.jar AnalyticsL4.java.
+
+566
+00:46:36.466 --> 00:46:38.642
+COUNTING CLICKS WITHOUT HURTING REDIRECTS.
+
+567
+00:46:38.922 --> 00:46:43.231
+Marketing wants clicks and UNIQUE visitors per link, per campaign, in near.
+
+568
+00:46:46.081 --> 00:46:46.999
+On screen:
+
+569
+00:46:47.279 --> 00:46:54.191
+Part 1, 40,000 clicks, 32 concurrent writers, PostgreSQL 16 with durable commits.
+
+570
+00:46:54.471 --> 00:47:00.721
+(fsync on). strategy clicks per second p99 cost on redirect DB statements counted.
+
+571
+00:47:01.001 --> 00:47:10.345
+A) UPDATE per click, spread over 1,000 links 12,253 11.33 ms 40,000 40,000.
+
+572
+00:47:10.625 --> 00:47:19.905
+B) UPDATE per click, ONE hot campaign link 2,263 67.22 ms 40,000 40,000.
+
+573
+00:47:20.185 --> 00:47:30.660
+C) buffer + 1 s micro-batch upsert (half on hot link) 10,000 0.0100 ms 2,029 40,000.
+
+574
+00:47:30.940 --> 00:47:37.063
+(C is paced at 10,000 clicks per second, its limit is the redirect traffic, not the. counter).
+
+575
+00:47:37.343 --> 00:47:51.252
+Part 2, 3,000,000 clicks from repeat visitors across 20 redirect nodes. exact unique devices (HashSet) 663,668 ~37 MB of set entries.
+
+576
+00:47:51.532 --> 00:47:53.047
+The rest is in the chapter.
+
+577
+00:47:55.897 --> 00:47:56.750
+Reading it:
+
+578
+00:47:57.030 --> 00:48:05.414
+Spread-out updates manage ~12,000 per second with an ~11 ms p99, already a cost on every redirect.
+
+579
+00:48:05.694 --> 00:48:16.979
+On one hot row throughput drops to ~2,300 per second and p99 to ~67 ms: each commit on the row waits for the previous one to flush.
+
+580
+00:48:17.259 --> 00:48:28.651
+Micro-batching makes the redirect's cost a 0.01 ms memory increment and writes ~2,000 upserts (one per link per flush) instead of 40,000.
+
+581
+00:48:28.931 --> 00:48:33.411
+All 40,000 clicks were counted, including the final flush on shutdown.
+
+582
+00:48:34.761 --> 00:48:54.004
+Unique visitors: merged HLL sketches estimated 666,410 against an exact 663,668 (+0.41%, inside the 0.81% standard error) in 16 KB per sketch.
+
+583
+00:48:54.284 --> 00:49:02.817
+Adding per-node unique counts gave 2.6 million (+294%), because the same device clicks through many nodes.
+
+584
+00:49:03.097 --> 00:49:07.236
+In production the buffer is a Kafka topic and the flusher a stream job.
+
+585
+00:49:07.516 --> 00:49:12.529
+The principle is the same: counts are a second behind, and the redirect never waits.
+
+586
+00:49:13.879 --> 00:49:14.818
+Part 6.
+
+587
+00:49:15.098 --> 00:49:16.378
+Production Concerns.
+
+588
+00:49:17.628 --> 00:49:18.780
+Failure modes.
+
+589
+00:49:19.060 --> 00:49:20.404
+Here is a quick table:
+
+590
+00:49:20.684 --> 00:49:22.967
+Failure, and Symptom, and Mitigation.
+
+591
+00:49:23.247 --> 00:49:24.505
+Sequential codes.
+
+592
+00:49:24.785 --> 00:49:25.596
+Symptom:
+
+593
+00:49:25.876 --> 00:49:27.988
+Neighbouring links enumerable (L1).
+
+594
+00:49:28.268 --> 00:49:29.271
+Mitigation:
+
+595
+00:49:29.551 --> 00:49:33.135
+Keyed permutation; no personal data behind code alone.
+
+596
+00:49:33.415 --> 00:49:35.100
+301 redirects.
+
+597
+00:49:35.380 --> 00:49:36.191
+Symptom:
+
+598
+00:49:36.471 --> 00:49:38.156
+Missing clicks; can't revoke.
+
+599
+00:49:38.436 --> 00:49:39.439
+Mitigation:
+
+600
+00:49:39.719 --> 00:49:42.919
+302 or 307 with no-store.
+
+601
+00:49:43.199 --> 00:49:44.415
+Campaign hot key.
+
+602
+00:49:44.695 --> 00:49:45.505
+Symptom:
+
+603
+00:49:45.785 --> 00:49:49.817
+One shard or row saturated; shared pool exhausted (L3).
+
+604
+00:49:50.097 --> 00:49:51.100
+Mitigation:
+
+605
+00:49:51.380 --> 00:49:53.748
+Near-cache, pre-warm, edge, bulkheads.
+
+606
+00:49:54.028 --> 00:49:55.329
+Cold-miss stampede.
+
+607
+00:49:55.609 --> 00:49:56.420
+Symptom:
+
+608
+00:49:56.700 --> 00:49:58.812
+Duplicate DB reads (L2:
+
+609
+00:49:59.092 --> 00:50:00.500
+716).
+
+610
+00:50:00.780 --> 00:50:01.783
+Mitigation:
+
+611
+00:50:02.063 --> 00:50:03.449
+Per-key miss coalescing.
+
+612
+00:50:03.729 --> 00:50:05.031
+Synchronous counters.
+
+613
+00:50:05.311 --> 00:50:06.121
+Symptom:
+
+614
+00:50:06.401 --> 00:50:09.409
+Redirect latency tied to row locks (L4).
+
+615
+00:50:09.689 --> 00:50:10.692
+Mitigation:
+
+616
+00:50:10.972 --> 00:50:12.849
+Async events + aggregation.
+
+617
+00:50:14.199 --> 00:50:15.927
+Unrestricted destinations.
+
+618
+00:50:16.207 --> 00:50:17.018
+Symptom:
+
+619
+00:50:17.298 --> 00:50:18.962
+Phishing on the trusted domain.
+
+620
+00:50:19.242 --> 00:50:20.245
+Mitigation:
+
+621
+00:50:20.525 --> 00:50:23.959
+Allow-list, parser-based validation, abuse kill switch.
+
+622
+00:50:24.239 --> 00:50:25.690
+Mass expiry deletes.
+
+623
+00:50:25.970 --> 00:50:26.781
+Symptom:
+
+624
+00:50:27.061 --> 00:50:29.045
+Vacuum storms, replica lag.
+
+625
+00:50:29.325 --> 00:50:30.327
+Mitigation:
+
+626
+00:50:30.607 --> 00:50:33.167
+Partition by expiry, drop partitions.
+
+627
+00:50:33.447 --> 00:50:34.535
+Bot traffic.
+
+628
+00:50:34.815 --> 00:50:35.626
+Symptom:
+
+629
+00:50:35.906 --> 00:50:37.058
+Inflated clicks.
+
+630
+00:50:37.338 --> 00:50:38.341
+Mitigation:
+
+631
+00:50:38.621 --> 00:50:41.330
+UA or behaviour filtering, separate counts.
+
+632
+00:50:42.680 --> 00:50:43.768
+Observability.
+
+633
+00:50:44.048 --> 00:50:54.181
+RED metrics on the redirect path, per region and per status (302 or 404 or 410), plus cache hit ratio per tier.
+
+634
+00:50:54.461 --> 00:51:01.501
+Hot-key detection: top codes per node per minute (count-min sketch), alerting when one code exceeds a share of traffic.
+
+635
+00:51:01.781 --> 00:51:05.237
+404 rate per client as an enumeration signal.
+
+636
+00:51:05.517 --> 00:51:08.973
+Analytics lag: event time versus aggregation time.
+
+637
+00:51:09.253 --> 00:51:19.216
+Creation: idempotent replays (200s), validation rejections by reason, a spike in rejections may be an attack or a misconfigured campaign.
+
+638
+00:51:20.566 --> 00:51:21.505
+Security.
+
+639
+00:51:21.785 --> 00:51:27.865
+Destination allow-list managed as code, reviewed changes, audit log (Ch 36).
+
+640
+00:51:28.145 --> 00:51:33.201
+Management API: mTLS or service identity, per-owner quotas.
+
+641
+00:51:33.481 --> 00:51:40.478
+Permutation keys rotate only for new codes (old codes stay valid, the mapping is only used at mint time).
+
+642
+00:51:40.758 --> 00:51:45.985
+Tracking pages behind links require a signed token bound to the order and expiry.
+
+643
+00:51:47.335 --> 00:51:48.231
+Performance.
+
+644
+00:51:48.511 --> 00:51:54.612
+The redirect handler does no allocation-heavy work: a near-cache lookup, a header, an async enqueue.
+
+645
+00:51:54.892 --> 00:51:59.521
+It's a good fit for virtual threads or a non-blocking server (Ch 19).
+
+646
+00:51:59.801 --> 00:52:06.223
+Keep responses tiny: no body on 302, keep-alive, HTTP or 2 at the edge.
+
+647
+00:52:06.503 --> 00:52:14.183
+Bulk creation: batch inserts (L2 inserted 10,000 in one batch), pre-reserved counter blocks, async results.
+
+648
+00:52:15.533 --> 00:52:16.258
+Cost.
+
+649
+00:52:16.538 --> 00:52:23.151
+Storage is small and bounded by expiry; the main costs are the redirect fleet and the analytics pipeline.
+
+650
+00:52:23.431 --> 00:52:27.485
+Edge caching of campaign codes is the cheapest capacity for spikes.
+
+651
+00:52:27.765 --> 00:52:34.847
+Keep raw click events for a limited period (for example, 90 days) and aggregates longer (Ch 35).
+
+652
+00:52:36.197 --> 00:52:37.136
+Part 7.
+
+653
+00:52:37.416 --> 00:52:39.123
+Anti-Patterns and Pitfalls.
+
+654
+00:52:40.373 --> 00:52:41.290
+Watch out:
+
+655
+00:52:41.570 --> 00:52:42.210
+1.
+
+656
+00:52:42.490 --> 00:52:44.986
+Auto-increment ids as public codes.
+
+657
+00:52:45.266 --> 00:52:47.719
+Every link reveals its neighbours (L1).
+
+658
+00:52:47.999 --> 00:52:49.941
+Permute, or use random codes.
+
+659
+00:52:51.291 --> 00:52:52.208
+Watch out:
+
+660
+00:52:52.488 --> 00:52:53.192
+2.
+
+661
+00:52:53.472 --> 00:52:55.883
+Hash truncation without collision handling.
+
+662
+00:52:56.163 --> 00:53:02.755
+Birthday collisions arrive far sooner than intuition says, 40 in 2 million at 6 characters (L1).
+
+663
+00:53:04.105 --> 00:53:05.022
+Watch out:
+
+664
+00:53:05.302 --> 00:53:06.049
+3.
+
+665
+00:53:06.329 --> 00:53:09.635
+Deduplicating identical URLs across owners.
+
+666
+00:53:09.915 --> 00:53:13.755
+Different owners need different expiry, analytics and revocation.
+
+667
+00:53:14.035 --> 00:53:15.721
+Dedupe per owner, if at all.
+
+668
+00:53:17.071 --> 00:53:17.988
+Watch out:
+
+669
+00:53:18.268 --> 00:53:18.972
+4.
+
+670
+00:53:19.252 --> 00:53:20.916
+301 by default.
+
+671
+00:53:21.196 --> 00:53:26.529
+Browser caching hides clicks and makes revocation impossible for those who've clicked before.
+
+672
+00:53:27.879 --> 00:53:28.797
+Watch out:
+
+673
+00:53:29.077 --> 00:53:29.845
+5.
+
+674
+00:53:30.125 --> 00:53:39.703
+Validating destinations with string matching. contains(grocery.in) accepts grocery.in.evil.example and grocery.in@evil.example.
+
+675
+00:53:39.983 --> 00:53:42.799
+Parse, then compare hosts exactly (L2).
+
+676
+00:53:44.149 --> 00:53:45.067
+Watch out:
+
+677
+00:53:45.347 --> 00:53:46.093
+6.
+
+678
+00:53:46.373 --> 00:53:48.827
+Public or unauthenticated link creation.
+
+679
+00:53:49.107 --> 00:53:51.731
+Your trusted domain becomes a phishing service.
+
+680
+00:53:53.081 --> 00:53:53.998
+Watch out:
+
+681
+00:53:54.278 --> 00:53:55.025
+7.
+
+682
+00:53:55.305 --> 00:53:56.841
+Counting clicks synchronously.
+
+683
+00:53:57.121 --> 00:54:01.857
+A row lock on the redirect path, worst exactly during campaigns (L4).
+
+684
+00:54:03.207 --> 00:54:04.124
+Watch out:
+
+685
+00:54:04.404 --> 00:54:05.087
+8.
+
+686
+00:54:05.367 --> 00:54:06.689
+Summing unique counts.
+
+687
+00:54:06.969 --> 00:54:12.537
+Uniques don't add across nodes, days or links (L4: +294%).
+
+688
+00:54:12.817 --> 00:54:14.332
+Use mergeable sketches.
+
+689
+00:54:15.682 --> 00:54:16.599
+Watch out:
+
+690
+00:54:16.879 --> 00:54:17.626
+9.
+
+691
+00:54:17.906 --> 00:54:20.061
+Expecting sharding to fix a hot key.
+
+692
+00:54:20.341 --> 00:54:22.410
+Sharding spreads keys, not load.
+
+693
+00:54:22.690 --> 00:54:25.165
+One code lives on one shard (L3).
+
+694
+00:54:26.515 --> 00:54:27.432
+Watch out:
+
+695
+00:54:27.712 --> 00:54:28.416
+10.
+
+696
+00:54:28.696 --> 00:54:31.533
+One pool for campaigns and transactional links.
+
+697
+00:54:31.813 --> 00:54:35.547
+A campaign spike starves order tracking (§1.1).
+
+698
+00:54:35.827 --> 00:54:36.829
+Bulkhead them.
+
+699
+00:54:38.179 --> 00:54:39.097
+Watch out:
+
+700
+00:54:39.377 --> 00:54:40.209
+11.
+
+701
+00:54:40.489 --> 00:54:42.686
+Deleting expired rows one by one.
+
+702
+00:54:42.966 --> 00:54:46.187
+Billions of deletes cause vacuum and replication pain.
+
+703
+00:54:46.467 --> 00:54:47.982
+Partition by expiry.
+
+704
+00:54:49.332 --> 00:54:50.249
+Watch out:
+
+705
+00:54:50.529 --> 00:54:51.319
+12.
+
+706
+00:54:51.599 --> 00:54:52.815
+Recycling codes.
+
+707
+00:54:53.095 --> 00:55:00.625
+Old SMS and screenshots still point at them; a recycled code sends someone else's customer to a new destination.
+
+708
+00:55:01.975 --> 00:55:02.850
+Part 8.
+
+709
+00:55:03.130 --> 00:55:04.474
+Interview Q and A.
+
+710
+00:55:05.724 --> 00:55:06.556
+Beginner.
+
+711
+00:55:06.836 --> 00:55:07.860
+Question 1.
+
+712
+00:55:08.140 --> 00:55:11.340
+Design a URL shortener, what are the core components?
+
+713
+00:55:11.620 --> 00:55:12.985
+Thirty-second answer:
+
+714
+00:55:13.265 --> 00:55:19.964
+A write API that validates the long URL, mints a unique short code and stores code, then URL.
+
+715
+00:55:20.244 --> 00:55:27.092
+A redirect endpoint that looks up the code, through caches, and returns a 302 to the long URL.
+
+716
+00:55:27.372 --> 00:55:34.220
+A database as the source of truth, a cache for the hot working set, and an asynchronous pipeline for click analytics.
+
+717
+00:55:34.500 --> 00:55:37.359
+Plus expiry, abuse controls and monitoring.
+
+718
+00:55:38.709 --> 00:55:39.711
+Question 2.
+
+719
+00:55:39.991 --> 00:55:43.789
+301 or 302, which would you use and why?
+
+720
+00:55:44.069 --> 00:55:45.434
+Thirty-second answer:
+
+721
+00:55:45.714 --> 00:55:48.807
+302 (or 307) by default.
+
+722
+00:55:49.087 --> 00:56:03.061
+A 301 says the redirect is permanent, so browsers and proxies may cache it, repeat clicks never reach you, analytics undercount, and you can't revoke or change the destination for anyone who has the cached redirect.
+
+723
+00:56:03.341 --> 00:56:09.357
+A 302 means every click reaches the service, so the read path has to be cheap and well-cached.
+
+724
+00:56:10.707 --> 00:56:11.752
+Question 3.
+
+725
+00:56:12.032 --> 00:56:14.272
+How many characters does a short code need?
+
+726
+00:56:14.552 --> 00:56:15.917
+Thirty-second answer:
+
+727
+00:56:16.197 --> 00:56:19.781
+Work it out from the number of codes you'll ever mint and the alphabet.
+
+728
+00:56:20.061 --> 00:56:27.784
+Base62 gives 62^6 about 56.8 billion and 62^7 about 3.5 trillion.
+
+729
+00:56:28.064 --> 00:56:37.387
+At 2M links per day, 7 characters lasts thousands of years; 6 would last about 78 years but random schemes would collide much sooner.
+
+730
+00:56:37.667 --> 00:56:43.085
+For random codes you also want the space sparse enough that guesses rarely hit a live code.
+
+731
+00:56:44.435 --> 00:56:45.502
+Question 4.
+
+732
+00:56:45.782 --> 00:56:47.958
+How do you estimate the load for a shortener?
+
+733
+00:56:48.238 --> 00:56:49.603
+Thirty-second answer:
+
+734
+00:56:49.883 --> 00:57:12.369
+Creates per day from the business (2M transactional links per day about 23 per second, plus bulk campaigns up to ~5,600 per second), clicks per link (~3) for average redirects, and the campaign spike for peak (20M SMS times 12% click-through, decaying over ~10 minutes about 30k per second on one code).
+
+735
+00:57:12.649 --> 00:57:23.529
+Storage = live rows times row size, bounded by expiry: ~780M rows times ~300 B about 230 GB.
+
+736
+00:57:24.879 --> 00:57:25.881
+Intermediate.
+
+737
+00:57:26.161 --> 00:57:27.271
+Question 5.
+
+738
+00:57:27.551 --> 00:57:29.684
+Compare ways to generate short codes.
+
+739
+00:57:29.964 --> 00:57:31.329
+Thirty-second answer:
+
+740
+00:57:31.609 --> 00:57:37.860
+Hash-and-truncate needs no coordination but collides (birthday bound) and still needs check-and-retry.
+
+741
+00:57:38.140 --> 00:57:42.087
+Random codes are unguessable but need a uniqueness check per insert.
+
+742
+00:57:42.367 --> 00:57:46.079
+A counter is unique and short with no lookup but is enumerable.
+
+743
+00:57:46.359 --> 00:57:52.972
+A counter through a keyed permutation keeps the counter's uniqueness and no-lookup property while hiding the order.
+
+744
+00:57:54.322 --> 00:57:55.431
+Question 6.
+
+745
+00:57:55.711 --> 00:57:57.951
+How do you make link creation idempotent?
+
+746
+00:57:58.231 --> 00:57:59.597
+Thirty-second answer:
+
+747
+00:57:59.877 --> 00:58:07.514
+Either an Idempotency-Key header stored with the result, or a natural key: a unique constraint on (owner, hash(url)).
+
+748
+00:58:07.794 --> 00:58:14.727
+Insert with on conflict do nothing; if nothing was inserted, read and return the existing code with 200.
+
+749
+00:58:15.007 --> 00:58:17.205
+Retries then never mint a second link.
+
+750
+00:58:18.555 --> 00:58:19.643
+Question 7.
+
+751
+00:58:19.923 --> 00:58:22.397
+How do you stop the shortener being used for phishing?
+
+752
+00:58:22.677 --> 00:58:24.043
+Thirty-second answer:
+
+753
+00:58:24.323 --> 00:58:47.107
+No public creation; authenticated services with quotas; destinations restricted to allow-listed hosts, validated by parsing the URL (https only, no user-info, exact host match), not string matching; safe-browsing scans for partner links; an abuse report endpoint and a kill switch that revokes a code and invalidates caches.
+
+754
+00:58:48.457 --> 00:58:49.481
+Question 8.
+
+755
+00:58:49.761 --> 00:58:51.382
+How would you cache redirects?
+
+756
+00:58:51.662 --> 00:58:53.027
+Thirty-second answer:
+
+757
+00:58:53.307 --> 00:59:08.177
+Three tiers: a short-TTL in-process near-cache on each redirect node, a distributed cache (Redis) for the working set, and the database for cold misses, with per-key miss coalescing and brief negative caching of unknown codes.
+
+758
+00:59:08.457 --> 00:59:14.750
+Popularity is skewed, so a small cache captures most traffic; the tail always reaches the database.
+
+759
+00:59:16.100 --> 00:59:17.167
+Question 9.
+
+760
+00:59:17.447 --> 00:59:20.092
+SQL or NoSQL for the links table?
+
+761
+00:59:20.372 --> 00:59:21.737
+Thirty-second answer:
+
+762
+00:59:22.017 --> 00:59:23.148
+Estimate first.
+
+763
+00:59:23.428 --> 00:59:37.103
+With expiry the live set is ~230 GB of pure key-value lookups, which partitioned PostgreSQL with read replicas and caches serves comfortably, and it gives unique constraints for idempotency.
+
+764
+00:59:37.383 --> 00:59:49.671
+Move to DynamoDB or Cassandra if the live set grows to many terabytes, if you need multi-region active-active writes, or if you want native per-item TTL at huge scale.
+
+765
+00:59:51.021 --> 00:59:51.789
+Senior.
+
+766
+00:59:52.069 --> 00:59:53.114
+Question 10.
+
+767
+00:59:53.394 --> 00:59:56.317
+A campaign sends 20M SMS with one link.
+
+768
+00:59:56.597 --> 00:59:58.645
+What breaks and how do you design for it?
+
+769
+00:59:58.925 --> 01:00:00.290
+Thirty-second answer:
+
+770
+01:00:00.570 --> 01:00:08.271
+All clicks hit one key: one Redis shard, one DB row if you count synchronously, and possibly a shared connection pool.
+
+771
+01:00:08.551 --> 01:00:11.581
+Sharding doesn't help because it spreads keys, not load.
+
+772
+01:00:11.861 --> 01:00:26.815
+Defend with a near-cache on every node (at most one lookup per node per TTL), pre-warming, edge caching for campaign codes, async click counting, and a separate deployment or pool for redirects so transactional links are unaffected.
+
+773
+01:00:28.165 --> 01:00:29.296
+Question 11.
+
+774
+01:00:29.576 --> 01:00:32.627
+How do you build click analytics without slowing redirects?
+
+775
+01:00:32.907 --> 01:00:34.272
+Thirty-second answer:
+
+776
+01:00:34.552 --> 01:00:38.307
+The redirect only emits an event (buffered, async) to Kafka.
+
+777
+01:00:38.587 --> 01:00:45.029
+A stream processor aggregates per link and time bucket into an analytics store, and raw events go to the lake.
+
+778
+01:00:45.309 --> 01:00:50.365
+Unique visitors use HyperLogLog sketches, which merge across nodes and windows.
+
+779
+01:00:50.645 --> 01:00:54.315
+Bots and link-preview crawlers are flagged and counted separately.
+
+780
+01:00:55.665 --> 01:00:56.753
+Question 12.
+
+781
+01:00:57.033 --> 01:00:59.721
+How do you handle expiry and deletion at scale?
+
+782
+01:01:00.001 --> 01:01:01.366
+Thirty-second answer:
+
+783
+01:01:01.646 --> 01:01:14.510
+Store expiresat, return 410 after it (checked on read, so expiry is exact without a sweeper), and partition by expiry month so purging is DROP PARTITION after a retention period.
+
+784
+01:01:14.790 --> 01:01:18.929
+Revocation sets revokedat and publishes a cache invalidation.
+
+785
+01:01:19.209 --> 01:01:20.638
+Never recycle codes.
+
+786
+01:01:21.988 --> 01:01:23.268
+Question 13.
+
+787
+01:01:23.548 --> 01:01:26.044
+How do you prevent enumeration of short links?
+
+788
+01:01:26.324 --> 01:01:27.689
+Thirty-second answer:
+
+789
+01:01:27.969 --> 01:01:49.175
+Non-sequential codes (random, or a keyed permutation of a counter), a sparse code space, rate limits and alerts on 404s per client, negative caching so probes don't reach the database, and, most important, nothing sensitive reachable by the code alone: the page behind it requires a signed token or login.
+
+790
+01:01:50.525 --> 01:01:51.719
+Question 14.
+
+791
+01:01:51.999 --> 01:01:55.711
+How do you support a bulk campaign of 20M personalised links?
+
+792
+01:01:55.991 --> 01:01:57.357
+Thirty-second answer:
+
+793
+01:01:57.637 --> 01:02:04.634
+A batch API that accepts large files or streams, returns a job id, and writes results asynchronously.
+
+794
+01:02:04.914 --> 01:02:13.234
+Pre-reserve large counter blocks, mint codes in memory, and insert with batched statements or COPY into the right expiry partition.
+
+795
+01:02:13.514 --> 01:02:16.245
+Warm caches only for the likely-hot subset.
+
+796
+01:02:16.525 --> 01:02:19.533
+Throttle so transactional creates keep their SLO.
+
+797
+01:02:20.883 --> 01:02:21.779
+Architect.
+
+798
+01:02:22.059 --> 01:02:23.253
+Question 15.
+
+799
+01:02:23.533 --> 01:02:28.227
+Design the short-link service for a national-scale grocery platform, end to end.
+
+800
+01:02:28.507 --> 01:02:29.872
+Thirty-second answer:
+
+801
+01:02:30.152 --> 01:02:49.864
+Internal-only creation with allow-listed destinations and idempotent create; 7-char codes from counter blocks through a keyed permutation; 302 redirects; a separate redirect deployment with near-cache, Redis and replicas; PostgreSQL partitioned by expiry; click events to Kafka,
+
+802
+01:02:50.144 --> 01:02:59.595
+stream-aggregated with HLL uniques; hot-key detection, pre-warming and edge caching for campaigns; abuse kill switch; SLOs per region.
+
+803
+01:03:00.945 --> 01:03:02.139
+Question 16.
+
+804
+01:03:02.419 --> 01:03:06.153
+How do you make redirects survive a database or region outage?
+
+805
+01:03:06.433 --> 01:03:07.798
+Thirty-second answer:
+
+806
+01:03:08.078 --> 01:03:18.809
+Redirects are read-only and cacheable: serve from near-cache and Redis for the working set, from local replicas for misses, and fail creation fast while the primary is down.
+
+807
+01:03:19.089 --> 01:03:24.657
+Replicate to a second region with its own caches; route users by DNS or anycast.
+
+808
+01:03:24.937 --> 01:03:29.139
+Tolerate stale reads except read-your-writes for a creator's first click.
+
+809
+01:03:30.489 --> 01:03:31.833
+Question 17.
+
+810
+01:03:32.113 --> 01:03:34.887
+Build versus buy: would you use a SaaS shortener?
+
+811
+01:03:35.167 --> 01:03:36.532
+Thirty-second answer:
+
+812
+01:03:36.812 --> 01:03:40.460
+For marketing-only links a SaaS (Bitly-style) can be fine.
+
+813
+01:03:40.740 --> 01:03:56.527
+For transactional links carrying order tracking, you want a first-party domain, control over destinations and data (DLT whitelisting, privacy, residency), latency and availability you control, and no per-click fees at millions of clicks per day.
+
+814
+01:03:56.807 --> 01:04:02.033
+Many companies run both: first-party for transactional, SaaS for some marketing.
+
+815
+01:04:03.383 --> 01:04:04.557
+Question 18.
+
+816
+01:04:04.837 --> 01:04:08.442
+How would you evolve the code scheme without breaking existing links?
+
+817
+01:04:08.722 --> 01:04:10.087
+Thirty-second answer:
+
+818
+01:04:10.367 --> 01:04:16.341
+Codes are forever: existing codes stay resolvable by lookup regardless of how they were minted.
+
+819
+01:04:16.621 --> 01:04:23.661
+A new scheme (longer codes, new permutation keys, a prefix for a new namespace) applies only to new codes.
+
+820
+01:04:23.941 --> 01:04:31.194
+Keep the namespaces disjoint (for example, by length or a leading character) so new codes never collide with old ones.
+
+821
+01:04:32.544 --> 01:04:33.781
+Question 19.
+
+822
+01:04:34.061 --> 01:04:36.963
+What are the privacy obligations for click analytics?
+
+823
+01:04:37.243 --> 01:04:38.608
+Thirty-second answer:
+
+824
+01:04:38.888 --> 01:04:46.184
+Click events contain personal data (IP, device id, possibly linked to a customer via the personalised link).
+
+825
+01:04:46.464 --> 01:05:04.683
+Minimise: coarse region, salted hashed device ids, no raw IPs beyond short security retention; state the purpose; set retention (raw 90 days, aggregates longer); support erasure; keep data in-region; and never put personal identifiers in URLs.
+
+826
+01:05:06.033 --> 01:05:07.142
+Question 20.
+
+827
+01:05:07.422 --> 01:05:11.177
+What would you monitor to know the service is healthy, and what would page you?
+
+828
+01:05:11.457 --> 01:05:12.822
+Thirty-second answer:
+
+829
+01:05:13.102 --> 01:05:25.561
+Page on redirect SLO burn (availability and p99 per region), a sudden rise in 5xx or 404s, cache hit ratio collapse, and hot-key saturation.
+
+830
+01:05:25.841 --> 01:05:32.390
+Ticket-level alerts on creation errors, analytics lag, validation rejection spikes and abuse reports.
+
+831
+01:05:32.670 --> 01:05:37.449
+Dashboards for top codes, per-client 404 rates and campaign traffic.
+
+832
+01:05:38.799 --> 01:05:39.695
+Part 9.
+
+833
+01:05:39.975 --> 01:05:41.383
+Summary and Practice.
+
+834
+01:05:42.633 --> 01:05:43.721
+Key takeaways.
+
+835
+01:05:44.001 --> 01:05:52.598
+Estimate first: reads dominate and spike; expiry bounds storage (~230 GB live) (§2.3).
+
+836
+01:05:52.878 --> 01:06:03.267
+Code generation is a trade-off: hashes collide, random codes need lookups, counters leak order; counter blocks + keyed permutation get the best of each (L1).
+
+837
+01:06:03.547 --> 01:06:10.545
+Creation is idempotent and validated: natural-key upserts; parse URLs, allow-list hosts (L2).
+
+838
+01:06:10.825 --> 01:06:17.545
+302 by default: every click reaches you, so the read path must be cheap (§2.7).
+
+839
+01:06:18.895 --> 01:06:23.353
+Cache the head, size the DB for the tail; coalesce misses (L2, L3).
+
+840
+01:06:23.633 --> 01:06:28.241
+Hot keys defeat sharding: near-cache, pre-warm, edge, bulkheads (L3).
+
+841
+01:06:28.521 --> 01:06:32.425
+Analytics off the redirect path; HLL for uniques (L4).
+
+842
+01:06:32.705 --> 01:06:37.761
+Abuse and privacy are requirements, not afterthoughts (§2.11).
+
+843
+01:06:39.111 --> 01:06:40.434
+Decision cheat sheet.
+
+844
+01:06:40.714 --> 01:06:42.058
+Here is a quick table:
+
+845
+01:06:42.338 --> 01:06:44.109
+Question, and Default answer.
+
+846
+01:06:44.389 --> 01:06:45.306
+Code length:
+
+847
+01:06:45.586 --> 01:06:48.402
+7 base62 (3.5T).
+
+848
+01:06:48.682 --> 01:06:49.621
+Code scheme:
+
+849
+01:06:49.901 --> 01:06:55.042
+Counter blocks + keyed permutation; random + unique index is also fine.
+
+850
+01:06:55.322 --> 01:06:56.538
+Redirect status:
+
+851
+01:06:56.818 --> 01:07:01.959
+302 or 307, no-store; 410 for expired.
+
+852
+01:07:02.239 --> 01:07:03.029
+Store:
+
+853
+01:07:03.309 --> 01:07:08.365
+Partitioned PostgreSQL + replicas; KV store past a stated trigger.
+
+854
+01:07:08.645 --> 01:07:09.370
+Cache:
+
+855
+01:07:09.650 --> 01:07:14.151
+Near-cache (seconds) + Redis + miss coalescing + negative caching.
+
+856
+01:07:14.431 --> 01:07:15.327
+Campaigns:
+
+857
+01:07:15.607 --> 01:07:18.103
+Pre-warm, near-cache, edge, separate pool.
+
+858
+01:07:18.383 --> 01:07:19.322
+Analytics:
+
+859
+01:07:19.602 --> 01:07:24.402
+Kafka, then stream aggregation, then OLAP; HLL uniques; bots flagged.
+
+860
+01:07:24.682 --> 01:07:25.535
+Abuse:
+
+861
+01:07:25.815 --> 01:07:30.850
+Internal creation only, allow-list, kill switch, 404 rate limits.
+
+862
+01:07:32.200 --> 01:07:33.331
+Exercises.
+
+863
+01:07:33.611 --> 01:07:38.837
+(B2) In L1, change the code length for strategy A to 7 characters and re-run.
+
+864
+01:07:39.117 --> 01:07:40.525
+How many collisions now?
+
+865
+01:07:40.805 --> 01:07:43.771
+At what number of codes would you expect the first collision?
+
+866
+01:07:44.051 --> 01:07:50.259
+(B2) Add custom aliases to L2 with a reserved-word list and a 409 on conflict.
+
+867
+01:07:50.539 --> 01:08:00.864
+(B3) Add per-key miss coalescing (a ConcurrentHashMapString, CompletableFutureLink) to L2 and show database reads fall to the number of distinct links.
+
+868
+01:08:02.214 --> 01:08:07.227
+(B3) In L3, change the Zipf exponent to 0.8 and 1.2.
+
+869
+01:08:07.507 --> 01:08:11.049
+How does the cache size needed for 80% hit ratio change?
+
+870
+01:08:11.329 --> 01:08:20.246
+(B4) Extend L4 with per-hour HLL sketches and compute daily uniques by merging 24 of them; compare with an exact count.
+
+871
+01:08:21.596 --> 01:08:22.599
+Further reading.
+
+872
+01:08:22.879 --> 01:08:29.556
+RFC 9110 (HTTP semantics), redirect status codes and caching.
+
+873
+01:08:29.836 --> 01:08:31.137
+Flajolet et al.
+
+874
+01:08:31.417 --> 01:08:39.204
+HyperLogLog: the analysis of a near-optimal cardinality estimation algorithm (2007); Heule et al.
+
+875
+01:08:39.484 --> 01:08:42.471
+HyperLogLog in Practice (2013).
+
+876
+01:08:42.751 --> 01:08:49.428
+Black and Rogaway, Ciphers with Arbitrary Finite Domains (cycle-walking, Feistel on small domains).
+
+877
+01:08:49.708 --> 01:08:56.108
+TRAI directions on URL whitelisting in commercial SMS (DLT), check the current version.
+
+878
+01:08:56.388 --> 01:08:57.177
+OWASP:
+
+879
+01:08:57.457 --> 01:09:00.060
+Unvalidated Redirects and Forwards cheat sheet.
+
+880
+01:09:01.410 --> 01:09:02.647
+Related chapters.
+
+881
+01:09:02.927 --> 01:09:07.258
+Ch 07, Caching: stampedes, near-caches, hot keys.
+
+882
+01:09:07.538 --> 01:09:13.085
+Ch 11, Partitioning and Sharding: hash partitioning and why it doesn't fix hot keys.
+
+883
+01:09:13.365 --> 01:09:17.418
+Ch 14, Messaging and Event Streaming: the click pipeline.
+
+884
+01:09:17.698 --> 01:09:24.034
+Ch 20, Idempotency, IDs and Distributed Locks: id schemes and the birthday bound.
+
+885
+01:09:24.314 --> 01:09:30.415
+Ch 39, Distributed Rate Limiter: limiting 404 probes and creation quotas.
+
+886
+01:09:30.695 --> 01:09:34.727
+Ch 40, Notification System: the main producer of links.
+
+887
+01:09:36.077 --> 01:09:37.677
+That's the end of this chapter.
+
+888
+01:09:37.957 --> 01:09:43.995
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+889
+01:09:44.275 --> 01:09:45.725
+See you in the next chapter.
+

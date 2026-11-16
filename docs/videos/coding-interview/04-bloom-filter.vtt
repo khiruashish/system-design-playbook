@@ -1,0 +1,542 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.331
+Bloom Filter:
+
+2
+00:00:01.611 --> 00:00:03.787
+Sizing and Measured False Positives.
+
+3
+00:00:04.067 --> 00:00:07.993
+Chapter 4, from the Coding Interview part of the System Design Playbook.
+
+4
+00:00:09.743 --> 00:00:10.596
+Part 1.
+
+5
+00:00:10.876 --> 00:00:11.772
+Problem.
+
+6
+00:00:13.022 --> 00:00:26.462
+Answer has this username or URL or key been seen? for 100k (or 1 billion) items in a fraction of the memory a set would use, with no false negatives and about 1% false positives.
+
+7
+00:00:26.742 --> 00:00:30.326
+Size it from the target error rate and verify it empirically.
+
+8
+00:00:31.676 --> 00:00:32.551
+Part 2.
+
+9
+00:00:32.831 --> 00:00:33.748
+Key idea.
+
+10
+00:00:34.998 --> 00:00:43.723
+Use m bits and k hash functions. add sets k bits; mightContain checks them, and if any is 0 the item is definitely absent.
+
+11
+00:00:44.003 --> 00:00:57.806
+For n items and a target rate p: m = minus n, ln p / (ln 2)², k = (m or n), ln 2, which is about 9.6 bits and 7 hashes per item for 1%.
+
+12
+00:00:58.086 --> 00:01:03.419
+Two base hashes simulate all k (h1 + i, h2, Kirsch, Mitzenmacher).
+
+13
+00:01:03.699 --> 00:01:12.787
+It's used in front of databases (Cassandra, HBase, RocksDB SSTables) to skip disk reads for keys that are certainly absent.
+
+14
+00:01:14.137 --> 00:01:15.481
+Here is the diagram.
+
+15
+00:01:19.331 --> 00:01:20.227
+Part 3.
+
+16
+00:01:20.507 --> 00:01:21.361
+Solution.
+
+17
+00:01:22.611 --> 00:01:25.341
+Here is the Java code, BloomFilter.java.
+
+18
+00:01:25.621 --> 00:01:29.184
+It runs to 70 lines; the full listing is in the chapter.
+
+19
+00:01:29.464 --> 00:01:37.400
+Problem: has this username or URL been seen? for a billion items in little memory, accepting rare false positives.
+
+20
+00:01:37.680 --> 00:01:44.464
+Optimal sizing: m = -n ln p / (ln 2)^2, k = (m or n) ln 2.
+
+21
+00:01:47.314 --> 00:01:48.231
+Part 4.
+
+22
+00:01:48.511 --> 00:01:49.343
+Walkthrough.
+
+23
+00:01:50.593 --> 00:01:51.937
+Here is a quick table:
+
+24
+00:01:52.217 --> 00:01:59.663
+Code, and Why. m = ceil(-n ln p / (ln 2)^2); k = round(m or n, ln 2):
+
+25
+00:01:59.943 --> 00:02:01.372
+Size from requirements.
+
+26
+00:02:01.652 --> 00:02:12.105
+The output shows 958,506 bits (117 KB) and k = 7 for 100k items at 1%.
+
+27
+00:02:12.385 --> 00:02:15.905
+Math.floorMod(h0 + i h1, (long) m):
+
+28
+00:02:16.185 --> 00:02:23.737
+Double hashing: k indexes from 2 hashes, with no measurable loss in accuracy. return new longh1, h2 1:
+
+29
+00:02:24.017 --> 00:02:31.761
+Forcing h2 to be odd avoids degenerate cases where h2 shares factors with m. measured false-positive rate...
+
+30
+00:02:32.041 --> 00:02:33.812
+0.91%:
+
+31
+00:02:34.092 --> 00:02:38.764
+Measured against 100k unseen items, close to the 1% target.
+
+32
+00:02:39.044 --> 00:02:41.775
+The test asserts the bound as well as printing it.
+
+33
+00:02:43.125 --> 00:02:44.085
+Part 5.
+
+34
+00:02:44.365 --> 00:02:45.303
+Complexity.
+
+35
+00:02:46.553 --> 00:02:47.897
+Here is a quick table:
+
+36
+00:02:48.177 --> 00:02:51.463
+Approach, and Time, and Space. add or mightContain.
+
+37
+00:02:51.743 --> 00:02:52.489
+Time:
+
+38
+00:02:52.769 --> 00:02:53.601
+O(k).
+
+39
+00:02:53.881 --> 00:02:58.169
+Space: m bits about 1.44, n, log₂(1 or p).
+
+40
+00:02:59.519 --> 00:03:00.458
+Part 6.
+
+41
+00:03:00.738 --> 00:03:01.463
+Run it.
+
+42
+00:03:02.713 --> 00:03:04.036
+Here is the shell code.
+
+43
+00:03:06.886 --> 00:03:28.091
+On screen: n=100000, target p=1% - m=958506 bits (117.0 KB, 9.6 bits or item), k=7 hashes. false negatives: none; measured false-positive rate on 100k unseen items:
+
+44
+00:03:28.371 --> 00:03:36.499
+0.91%. a HashSetString of the same items would need roughly 5859 KB.
+
+45
+00:03:36.779 --> 00:03:37.526
+PASS.
+
+46
+00:03:40.376 --> 00:03:41.315
+Part 7.
+
+47
+00:03:41.595 --> 00:03:43.280
+Solve it with Spring Boot 4.
+
+48
+00:03:44.530 --> 00:03:53.618
+The bit array becomes a Redis bitmap shared by all instances, and each add or check is one Lua call that sets or tests the k bits atomically.
+
+49
+00:03:53.898 --> 00:03:58.997
+The service uses it as a guard: definitely not present skips the database entirely.
+
+50
+00:04:00.347 --> 00:04:03.141
+The sequence diagram walks through it step by step.
+
+51
+00:04:03.421 --> 00:04:04.360
+C to U:
+
+52
+00:04:04.640 --> 00:04:09.824
+GET or api or v1 or usernames or new-42 or availability.
+
+53
+00:04:10.104 --> 00:04:12.728
+U to B: bloom-check.lua (7 positions).
+
+54
+00:04:13.008 --> 00:04:13.989
+B to U:
+
+55
+00:04:14.269 --> 00:04:16.339
+0 = definitely absent.
+
+56
+00:04:16.619 --> 00:04:19.200
+U to C: available (no DB query).
+
+57
+00:04:19.480 --> 00:04:20.461
+B to U:
+
+58
+00:04:20.741 --> 00:04:22.448
+1 = maybe present.
+
+59
+00:04:22.728 --> 00:04:23.624
+U to D:
+
+60
+00:04:23.904 --> 00:04:24.736
+SELECT...
+
+61
+00:04:25.016 --> 00:04:26.104
+(source of truth).
+
+62
+00:04:26.384 --> 00:04:28.411
+D to U: found or not found.
+
+63
+00:04:28.691 --> 00:04:30.952
+U to C: available =!found.
+
+64
+00:04:34.802 --> 00:04:35.762
+Check (Lua).
+
+65
+00:04:36.042 --> 00:04:38.495
+Here is the LUA code, bloom-check.lua.
+
+66
+00:04:38.775 --> 00:04:42.189
+KEYS1 = bitmap; ARGV = bit positions.
+
+67
+00:04:42.469 --> 00:04:46.373
+0 = definitely absent, 1 = possibly present.
+
+68
+00:04:49.223 --> 00:04:50.140
+Add (Lua).
+
+69
+00:04:50.420 --> 00:04:52.916
+Here is the LUA code, bloom-add.lua.
+
+70
+00:04:53.196 --> 00:04:56.609
+KEYS1 = bitmap; ARGV = bit positions.
+
+71
+00:04:56.889 --> 00:05:01.561
+Returns 1 if any bit was newly set (that is, the item was probably new).
+
+72
+00:05:04.411 --> 00:05:05.243
+Filter.
+
+73
+00:05:05.523 --> 00:05:08.702
+Here is the Java code, RedisBloomFilter.java.
+
+74
+00:05:08.982 --> 00:05:12.715
+It runs to 39 lines; the full listing is in the chapter.
+
+75
+00:05:12.995 --> 00:05:17.177
+A Bloom filter stored as a Redis bitmap, shared by every app instance.
+
+76
+00:05:17.457 --> 00:05:21.254
+Each add or check is one Lua. call (one round trip, atomic).
+
+77
+00:05:21.534 --> 00:05:27.699
+With the RedisBloom module you would use BF.RESERVE or BF.ADD or BF.EXISTS instead.
+
+78
+00:05:30.549 --> 00:05:31.829
+Sizing and hashing.
+
+79
+00:05:32.109 --> 00:05:34.733
+Here is the Java code, BloomMath.java.
+
+80
+00:05:35.013 --> 00:05:38.832
+It runs to 37 lines; the full listing is in the chapter.
+
+81
+00:05:39.112 --> 00:05:50.141
+Sizing and hashing from the interview solution: m = -n ln p / (ln 2)^2, k = (m or n) ln 2, Kirsch-Mitzenmacher double hashing.
+
+82
+00:05:52.991 --> 00:05:53.823
+Service.
+
+83
+00:05:54.103 --> 00:05:57.410
+Here is the Java code, UsernameService.java.
+
+84
+00:05:57.690 --> 00:06:01.402
+It runs to 34 lines; the full listing is in the chapter.
+
+85
+00:06:01.682 --> 00:06:03.495
+Is this username available?
+
+86
+00:06:03.775 --> 00:06:09.834
+The Bloom filter answers most checks without touching the database: definitely not present means available.
+
+87
+00:06:10.114 --> 00:06:12.461
+Only maybe present goes to the database.
+
+88
+00:06:15.311 --> 00:06:16.655
+Run it as a service.
+
+89
+00:06:16.935 --> 00:06:22.759
+The integration test BloomFilterIT.java drives the API against a real Redis.
+
+90
+00:06:23.039 --> 00:06:25.727
+This is its transcript ( request, response):
+
+91
+00:06:27.077 --> 00:06:38.853
+On screen: sized for n = 10,000 at p = 1%: m = 95851 bits (11 KB in Redis), k = 7.
+
+92
+00:06:39.133 --> 00:06:42.653
+POST or api or v1 or usernames or asha.
+
+93
+00:06:42.933 --> 00:06:43.999
+201.
+
+94
+00:06:44.279 --> 00:06:48.973
+GET or api or v1 or usernames or asha or availability.
+
+95
+00:06:49.253 --> 00:06:52.133
+200 username:asha,available:false.
+
+96
+00:06:52.413 --> 00:06:57.639
+GET or api or v1 or usernames or brand-new-name or availability.
+
+97
+00:06:57.919 --> 00:07:01.333
+200 username:brand-new-name,available:true.
+
+98
+00:07:01.613 --> 00:07:03.639
+10,000 registered names checked:
+
+99
+00:07:03.919 --> 00:07:07.034
+10,000 reported taken (no false negatives).
+
+100
+00:07:07.314 --> 00:07:09.255
+10,000 unused names checked:
+
+101
+00:07:09.535 --> 00:07:18.239
+10,000 available, database queried only 90 times (false. positive rate 0.90%, target 1%).
+
+102
+00:07:18.519 --> 00:07:19.266
+PASS.
+
+103
+00:07:22.116 --> 00:07:24.207
+What changes from the interview version.
+
+104
+00:07:24.487 --> 00:07:25.831
+Here is a quick table:
+
+105
+00:07:26.111 --> 00:07:28.543
+Interview, and Production (Spring Boot 4).
+
+106
+00:07:28.823 --> 00:07:30.465
+BitSet in one JVM:
+
+107
+00:07:30.745 --> 00:07:55.300
+Redis bitmap (~11.7 KB for 10,000 items at 1%) shared by every instance. k separate bit operations: one Lua script per add or check: atomic, one round trip. filter only: write-through on register, so the filter can never produce a false negative. fixed size: rebuild into a bigger key when inserts exceed n (or use RedisBloom's scalable BF.RESERVE...
+
+108
+00:07:55.580 --> 00:07:56.625
+EXPANSION).
+
+109
+00:07:57.975 --> 00:08:08.813
+The measured false-positive rate (0.90% at the design load) matches the 1% target, and the database saw 90 queries instead of 10,000.
+
+110
+00:08:10.163 --> 00:08:11.037
+Part 8.
+
+111
+00:08:11.317 --> 00:08:12.427
+Common mistakes.
+
+112
+00:08:13.677 --> 00:08:15.234
+Expecting deletes to work.
+
+113
+00:08:15.514 --> 00:08:17.626
+Clearing a bit can remove other items.
+
+114
+00:08:17.906 --> 00:08:20.573
+Use a Counting Bloom filter or a Cuckoo filter.
+
+115
+00:08:20.853 --> 00:08:21.877
+Under-sizing.
+
+116
+00:08:22.157 --> 00:08:25.826
+Inserting more than n items makes the FPR grow fast.
+
+117
+00:08:26.106 --> 00:08:28.645
+Rebuild, or use a scalable Bloom filter.
+
+118
+00:08:28.925 --> 00:08:32.103
+Using String.hashCode() with k simple variants.
+
+119
+00:08:32.383 --> 00:08:34.773
+Correlated hashes raise the FPR.
+
+120
+00:08:36.123 --> 00:08:37.019
+Part 9.
+
+121
+00:08:37.299 --> 00:08:38.643
+Follow-up questions.
+
+122
+00:08:39.893 --> 00:08:40.767
+Question.
+
+123
+00:08:41.047 --> 00:08:43.330
+Where does a Bloom filter sit in a read path?
+
+124
+00:08:43.610 --> 00:08:44.975
+Thirty-second answer:
+
+125
+00:08:45.255 --> 00:08:59.847
+In front of an expensive lookup that usually misses: per-SSTable filters in LSM databases, username taken? checks, crawler URL already seen? checks, CDN is this object cached anywhere? checks.
+
+126
+00:09:00.127 --> 00:09:02.922
+A negative answer skips the I or O entirely.
+
+127
+00:09:04.272 --> 00:09:05.147
+Question.
+
+128
+00:09:05.427 --> 00:09:07.048
+Bloom versus Cuckoo filter?
+
+129
+00:09:07.328 --> 00:09:08.693
+Thirty-second answer:
+
+130
+00:09:08.973 --> 00:09:16.739
+Cuckoo filters support delete, have better lookup locality, and use less space at low FPRs (below about 3%).
+
+131
+00:09:17.019 --> 00:09:19.728
+Inserts can fail when the table is nearly full.
+
+132
+00:09:20.008 --> 00:09:23.144
+Bloom filters are simpler and their inserts never fail.
+
+133
+00:09:24.494 --> 00:09:26.094
+That's the end of this chapter.
+
+134
+00:09:26.374 --> 00:09:32.411
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+135
+00:09:32.691 --> 00:09:34.142
+See you in the next chapter.
+

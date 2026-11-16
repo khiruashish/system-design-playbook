@@ -1,0 +1,514 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.374
+Merkle Tree:
+
+2
+00:00:01.654 --> 00:00:03.254
+Replica Anti-Entropy.
+
+3
+00:00:03.534 --> 00:00:07.481
+Chapter 10, from the Coding Interview part of the System Design Playbook.
+
+4
+00:00:09.231 --> 00:00:10.084
+Part 1.
+
+5
+00:00:10.364 --> 00:00:11.260
+Problem.
+
+6
+00:00:12.510 --> 00:00:15.369
+Two replicas each hold 100,000 keys.
+
+7
+00:00:15.649 --> 00:00:17.035
+A few writes were missed.
+
+8
+00:00:17.315 --> 00:00:21.838
+Find exactly which keys differ while exchanging as few hashes as possible.
+
+9
+00:00:22.118 --> 00:00:26.363
+Sending all the data, or even all the per-key hashes, is too expensive.
+
+10
+00:00:27.713 --> 00:00:28.588
+Part 2.
+
+11
+00:00:28.868 --> 00:00:29.785
+Key idea.
+
+12
+00:00:31.035 --> 00:00:35.494
+Split the key space into buckets and hash each bucket's contents (the leaves).
+
+13
+00:00:35.774 --> 00:00:37.843
+Each parent is hash(left ‖ right).
+
+14
+00:00:38.123 --> 00:00:40.897
+If the roots match, the replicas are identical.
+
+15
+00:00:41.177 --> 00:00:44.675
+Otherwise descend only into subtrees whose hashes differ.
+
+16
+00:00:44.955 --> 00:00:49.649
+With d differences in B buckets, that's about O(d, log B) comparisons.
+
+17
+00:00:49.929 --> 00:00:54.089
+Cassandra repair, DynamoDB, Git and blockchains all use this.
+
+18
+00:00:55.439 --> 00:00:56.783
+Here is the diagram.
+
+19
+00:01:00.633 --> 00:01:01.529
+Part 3.
+
+20
+00:01:01.809 --> 00:01:02.662
+Solution.
+
+21
+00:01:03.912 --> 00:01:06.579
+Here is the Java code, MerkleTree.java.
+
+22
+00:01:06.859 --> 00:01:10.443
+It runs to 91 lines; the full listing is in the chapter.
+
+23
+00:01:10.723 --> 00:01:18.552
+Problem: two replicas of a key range; find WHICH keys differ while exchanging as few hashes as possible (anti-entropy).
+
+24
+00:01:21.402 --> 00:01:22.319
+Part 4.
+
+25
+00:01:22.599 --> 00:01:23.431
+Walkthrough.
+
+26
+00:01:24.681 --> 00:01:26.025
+Here is a quick table:
+
+27
+00:01:26.305 --> 00:01:32.385
+Code, and Why. buckets.get(lo).forEach((k, v) - sb.append(k)...) // TreeMap:
+
+28
+00:01:32.665 --> 00:01:44.633
+Leaves hash a sorted serialisation, so the same contents always give the same hash on both replicas. new Node(sha256(l.hash, r.hash), l, r, lo, hi):
+
+29
+00:01:44.913 --> 00:01:47.324
+A parent hash commits to everything below it.
+
+30
+00:01:47.604 --> 00:01:54.772
+Any change at a leaf changes every ancestor up to the root. if (Arrays.equals(a.hash, b.hash)) return;:
+
+31
+00:01:55.052 --> 00:02:01.132
+Pruning: equal subtrees are skipped entirely, which is where the savings come from. hash comparisons:
+
+32
+00:02:01.412 --> 00:02:04.804
+37 (versus 1024 leaf hashes):
+
+33
+00:02:05.084 --> 00:02:09.735
+Two differing buckets out of 1,024 took 37 comparisons.
+
+34
+00:02:11.085 --> 00:02:12.045
+Part 5.
+
+35
+00:02:12.325 --> 00:02:13.263
+Complexity.
+
+36
+00:02:14.513 --> 00:02:15.857
+Here is a quick table:
+
+37
+00:02:16.137 --> 00:02:18.548
+Approach, and Time, and Space. build.
+
+38
+00:02:18.828 --> 00:02:19.575
+Time:
+
+39
+00:02:19.855 --> 00:02:21.028
+O(n) hashing.
+
+40
+00:02:21.308 --> 00:02:22.161
+Space:
+
+41
+00:02:22.441 --> 00:02:23.956
+O(B) nodes. diff.
+
+42
+00:02:24.236 --> 00:02:24.983
+Time:
+
+43
+00:02:25.263 --> 00:02:27.140
+O(d, log B) comparisons.
+
+44
+00:02:27.420 --> 00:02:28.273
+Space:
+
+45
+00:02:28.553 --> 00:02:30.047
+O(log B) recursion.
+
+46
+00:02:31.397 --> 00:02:32.335
+Part 6.
+
+47
+00:02:32.615 --> 00:02:33.341
+Run it.
+
+48
+00:02:34.591 --> 00:02:35.913
+Here is the shell code.
+
+49
+00:02:38.763 --> 00:02:39.681
+On screen:
+
+50
+00:02:39.961 --> 00:02:46.233
+100000 keys, 1024 buckets: roots equal? false. hash comparisons:
+
+51
+00:02:46.513 --> 00:02:53.147
+37 (versus 1024 leaf hashes or 100000 values). differing buckets:
+
+52
+00:02:53.427 --> 00:03:02.409
+42, 393 - keys to repair: key-4242, key-77777.
+
+53
+00:03:02.689 --> 00:03:03.435
+PASS.
+
+54
+00:03:06.285 --> 00:03:07.224
+Part 7.
+
+55
+00:03:07.504 --> 00:03:09.189
+Solve it with Spring Boot 4.
+
+56
+00:03:10.439 --> 00:03:18.973
+Each replica's keys are split into 16 bucket hashes in Redis, so a Merkle leaf is one bucket and repairing a leaf reads only that bucket.
+
+57
+00:03:19.253 --> 00:03:29.642
+The service compares two replicas top-down, repairs the differing buckets with last-writer-wins, and can run on a schedule (ci.anti-entropy.enabled=true).
+
+58
+00:03:30.992 --> 00:03:33.787
+The sequence diagram walks through it step by step.
+
+59
+00:03:34.067 --> 00:03:37.288
+J to A: build tree (16 leaf hashes - root).
+
+60
+00:03:37.568 --> 00:03:39.296
+J to B: build tree.
+
+61
+00:03:39.576 --> 00:03:43.885
+J to J: compare roots - differ - descend only into differing subtrees.
+
+62
+00:03:44.165 --> 00:03:45.147
+J to A:
+
+63
+00:03:45.427 --> 00:03:48.947
+HGETALL replica:a:b8 (differing buckets only).
+
+64
+00:03:49.227 --> 00:03:50.208
+J to B:
+
+65
+00:03:50.488 --> 00:03:52.621
+HGETALL replica:b:b8.
+
+66
+00:03:52.901 --> 00:03:56.037
+J to A: write newer versions (LWW).
+
+67
+00:03:56.317 --> 00:03:58.365
+J to B: write newer versions.
+
+68
+00:04:02.215 --> 00:04:03.367
+Anti-entropy.
+
+69
+00:04:03.647 --> 00:04:07.295
+Here is the Java code, AntiEntropyService.java.
+
+70
+00:04:07.575 --> 00:04:11.351
+It runs to 65 lines; the full listing is in the chapter.
+
+71
+00:04:11.631 --> 00:04:20.207
+Compare two replicas top-down: equal subtree hashes are skipped entirely, so only the differing. buckets are read and transferred.
+
+72
+00:04:20.487 --> 00:04:30.215
+In a real cluster each node keeps its own tree and only the. hashes cross the network; here both replicas live in one Redis for a self-contained demo.
+
+73
+00:04:33.065 --> 00:04:34.089
+Merkle tree.
+
+74
+00:04:34.369 --> 00:04:37.036
+Here is the Java code, MerkleTree.java.
+
+75
+00:04:37.316 --> 00:04:40.943
+It runs to 41 lines; the full listing is in the chapter.
+
+76
+00:04:41.223 --> 00:04:48.519
+Binary hash tree over the bucket hashes. nodes1 is the root; nodesBUCKETS + i is leaf i (heap layout).
+
+77
+00:04:51.369 --> 00:04:52.457
+Replica store.
+
+78
+00:04:52.737 --> 00:04:55.553
+Here is the Java code, ReplicaStore.java.
+
+79
+00:04:55.833 --> 00:04:59.609
+It runs to 46 lines; the full listing is in the chapter.
+
+80
+00:04:59.889 --> 00:05:09.339
+Each replica's data is split into BUCKETS Redis hashes by key hash, so a Merkle leaf = one bucket and. repairing a leaf only reads that bucket.
+
+81
+00:05:09.619 --> 00:05:12.649
+Values are stored as versionvalue (last-writer-wins).
+
+82
+00:05:15.499 --> 00:05:16.779
+Controller and job.
+
+83
+00:05:17.059 --> 00:05:20.643
+Here is the Java code, AntiEntropyController.java.
+
+84
+00:05:20.923 --> 00:05:24.571
+It runs to 31 lines; the full listing is in the chapter.
+
+85
+00:05:27.421 --> 00:05:28.765
+Run it as a service.
+
+86
+00:05:29.045 --> 00:05:34.527
+The integration test MerkleIT.java drives the API against a real Redis.
+
+87
+00:05:34.807 --> 00:05:37.495
+This is its transcript ( request, response):
+
+88
+00:05:38.845 --> 00:05:39.763
+On screen:
+
+89
+00:05:40.043 --> 00:05:46.955
+2 replicas x 1,000 keys in 16 buckets; 3 updates missed by b, 1 new key missed by a.
+
+90
+00:05:47.235 --> 00:05:51.203
+GET or api or v1 or replicas or a or merkle-root.
+
+91
+00:05:51.483 --> 00:05:57.179
+200 replica:a,root:da9defd5db9d9f5d.
+
+92
+00:05:57.459 --> 00:06:01.640
+GET or api or v1 or replicas or b or merkle-root.
+
+93
+00:06:01.920 --> 00:06:11.307
+200 replica:b,root:6c9f30840f482467.
+
+94
+00:06:11.587 --> 00:06:17.795
+POST or api or v1 or replicas or anti-entropy?a=a and b=b.
+
+95
+00:06:18.075 --> 00:06:30.277
+200. hashComparisons:15,differingBuckets:8,9,10,15,keysTransferred:495,keysRepaired:4,totalKeys:1001. second sync:
+
+96
+00:06:30.557 --> 00:06:36.573
+1 hash comparison, 0 differing buckets, 0 keys transferred (replicas. converged).
+
+97
+00:06:36.853 --> 00:06:37.600
+PASS.
+
+98
+00:06:40.450 --> 00:06:42.541
+What changes from the interview version.
+
+99
+00:06:42.821 --> 00:06:44.165
+Here is a quick table:
+
+100
+00:06:44.445 --> 00:07:05.202
+Interview, and Production (Spring Boot 4). two in-memory maps: replica data in bucketed Redis hashes; a leaf = a bucket you can fetch alone. diff only: repair with last-writer-wins by version, written to whichever side is behind. run once: @Scheduled job, enabled per environment with @ConditionalOnProperty.
+
+101
+00:07:06.552 --> 00:07:07.363
+Result:
+
+102
+00:07:07.643 --> 00:07:17.435
+4 of 16 buckets differed, so 495 of 2,002 key copies were read instead of all of them, and a second run needed one comparison.
+
+103
+00:07:17.715 --> 00:07:29.533
+In a real cluster each node maintains its own tree incrementally and only hashes cross the network until a differing leaf is found (Cassandra repair, Dynamo anti-entropy, Riak AAE).
+
+104
+00:07:30.883 --> 00:07:31.758
+Part 8.
+
+105
+00:07:32.038 --> 00:07:33.147
+Common mistakes.
+
+106
+00:07:34.397 --> 00:07:37.235
+Bucketing by insertion order instead of by key.
+
+107
+00:07:37.515 --> 00:07:41.461
+The two replicas then bucket differently and everything appears to differ.
+
+108
+00:07:41.741 --> 00:07:43.853
+Rebuilding the whole tree on every write.
+
+109
+00:07:44.133 --> 00:07:49.616
+Update the leaf and its ancestors incrementally, or rebuild periodically for repair runs.
+
+110
+00:07:49.896 --> 00:07:53.821
+Too few buckets, so each differing bucket still means shipping many keys.
+
+111
+00:07:54.101 --> 00:07:55.829
+Too many buckets inflate the tree.
+
+112
+00:07:56.109 --> 00:07:58.371
+Tune B to the expected divergence.
+
+113
+00:07:59.721 --> 00:08:00.617
+Part 9.
+
+114
+00:08:00.897 --> 00:08:02.241
+Follow-up questions.
+
+115
+00:08:03.491 --> 00:08:04.365
+Question.
+
+116
+00:08:04.645 --> 00:08:06.267
+How does Cassandra use this?
+
+117
+00:08:06.547 --> 00:08:16.168
+Thirty-second answer: nodetool repair builds Merkle trees per token range on each replica, exchanges them, and streams only the differing ranges.
+
+118
+00:08:16.448 --> 00:08:21.589
+Incremental repair marks repaired SSTables so later runs cover only new data.
+
+119
+00:08:22.939 --> 00:08:23.814
+Question.
+
+120
+00:08:24.094 --> 00:08:27.486
+Merkle trees versus read repair versus hinted handoff?
+
+121
+00:08:27.766 --> 00:08:29.131
+Thirty-second answer:
+
+122
+00:08:29.411 --> 00:08:33.017
+Hinted handoff replays writes missed during short outages.
+
+123
+00:08:33.297 --> 00:08:35.814
+Read repair fixes the keys you happen to read.
+
+124
+00:08:36.094 --> 00:08:41.833
+Merkle-tree anti-entropy finds all divergence, including cold keys nobody reads.
+
+125
+00:08:42.113 --> 00:08:43.969
+You need all three for convergence.
+
+126
+00:08:45.319 --> 00:08:46.919
+That's the end of this chapter.
+
+127
+00:08:47.199 --> 00:08:53.236
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+128
+00:08:53.516 --> 00:08:54.967
+See you in the next chapter.
+

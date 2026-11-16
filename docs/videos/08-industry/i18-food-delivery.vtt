@@ -1,0 +1,3074 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.395
+Food Delivery.
+
+2
+00:00:01.675 --> 00:00:06.305
+Chapter I18, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:08.055 --> 00:00:09.015
+At a glance:
+
+4
+00:00:09.295 --> 00:00:10.468
+Chapter at a glance.
+
+5
+00:00:10.748 --> 00:00:13.009
+Sector: food delivery and quick commerce.
+
+6
+00:00:13.289 --> 00:00:15.871
+Format: system design walkthrough, no code.
+
+7
+00:00:16.151 --> 00:00:17.153
+Reader bands:
+
+8
+00:00:17.433 --> 00:00:18.948
+B1, then B4.
+
+9
+00:00:19.228 --> 00:00:20.124
+Builds on:
+
+10
+00:00:20.404 --> 00:00:23.092
+Ch 47 (dispatch and tracking).
+
+11
+00:00:23.372 --> 00:00:25.036
+Ch 41 (chat).
+
+12
+00:00:25.316 --> 00:00:26.959
+Ch 43 (feed).
+
+13
+00:00:27.239 --> 00:00:29.159
+Ch 49 (pricing).
+
+14
+00:00:30.509 --> 00:00:32.877
+I05 (marketplace matching).
+
+15
+00:00:33.157 --> 00:00:34.501
+I12 (last mile).
+
+16
+00:00:34.781 --> 00:00:39.495
+What you get: a reference platform in the style of Swiggy, Zomato or DoorDash.
+
+17
+00:00:39.775 --> 00:00:43.914
+Three sides meet on it: customers, restaurants and delivery partners.
+
+18
+00:00:44.194 --> 00:00:54.925
+The chapter covers: restaurant onboarding and menus;. discovery and the personalised home feed, search and ads;. serviceability and ETA promises shown before ordering;.
+
+19
+00:00:56.275 --> 00:01:18.120
+the cart, pricing, fees and offers;. the order lifecycle, from restaurant acceptance to prep-time prediction, dispatch and batching, live tracking, delivery and ratings;. payments, refunds and settlements;. peak-hour surge management, including dinner rush, rain and cricket finals;. a quick-commerce variant with 10-minute grocery delivery from dark stores.
+
+20
+00:01:19.470 --> 00:01:21.155
+It explains the algorithms:
+
+21
+00:01:21.435 --> 00:01:33.083
+ETA decomposition, prep-time models, dispatch assignment and batching, delivery-partner positioning, surge and demand shaping, ranking, fraud and refund abuse, and quick-commerce slotting.
+
+22
+00:01:33.363 --> 00:01:36.030
+It ends with the data platform and tech stack.
+
+23
+00:01:36.310 --> 00:01:37.291
+Reading time:
+
+24
+00:01:37.571 --> 00:01:38.723
+85 min.
+
+25
+00:01:40.073 --> 00:01:40.820
+Warning:
+
+26
+00:01:41.100 --> 00:01:42.508
+Sources and honesty.
+
+27
+00:01:42.788 --> 00:01:52.004
+Swiggy, Zomato, DoorDash and Uber Eats have published engineering blogs on ETA prediction, dispatch, prep-time models and their data platforms.
+
+28
+00:01:52.284 --> 00:01:56.145
+Claims taken from these are marked publicly described (VERIFY).
+
+29
+00:01:56.425 --> 00:01:59.540
+The following India regulations are marked VERIFY:
+
+30
+00:01:59.820 --> 00:02:02.231
+FSSAI requirements for restaurant listing;.
+
+31
+00:02:02.511 --> 00:02:14.372
+GST on restaurant services through e-commerce operators (Section 9(5));. the Social Security Code and state laws on gig workers (for example, Rajasthan, Karnataka);.
+
+32
+00:02:15.722 --> 00:02:16.490
+ONDC.
+
+33
+00:02:16.770 --> 00:02:19.010
+Everything else is a reference design.
+
+34
+00:02:20.360 --> 00:02:21.213
+Part 1.
+
+35
+00:02:21.493 --> 00:02:23.029
+The System in One Page.
+
+36
+00:02:24.279 --> 00:02:25.943
+Why food delivery is hard.
+
+37
+00:02:26.223 --> 00:02:31.151
+Food delivery is a three-sided real-time marketplace with perishable goods:
+
+38
+00:02:31.431 --> 00:02:36.786
+Customers expect delivery in 30 minutes or less, and they expect the ETA they were promised.
+
+39
+00:02:37.066 --> 00:02:42.463
+Restaurants cook with variable prep times, which depend on kitchen load, the dish and staff.
+
+40
+00:02:42.743 --> 00:02:46.882
+Delivery partners (riders) are independent and move around the city.
+
+41
+00:02:47.162 --> 00:02:50.106
+Their supply varies by hour, weather and incentives.
+
+42
+00:02:50.386 --> 00:02:53.821
+Food degrades with time: cold food means a bad rating.
+
+43
+00:02:54.101 --> 00:02:57.791
+Riders shouldn't wait at restaurants, and food shouldn't wait for riders.
+
+44
+00:02:59.141 --> 00:03:11.045
+Demand is extremely peaky: lunch from 12:30 to 14:00;. dinner from 19:30 to 22:30;. rain spikes it further;. big matches spike it even more.
+
+45
+00:03:11.325 --> 00:03:16.723
+Every decision trades off customer speed, rider utilisation and restaurant efficiency.
+
+46
+00:03:18.073 --> 00:03:19.161
+Main systems.
+
+47
+00:03:19.441 --> 00:03:20.785
+Here is a quick table:
+
+48
+00:03:21.065 --> 00:03:22.579
+System, and What it does.
+
+49
+00:03:22.859 --> 00:03:24.779
+Restaurant onboarding and catalogue:
+
+50
+00:03:25.059 --> 00:03:31.289
+Restaurant details, FSSAI licence, menus, items, variants, add-ons, availability, timings.
+
+51
+00:03:31.569 --> 00:03:32.955
+Restaurant partner app:
+
+52
+00:03:33.235 --> 00:03:38.974
+Accept or reject orders, mark items out of stock, mark ready, manage hours, see payouts.
+
+53
+00:03:39.254 --> 00:03:40.150
+Discovery:
+
+54
+00:03:40.430 --> 00:03:43.118
+Home feed, collections, search, filters, ads.
+
+55
+00:03:43.398 --> 00:03:44.507
+Serviceability:
+
+56
+00:03:44.787 --> 00:03:47.347
+Can this restaurant deliver to this address now?
+
+57
+00:03:47.627 --> 00:03:48.950
+With what ETA and fee?
+
+58
+00:03:49.230 --> 00:03:50.361
+Cart and pricing:
+
+59
+00:03:50.641 --> 00:03:56.251
+Item prices, packaging, delivery fee, surge fee, platform fee, taxes, offers, membership.
+
+60
+00:03:56.531 --> 00:03:57.641
+Order management:
+
+61
+00:03:57.921 --> 00:04:00.971
+Order state machine, notifications, cancellations.
+
+62
+00:04:02.321 --> 00:04:03.537
+Prep-time and ETA:
+
+63
+00:04:03.817 --> 00:04:07.487
+Predicts food-ready time and delivery time, and keeps updating them.
+
+64
+00:04:07.767 --> 00:04:08.684
+Dispatch:
+
+65
+00:04:08.964 --> 00:04:11.609
+Assigns riders to orders and batches orders.
+
+66
+00:04:11.889 --> 00:04:13.212
+Rider app and fleet:
+
+67
+00:04:13.492 --> 00:04:17.289
+Shifts, login, location, navigation, earnings, incentives.
+
+68
+00:04:17.569 --> 00:04:18.401
+Tracking:
+
+69
+00:04:18.681 --> 00:04:22.884
+Live map, ETA updates, rider, customer calls through masked numbers.
+
+70
+00:04:23.164 --> 00:04:24.551
+Payments and settlements:
+
+71
+00:04:24.831 --> 00:04:28.585
+Customer payments, refunds, restaurant settlements, rider payouts.
+
+72
+00:04:28.865 --> 00:04:29.761
+Support:
+
+73
+00:04:30.041 --> 00:04:33.156
+Missing items, spills, late orders, refunds, chat.
+
+74
+00:04:33.436 --> 00:04:34.780
+Ratings and reviews:
+
+75
+00:04:35.060 --> 00:04:37.172
+Restaurant, rider and dish ratings.
+
+76
+00:04:37.452 --> 00:04:38.561
+Ads and growth:
+
+77
+00:04:38.841 --> 00:04:42.745
+Sponsored listings, offers funded by restaurants or the platform.
+
+78
+00:04:44.095 --> 00:04:45.290
+Data platform:
+
+79
+00:04:45.570 --> 00:04:48.429
+Analytics, ML features, experimentation.
+
+80
+00:04:49.779 --> 00:04:51.933
+Scale for this design (assumptions).
+
+81
+00:04:52.213 --> 00:04:53.557
+Here is a quick table:
+
+82
+00:04:53.837 --> 00:04:55.160
+Quantity, and Value.
+
+83
+00:04:55.440 --> 00:04:56.251
+Cities:
+
+84
+00:04:56.531 --> 00:04:57.811
+500 plus.
+
+85
+00:04:58.091 --> 00:04:59.029
+Restaurants:
+
+86
+00:04:59.309 --> 00:05:01.016
+250k active.
+
+87
+00:05:01.296 --> 00:05:03.216
+Active delivery partners at peak:
+
+88
+00:05:03.496 --> 00:05:05.736
+300k online at dinner peak.
+
+89
+00:05:06.016 --> 00:05:06.805
+Orders:
+
+90
+00:05:07.085 --> 00:05:14.189
+3M per day; peak ~600 orders per second at 20:30 (rain days 1.5 to 2 times ).
+
+91
+00:05:14.469 --> 00:05:15.664
+Home feed loads:
+
+92
+00:05:15.944 --> 00:05:19.144
+50M per day; ~3k per second at peak.
+
+93
+00:05:19.424 --> 00:05:20.917
+Rider location pings:
+
+94
+00:05:21.197 --> 00:05:27.277
+300k riders times 1 ping or 4 s = 75k pings per second.
+
+95
+00:05:27.557 --> 00:05:31.589
+Order state events: ~20 per order, then 60M per day.
+
+96
+00:05:31.869 --> 00:05:33.192
+Dispatch decisions:
+
+97
+00:05:33.472 --> 00:05:37.376
+Every few seconds per zone, each over hundreds of orders and riders.
+
+98
+00:05:38.726 --> 00:05:40.113
+Estimation highlights.
+
+99
+00:05:40.393 --> 00:05:41.395
+Feed cost.
+
+100
+00:05:41.675 --> 00:05:53.537
+Each feed call must know, for the customer's location: which restaurants are serviceable right now (open, within radius, rider availability);. their ETAs and fees;. personalised ranking.
+
+101
+00:05:54.887 --> 00:05:59.004
+That is several hundred restaurants evaluated in 300 ms.
+
+102
+00:05:59.284 --> 00:06:07.796
+Serviceability and ETA must come from precomputed, zone-level signals refreshed every minute or so, not computed fresh per request.
+
+103
+00:06:08.076 --> 00:06:08.993
+Dispatch.
+
+104
+00:06:09.273 --> 00:06:19.577
+600 orders per second nationwide spread across ~1,500 zones is ~0.4 orders per second per zone on average.
+
+105
+00:06:19.857 --> 00:06:27.111
+Hot zones (Koramangala at 20:30) see 5 to 10 orders per second with hundreds of riders nearby.
+
+106
+00:06:28.461 --> 00:06:35.373
+Batch assignment every 10 to 30 seconds per zone keeps the optimisation problem small (§6.4).
+
+107
+00:06:35.653 --> 00:06:37.082
+Location ingestion.
+
+108
+00:06:37.362 --> 00:06:43.463
+75k pings per second goes through a geo-indexed in-memory store for riders near X.
+
+109
+00:06:43.743 --> 00:06:47.135
+Pings are also streamed to Kafka for tracking and analytics.
+
+110
+00:06:48.485 --> 00:06:49.360
+Part 2.
+
+111
+00:06:49.640 --> 00:06:50.600
+Requirements.
+
+112
+00:06:51.850 --> 00:06:52.703
+Functional.
+
+113
+00:06:52.983 --> 00:06:53.901
+Discovery.
+
+114
+00:06:54.181 --> 00:06:59.983
+Customers browse restaurants that deliver to their address, with ETA, fees, ratings and offers.
+
+115
+00:07:00.263 --> 00:07:05.554
+They can search dishes or restaurants and filter (veg, rating, delivery time, offers).
+
+116
+00:07:05.834 --> 00:07:06.581
+Menu.
+
+117
+00:07:06.861 --> 00:07:13.069
+Shows items with variants and add-ons, availability (out of stock, time-based menus) and pricing.
+
+118
+00:07:13.349 --> 00:07:14.501
+Cart and checkout.
+
+119
+00:07:14.781 --> 00:07:20.903
+Totals cover item prices, packaging, delivery fee, surge, platform fee, GST and offers.
+
+120
+00:07:21.183 --> 00:07:24.106
+The address is validated and the ETA promise shown.
+
+121
+00:07:25.456 --> 00:07:30.363
+Payment options are UPI, cards, wallets and cash on delivery (COD).
+
+122
+00:07:30.643 --> 00:07:31.581
+Order flow.
+
+123
+00:07:31.861 --> 00:07:32.821
+Order placed.
+
+124
+00:07:33.101 --> 00:07:35.683
+Restaurant accepts, with a prep-time estimate.
+
+125
+00:07:35.963 --> 00:07:37.051
+Rider assigned.
+
+126
+00:07:37.331 --> 00:07:38.973
+Rider reaches the restaurant.
+
+127
+00:07:39.253 --> 00:07:40.683
+Food ready and picked up.
+
+128
+00:07:42.033 --> 00:07:43.206
+Out for delivery.
+
+129
+00:07:43.486 --> 00:07:44.297
+Delivered.
+
+130
+00:07:44.577 --> 00:07:47.627
+Customers get live tracking and ETA updates throughout.
+
+131
+00:07:47.907 --> 00:07:48.846
+Changes.
+
+132
+00:07:49.126 --> 00:07:54.033
+Customers can cancel before the restaurant accepts, or later under policy with fees.
+
+133
+00:07:54.313 --> 00:08:01.075
+Restaurants can reject orders or mark items unavailable, which triggers substitution or a partial refund.
+
+134
+00:08:01.355 --> 00:08:02.486
+Rider flows.
+
+135
+00:08:02.766 --> 00:08:04.025
+Log in to a shift.
+
+136
+00:08:05.375 --> 00:08:10.175
+Receive an assignment and accept it, or have it auto-accepted with a rejection limit.
+
+137
+00:08:10.455 --> 00:08:12.012
+Navigate to the restaurant.
+
+138
+00:08:12.292 --> 00:08:15.023
+Pick up with an OTP or order ID check.
+
+139
+00:08:15.303 --> 00:08:18.247
+Deliver, with an OTP for high-value orders.
+
+140
+00:08:18.527 --> 00:08:20.681
+Collect COD cash and track earnings.
+
+141
+00:08:20.961 --> 00:08:21.836
+Support.
+
+142
+00:08:22.116 --> 00:08:29.519
+Self-serve resolution for missing or wrong items and late delivery, with images, refunds or credits, and escalation.
+
+143
+00:08:30.869 --> 00:08:34.495
+Ratings for restaurants and riders, plus dish-level ratings.
+
+144
+00:08:34.775 --> 00:08:35.671
+Settlements.
+
+145
+00:08:35.951 --> 00:08:41.391
+Restaurant payouts with commission and taxes deducted, on a weekly or more frequent cycle.
+
+146
+00:08:41.671 --> 00:08:45.319
+Rider payouts made up of per-order pay, incentives and tips.
+
+147
+00:08:46.669 --> 00:08:47.779
+Non-functional.
+
+148
+00:08:48.059 --> 00:08:49.403
+Here is a quick table:
+
+149
+00:08:49.683 --> 00:08:51.048
+Attribute, and Target.
+
+150
+00:08:51.328 --> 00:09:00.352
+ETA accuracy: for example, 85 to 90% of orders delivered within the promised window, with mean absolute error of a few minutes.
+
+151
+00:09:00.632 --> 00:09:01.720
+Feed latency:
+
+152
+00:09:01.000 --> 00:09:04.027
+P95 300 ms.
+
+153
+00:09:04.307 --> 00:09:05.331
+Order placement:
+
+154
+00:09:05.611 --> 00:09:09.984
+P95 1 s; exactly-once payment and order creation.
+
+155
+00:09:10.264 --> 00:09:11.544
+Dispatch latency:
+
+156
+00:09:11.824 --> 00:09:18.629
+Rider assigned within ~1 to 2 minutes of acceptance (or timed to food readiness, §6.4).
+
+157
+00:09:18.909 --> 00:09:20.104
+Tracking freshness:
+
+158
+00:09:20.384 --> 00:09:24.459
+Rider location on the customer's map updated every few seconds.
+
+159
+00:09:24.739 --> 00:09:25.805
+Availability:
+
+160
+00:09:26.085 --> 00:09:33.125
+Order placement and the restaurant and rider apps at 99.95%; graceful degradation at peak.
+
+161
+00:09:34.475 --> 00:09:35.521
+Peak handling:
+
+162
+00:09:35.801 --> 00:09:39.321
+2 times normal peak on rain days without collapsing ETAs.
+
+163
+00:09:39.601 --> 00:09:40.475
+Fairness:
+
+164
+00:09:40.755 --> 00:09:44.830
+Rider earnings transparency; restaurant ranking rules disclosed.
+
+165
+00:09:46.180 --> 00:09:47.076
+Part 3.
+
+166
+00:09:47.356 --> 00:09:48.871
+High-Level Architecture.
+
+167
+00:09:50.121 --> 00:09:51.465
+Here is the diagram.
+
+168
+00:09:55.315 --> 00:09:56.360
+Key decisions.
+
+169
+00:09:56.640 --> 00:09:57.984
+Here is a quick table:
+
+170
+00:09:58.264 --> 00:10:00.035
+Decision, and Choice, and Why.
+
+171
+00:10:00.315 --> 00:10:01.317
+Geography.
+
+172
+00:10:01.597 --> 00:10:02.429
+Choice:
+
+173
+00:10:02.709 --> 00:10:09.579
+City, then zones (hexagons, for example, H3, or polygons) for supply, demand and serviceability.
+
+174
+00:10:09.859 --> 00:10:10.541
+Why:
+
+175
+00:10:10.821 --> 00:10:13.467
+Bounded optimisation and local signals.
+
+176
+00:10:13.747 --> 00:10:14.856
+Serviceability.
+
+177
+00:10:15.136 --> 00:10:15.968
+Choice:
+
+178
+00:10:16.248 --> 00:10:21.795
+Precomputed per (restaurant, customer hexagon) and refreshed every minute with zone stress.
+
+179
+00:10:22.075 --> 00:10:22.757
+Why:
+
+180
+00:10:23.037 --> 00:10:24.723
+Fast feed and honest ETAs.
+
+181
+00:10:25.003 --> 00:10:25.728
+ETA.
+
+182
+00:10:26.008 --> 00:10:26.840
+Choice:
+
+183
+00:10:27.120 --> 00:10:35.376
+Decomposed: dispatch wait, rider to restaurant, prep remaining, pickup wait, travel to customer, last mile; ML per component.
+
+184
+00:10:35.656 --> 00:10:36.339
+Why:
+
+185
+00:10:36.619 --> 00:10:38.155
+Explainable, updatable.
+
+186
+00:10:38.435 --> 00:10:39.352
+Dispatch.
+
+187
+00:10:39.632 --> 00:10:40.464
+Choice:
+
+188
+00:10:40.744 --> 00:10:45.096
+Batch optimisation every few seconds per zone, timed to food readiness.
+
+189
+00:10:45.376 --> 00:10:46.059
+Why:
+
+190
+00:10:46.339 --> 00:10:48.472
+Riders don't wait, food doesn't wait.
+
+191
+00:10:48.752 --> 00:10:49.669
+Order state.
+
+192
+00:10:49.949 --> 00:10:50.781
+Choice:
+
+193
+00:10:51.061 --> 00:10:53.429
+Event-sourced state machine with Kafka events.
+
+194
+00:10:53.709 --> 00:10:54.392
+Why:
+
+195
+00:10:54.672 --> 00:10:56.187
+Many consumers, audit.
+
+196
+00:10:57.537 --> 00:10:58.561
+Peak control.
+
+197
+00:10:58.841 --> 00:10:59.673
+Choice:
+
+198
+00:10:59.953 --> 00:11:06.609
+Zone-level levers: radius shrink, surge fees, longer ETAs, hiding far restaurants, rider incentives.
+
+199
+00:11:06.889 --> 00:11:07.571
+Why:
+
+200
+00:11:07.851 --> 00:11:09.302
+Keeps promises at peak.
+
+201
+00:11:09.582 --> 00:11:10.542
+Location.
+
+202
+00:11:10.822 --> 00:11:11.654
+Choice:
+
+203
+00:11:11.934 --> 00:11:15.881
+In-memory geo index for live riders plus Kafka for history.
+
+204
+00:11:16.161 --> 00:11:16.843
+Why:
+
+205
+00:11:17.123 --> 00:11:18.745
+Fast nearest-rider queries.
+
+206
+00:11:20.095 --> 00:11:21.012
+Part 4.
+
+207
+00:11:21.292 --> 00:11:23.169
+How It Works, Journeys End to End.
+
+208
+00:11:24.419 --> 00:11:27.641
+Journey 1: opening the app at 8:15 pm.
+
+209
+00:11:27.921 --> 00:11:28.881
+Location.
+
+210
+00:11:29.161 --> 00:11:33.278
+The app sends the customer's location (GPS or saved address).
+
+211
+00:11:33.558 --> 00:11:39.553
+The server maps it to a hexagon (H3 resolution ~8 to 9) and to a delivery zone.
+
+212
+00:11:39.833 --> 00:11:42.307
+Serviceability (§5.2).
+
+213
+00:11:42.587 --> 00:11:47.579
+The serviceability service returns the restaurants that can deliver to this hexagon now.
+
+214
+00:11:47.859 --> 00:11:59.358
+For each one it applies: open (timings, holiday, and whether it is currently accepting orders);. distance or travel time within the restaurant's radius, which shrinks when the zone is stressed;.
+
+215
+00:12:00.708 --> 00:12:13.807
+ETA estimate: precomputed restaurant-to-hexagon travel time plus current prep-time and dispatch-delay signals;. delivery fee: base by distance, surge by zone stress, waived for members or by offers.
+
+216
+00:12:14.087 --> 00:12:19.804
+This is a lookup into precomputed tables refreshed every ~1 minute by stream jobs.
+
+217
+00:12:20.084 --> 00:12:22.495
+Feed assembly (§6.6).
+
+218
+00:12:22.775 --> 00:12:27.191
+The feed service: takes the serviceable set (~400 restaurants);.
+
+219
+00:12:28.541 --> 00:12:47.293
+scores each one for this user with a ranking model (cuisine affinity, past orders, price band, rating, ETA, offers, freshness);. mixes in ads: sponsored slots labelled and auctioned (Ch 43);. builds widgets such as Order again, Top picks for you, Under 30 mins and offer carousels.
+
+220
+00:12:47.573 --> 00:12:48.490
+Response.
+
+221
+00:12:48.770 --> 00:12:51.565
+The feed is returned in ~200 ms.
+
+222
+00:12:51.845 --> 00:12:53.679
+Images come from the CDN.
+
+223
+00:12:53.959 --> 00:12:55.282
+Impressions are logged.
+
+224
+00:12:55.562 --> 00:12:56.522
+Rain mode.
+
+225
+00:12:56.802 --> 00:12:59.021
+If it's raining in this zone, the feed may:
+
+226
+00:13:00.371 --> 00:13:04.381
+show fewer far restaurants;. show higher fees and ETAs;. show a banner:
+
+227
+00:13:04.661 --> 00:13:07.648
+High demand due to rain, delivery may take longer.
+
+228
+00:13:08.998 --> 00:13:10.790
+Journey 2: placing an order.
+
+229
+00:13:11.070 --> 00:13:11.817
+Menu.
+
+230
+00:13:12.097 --> 00:13:17.643
+Sameer opens a biryani restaurant and adds Chicken Biryani (full) with extra raita.
+
+231
+00:13:17.923 --> 00:13:23.427
+The menu service shows availability, which the restaurant can toggle out of stock in real time.
+
+232
+00:13:23.707 --> 00:13:24.433
+Cart.
+
+233
+00:13:24.713 --> 00:13:34.569
+The cart service prices the order (§5.4): items and add-ons;. packaging charges;. delivery fee (distance and surge);. platform fee;.
+
+234
+00:13:35.919 --> 00:13:54.308
+GST: restaurant services through e-commerce operators at 5%, with the platform collecting and paying under Section 9(5) (VERIFY);. offers (restaurant-funded 50% off up to 100 rupees, platform coupons, membership);. final total and ETA promise.
+
+235
+00:13:54.588 --> 00:13:55.484
+Checkout.
+
+236
+00:13:55.764 --> 00:13:58.729
+Address confirmation; a pin drop helps the rider.
+
+237
+00:14:00.079 --> 00:14:04.815
+Payment by UPI: the payment intent is created with an idempotency key.
+
+238
+00:14:05.095 --> 00:14:07.954
+On success the order is created in the PLACED state.
+
+239
+00:14:08.234 --> 00:14:15.231
+With COD, the order is created directly, with risk checks such as COD limits for new users or risky addresses.
+
+240
+00:14:15.511 --> 00:14:16.450
+Order event.
+
+241
+00:14:16.730 --> 00:14:18.671
+OrderPlaced is published to Kafka.
+
+242
+00:14:18.951 --> 00:14:21.725
+Consumers react: restaurant notification;.
+
+243
+00:14:22.005 --> 00:14:25.439
+ETA service (initial prediction);. dispatch (pre-planning);.
+
+244
+00:14:26.789 --> 00:14:27.749
+analytics.
+
+245
+00:14:28.029 --> 00:14:29.203
+Customer screen.
+
+246
+00:14:29.483 --> 00:14:32.064
+Waiting for restaurant to accept with the ETA.
+
+247
+00:14:33.414 --> 00:14:35.953
+Journey 3: restaurant acceptance and prep.
+
+248
+00:14:36.233 --> 00:14:37.321
+Notification.
+
+249
+00:14:37.601 --> 00:14:42.763
+The restaurant's partner app (a tablet at the counter) rings loudly with the order details.
+
+250
+00:14:43.043 --> 00:14:44.046
+Acceptance.
+
+251
+00:14:44.326 --> 00:14:52.219
+The staff accept within ~1 to 3 minutes and the app suggests a prep time, for example, 18 minutes, which they can adjust.
+
+252
+00:14:52.499 --> 00:14:55.593
+Auto-accept is available for reliable restaurants.
+
+253
+00:14:55.873 --> 00:14:59.563
+Timeout or rejection triggers an attempt to call the restaurant.
+
+254
+00:14:59.843 --> 00:15:07.481
+If that fails, the order is cancelled with a full refund, and the restaurant is penalised in ranking or reliability scores.
+
+255
+00:15:08.831 --> 00:15:11.497
+Prep-time prediction (§6.2).
+
+256
+00:15:11.777 --> 00:15:23.831
+The platform's model predicts the actual food-ready time from: the restaurant's history;. the items;. current kitchen load (open orders at that restaurant);. time of day;. the staff's entered estimate.
+
+257
+00:15:25.181 --> 00:15:29.255
+Restaurants often under- or over-estimate, so the model corrects for it.
+
+258
+00:15:29.535 --> 00:15:30.453
+Mark ready.
+
+259
+00:15:30.733 --> 00:15:32.866
+The restaurant taps Food ready when packed.
+
+260
+00:15:33.146 --> 00:15:40.037
+This signal is noisy (some mark ready early to look good), so models also use rider wait times to calibrate.
+
+261
+00:15:40.317 --> 00:15:41.554
+Item out of stock.
+
+262
+00:15:41.834 --> 00:15:44.223
+The restaurant marks an item unavailable.
+
+263
+00:15:44.503 --> 00:15:50.349
+The customer gets a prompt to choose a substitute or accept a partial refund, with a timeout default.
+
+264
+00:15:51.699 --> 00:15:53.725
+Journey 4: dispatch and pickup.
+
+265
+00:15:54.005 --> 00:15:54.795
+Timing.
+
+266
+00:15:55.075 --> 00:16:08.835
+Dispatch wants the rider to arrive at the restaurant just as the food is ready: if the rider is early, they wait, which wastes rider time and capacity;. if they are late, the food waits and gets cold, and the ETA is missed.
+
+267
+00:16:09.115 --> 00:16:14.704
+Dispatch therefore plans an assignment around (predicted ready time minus rider travel time).
+
+268
+00:16:14.984 --> 00:16:17.715
+Batch optimisation (§6.4).
+
+269
+00:16:17.995 --> 00:16:21.408
+Every ~10 to 20 s in each zone, the dispatcher:
+
+270
+00:16:22.758 --> 00:16:41.894
+collects unassigned orders and available riders: idle riders, and riders finishing a delivery nearby (chained);. computes costs (travel time to restaurant, wait at restaurant, delay to the customer versus promise, rider fairness);. solves an assignment problem (Hungarian or min-cost matching,
+
+271
+00:16:42.174 --> 00:16:53.139
+or heuristics);. considers batching: two orders from the same or nearby restaurants going in the same direction can share a rider if neither customer's ETA suffers too much.
+
+272
+00:16:54.489 --> 00:16:55.641
+Offer to the rider.
+
+273
+00:16:55.921 --> 00:17:01.169
+The rider app shows the order (restaurant, distance, estimated earnings) and the rider accepts.
+
+274
+00:17:01.449 --> 00:17:06.036
+Rejections or timeouts send the order back to the pool, with a higher priority.
+
+275
+00:17:06.316 --> 00:17:07.063
+Pickup.
+
+276
+00:17:07.343 --> 00:17:12.655
+The rider navigates to the restaurant and is geofenced on arrival (arrived at restaurant).
+
+277
+00:17:14.005 --> 00:17:20.191
+Food is handed over, the rider confirms the order ID and items, and the status becomes PICKEDUP.
+
+278
+00:17:20.471 --> 00:17:23.266
+Rider wait time at the restaurant is recorded.
+
+279
+00:17:23.546 --> 00:17:25.807
+It is a key signal for prep-time models.
+
+280
+00:17:26.087 --> 00:17:26.962
+Delivery.
+
+281
+00:17:27.242 --> 00:17:34.047
+The rider navigates to the customer, and the live location streams to the customer's map (§5.6).
+
+282
+00:17:35.397 --> 00:17:44.613
+The ETA is recomputed continuously from remaining route time plus a last-mile estimate (building access, finding the flat, apartment security).
+
+283
+00:17:44.893 --> 00:17:47.389
+Contact uses masked phone calls or chat.
+
+284
+00:17:47.669 --> 00:17:50.955
+Delivered: confirmed by geofence plus the rider tap.
+
+285
+00:17:51.235 --> 00:17:54.541
+High-value orders may require a delivery OTP.
+
+286
+00:17:54.821 --> 00:17:55.888
+After delivery.
+
+287
+00:17:56.168 --> 00:17:58.045
+Rating prompts go to the customer.
+
+288
+00:17:59.395 --> 00:18:01.145
+Rider earnings are updated.
+
+289
+00:18:01.425 --> 00:18:06.011
+The rider becomes available, often already pre-assigned to a next order nearby.
+
+290
+00:18:07.361 --> 00:18:10.455
+Journey 5: the rain spike at 8:30 pm.
+
+291
+00:18:10.735 --> 00:18:11.652
+Detection.
+
+292
+00:18:11.932 --> 00:18:16.135
+Order rates in Bengaluru zones jump 60% in 10 minutes.
+
+293
+00:18:16.415 --> 00:18:20.191
+Rider supply drops, because some riders log off in heavy rain.
+
+294
+00:18:20.471 --> 00:18:21.836
+Travel times increase.
+
+295
+00:18:22.116 --> 00:18:26.809
+Zone stress, measured as open orders per available rider, crosses thresholds.
+
+296
+00:18:27.089 --> 00:18:31.633
+Automatic levers, per zone, in a graduated order (§6.5):
+
+297
+00:18:31.913 --> 00:18:36.287
+ETA inflation: show honest, longer ETAs so promises aren't broken.
+
+298
+00:18:36.567 --> 00:18:40.833
+Rain or surge fee: this funds rider incentives and tempers demand.
+
+299
+00:18:42.183 --> 00:18:43.399
+Rider incentives:
+
+300
+00:18:43.679 --> 00:18:49.077
+Rain bonus 30 rupees per order for the next 2 hours pushed to offline riders nearby.
+
+301
+00:18:49.357 --> 00:18:53.581
+Serviceability radius shrink: restaurants far from customers are hidden.
+
+302
+00:18:53.861 --> 00:18:57.615
+Batching more aggressively: two orders per rider where routes align.
+
+303
+00:18:57.895 --> 00:19:01.586
+Throttle: pause orders from restaurants with long prep backlogs.
+
+304
+00:19:01.866 --> 00:19:05.749
+In extreme cases, show Not accepting orders in your area right now.
+
+305
+00:19:06.029 --> 00:19:06.903
+Monitoring.
+
+306
+00:19:07.183 --> 00:19:11.173
+Ops dashboards show zone stress, ETA breaches and rider supply.
+
+307
+00:19:11.453 --> 00:19:13.970
+City ops can override the levers manually.
+
+308
+00:19:15.320 --> 00:19:16.237
+Recovery.
+
+309
+00:19:16.517 --> 00:19:21.829
+As the rain stops, the levers relax gradually (hysteresis) to avoid oscillation.
+
+310
+00:19:23.179 --> 00:19:25.526
+Journey 6: a missing item complaint.
+
+311
+00:19:25.806 --> 00:19:26.681
+Complaint.
+
+312
+00:19:26.961 --> 00:19:31.249
+Sameer reports raita missing in the app's help section, with a photo option.
+
+313
+00:19:31.529 --> 00:19:32.979
+Self-serve resolution.
+
+314
+00:19:33.259 --> 00:19:46.827
+A rule and risk engine decides: instant refund for low-value items when the customer is trustworthy (low complaint history);. escalation to an agent when the risk is high (frequent complaints, high-value claims).
+
+315
+00:19:47.107 --> 00:19:47.961
+Refund.
+
+316
+00:19:48.241 --> 00:19:55.195
+Issued to the source (UPI or card) or as platform credits, depending on the customer's choice and policy.
+
+317
+00:19:56.545 --> 00:19:57.569
+Attribution.
+
+318
+00:19:57.849 --> 00:20:04.527
+The cost is attributed to the restaurant (packing error) or the rider (tampering), based on evidence and patterns.
+
+319
+00:20:04.807 --> 00:20:09.820
+It affects the restaurant's settlement through deductions, per contract, or its quality score.
+
+320
+00:20:10.100 --> 00:20:16.585
+Abuse detection (§6.8): repeat complainers, linked accounts and photo reuse are flagged.
+
+321
+00:20:17.935 --> 00:20:20.901
+Journey 7: quick commerce (10-minute groceries).
+
+322
+00:20:21.181 --> 00:20:22.247
+Dark stores.
+
+323
+00:20:22.527 --> 00:20:28.991
+Small warehouses within ~2 to 3 km of customers hold ~5 to 8k SKUs.
+
+324
+00:20:29.271 --> 00:20:31.213
+Each store serves a tight polygon.
+
+325
+00:20:31.493 --> 00:20:32.218
+Order.
+
+326
+00:20:32.498 --> 00:20:34.994
+The customer orders milk, bread and chips.
+
+327
+00:20:35.274 --> 00:20:42.143
+Serviceability shows a 10 mins ETA, available only if the store has stock and pickers and riders are available.
+
+328
+00:20:42.423 --> 00:20:43.234
+Picking.
+
+329
+00:20:43.514 --> 00:20:45.775
+The order drops to the store's picking system.
+
+330
+00:20:46.055 --> 00:20:52.733
+The pick route is optimised by slotting, since fast movers sit near the packing station (§6.9).
+
+331
+00:20:54.083 --> 00:20:57.347
+Picking takes ~2 minutes and packing ~1 minute.
+
+332
+00:20:57.627 --> 00:20:58.544
+Dispatch.
+
+333
+00:20:58.824 --> 00:21:01.704
+Riders wait at the store, so assignment is instant.
+
+334
+00:21:01.984 --> 00:21:05.547
+Delivery takes ~5 to 7 minutes over short distances.
+
+335
+00:21:05.827 --> 00:21:06.765
+Inventory.
+
+336
+00:21:07.045 --> 00:21:08.773
+Real-time stock per store.
+
+337
+00:21:09.053 --> 00:21:15.667
+Demand forecasting per SKU per store per hour drives replenishment from the mother warehouse (I12).
+
+338
+00:21:15.947 --> 00:21:18.485
+Stock-outs hide items from the app immediately.
+
+339
+00:21:19.835 --> 00:21:20.795
+Part 5.
+
+340
+00:21:21.075 --> 00:21:22.611
+Core Subsystems in Depth.
+
+341
+00:21:23.861 --> 00:21:26.229
+Geo model: zones and hexagons.
+
+342
+00:21:26.509 --> 00:21:36.280
+Hexagons: the H3 grid (open-sourced by Uber) at a resolution where each cell is about 0.1 to 0.7 km².
+
+343
+00:21:36.560 --> 00:21:40.763
+It is used for: demand and supply counts;. serviceability tables;.
+
+344
+00:21:41.043 --> 00:21:44.349
+ETA features (travel time between hexes);. surge.
+
+345
+00:21:44.629 --> 00:21:51.904
+Zones: operational areas (polygons) made of hexes, each with its own rider fleet, ops team and lever settings.
+
+346
+00:21:53.254 --> 00:22:01.745
+Travel time matrix: hex-to-hex travel times by time of day, learned from rider GPS traces, plus live traffic adjustments.
+
+347
+00:22:03.095 --> 00:22:04.908
+Serviceability and zone state.
+
+348
+00:22:05.188 --> 00:22:21.807
+Inputs, refreshed every 30 to 60 s by stream jobs: restaurant status (open, accepting, current prep backlog);. zone stress (orders per available rider, rider wait times, ETA breach rate);. rain flags and weather;. lever settings (radius, fees).
+
+349
+00:22:22.087 --> 00:22:27.591
+Precomputed table: per (restaurant, customer hexagon) it holds: serviceable or not;.
+
+350
+00:22:28.941 --> 00:22:31.373
+ETA band;. delivery fee;. distance.
+
+351
+00:22:31.653 --> 00:22:45.541
+Restaurants times nearby hexes is a manageable size, for example, 250k times ~300 hexes about 75M entries, held in Redis or an in-memory KV keyed by hex.
+
+352
+00:22:45.821 --> 00:22:53.479
+Consistency: the cart re-checks serviceability and fees at checkout, so the customer always sees a fresh promise before paying.
+
+353
+00:22:54.829 --> 00:22:56.173
+Catalogue and menus.
+
+354
+00:22:56.453 --> 00:23:12.773
+Structure: restaurant, then menu categories, then items;. items carry variants (half or full), add-on groups (min or max choices), dietary tags, images, prices and tax category;. availability windows (breakfast menu) and out-of-stock flags.
+
+355
+00:23:13.053 --> 00:23:20.691
+Updates: restaurants edit through the partner app or POS integrations (some POS systems push menus and stock).
+
+356
+00:23:20.971 --> 00:23:22.357
+Changes are versioned.
+
+357
+00:23:22.637 --> 00:23:25.155
+The cart validates against the current version.
+
+358
+00:23:26.505 --> 00:23:38.387
+Search index: dishes and restaurants are indexed with synonyms (biriyani = biryani), transliteration (Hindi or Kannada typed in English) and spell correction (Ch 42).
+
+359
+00:23:39.737 --> 00:23:40.889
+Cart and pricing.
+
+360
+00:23:41.169 --> 00:23:50.449
+Components: item subtotal;. packaging;. delivery fee (distance-based, plus surge, minus member waiver);. small-cart fee;. platform fee;.
+
+361
+00:23:50.729 --> 00:23:52.479
+GST (per tax rules);.
+
+362
+00:23:53.829 --> 00:24:01.167
+discounts with funding attribution (restaurant-funded versus platform-funded);. tip (optional, passed fully to the rider).
+
+363
+00:24:01.447 --> 00:24:08.146
+Offer engine (Ch 49): eligibility rules, stacking rules, budget caps and per-user limits.
+
+364
+00:24:08.426 --> 00:24:14.293
+Price snapshot: the final breakdown is stored with the order for invoices, settlements and refunds.
+
+365
+00:24:15.643 --> 00:24:16.773
+Order management.
+
+366
+00:24:17.053 --> 00:24:18.077
+State machine:
+
+367
+00:24:18.357 --> 00:24:24.416
+PLACED, then ACCEPTED, then (RIDERASSIGNED), then FOODREADY, then PICKEDUP, then DELIVERED;. with branches:
+
+368
+00:24:24.696 --> 00:24:31.608
+REJECTED, CANCELLEDBYCUSTOMER or RESTAURANT or PLATFORM, UNDELIVERED (customer not reachable), and so on.
+
+369
+00:24:31.888 --> 00:24:34.491
+Event-sourced: each transition is an event.
+
+370
+00:24:34.771 --> 00:24:40.275
+Consumers include notifications, tracking, ETA, settlements, support and analytics.
+
+371
+00:24:41.625 --> 00:24:47.299
+Timers: acceptance timeout, food-ready overdue, rider-not-assigned alerts, delivery overdue.
+
+372
+00:24:47.579 --> 00:24:51.654
+These are scheduled timers (Ch 50) that trigger escalations.
+
+373
+00:24:51.934 --> 00:25:01.321
+Idempotency: client retries, payment callbacks and rider app retries over flaky networks all carry idempotency keys and state-transition guards.
+
+374
+00:25:02.671 --> 00:25:04.121
+Location and tracking.
+
+375
+00:25:04.401 --> 00:25:20.508
+Ingest: rider apps send GPS every ~4 s while on a trip, less often when idle;. batches are uploaded when the network is poor;. the server applies map matching (snap to road), filters outliers and detects spoofing (I05).
+
+376
+00:25:20.788 --> 00:25:31.113
+Live geo index: an in-memory index (H3 cells or a geohash) of available riders, queried by dispatch for riders within X minutes of the restaurant.
+
+377
+00:25:31.393 --> 00:25:32.588
+Customer tracking:
+
+378
+00:25:33.938 --> 00:25:44.946
+the rider's position is pushed through the realtime gateway every few seconds;. the client animates smoothly between points;. for privacy, it is shown only during the active order.
+
+379
+00:25:46.296 --> 00:25:48.067
+Fleet, shifts and incentives.
+
+380
+00:25:48.347 --> 00:26:02.875
+Riders: log in to slots or shifts (some platforms use slot booking for guaranteed earnings windows);. get zone assignments;. get incentive programmes (orders completed in the peak window, rain bonuses, weekly targets).
+
+381
+00:26:03.155 --> 00:26:08.445
+Earnings: base pay per order plus distance pay, wait-time pay, incentives and tips.
+
+382
+00:26:08.725 --> 00:26:10.411
+Earnings are transparent in the app.
+
+383
+00:26:11.761 --> 00:26:25.158
+Supply planning: forecast demand per zone per 30 minutes;. compute the required riders from expected orders times time per order ÷ batching factor;. recruit and incentivise to fill gaps.
+
+384
+00:26:26.508 --> 00:26:27.404
+Settlements.
+
+385
+00:26:27.684 --> 00:26:37.220
+Restaurants: order value minus commission, payment gateway fees, restaurant-funded discounts and penalties, minus TDS or TCS (VERIFY).
+
+386
+00:26:37.500 --> 00:26:41.873
+Paid on a weekly cycle or faster (some platforms offer daily payouts).
+
+387
+00:26:42.153 --> 00:26:44.393
+Riders: daily or weekly payouts.
+
+388
+00:26:44.673 --> 00:26:50.881
+COD cash collected by riders is reconciled against their earnings: deposit or deduction.
+
+389
+00:26:51.161 --> 00:26:58.628
+Ledger: double-entry, per order and per party, with reconciliation against payment gateway reports (I03).
+
+390
+00:26:59.978 --> 00:27:00.917
+Part 6.
+
+391
+00:27:01.197 --> 00:27:02.157
+Algorithms.
+
+392
+00:27:03.407 --> 00:27:04.751
+ETA decomposition.
+
+393
+00:27:05.031 --> 00:27:14.887
+Total ETA = taccept + tdispatch + max(tridertorestaurant, tprepremaining) + tpickup + ttraveltocustomer + tlastmile.
+
+394
+00:27:15.167 --> 00:27:17.769
+Each term has its own model with its own features.
+
+395
+00:27:18.049 --> 00:27:34.199
+For example: ttravel: the hex-to-hex travel time matrix, plus route distance, time of day, weather and live zone speed;. tlastmile: learned per building or society from history (gated communities, high-rises);. tprep: §6.2.
+
+396
+00:27:35.549 --> 00:27:39.410
+Prediction targets: a distribution, via quantile regression.
+
+397
+00:27:39.690 --> 00:27:47.434
+The promise shown to the customer is a conservative quantile (for example, P80), while dispatch planning uses the median.
+
+398
+00:27:47.714 --> 00:27:55.821
+Continuous updates: after each event (accept, rider assigned, picked up), recompute with the actual times known so far.
+
+399
+00:27:56.101 --> 00:27:58.853
+Tell the customer if the ETA moves materially.
+
+400
+00:27:59.133 --> 00:28:00.413
+Public descriptions:
+
+401
+00:28:00.693 --> 00:28:09.077
+DoorDash and Swiggy have published about ETA models using gradient boosting and deep learning, with multi-stage predictions (VERIFY).
+
+402
+00:28:10.427 --> 00:28:11.728
+Prep-time prediction.
+
+403
+00:28:12.008 --> 00:28:29.459
+Features: restaurant;. number and type of items (biryani is quick to serve; pizza needs baking time);. open orders at the restaurant (kitchen load);. time of day and day of week;. the staff-entered prep estimate;. the restaurant's historical bias between entered and actual times.
+
+404
+00:28:30.809 --> 00:28:45.486
+Labels: true food-ready time is not directly observed, because the mark ready tap is noisy;. use rider arrival and pickup times: if the rider waited, food was ready later than arrival; if the food waited, it was ready earlier,
+
+405
+00:28:45.766 --> 00:28:54.534
+estimated from the ready tap or pickup time;. this is a censored-data problem, handled with survival-style or censored-regression techniques.
+
+406
+00:28:55.884 --> 00:29:00.855
+Use: time the rider assignment so arrival about ready time (§6.4).
+
+407
+00:29:01.135 --> 00:29:04.164
+Dynamic updates come from the restaurant's real-time load.
+
+408
+00:29:05.514 --> 00:29:07.029
+Dispatch cost function.
+
+409
+00:29:07.309 --> 00:29:19.298
+For an assignment of rider r to order o, the cost combines: rider travel time to the restaurant;. expected rider wait = max(0, readytime minus arrivaltime).
+
+410
+00:29:19.578 --> 00:29:26.618
+This wastes rider capacity;. expected food wait = max(0, arrivaltime minus readytime).
+
+411
+00:29:26.898 --> 00:29:34.898
+This cools the food and delays the customer;. customer delay versus promise: the penalty grows steeply after the promised time;.
+
+412
+00:29:36.248 --> 00:29:49.325
+rider fairness: spread orders across riders, and avoid giving long trips to riders near the end of their shift;. chaining benefit: a rider finishing a nearby delivery is available soon at a known location.
+
+413
+00:29:50.675 --> 00:29:52.041
+Assignment and batching.
+
+414
+00:29:52.321 --> 00:30:14.635
+Batch matching: every Δt (10 to 30 s) per zone, build a bipartite graph of orders times riders, including soon-available riders;. edge costs come from §6.3;. solve min-cost bipartite matching with the Hungarian algorithm (O(n³), fine for a few hundred) or auction algorithms and greedy heuristics at bigger sizes.
+
+415
+00:30:14.915 --> 00:30:16.067
+Delayed assignment:
+
+416
+00:30:17.417 --> 00:30:20.447
+don't assign immediately if food will take 20 minutes.
+
+417
+00:30:20.727 --> 00:30:28.897
+Wait until the latest good assign time (ready time minus travel time minus buffer);. this keeps riders free for urgent orders.
+
+418
+00:30:29.177 --> 00:30:31.161
+It is a rolling-horizon decision.
+
+419
+00:30:31.441 --> 00:30:50.577
+Batching (two or more orders per rider): candidate pairs share the same or a nearby restaurant, have ready times within a few minutes, and have customers in a similar direction;. evaluate the insertion cost: the extra delay for each order compared with solo delivery, which must stay under thresholds and promises;.
+
+420
+00:30:51.927 --> 00:31:00.610
+this is a vehicle-routing problem with pickup and delivery and time windows (VRPPDTW) for small sets, solved heuristically.
+
+421
+00:31:00.890 --> 00:31:03.087
+Rejections: riders can decline.
+
+422
+00:31:03.367 --> 00:31:10.919
+Model the acceptance probability (distance, pay, rider history) in the cost, so likely-rejected offers aren't made.
+
+423
+00:31:11.199 --> 00:31:12.479
+Public descriptions:
+
+424
+00:31:12.759 --> 00:31:18.818
+Swiggy and DoorDash have blogged about batch dispatch optimisation and assignment timing (VERIFY).
+
+425
+00:31:20.168 --> 00:31:21.725
+Surge and demand shaping.
+
+426
+00:31:22.005 --> 00:31:35.765
+Zone stress metric: for example, (open unassigned orders + expected orders next 15 minutes) ÷ (available riders + riders becoming free in 15 minutes), alongside ETA breach rates.
+
+427
+00:31:36.045 --> 00:31:38.136
+Levers, by escalating thresholds:
+
+428
+00:31:38.416 --> 00:31:39.589
+ETA inflation.
+
+429
+00:31:39.869 --> 00:31:41.939
+Surge fee (a capped step function).
+
+430
+00:31:42.219 --> 00:31:45.440
+Rider incentives (push to nearby offline riders).
+
+431
+00:31:45.720 --> 00:31:46.829
+Radius shrink.
+
+432
+00:31:48.179 --> 00:31:49.523
+Restaurant throttling.
+
+433
+00:31:49.803 --> 00:31:50.806
+Order pausing.
+
+434
+00:31:51.086 --> 00:31:56.910
+Control loop: a PID-like or rule-based controller with hysteresis, so levers don't flap.
+
+435
+00:31:57.190 --> 00:32:01.905
+Experiment carefully, since surge affects both customer trust and rider earnings.
+
+436
+00:32:02.185 --> 00:32:09.673
+Rider repositioning: suggest that idle riders move to hexes with predicted demand, using heatmaps in the rider app.
+
+437
+00:32:11.023 --> 00:32:12.196
+Discovery ranking.
+
+438
+00:32:12.476 --> 00:32:17.084
+Candidates: serviceable restaurants, plus dish-level candidates for search.
+
+439
+00:32:17.364 --> 00:32:20.287
+Model: a multi-objective learning-to-rank model.
+
+440
+00:32:20.567 --> 00:32:26.220
+It predicts P(click), P(order click) and expected satisfaction (a good rating, no complaint).
+
+441
+00:32:26.500 --> 00:32:30.639
+It is combined with ETA and price fit, plus diversity and freshness.
+
+442
+00:32:30.919 --> 00:32:37.767
+Features: user cuisine affinity and embeddings;. restaurant quality (rating, complaint rate, acceptance rate);.
+
+443
+00:32:38.047 --> 00:32:38.772
+ETA;.
+
+444
+00:32:40.122 --> 00:32:45.391
+offers;. time-of-day fit (breakfast places in the morning);. repeat behaviour (Order again).
+
+445
+00:32:45.671 --> 00:32:55.869
+Ads blending: sponsored candidates from an auction (bid times predicted CTR times quality), placed in fixed or labelled slots with relevance thresholds.
+
+446
+00:32:56.149 --> 00:32:59.114
+New restaurants: cold-start exploration slots.
+
+447
+00:33:00.464 --> 00:33:02.768
+Demand forecasting and supply planning.
+
+448
+00:33:03.048 --> 00:33:16.979
+Forecast orders per zone per 15 to 30 minutes for the next day and the next hour, using: history and seasonality;. weather forecasts;. holidays and festivals;. events (cricket matches);. marketing campaigns.
+
+449
+00:33:18.329 --> 00:33:24.835
+Use: rider shift planning, incentive budgets, restaurant prep readiness alerts, and quick-commerce replenishment.
+
+450
+00:33:26.185 --> 00:33:27.359
+Fraud and abuse.
+
+451
+00:33:27.639 --> 00:33:37.409
+Customer refund abuse: frequent missing item claims, linked accounts (device, phone, address, payment instrument graph), photo reuse (perceptual hash).
+
+452
+00:33:37.689 --> 00:33:41.017
+The response is a risk score that gates instant refunds.
+
+453
+00:33:41.297 --> 00:33:45.244
+COD fraud: fake orders and repeated refusals at the door.
+
+454
+00:33:45.524 --> 00:33:48.041
+The response is COD limits per risk tier.
+
+455
+00:33:48.321 --> 00:33:49.409
+Rider fraud:
+
+456
+00:33:49.689 --> 00:33:58.073
+GPS spoofing (mock locations, impossible jumps), marking delivered without delivering, collusion with customers on claims.
+
+457
+00:33:58.353 --> 00:34:01.383
+Detect with sensor consistency and pattern models.
+
+458
+00:34:02.733 --> 00:34:06.359
+Restaurant fraud: fake orders to farm ratings or offers.
+
+459
+00:34:06.639 --> 00:34:10.245
+Use graph analysis of customers, devices and restaurants.
+
+460
+00:34:10.525 --> 00:34:13.810
+Promo abuse: multiple accounts for new-user offers.
+
+461
+00:34:14.090 --> 00:34:16.629
+Use device fingerprinting and account linking.
+
+462
+00:34:17.979 --> 00:34:19.557
+Quick-commerce algorithms.
+
+463
+00:34:19.837 --> 00:34:28.136
+Store slotting: place fast-moving SKUs near the packing station, grouped by co-purchase affinity, to minimise pick path length.
+
+464
+00:34:28.416 --> 00:34:35.605
+Pick routing: a short path through the store (a TSP heuristic on the aisle graph) and batch picking of multiple orders.
+
+465
+00:34:35.885 --> 00:34:44.888
+Replenishment: a forecast per SKU per store per hour, a safety stock for the service level, and constraints from mother warehouse truck schedules.
+
+466
+00:34:45.168 --> 00:34:46.597
+Serviceability promise:
+
+467
+00:34:46.877 --> 00:34:51.464
+10 minutes only if stock is available and the picker and rider queues are short.
+
+468
+00:34:51.744 --> 00:34:54.432
+Otherwise show a longer promise or hide the store.
+
+469
+00:34:55.782 --> 00:34:56.721
+Part 7.
+
+470
+00:34:57.001 --> 00:34:58.323
+Data Architecture.
+
+471
+00:34:59.573 --> 00:35:00.960
+Operational stores.
+
+472
+00:35:01.240 --> 00:35:02.584
+Here is a quick table:
+
+473
+00:35:02.864 --> 00:35:05.040
+Data, and Store (reference), and Notes.
+
+474
+00:35:05.320 --> 00:35:06.579
+Users, addresses.
+
+475
+00:35:06.859 --> 00:35:08.096
+Store (reference):
+
+476
+00:35:08.376 --> 00:35:11.021
+PostgreSQL or MySQL sharded.
+
+477
+00:35:11.301 --> 00:35:12.112
+Notes:
+
+478
+00:35:12.392 --> 00:35:13.864
+Geocoded addresses.
+
+479
+00:35:14.144 --> 00:35:15.488
+Restaurants, menus.
+
+480
+00:35:15.768 --> 00:35:17.005
+Store (reference):
+
+481
+00:35:17.285 --> 00:35:20.101
+PostgreSQL + search index + cache.
+
+482
+00:35:20.381 --> 00:35:21.192
+Notes:
+
+483
+00:35:21.472 --> 00:35:22.645
+Versioned menus.
+
+484
+00:35:22.925 --> 00:35:24.397
+Serviceability tables.
+
+485
+00:35:24.677 --> 00:35:25.915
+Store (reference):
+
+486
+00:35:26.195 --> 00:35:28.435
+Redis or in-memory KV by hex.
+
+487
+00:35:28.715 --> 00:35:29.525
+Notes:
+
+488
+00:35:29.805 --> 00:35:31.235
+Refreshed every minute.
+
+489
+00:35:31.515 --> 00:35:32.304
+Orders.
+
+490
+00:35:32.584 --> 00:35:33.821
+Store (reference):
+
+491
+00:35:34.101 --> 00:35:38.304
+Sharded RDBMS (by order ID) + event log in Kafka.
+
+492
+00:35:38.584 --> 00:35:39.395
+Notes:
+
+493
+00:35:39.675 --> 00:35:40.677
+State machine.
+
+494
+00:35:40.957 --> 00:35:42.472
+Live rider locations.
+
+495
+00:35:42.752 --> 00:35:43.989
+Store (reference):
+
+496
+00:35:44.269 --> 00:35:47.256
+In-memory geo index (Redis geo or custom).
+
+497
+00:35:47.536 --> 00:35:48.347
+Notes:
+
+498
+00:35:48.627 --> 00:35:49.459
+Ephemeral.
+
+499
+00:35:49.739 --> 00:35:51.040
+Location history.
+
+500
+00:35:51.320 --> 00:35:52.557
+Store (reference):
+
+501
+00:35:52.837 --> 00:35:54.949
+Kafka, then Cassandra or lakehouse.
+
+502
+00:35:55.229 --> 00:35:56.040
+Notes:
+
+503
+00:35:56.320 --> 00:35:57.728
+Analytics, disputes.
+
+504
+00:35:58.008 --> 00:35:59.267
+Payments and ledger.
+
+505
+00:35:59.547 --> 00:36:00.784
+Store (reference):
+
+506
+00:36:01.064 --> 00:36:03.197
+PostgreSQL, append-only.
+
+507
+00:36:03.477 --> 00:36:04.288
+Notes:
+
+508
+00:36:04.568 --> 00:36:05.805
+Reconciliation.
+
+509
+00:36:06.085 --> 00:36:07.451
+Ratings and reviews.
+
+510
+00:36:07.731 --> 00:36:08.968
+Store (reference):
+
+511
+00:36:09.248 --> 00:36:11.360
+PostgreSQL + aggregates.
+
+512
+00:36:11.640 --> 00:36:12.451
+Notes:
+
+513
+00:36:12.731 --> 00:36:13.797
+Quality scores.
+
+514
+00:36:15.147 --> 00:36:16.662
+Quick-commerce inventory.
+
+515
+00:36:16.942 --> 00:36:18.179
+Store (reference):
+
+516
+00:36:18.459 --> 00:36:20.721
+Per-store DB with real-time stock.
+
+517
+00:36:21.001 --> 00:36:21.811
+Notes:
+
+518
+00:36:22.091 --> 00:36:23.691
+Reservations at checkout.
+
+519
+00:36:25.041 --> 00:36:26.897
+Analytics and ML platform.
+
+520
+00:36:27.177 --> 00:36:35.391
+Events: feed impressions, clicks, carts, orders, state transitions, rider pings, ETAs predicted versus actual, support tickets.
+
+521
+00:36:35.671 --> 00:36:51.756
+Feature store (online and offline): real-time features (restaurant open orders, zone stress, rider wait times in the last 15 minutes) computed by Flink;. batch features (restaurant historical prep times, user affinities) computed by Spark.
+
+522
+00:36:52.036 --> 00:36:53.081
+ML models:
+
+523
+00:36:53.361 --> 00:37:02.065
+ETA components, prep time, ranking, ads CTR, surge forecasting, fraud, demand forecasting, rider acceptance probability.
+
+524
+00:37:03.415 --> 00:37:18.519
+Warehouse marts: orders and GMV by city and zone;. delivery performance (ETA accuracy, delays by component);. rider utilisation and earnings;. restaurant performance;. unit economics (contribution margin per order).
+
+525
+00:37:18.799 --> 00:37:20.037
+Experimentation:
+
+526
+00:37:21.387 --> 00:37:29.920
+A or B tests on ranking and fees;. switchback experiments for dispatch and surge, where whole zones alternate treatments over time windows.
+
+527
+00:37:30.200 --> 00:37:37.496
+This is needed because marketplace interventions interfere across users (publicly described by DoorDash; VERIFY).
+
+528
+00:37:38.846 --> 00:37:39.827
+Data flow.
+
+529
+00:37:40.107 --> 00:37:41.451
+Here is the diagram.
+
+530
+00:37:45.301 --> 00:37:46.176
+Part 8.
+
+531
+00:37:46.456 --> 00:37:48.141
+Tech Stack (reference choice).
+
+532
+00:37:49.391 --> 00:37:50.735
+Here is a quick table:
+
+533
+00:37:51.015 --> 00:37:52.679
+Layer, and Choice, and Notes.
+
+534
+00:37:52.959 --> 00:37:53.877
+Services.
+
+535
+00:37:54.157 --> 00:37:54.989
+Choice:
+
+536
+00:37:55.269 --> 00:37:59.962
+Java or Kotlin (Spring Boot), Go for high-throughput location and dispatch.
+
+537
+00:38:00.242 --> 00:38:01.159
+Realtime.
+
+538
+00:38:01.439 --> 00:38:02.271
+Choice:
+
+539
+00:38:02.551 --> 00:38:06.242
+WebSockets or MQTT gateways, push notifications.
+
+540
+00:38:06.522 --> 00:38:07.333
+Notes:
+
+541
+00:38:07.613 --> 00:38:09.255
+Tracking, restaurant alerts.
+
+542
+00:38:09.535 --> 00:38:10.282
+Geo.
+
+543
+00:38:10.562 --> 00:38:11.394
+Choice:
+
+544
+00:38:11.674 --> 00:38:15.685
+H3, OSRM or Valhalla or commercial routing, map matching.
+
+545
+00:38:15.965 --> 00:38:16.775
+Notes:
+
+546
+00:38:17.055 --> 00:38:18.143
+Travel times.
+
+547
+00:38:18.423 --> 00:38:19.469
+Datastores.
+
+548
+00:38:19.749 --> 00:38:20.581
+Choice:
+
+549
+00:38:20.861 --> 00:38:27.453
+PostgreSQL or MySQL, Redis, Cassandra or ScyllaDB, DynamoDB-like stores.
+
+550
+00:38:27.733 --> 00:38:28.501
+Search.
+
+551
+00:38:28.781 --> 00:38:29.613
+Choice:
+
+552
+00:38:29.893 --> 00:38:31.770
+Elasticsearch or OpenSearch.
+
+553
+00:38:32.050 --> 00:38:32.861
+Notes:
+
+554
+00:38:33.141 --> 00:38:34.485
+Dishes, restaurants.
+
+555
+00:38:34.765 --> 00:38:35.618
+Streaming.
+
+556
+00:38:35.898 --> 00:38:36.730
+Choice:
+
+557
+00:38:37.010 --> 00:38:38.077
+Kafka, Flink.
+
+558
+00:38:38.357 --> 00:38:39.167
+Notes:
+
+559
+00:38:39.447 --> 00:38:40.919
+Features, zone state.
+
+560
+00:38:42.269 --> 00:38:43.016
+ML.
+
+561
+00:38:43.296 --> 00:38:44.128
+Choice:
+
+562
+00:38:44.408 --> 00:38:50.851
+Python, XGBoost or LightGBM, PyTorch or TensorFlow, feature store, model serving.
+
+563
+00:38:51.131 --> 00:38:51.941
+Notes:
+
+564
+00:38:52.221 --> 00:38:53.352
+ETA, ranking.
+
+565
+00:38:53.632 --> 00:38:54.784
+Optimisation.
+
+566
+00:38:55.064 --> 00:38:55.896
+Choice:
+
+567
+00:38:56.176 --> 00:39:00.528
+Custom Hungarian or auction solvers, OR-Tools for routing experiments.
+
+568
+00:39:00.808 --> 00:39:01.619
+Notes:
+
+569
+00:39:01.899 --> 00:39:02.816
+Dispatch.
+
+570
+00:39:03.096 --> 00:39:04.056
+Lakehouse.
+
+571
+00:39:04.336 --> 00:39:05.168
+Choice:
+
+572
+00:39:05.448 --> 00:39:10.739
+Spark, Iceberg or Delta or Hudi, Trino or Presto, Snowflake or BigQuery.
+
+573
+00:39:11.019 --> 00:39:11.829
+Notes:
+
+574
+00:39:12.109 --> 00:39:13.069
+Analytics.
+
+575
+00:39:13.349 --> 00:39:15.333
+Publicly described (VERIFY).
+
+576
+00:39:15.613 --> 00:39:16.445
+Choice:
+
+577
+00:39:16.725 --> 00:39:17.451
+Swiggy:
+
+578
+00:39:17.731 --> 00:39:22.915
+Java or Go microservices, Kafka, ML platform for ETA and assignment.
+
+579
+00:39:23.195 --> 00:39:23.984
+Zomato:
+
+580
+00:39:24.264 --> 00:39:28.979
+AWS, Go or Java or PHP history, real-time features with Flink.
+
+581
+00:39:29.259 --> 00:39:30.219
+DoorDash:
+
+582
+00:39:30.499 --> 00:39:34.083
+Kotlin microservices, Kafka, Flink, switchback testing.
+
+583
+00:39:34.363 --> 00:39:35.173
+Notes:
+
+584
+00:39:35.453 --> 00:39:36.904
+From engineering blogs.
+
+585
+00:39:38.254 --> 00:39:39.150
+Part 9.
+
+586
+00:39:39.430 --> 00:39:41.670
+Security, Privacy and Compliance.
+
+587
+00:39:42.920 --> 00:39:49.085
+Food safety: an FSSAI licence is required for listing restaurants, and displayed (VERIFY).
+
+588
+00:39:49.365 --> 00:39:50.112
+Tax:
+
+589
+00:39:50.392 --> 00:39:58.755
+GST on restaurant services through e-commerce operators is collected and paid by the platform (Section 9(5), VERIFY).
+
+590
+00:39:59.035 --> 00:40:01.360
+TCS or TDS on settlements.
+
+591
+00:40:01.640 --> 00:40:02.941
+Invoices per order.
+
+592
+00:40:03.221 --> 00:40:10.283
+Gig workers: the Code on Social Security includes gig and platform workers (VERIFY notification status);.
+
+593
+00:40:11.633 --> 00:40:24.539
+state laws (for example, Rajasthan's 2023 act, Karnataka's ordinance or act; VERIFY) may require registration, welfare fees and transparency on algorithms and payouts.
+
+594
+00:40:24.819 --> 00:40:30.345
+Designs should support earnings transparency, grievance redressal and data on working hours.
+
+595
+00:40:30.625 --> 00:40:41.014
+Consumer protection: transparent fees (no drip pricing), clear cancellation and refund policies, grievance officers, and dark patterns guidelines (VERIFY).
+
+596
+00:40:41.294 --> 00:40:42.211
+Privacy:
+
+597
+00:40:43.561 --> 00:40:52.244
+masked phone numbers;. rider locations shown only during active orders;. customer addresses visible to riders only during delivery;.
+
+598
+00:40:52.524 --> 00:40:54.380
+DPDP Act compliance.
+
+599
+00:40:54.660 --> 00:40:55.513
+Payments:
+
+600
+00:40:55.793 --> 00:40:59.697
+PCI-DSS, tokenisation and RBI rules (VERIFY).
+
+601
+00:40:59.977 --> 00:41:01.108
+Rider safety:
+
+602
+00:41:01.388 --> 00:41:06.081
+SOS button, insurance, and no penalties that encourage unsafe speeding.
+
+603
+00:41:06.361 --> 00:41:13.401
+Avoid ETAs that pressure riders unrealistically, a point raised publicly about 10-minute delivery (VERIFY).
+
+604
+00:41:14.751 --> 00:41:15.605
+Part 10.
+
+605
+00:41:15.885 --> 00:41:17.805
+Reliability and Operations.
+
+606
+00:41:19.055 --> 00:41:33.156
+Peak readiness: pre-scale for dinner and events;. load-test order placement;. protect the critical path (place order, restaurant notification, dispatch, tracking);. shed non-critical features (recommendation widgets) first.
+
+607
+00:41:33.436 --> 00:41:39.196
+Degraded modes: if the ETA model fails, fall back to heuristic ETAs from zone averages;.
+
+608
+00:41:40.546 --> 00:41:50.679
+if dispatch optimisation is slow, fall back to a greedy nearest-rider assignment;. if the restaurant app is offline, fall back to automated calls (IVR).
+
+609
+00:41:50.959 --> 00:42:00.431
+City ops centre: dashboards per zone (stress, breach rates, rider supply), manual levers and incident playbooks for rain, festivals and outages.
+
+610
+00:42:00.711 --> 00:42:04.423
+Observability: order funnel conversion;. acceptance times;.
+
+611
+00:42:05.773 --> 00:42:08.824
+rider assignment delay;. rider wait at restaurants;.
+
+612
+00:42:09.104 --> 00:42:13.925
+ETA error by component;. complaint rates;. refund costs;. payment success.
+
+613
+00:42:14.205 --> 00:42:22.739
+Restaurant reliability: acceptance rate, cancellation rate, prep accuracy and complaint rate are fed back into ranking and onboarding.
+
+614
+00:42:24.089 --> 00:42:25.091
+Part 11.
+
+615
+00:42:25.371 --> 00:42:26.417
+Key Trade-offs.
+
+616
+00:42:27.667 --> 00:42:29.011
+Here is a quick table:
+
+617
+00:42:29.291 --> 00:42:31.808
+Decision, and Chosen, and Accepted cost.
+
+618
+00:42:32.088 --> 00:42:33.112
+ETA promise.
+
+619
+00:42:33.392 --> 00:42:34.224
+Chosen:
+
+620
+00:42:34.504 --> 00:42:35.955
+Conservative quantile.
+
+621
+00:42:36.235 --> 00:42:37.408
+Accepted cost:
+
+622
+00:42:37.688 --> 00:42:39.693
+Some lost orders from longer ETAs.
+
+623
+00:42:39.973 --> 00:42:41.147
+Dispatch timing.
+
+624
+00:42:41.427 --> 00:42:42.259
+Chosen:
+
+625
+00:42:42.539 --> 00:42:44.949
+Delayed assignment until near food-ready.
+
+626
+00:42:45.229 --> 00:42:46.403
+Accepted cost:
+
+627
+00:42:46.683 --> 00:42:48.539
+Risk if prep predictions are wrong.
+
+628
+00:42:48.819 --> 00:42:49.651
+Batching.
+
+629
+00:42:49.931 --> 00:42:50.763
+Chosen:
+
+630
+00:42:51.043 --> 00:42:52.813
+When delay is within thresholds.
+
+631
+00:42:53.093 --> 00:42:54.267
+Accepted cost:
+
+632
+00:42:54.547 --> 00:42:56.445
+Some customers wait a bit longer.
+
+633
+00:42:56.725 --> 00:42:57.707
+Peak levers.
+
+634
+00:42:57.987 --> 00:42:58.819
+Chosen:
+
+635
+00:42:59.099 --> 00:43:01.787
+Graduated surge, radius shrink, throttle.
+
+636
+00:43:02.067 --> 00:43:03.240
+Accepted cost:
+
+637
+00:43:03.520 --> 00:43:05.611
+Lost demand, customer annoyance.
+
+638
+00:43:05.891 --> 00:43:06.744
+Refunds.
+
+639
+00:43:07.024 --> 00:43:07.856
+Chosen:
+
+640
+00:43:08.136 --> 00:43:10.013
+Instant for low-risk customers.
+
+641
+00:43:10.293 --> 00:43:11.467
+Accepted cost:
+
+642
+00:43:11.747 --> 00:43:12.984
+Some abuse losses.
+
+643
+00:43:13.264 --> 00:43:14.373
+Serviceability.
+
+644
+00:43:14.653 --> 00:43:15.485
+Chosen:
+
+645
+00:43:15.765 --> 00:43:17.365
+Precomputed every minute.
+
+646
+00:43:17.645 --> 00:43:18.819
+Accepted cost:
+
+647
+00:43:19.099 --> 00:43:21.403
+Slight staleness; re-check at checkout.
+
+648
+00:43:21.683 --> 00:43:22.899
+Experimentation.
+
+649
+00:43:23.179 --> 00:43:24.011
+Chosen:
+
+650
+00:43:24.291 --> 00:43:26.232
+Switchback for marketplace levers.
+
+651
+00:43:26.512 --> 00:43:27.685
+Accepted cost:
+
+652
+00:43:27.965 --> 00:43:29.523
+Slower, noisier results.
+
+653
+00:43:29.803 --> 00:43:30.805
+Quick commerce.
+
+654
+00:43:31.085 --> 00:43:31.917
+Chosen:
+
+655
+00:43:32.197 --> 00:43:33.819
+Dark stores near customers.
+
+656
+00:43:34.099 --> 00:43:35.272
+Accepted cost:
+
+657
+00:43:35.552 --> 00:43:37.856
+High fixed costs, limited assortment.
+
+658
+00:43:39.206 --> 00:43:40.145
+Part 12.
+
+659
+00:43:40.425 --> 00:43:41.769
+Interview Q and A.
+
+660
+00:43:43.019 --> 00:43:43.851
+Beginner.
+
+661
+00:43:44.131 --> 00:43:45.155
+Question 1.
+
+662
+00:43:45.435 --> 00:43:47.568
+What are the steps of a food delivery order?
+
+663
+00:43:47.848 --> 00:43:49.213
+Thirty-second answer:
+
+664
+00:43:49.493 --> 00:44:07.243
+Order placed and paid, restaurant accepts with a prep time, a rider is assigned timed to food readiness, rider picks up, delivers with live tracking, and the order is rated and settled, each step is a state transition event consumed by notifications, tracking, ETA and settlements.
+
+665
+00:44:08.593 --> 00:44:09.595
+Question 2.
+
+666
+00:44:09.875 --> 00:44:12.691
+How do you show which restaurants can deliver to me right now?
+
+667
+00:44:12.971 --> 00:44:14.337
+Thirty-second answer:
+
+668
+00:44:14.617 --> 00:44:27.822
+Map the customer location to a hexagon and look up a precomputed serviceability table per (restaurant, hex) refreshed every minute from restaurant status, distance, zone stress and fees; re-check at checkout.
+
+669
+00:44:29.172 --> 00:44:30.217
+Question 3.
+
+670
+00:44:30.497 --> 00:44:32.417
+How is live rider tracking built?
+
+671
+00:44:32.697 --> 00:44:34.063
+Thirty-second answer:
+
+672
+00:44:34.343 --> 00:44:51.687
+The rider app sends GPS every few seconds; the server snaps to roads and filters noise, updates an in-memory geo index and streams positions to the customer through a realtime gateway; the client animates between points; ETA is recomputed as the rider moves.
+
+673
+00:44:53.037 --> 00:44:54.103
+Question 4.
+
+674
+00:44:54.383 --> 00:44:56.773
+Why does the delivery fee change in the rain?
+
+675
+00:44:57.053 --> 00:44:58.418
+Thirty-second answer:
+
+676
+00:44:58.698 --> 00:45:09.279
+Demand rises and rider supply falls; a surge fee funds rider incentives and tempers demand so ETAs stay honest, part of graduated zone-level levers.
+
+677
+00:45:10.629 --> 00:45:11.632
+Intermediate.
+
+678
+00:45:11.912 --> 00:45:13.021
+Question 5.
+
+679
+00:45:13.301 --> 00:45:15.093
+How would you predict delivery ETA?
+
+680
+00:45:15.373 --> 00:45:16.739
+Thirty-second answer:
+
+681
+00:45:17.019 --> 00:45:37.563
+Decompose it into acceptance, dispatch, max(rider-to-restaurant, prep remaining), pickup, travel to customer and last mile; model each with ML (quantile regression) using features like restaurant load, travel time matrices, weather and building history; promise a conservative quantile and update after each event.
+
+682
+00:45:38.913 --> 00:45:40.022
+Question 6.
+
+683
+00:45:40.302 --> 00:45:44.654
+How do you predict restaurant prep time when 'food ready' taps are unreliable?
+
+684
+00:45:44.934 --> 00:45:46.299
+Thirty-second answer:
+
+685
+00:45:46.579 --> 00:46:02.259
+Use restaurant, items, kitchen load, time of day and staff estimate as features, and derive labels from rider arrival and pickup times treating them as censored observations (rider waited versus food waited); correct each restaurant's bias.
+
+686
+00:46:03.609 --> 00:46:04.697
+Question 7.
+
+687
+00:46:04.977 --> 00:46:06.407
+How do you price a cart?
+
+688
+00:46:06.687 --> 00:46:08.052
+Thirty-second answer:
+
+689
+00:46:08.332 --> 00:46:24.481
+Item and add-on prices, packaging, distance and surge delivery fee, platform fee, GST per rules, offers with eligibility and stacking rules and funding attribution, optional tip; store a price snapshot with the order for invoices and settlements.
+
+690
+00:46:25.831 --> 00:46:26.855
+Question 8.
+
+691
+00:46:27.135 --> 00:46:31.103
+What happens when a restaurant marks an item out of stock after ordering?
+
+692
+00:46:31.383 --> 00:46:32.749
+Thirty-second answer:
+
+693
+00:46:33.029 --> 00:46:44.741
+Notify the customer with substitution options or a partial refund with a timeout default, update the order and price snapshot, adjust the settlement, and track restaurant reliability.
+
+694
+00:46:46.091 --> 00:46:47.157
+Question 9.
+
+695
+00:46:47.437 --> 00:46:50.957
+How do you handle missing-item complaints without being exploited?
+
+696
+00:46:51.237 --> 00:46:52.603
+Thirty-second answer:
+
+697
+00:46:52.883 --> 00:47:07.667
+Self-serve refunds gated by a risk score built from complaint history, account linking graphs, order value and photo checks; instant for low-risk, agent review for high-risk; attribute costs to restaurant or rider by evidence.
+
+698
+00:47:09.017 --> 00:47:09.785
+Senior.
+
+699
+00:47:10.065 --> 00:47:11.110
+Question 10.
+
+700
+00:47:11.390 --> 00:47:13.374
+Design dispatch for food delivery.
+
+701
+00:47:13.654 --> 00:47:15.019
+Thirty-second answer:
+
+702
+00:47:15.299 --> 00:47:35.011
+Per zone every 10 to 30 s, collect unassigned orders and available or soon-available riders, compute costs from travel, rider wait, food wait, promise delay, fairness and acceptance probability, delay assignment until near food-ready, solve min-cost matching, evaluate batching via insertion cost,
+
+703
+00:47:35.291 --> 00:47:39.686
+offer to riders and re-pool on rejection; fall back to greedy under load.
+
+704
+00:47:41.036 --> 00:47:42.167
+Question 11.
+
+705
+00:47:42.447 --> 00:47:44.857
+How do you manage a demand spike when it rains?
+
+706
+00:47:45.137 --> 00:47:46.503
+Thirty-second answer:
+
+707
+00:47:46.783 --> 00:48:00.564
+Measure zone stress and apply graduated levers, honest ETAs, surge fees, rider incentives, radius shrink, more batching, restaurant throttling, pausing, with hysteresis and ops overrides; recover gradually.
+
+708
+00:48:01.914 --> 00:48:03.002
+Question 12.
+
+709
+00:48:03.282 --> 00:48:05.927
+How do you test changes to dispatch or surge?
+
+710
+00:48:06.207 --> 00:48:07.573
+Thirty-second answer:
+
+711
+00:48:07.853 --> 00:48:24.685
+Marketplace interventions interfere across users, so use switchback experiments, alternate treatment and control by zone and time window, plus simulation on historical data before launch, with metrics on ETA accuracy, rider utilisation, cost and conversion.
+
+712
+00:48:26.035 --> 00:48:27.315
+Question 13.
+
+713
+00:48:27.595 --> 00:48:29.856
+How would you rank restaurants in the home feed?
+
+714
+00:48:30.136 --> 00:48:31.501
+Thirty-second answer:
+
+715
+00:48:31.781 --> 00:48:48.187
+Multi-objective learning-to-rank predicting click, order and satisfaction, combined with ETA, price fit, offers, quality and time-of-day fit, user embeddings and repeat behaviour, plus labelled ads from an auction, diversity and cold-start exploration.
+
+716
+00:48:49.537 --> 00:48:50.731
+Question 14.
+
+717
+00:48:51.011 --> 00:48:53.486
+How do you detect rider GPS spoofing?
+
+718
+00:48:53.766 --> 00:48:55.131
+Thirty-second answer:
+
+719
+00:48:55.411 --> 00:49:09.449
+Check for mock-location flags, impossible speeds and jumps, mismatch between GPS and network or sensor data, deliveries marked without approaching the customer, and patterns across riders; apply holds and reviews.
+
+720
+00:49:10.799 --> 00:49:11.695
+Architect.
+
+721
+00:49:11.975 --> 00:49:13.169
+Question 15.
+
+722
+00:49:13.449 --> 00:49:17.289
+Design a food delivery platform for 3 million orders a day.
+
+723
+00:49:17.569 --> 00:49:18.935
+Thirty-second answer:
+
+724
+00:49:19.215 --> 00:49:41.337
+Hex and zone geo model; precomputed serviceability; personalised feed and search; cart and pricing with offers; event-sourced order management; prep and ETA models; batch dispatch with delayed assignment and batching; live tracking; graduated peak levers; ledgers for settlements; Kafka, Flink features and a lakehouse with switchback experiments.
+
+725
+00:49:42.687 --> 00:49:43.882
+Question 16.
+
+726
+00:49:44.162 --> 00:49:47.426
+How do you improve unit economics without hurting customers?
+
+727
+00:49:47.706 --> 00:49:49.071
+Thirty-second answer:
+
+728
+00:49:49.351 --> 00:50:06.994
+Increase rider utilisation through better prep prediction and delayed assignment, batching within delay thresholds, demand shaping, reducing refunds via quality and fraud controls, optimising offer spend with targeting and budgets, and measuring contribution margin per order by zone.
+
+729
+00:50:08.344 --> 00:50:09.688
+Question 17.
+
+730
+00:50:09.968 --> 00:50:12.336
+What real-time data platform would you build?
+
+731
+00:50:12.616 --> 00:50:13.981
+Thirty-second answer:
+
+732
+00:50:14.261 --> 00:50:33.440
+Kafka for all app and order events, Flink for real-time features (restaurant load, zone stress, rider waits) into an online feature store and serviceability tables, a lakehouse for training and analytics, model serving for ETA, dispatch and ranking, and an experimentation platform supporting switchbacks.
+
+733
+00:50:34.790 --> 00:50:35.963
+Question 18.
+
+734
+00:50:36.243 --> 00:50:39.059
+How is quick commerce different from restaurant delivery?
+
+735
+00:50:39.339 --> 00:50:40.705
+Thirty-second answer:
+
+736
+00:50:40.985 --> 00:50:58.670
+The platform controls the supply node (dark store), so prep becomes picking with slotting and pick routing, inventory and replenishment forecasting become core, riders wait at stores for instant assignment, distances are short, and the 10-minute promise depends on stock and queue checks.
+
+737
+00:51:00.020 --> 00:51:01.257
+Question 19.
+
+738
+00:51:01.537 --> 00:51:04.951
+How would you design for gig worker regulations and fairness?
+
+739
+00:51:05.231 --> 00:51:06.596
+Thirty-second answer:
+
+740
+00:51:06.876 --> 00:51:25.756
+Transparent earnings breakdowns, explainable assignment and incentive rules, grievance workflows, records of working hours and earnings for welfare contributions, safety features and insurance, no penalties that encourage unsafe driving, and auditability of algorithms where laws require (VERIFY).
+
+741
+00:51:27.106 --> 00:51:28.215
+Question 20.
+
+742
+00:51:28.495 --> 00:51:30.501
+Compare food delivery with ride-hailing.
+
+743
+00:51:30.781 --> 00:51:32.146
+Thirty-second answer:
+
+744
+00:51:32.426 --> 00:51:53.247
+Both match moving supply with demand in real time using geo indexes, ETAs and surge; food delivery adds a third party (restaurant) with uncertain prep time, perishable goods, batching across orders and timing assignments to readiness, while ride-hailing matches people directly with pickup immediacy and pooling constraints.
+
+745
+00:51:54.597 --> 00:51:55.643
+Part 13.
+
+746
+00:51:55.923 --> 00:51:56.691
+Summary.
+
+747
+00:51:57.941 --> 00:52:02.954
+Food delivery is a three-sided, real-time marketplace with perishable goods.
+
+748
+00:52:03.234 --> 00:52:08.653
+Every decision balances customer speed, rider utilisation and restaurant efficiency.
+
+749
+00:52:08.933 --> 00:52:14.415
+Hexagons and zones organise the city for serviceability, ETAs, surge and dispatch.
+
+750
+00:52:14.695 --> 00:52:18.045
+Serviceability is precomputed and re-checked at checkout.
+
+751
+00:52:18.325 --> 00:52:20.351
+ETA is decomposed into parts.
+
+752
+00:52:20.631 --> 00:52:23.383
+Prep-time models learn from rider wait signals.
+
+753
+00:52:23.663 --> 00:52:29.039
+Dispatch delays assignment until near food-ready and batches orders within delay limits.
+
+754
+00:52:30.389 --> 00:52:34.101
+Peak handling uses graduated zone levers with hysteresis.
+
+755
+00:52:34.381 --> 00:52:37.859
+Marketplace changes are tested with switchback experiments.
+
+756
+00:52:38.139 --> 00:52:41.701
+Settlements, refunds and fraud need ledgers and risk scoring.
+
+757
+00:52:41.981 --> 00:52:45.693
+Quick commerce adds dark-store picking, slotting and replenishment.
+
+758
+00:52:47.043 --> 00:52:48.281
+Related chapters.
+
+759
+00:52:48.561 --> 00:52:51.931
+Ch 47, Delivery Dispatch and Live Tracking.
+
+760
+00:52:52.211 --> 00:52:54.665
+Ch 48, Delivery Slot Booking.
+
+761
+00:52:54.945 --> 00:52:57.419
+Ch 49, Pricing and Coupons.
+
+762
+00:52:57.699 --> 00:52:59.577
+I05, Ride-Hailing.
+
+763
+00:52:59.857 --> 00:53:01.286
+I12, Logistics.
+
+764
+00:53:01.566 --> 00:53:04.019
+This is the last design in the Industry tab.
+
+765
+00:53:04.299 --> 00:53:06.582
+Return to the Industry Designs index.
+
+766
+00:53:07.932 --> 00:53:09.532
+That's the end of this chapter.
+
+767
+00:53:09.812 --> 00:53:15.849
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+768
+00:53:16.129 --> 00:53:17.580
+See you in the next chapter.
+

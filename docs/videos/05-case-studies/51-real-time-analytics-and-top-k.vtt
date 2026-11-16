@@ -1,0 +1,3250 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:04.214
+Real-time Analytics and Top-K (Trending).
+
+3
+00:00:04.494 --> 00:00:08.697
+Chapter 51, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:10.447 --> 00:00:11.407
+At a glance:
+
+5
+00:00:11.687 --> 00:00:12.860
+Chapter at a glance.
+
+6
+00:00:13.140 --> 00:00:14.143
+Reader bands:
+
+7
+00:00:14.423 --> 00:00:16.705
+B2, then B4, Prerequisites:
+
+8
+00:00:16.985 --> 00:00:25.007
+Ch 11 (scatter-gather top-K), Ch 14 (Kafka), Ch 21 (event-time windows, watermarks, OLAP).
+
+9
+00:00:25.287 --> 00:00:40.135
+What you will build: the live numbers behind the platform: top products right now per city;. a trending shelf in the app;. live dashboards of orders, active customers and store load;. ad and promotion click counts that finance will reconcile.
+
+10
+00:00:41.485 --> 00:00:47.159
+This is the classic design top-K or trending or ad-click aggregation interview question.
+
+11
+00:00:47.439 --> 00:00:52.303
+Ch 21 covered event-time windows and batch-versus-stream correctness.
+
+12
+00:00:52.583 --> 00:00:59.431
+This chapter is about counting at scale with bounded memory, merging partial answers correctly, and defining trending.
+
+13
+00:00:59.711 --> 00:01:00.970
+What the labs measured:
+
+14
+00:01:01.250 --> 00:01:02.679
+L1: heavy hitters.
+
+15
+00:01:02.959 --> 00:01:07.333
+20M views over 845k distinct SKUs:
+
+16
+00:01:07.613 --> 00:01:11.901
+An exact hash map needed ~64.5 MB of state.
+
+17
+00:01:12.181 --> 00:01:18.773
+Count-Min + heap found the true top-100 with 0.12% count error in 2 MB.
+
+18
+00:01:20.123 --> 00:01:23.728
+Space-Saving found it exactly in 47 KB.
+
+19
+00:01:24.008 --> 00:01:28.488
+A 1% sample found 99 or 100 with 5% error.
+
+20
+00:01:28.768 --> 00:01:30.880
+L2: merging across partitions.
+
+21
+00:01:31.160 --> 00:01:32.760
+16 city partitions:
+
+22
+00:01:33.040 --> 00:01:38.757
+Merging local top-10s found only 6 of the true national top-10, with 5 wrong counts.
+
+23
+00:01:39.037 --> 00:01:49.064
+TPUT (a three-phase threshold algorithm) was exact while sending 4,950 pairs instead of 1.51M for a full shuffle.
+
+24
+00:01:50.414 --> 00:01:52.718
+L3: unique counts (real Redis).
+
+25
+00:01:52.998 --> 00:01:57.329
+Daily active customers across 1,200 store-hour keys:
+
+26
+00:01:57.609 --> 00:01:58.654
+Exact sets:
+
+27
+00:01:58.934 --> 00:02:03.670
+366.7 MB, and a 3.96 s union.
+
+28
+00:02:03.950 --> 00:02:05.187
+HyperLogLog:
+
+29
+00:02:05.467 --> 00:02:11.014
+16.5 MB, 24 ms, +0.51% error.
+
+30
+00:02:11.294 --> 00:02:16.585
+Adding up per-key unique counts overstated the truth by +316%.
+
+31
+00:02:16.865 --> 00:02:19.041
+L4: trending is not popular.
+
+32
+00:02:19.321 --> 00:02:21.987
+The most-viewed shelf was 8% real trends.
+
+33
+00:02:23.337 --> 00:02:26.495
+Growth-ratio ranking was 5% real trends.
+
+34
+00:02:26.775 --> 00:02:37.143
+A seasonality-aware z-score with a volume floor was 92% real trends, catching 31 of 40 injected trends with a 1-hour median delay.
+
+35
+00:02:37.423 --> 00:02:38.404
+Reading time:
+
+36
+00:02:38.684 --> 00:02:40.305
+100 min + code.
+
+37
+00:02:41.655 --> 00:02:42.509
+Part 1.
+
+38
+00:02:42.789 --> 00:02:44.709
+Introduction and Why It Matters.
+
+39
+00:02:45.959 --> 00:02:48.839
+A story: the trending shelf that only sold milk.
+
+40
+00:02:49.119 --> 00:03:00.852
+The first Trending near you shelf ran SELECT sku, count() FROM views WHERE ts now() - interval '1 hour' GROUP BY sku ORDER BY 2 DESC LIMIT 10 on the analytics replica every minute.
+
+41
+00:03:01.132 --> 00:03:02.753
+It went wrong in several ways:
+
+42
+00:03:03.033 --> 00:03:06.532
+It always showed milk, bread, onions, tomatoes and eggs.
+
+43
+00:03:06.812 --> 00:03:08.604
+They were popular, not trending.
+
+44
+00:03:08.884 --> 00:03:12.852
+The mango-festival spike a marketing team had paid for never appeared.
+
+45
+00:03:13.132 --> 00:03:14.561
+The query slowed down.
+
+46
+00:03:14.841 --> 00:03:19.748
+At 50k views per second, the hourly GROUP BY scanned 180M rows.
+
+47
+00:03:20.028 --> 00:03:24.167
+It took 40 seconds, then 3 minutes, and then the replica fell behind.
+
+48
+00:03:25.517 --> 00:03:31.746
+The rewrite split counting across 16 stream partitions, each keeping its own top-10, and merged them.
+
+49
+00:03:32.026 --> 00:03:35.013
+Items popular everywhere but top nowhere vanished.
+
+50
+00:03:35.293 --> 00:03:38.087
+Finance noticed the numbers didn't match the warehouse.
+
+51
+00:03:38.367 --> 00:03:43.701
+Daily active customers on the ops dashboard was the sum of hourly store-level uniques.
+
+52
+00:03:43.981 --> 00:03:48.503
+It said 6 million on a day the platform had 1.5 million customers.
+
+53
+00:03:48.783 --> 00:03:51.322
+The fix for (2) switched to growth ratios.
+
+54
+00:03:51.602 --> 00:03:54.738
+The shelf filled with items that went from 1 view to 4.
+
+55
+00:03:56.088 --> 00:04:07.117
+Real-time analytics is stream processing plus counting theory: what you can count exactly, what you must approximate, what merges correctly, and what question you are actually asking.
+
+56
+00:04:08.467 --> 00:04:09.150
+Quote:
+
+57
+00:04:09.430 --> 00:04:11.094
+The thesis of this chapter.
+
+58
+00:04:11.374 --> 00:04:13.977
+Count with sketches when the key space is large.
+
+59
+00:04:14.257 --> 00:04:22.811
+Heavy hitters (Count-Min, Space-Saving) and distinct counts (HyperLogLog) give bounded-memory answers with known error (L1, L3).
+
+60
+00:04:23.091 --> 00:04:25.310
+Partial answers must merge correctly.
+
+61
+00:04:25.590 --> 00:04:27.489
+Local top-K lists don't merge.
+
+62
+00:04:27.769 --> 00:04:31.993
+Partition by the ranking key or use threshold algorithms (L2).
+
+63
+00:04:32.273 --> 00:04:35.409
+Distinct counts don't add, but sketches merge (L3).
+
+64
+00:04:35.689 --> 00:04:36.969
+Define the question.
+
+65
+00:04:37.249 --> 00:04:44.566
+Trending is per-item anomaly detection against a seasonal baseline, with a volume floor, not most views (L4).
+
+66
+00:04:45.916 --> 00:04:52.231
+Serve pre-aggregated rollups and sketches from a store built for it, and reconcile the streaming numbers with batch.
+
+67
+00:04:53.581 --> 00:04:55.031
+What we compute, and where.
+
+68
+00:04:55.311 --> 00:04:56.655
+Here is a quick table:
+
+69
+00:04:56.935 --> 00:05:00.455
+Metric, and Question, and Freshness, and Technique, and Serving.
+
+70
+00:05:00.735 --> 00:05:02.250
+Top products per city.
+
+71
+00:05:02.530 --> 00:05:03.405
+Question:
+
+72
+00:05:03.685 --> 00:05:05.541
+Heavy hitters in a sliding hour.
+
+73
+00:05:05.821 --> 00:05:07.613
+Freshness: ~10 s.
+
+74
+00:05:07.893 --> 00:05:08.725
+Technique:
+
+75
+00:05:09.005 --> 00:05:11.714
+Space-Saving or Count-Min per city partition.
+
+76
+00:05:11.994 --> 00:05:12.783
+Serving:
+
+77
+00:05:13.063 --> 00:05:14.279
+Redis sorted sets.
+
+78
+00:05:14.559 --> 00:05:15.605
+Trending shelf.
+
+79
+00:05:15.885 --> 00:05:16.759
+Question:
+
+80
+00:05:17.039 --> 00:05:19.450
+Items surging versus their own baseline.
+
+81
+00:05:19.730 --> 00:05:21.437
+Freshness: ~1 min.
+
+82
+00:05:21.717 --> 00:05:22.549
+Technique:
+
+83
+00:05:22.829 --> 00:05:25.623
+Per-SKU seasonal baseline + z-score.
+
+84
+00:05:25.903 --> 00:05:26.693
+Serving:
+
+85
+00:05:26.973 --> 00:05:28.061
+Redis, then app.
+
+86
+00:05:28.341 --> 00:05:29.578
+Active customers.
+
+87
+00:05:29.858 --> 00:05:30.733
+Question:
+
+88
+00:05:31.013 --> 00:05:33.487
+Distinct users per store or hour per day.
+
+89
+00:05:33.767 --> 00:05:35.474
+Freshness: ~1 min.
+
+90
+00:05:35.754 --> 00:05:36.586
+Technique:
+
+91
+00:05:36.866 --> 00:05:39.170
+HyperLogLog per store-hour, merged.
+
+92
+00:05:39.450 --> 00:05:40.239
+Serving:
+
+93
+00:05:40.519 --> 00:05:41.607
+Redis or OLAP.
+
+94
+00:05:41.887 --> 00:05:43.786
+Orders and GMV dashboards.
+
+95
+00:05:44.066 --> 00:05:44.941
+Question:
+
+96
+00:05:45.221 --> 00:05:47.034
+Sums by store, city, minute.
+
+97
+00:05:47.314 --> 00:05:49.106
+Freshness: ~5 s.
+
+98
+00:05:49.386 --> 00:05:50.218
+Technique:
+
+99
+00:05:50.498 --> 00:05:52.290
+Windowed aggregation, rollups.
+
+100
+00:05:52.570 --> 00:05:53.359
+Serving:
+
+101
+00:05:53.639 --> 00:05:55.517
+Pinot or Druid or ClickHouse.
+
+102
+00:05:56.867 --> 00:05:58.275
+Ad and promo clicks.
+
+103
+00:05:58.555 --> 00:05:59.429
+Question:
+
+104
+00:05:59.709 --> 00:06:01.203
+Exact counts for billing.
+
+105
+00:06:01.483 --> 00:06:02.357
+Freshness:
+
+106
+00:06:02.637 --> 00:06:03.917
+Minutes, and exact.
+
+107
+00:06:04.197 --> 00:06:05.029
+Technique:
+
+108
+00:06:05.309 --> 00:06:09.149
+Dedup by click id, exactly-once sinks, batch reconcile.
+
+109
+00:06:09.429 --> 00:06:10.219
+Serving:
+
+110
+00:06:10.499 --> 00:06:11.885
+OLAP + warehouse.
+
+111
+00:06:13.235 --> 00:06:14.558
+Learning objectives.
+
+112
+00:06:14.838 --> 00:06:16.737
+By the end you will be able to:
+
+113
+00:06:17.017 --> 00:06:20.793
+Find heavy hitters with bounded memory and known error (L1).
+
+114
+00:06:21.073 --> 00:06:24.571
+Merge distributed partial aggregates correctly (L2).
+
+115
+00:06:24.851 --> 00:06:29.395
+Count distinct users at scale and roll counts up across dimensions (L3).
+
+116
+00:06:29.675 --> 00:06:32.491
+Detect trends rather than popularity (L4).
+
+117
+00:06:32.771 --> 00:06:38.979
+Design the streaming pipeline, OLAP serving, exactly-once counting for billing, and reconciliation.
+
+118
+00:06:40.329 --> 00:06:41.204
+Part 2.
+
+119
+00:06:41.484 --> 00:06:43.361
+Core Concepts, Beginner to Deep.
+
+120
+00:06:44.611 --> 00:06:47.022
+Intuition: counting cars on a highway.
+
+121
+00:06:47.302 --> 00:06:55.323
+You can't write down every car's number plate to answer which car models are most common today? but you can keep tallies for the models you see most.
+
+122
+00:06:55.603 --> 00:07:02.131
+How many different cars passed? can be estimated from the rarest patterns in the plates, without storing every plate.
+
+123
+00:07:02.411 --> 00:07:04.310
+Tallies from two toll booths add up.
+
+124
+00:07:04.590 --> 00:07:08.942
+Distinct cars across the two booths don't, because the same car passes both.
+
+125
+00:07:09.222 --> 00:07:14.385
+And unusual traffic means more than normal for this road at this hour, not the busiest road.
+
+126
+00:07:14.665 --> 00:07:16.713
+This chapter is those four ideas.
+
+127
+00:07:18.063 --> 00:07:19.023
+Requirements.
+
+128
+00:07:19.303 --> 00:07:20.156
+Functional.
+
+129
+00:07:20.436 --> 00:07:28.159
+Top-K products by views or orders per city and nationally, over sliding windows (5 min, 1 h, 24 h).
+
+130
+00:07:28.439 --> 00:07:31.319
+Trending items per city, refreshed every minute.
+
+131
+00:07:31.599 --> 00:07:38.489
+Distinct counts (active customers, unique viewers per product) by any combination of store, city and time range.
+
+132
+00:07:38.769 --> 00:07:43.761
+Dashboards: orders, GMV, store load by minute; drill-down by dimension.
+
+133
+00:07:44.041 --> 00:07:47.903
+Click and impression counts for sponsored listings, exact for billing.
+
+134
+00:07:49.253 --> 00:07:50.362
+Non-functional.
+
+135
+00:07:50.642 --> 00:07:57.191
+Ingest ~50k events per second (peaks 200k per second); dashboard freshness 10 s.
+
+136
+00:07:57.471 --> 00:08:04.277
+Query p99 200 ms for dashboards; 20 ms for app-facing shelves (precomputed).
+
+137
+00:08:04.557 --> 00:08:07.650
+Bounded memory per operator; horizontally scalable.
+
+138
+00:08:07.930 --> 00:08:10.682
+Billing counts exact and reconciled daily.
+
+139
+00:08:12.032 --> 00:08:13.077
+Estimation.
+
+140
+00:08:13.357 --> 00:08:14.701
+Here is a quick table:
+
+141
+00:08:14.981 --> 00:08:16.411
+Quantity, and Estimate.
+
+142
+00:08:16.691 --> 00:08:23.624
+Events: ~4 billion per day (views, searches, adds-to-cart, impressions) about 50k per second.
+
+143
+00:08:23.904 --> 00:08:24.715
+Keys:
+
+144
+00:08:24.995 --> 00:08:31.565
+50k SKUs times 300 stores; 30M customers; ad impressions with click ids.
+
+145
+00:08:31.845 --> 00:08:33.979
+Exact per-SKU-per-store counters:
+
+146
+00:08:34.259 --> 00:08:39.208
+15M counters per window: fine in a stream processor, heavy in a DB.
+
+147
+00:08:39.488 --> 00:08:41.664
+Distinct users per store-hour as sets:
+
+148
+00:08:41.944 --> 00:08:50.840
+1,200 keys held 367 MB for one city-day in L3; days times cities, then tens of GB.
+
+149
+00:08:51.120 --> 00:08:54.832
+HLL per store-hour: at most 12 KB each; L3:
+
+150
+00:08:55.112 --> 00:08:57.523
+16.5 MB for the city-day.
+
+151
+00:08:58.873 --> 00:08:59.897
+Heavy hitters.
+
+152
+00:09:00.177 --> 00:09:01.307
+L1 results:
+
+153
+00:09:02.657 --> 00:09:04.001
+Here is a quick table:
+
+154
+00:09:04.281 --> 00:09:08.655
+Method, and Top-100 recall, and Count error, and State, and Throughput.
+
+155
+00:09:08.935 --> 00:09:10.129
+Exact hash map.
+
+156
+00:09:10.409 --> 00:09:11.860
+Top-100 recall:
+
+157
+00:09:12.140 --> 00:09:13.399
+100%.
+
+158
+00:09:13.679 --> 00:09:14.553
+Count error:
+
+159
+00:09:14.833 --> 00:09:15.900
+0%.
+
+160
+00:09:16.180 --> 00:09:21.023
+State: ~64.5 MB (845k keys).
+
+161
+00:09:21.303 --> 00:09:22.135
+Throughput:
+
+162
+00:09:22.415 --> 00:09:24.143
+6.8 M per second.
+
+163
+00:09:24.423 --> 00:09:28.967
+Count-Min 4 times 65,536 + heap.
+
+164
+00:09:29.247 --> 00:09:30.697
+Top-100 recall:
+
+165
+00:09:30.977 --> 00:09:32.236
+100%.
+
+166
+00:09:32.516 --> 00:09:33.391
+Count error:
+
+167
+00:09:33.671 --> 00:09:35.377
+0.12%.
+
+168
+00:09:35.657 --> 00:09:36.447
+State:
+
+169
+00:09:36.727 --> 00:09:38.156
+2.0 MB.
+
+170
+00:09:38.436 --> 00:09:39.268
+Throughput:
+
+171
+00:09:39.548 --> 00:09:41.276
+9.8 M per second.
+
+172
+00:09:41.556 --> 00:09:43.817
+Space-Saving, 1,000 counters.
+
+173
+00:09:44.097 --> 00:09:45.548
+Top-100 recall:
+
+174
+00:09:45.828 --> 00:09:47.087
+100%.
+
+175
+00:09:47.367 --> 00:09:48.241
+Count error:
+
+176
+00:09:48.521 --> 00:09:50.548
+0.00%.
+
+177
+00:09:50.828 --> 00:09:51.617
+State:
+
+178
+00:09:51.897 --> 00:09:53.305
+47 KB.
+
+179
+00:09:53.585 --> 00:09:54.417
+Throughput:
+
+180
+00:09:54.697 --> 00:09:56.425
+4.2 M per second.
+
+181
+00:09:56.705 --> 00:09:58.924
+1% sample times 100.
+
+182
+00:09:59.204 --> 00:10:00.655
+Top-100 recall:
+
+183
+00:10:00.935 --> 00:10:02.236
+99%.
+
+184
+00:10:02.516 --> 00:10:03.391
+Count error:
+
+185
+00:10:03.671 --> 00:10:05.612
+5.05%.
+
+186
+00:10:05.892 --> 00:10:06.681
+State:
+
+187
+00:10:06.961 --> 00:10:08.497
+4.0 MB.
+
+188
+00:10:08.777 --> 00:10:09.609
+Throughput:
+
+189
+00:10:09.889 --> 00:10:11.831
+84.6 M per second.
+
+190
+00:10:13.181 --> 00:10:16.082
+Count-Min sketch: d rows of w counters.
+
+191
+00:10:16.362 --> 00:10:21.482
+Each event increments one counter per row, and the estimate is the minimum across rows.
+
+192
+00:10:21.762 --> 00:10:32.471
+It only over-estimates, by at most εN with probability 1minus δ, for w = e or ε and d = ln(1 or δ).
+
+193
+00:10:32.751 --> 00:10:34.799
+Pair it with a heap to track candidates.
+
+194
+00:10:35.079 --> 00:10:39.453
+It merges by adding counters, so partitions and time buckets combine.
+
+195
+00:10:39.733 --> 00:10:41.674
+Space-Saving or Misra, Gries:
+
+196
+00:10:43.024 --> 00:10:44.091
+k counters.
+
+197
+00:10:44.371 --> 00:10:48.104
+A new key replaces the smallest counter and inherits its count.
+
+198
+00:10:48.384 --> 00:10:53.824
+It guarantees any item with frequency N or k is present, with error at most N or k.
+
+199
+00:10:54.104 --> 00:11:00.419
+Here N or k = 20,000, larger than item 100's count, so the guarantee is loose.
+
+200
+00:11:00.699 --> 00:11:03.301
+On a skewed stream the real error was zero.
+
+201
+00:11:03.581 --> 00:11:09.277
+Sampling is cheap and surprisingly good for the head of the distribution, but noisy near the cut-off.
+
+202
+00:11:09.557 --> 00:11:12.139
+It is fine for dashboards and not for billing.
+
+203
+00:11:13.489 --> 00:11:20.315
+Sliding windows: keep sketches per small bucket (for example, 1 minute), and merge the last 60 for an hour.
+
+204
+00:11:20.595 --> 00:11:22.281
+Count-Min merges exactly.
+
+205
+00:11:22.561 --> 00:11:24.673
+Space-Saving merges approximately.
+
+206
+00:11:26.023 --> 00:11:27.580
+Merging partial answers.
+
+207
+00:11:27.860 --> 00:11:33.727
+Counting is partitioned (Kafka partitions, cities, shards), so the global answer is a merge.
+
+208
+00:11:34.007 --> 00:11:34.817
+L2:
+
+209
+00:11:36.167 --> 00:11:37.511
+Here is a quick table:
+
+210
+00:11:37.791 --> 00:11:41.589
+Method, and True top-10 found, and Wrong counts, and Pairs sent.
+
+211
+00:11:41.869 --> 00:11:43.447
+Merge local top-10s.
+
+212
+00:11:43.727 --> 00:11:45.093
+True top-10 found:
+
+213
+00:11:45.373 --> 00:11:46.418
+6 or 10.
+
+214
+00:11:46.698 --> 00:11:47.637
+Wrong counts:
+
+215
+00:11:47.917 --> 00:11:48.983
+5 or 10.
+
+216
+00:11:49.263 --> 00:11:50.287
+Pairs sent:
+
+217
+00:11:50.567 --> 00:11:51.826
+160.
+
+218
+00:11:52.106 --> 00:11:54.005
+Merge local top-100s.
+
+219
+00:11:54.285 --> 00:11:55.650
+True top-10 found:
+
+220
+00:11:55.930 --> 00:11:56.954
+10 or 10.
+
+221
+00:11:57.234 --> 00:11:58.173
+Wrong counts:
+
+222
+00:11:58.453 --> 00:11:59.583
+0 or 10.
+
+223
+00:11:59.863 --> 00:12:00.887
+Pairs sent:
+
+224
+00:12:01.167 --> 00:12:02.661
+1,600.
+
+225
+00:12:02.941 --> 00:12:04.754
+TPUT (three-phase threshold).
+
+226
+00:12:05.034 --> 00:12:06.399
+True top-10 found:
+
+227
+00:12:06.679 --> 00:12:07.703
+10 or 10.
+
+228
+00:12:07.983 --> 00:12:08.922
+Wrong counts:
+
+229
+00:12:09.202 --> 00:12:10.333
+0 or 10.
+
+230
+00:12:10.613 --> 00:12:11.637
+Pairs sent:
+
+231
+00:12:11.917 --> 00:12:13.773
+4,950.
+
+232
+00:12:14.053 --> 00:12:15.887
+Shuffle all counts by product.
+
+233
+00:12:16.167 --> 00:12:17.533
+True top-10 found:
+
+234
+00:12:17.813 --> 00:12:18.837
+10 or 10.
+
+235
+00:12:19.117 --> 00:12:20.055
+Wrong counts:
+
+236
+00:12:20.335 --> 00:12:21.466
+0 or 10.
+
+237
+00:12:21.746 --> 00:12:22.770
+Pairs sent:
+
+238
+00:12:23.050 --> 00:12:26.826
+1,509,929.
+
+239
+00:12:28.176 --> 00:12:30.075
+Local top-K lists don't merge.
+
+240
+00:12:30.355 --> 00:12:38.141
+An item can be high in every partition without being top in any, and partitions that didn't list it contribute zero to its count.
+
+241
+00:12:38.421 --> 00:12:42.304
+Asking for more (c, K) often works but carries no guarantee.
+
+242
+00:12:42.584 --> 00:12:43.843
+TPUT is exact:
+
+243
+00:12:44.123 --> 00:12:48.069
+Collect local top-K lists and use them to set a lower bound τ.
+
+244
+00:12:48.349 --> 00:12:52.509
+Fetch every item with a local count ≥ τ or m.
+
+245
+00:12:52.789 --> 00:12:54.645
+Get exact counts for the survivors.
+
+246
+00:12:55.995 --> 00:12:59.686
+Partition by the ranking key (shuffle by SKU) when you can.
+
+247
+00:12:59.966 --> 00:13:07.113
+Then each SKU is counted in one place, and the global top-K is a merge of disjoint local top-Ks.
+
+248
+00:13:07.393 --> 00:13:08.715
+That merge is exact.
+
+249
+00:13:08.995 --> 00:13:13.411
+Sketches that add (Count-Min, HLL) merge exactly by construction.
+
+250
+00:13:13.691 --> 00:13:17.126
+This is one reason to prefer them for distributed pipelines.
+
+251
+00:13:18.476 --> 00:13:19.607
+Distinct counts.
+
+252
+00:13:19.887 --> 00:13:21.615
+L3, on a real Redis:
+
+253
+00:13:22.965 --> 00:13:24.309
+Here is a quick table:
+
+254
+00:13:24.589 --> 00:13:27.085
+Exact SETs, and HyperLogLog.
+
+255
+00:13:27.365 --> 00:13:30.245
+Memory (1,200 store-hour keys).
+
+256
+00:13:30.525 --> 00:13:31.805
+Exact SETs:
+
+257
+00:13:32.085 --> 00:13:34.431
+366.7 MB.
+
+258
+00:13:34.711 --> 00:13:35.949
+HyperLogLog:
+
+259
+00:13:36.229 --> 00:13:37.807
+16.5 MB.
+
+260
+00:13:38.087 --> 00:13:41.117
+Load (6.75M events, pipelined).
+
+261
+00:13:41.397 --> 00:13:42.677
+Exact SETs:
+
+262
+00:13:42.957 --> 00:13:44.322
+18.2 s.
+
+263
+00:13:44.602 --> 00:13:45.839
+HyperLogLog:
+
+264
+00:13:46.119 --> 00:13:47.314
+8.3 s.
+
+265
+00:13:47.594 --> 00:13:48.661
+One store-hour.
+
+266
+00:13:48.941 --> 00:13:50.925
+Exact SETs: exact.
+
+267
+00:13:51.205 --> 00:13:54.746
+HyperLogLog: minus 0.60%.
+
+268
+00:13:55.026 --> 00:13:56.199
+City, whole day.
+
+269
+00:13:56.479 --> 00:14:02.047
+Exact SETs: exact, 3,956 ms (SUNIONSTORE).
+
+270
+00:14:02.327 --> 00:14:10.647
+HyperLogLog: +0.51%, 24.3 ms (PFCOUNT over 1,200 keys).
+
+271
+00:14:10.927 --> 00:14:12.271
+Sum of per-key uniques.
+
+272
+00:14:12.551 --> 00:14:15.794
+Exact SETs: +316%.
+
+273
+00:14:16.074 --> 00:14:19.210
+HyperLogLog: +316%.
+
+274
+00:14:20.560 --> 00:14:22.053
+Distinct counts don't add.
+
+275
+00:14:22.333 --> 00:14:25.085
+The same customer appears in many store-hours.
+
+276
+00:14:25.365 --> 00:14:27.435
+This is a very common dashboard bug.
+
+277
+00:14:27.715 --> 00:14:34.819
+HLL estimates cardinality from the maximum run of leading zeros in hashed values, in registers (Redis:
+
+278
+00:14:35.099 --> 00:14:44.400
+16,384 registers, ~0.81% standard error, at most 12 KB, sparse for small sets).
+
+279
+00:14:44.680 --> 00:14:48.157
+Crucially, merging sketches = the sketch of the union.
+
+280
+00:14:48.437 --> 00:14:53.749
+Store HLLs at the finest grain (store times hour) and roll up to any combination.
+
+281
+00:14:54.029 --> 00:14:55.629
+Where HLL isn't enough:
+
+282
+00:14:56.979 --> 00:15:02.697
+Intersections (customers who visited both stores) are inaccurate via inclusion, exclusion.
+
+283
+00:15:02.977 --> 00:15:05.750
+Use Theta sketches (Apache DataSketches).
+
+284
+00:15:06.030 --> 00:15:08.227
+Exact billing counts need exact dedup.
+
+285
+00:15:08.507 --> 00:15:10.513
+OLAP stores support these natively:
+
+286
+00:15:10.793 --> 00:15:15.422
+Druid, Pinot and ClickHouse all have HLL or Theta sketch columns.
+
+287
+00:15:15.702 --> 00:15:17.942
+Store sketches in rollups, not counts.
+
+288
+00:15:19.292 --> 00:15:20.081
+Trending.
+
+289
+00:15:20.361 --> 00:15:25.161
+L4, with 40 injected trends and a 10-slot shelf every hour for a week:
+
+290
+00:15:26.511 --> 00:15:27.855
+Here is a quick table:
+
+291
+00:15:28.135 --> 00:15:32.317
+Detector, and Precision (slots), and Recall (trends), and Median delay.
+
+292
+00:15:32.597 --> 00:15:34.026
+Most views last hour.
+
+293
+00:15:34.306 --> 00:15:35.565
+Precision (slots):
+
+294
+00:15:35.845 --> 00:15:36.826
+8%.
+
+295
+00:15:37.106 --> 00:15:38.343
+Recall (trends):
+
+296
+00:15:38.623 --> 00:15:39.797
+20 or 40.
+
+297
+00:15:40.077 --> 00:15:41.186
+Median delay:
+
+298
+00:15:41.466 --> 00:15:42.447
+0 h.
+
+299
+00:15:42.727 --> 00:15:44.733
+Growth versus same hour yesterday.
+
+300
+00:15:45.013 --> 00:15:46.271
+Precision (slots):
+
+301
+00:15:46.551 --> 00:15:47.661
+5%.
+
+302
+00:15:47.941 --> 00:15:49.178
+Recall (trends):
+
+303
+00:15:49.458 --> 00:15:50.823
+25 or 40.
+
+304
+00:15:51.103 --> 00:15:52.213
+Median delay:
+
+305
+00:15:52.493 --> 00:15:55.330
+2 h. z-score versus seasonal baseline.
+
+306
+00:15:55.610 --> 00:15:56.869
+Precision (slots):
+
+307
+00:15:57.149 --> 00:15:58.301
+14%.
+
+308
+00:15:58.581 --> 00:15:59.818
+Recall (trends):
+
+309
+00:16:00.098 --> 00:16:01.527
+39 or 40.
+
+310
+00:16:01.807 --> 00:16:02.917
+Median delay:
+
+311
+00:16:03.197 --> 00:16:08.167
+1 h. + volume floor (μ ≥ 2 per hour) and z 4.
+
+312
+00:16:08.447 --> 00:16:09.706
+Precision (slots):
+
+313
+00:16:09.986 --> 00:16:11.245
+92%.
+
+314
+00:16:11.525 --> 00:16:12.762
+Recall (trends):
+
+315
+00:16:13.042 --> 00:16:14.450
+31 or 40.
+
+316
+00:16:14.730 --> 00:16:15.839
+Median delay:
+
+317
+00:16:16.119 --> 00:16:16.994
+1 h.
+
+318
+00:16:18.344 --> 00:16:19.965
+Popularity is not trend.
+
+319
+00:16:20.245 --> 00:16:23.296
+The most-viewed list is the same staples every hour.
+
+320
+00:16:23.576 --> 00:16:28.803
+Growth ratios reward noise in the long tail (0, then 3 is 4 times ).
+
+321
+00:16:29.083 --> 00:16:36.592
+The surprise score compares an item with its own expected level for this hour of day, scaled by Poisson noise (√μ).
+
+322
+00:16:36.872 --> 00:16:39.603
+It finds real surges anywhere in the catalogue.
+
+323
+00:16:39.883 --> 00:16:42.656
+A floor and a threshold make the shelf trustworthy.
+
+324
+00:16:42.936 --> 00:16:50.189
+Almost all the misses were SKUs expecting under 2 views or hour, which is too small to separate from noise within hours.
+
+325
+00:16:50.469 --> 00:16:54.885
+A shelf that shows fewer than 10 items is fine; a shelf of noise is not.
+
+326
+00:16:56.235 --> 00:16:57.473
+Production additions:
+
+327
+00:16:57.753 --> 00:16:59.267
+Decay, so trends fade.
+
+328
+00:16:59.547 --> 00:17:00.913
+Per-city baselines.
+
+329
+00:17:01.193 --> 00:17:06.462
+Suppressing items that are out of stock, or not allowed on the shelf (alcohol rules, recalls).
+
+330
+00:17:06.742 --> 00:17:09.707
+Bot filtering, because fake views create fake trends.
+
+331
+00:17:09.987 --> 00:17:11.438
+Editorial overrides.
+
+332
+00:17:12.788 --> 00:17:14.153
+The streaming pipeline.
+
+333
+00:17:14.433 --> 00:17:22.305
+Ingest: apps, then collectors, then Kafka (keyed by the aggregation key where possible, for example, city:sku for top-K).
+
+334
+00:17:22.585 --> 00:17:25.103
+Schema-managed events (Ch 28).
+
+335
+00:17:25.383 --> 00:17:26.343
+Process:
+
+336
+00:17:26.623 --> 00:17:32.809
+Flink or Kafka Streams with event-time windows, watermarks and allowed lateness (Ch 21).
+
+337
+00:17:33.089 --> 00:17:35.521
+Keyed state holds sketches per key and bucket.
+
+338
+00:17:35.801 --> 00:17:37.807
+Checkpoints give exactly-once state.
+
+339
+00:17:38.087 --> 00:17:38.812
+Serve:
+
+340
+00:17:39.092 --> 00:17:43.337
+App-facing shelves are precomputed into Redis (a sorted set per city).
+
+341
+00:17:44.687 --> 00:17:50.682
+Dashboards use an OLAP store (Pinot or Druid or ClickHouse) with rollups and sketch columns.
+
+342
+00:17:50.962 --> 00:17:53.863
+Nothing app-facing runs ad-hoc aggregation.
+
+343
+00:17:54.143 --> 00:18:01.034
+Lambda versus Kappa: streaming gives fresh approximate numbers; batch (the warehouse) gives the reconciled truth.
+
+344
+00:18:01.314 --> 00:18:05.986
+Many teams run both, and label the dashboards live (approx.) versus final.
+
+345
+00:18:07.336 --> 00:18:09.149
+Exactly-once counts for billing.
+
+346
+00:18:09.429 --> 00:18:13.141
+Sponsored-listing clicks are billed to brands, so they must be exact:
+
+347
+00:18:13.421 --> 00:18:23.619
+Dedup by click id (the client generates a UUID; the server signs impression ids) in a keyed state with a TTL longer than the maximum lateness.
+
+348
+00:18:23.899 --> 00:18:28.080
+Filter bots and fraud (rate, device and pattern checks) before counting.
+
+349
+00:18:28.360 --> 00:18:29.491
+Publish the rules.
+
+350
+00:18:29.771 --> 00:18:36.960
+Exactly-once sinks: transactional writes (Kafka transactions, idempotent upserts keyed by window and campaign).
+
+351
+00:18:37.240 --> 00:18:45.731
+Reconcile daily against the batch recomputation from raw logs, with any difference explained (Ch 45 reconciliation style).
+
+352
+00:18:47.081 --> 00:18:48.211
+Interview framing.
+
+353
+00:18:48.491 --> 00:18:54.166
+Design a system to show the top-K most viewed products or trending items or count ad clicks.
+
+354
+00:18:54.446 --> 00:18:59.865
+Clarify: window;. exact versus approximate;. freshness;. per-dimension breakdowns.
+
+355
+00:19:00.145 --> 00:19:02.150
+Then cover: partitioning by key;.
+
+356
+00:19:03.500 --> 00:19:12.652
+sketches (Count-Min, Space-Saving, HLL) and their errors;. window mechanics;. precomputed serving;. merge correctness;. reconciliation.
+
+357
+00:19:12.932 --> 00:19:21.465
+Staff-level signals: saying local top-K doesn't merge and distinct counts don't add, and defining trending as a baseline anomaly.
+
+358
+00:19:22.815 --> 00:19:23.711
+Part 3.
+
+359
+00:19:23.991 --> 00:19:25.719
+Architecture and Diagrams.
+
+360
+00:19:26.969 --> 00:19:28.015
+Component view.
+
+361
+00:19:28.295 --> 00:19:29.639
+Here is the diagram.
+
+362
+00:19:33.489 --> 00:19:37.137
+Sequence: happy path, a view becomes part of the trending shelf.
+
+363
+00:19:37.417 --> 00:19:40.211
+The sequence diagram walks through it step by step.
+
+364
+00:19:40.491 --> 00:19:46.913
+A to C: view sku 4471 in Bengaluru at 18:04:12.
+
+365
+00:19:47.193 --> 00:19:52.355
+C to K: event keyed city BLR and sku 4471.
+
+366
+00:19:52.635 --> 00:19:54.086
+K to F: consume.
+
+367
+00:19:54.366 --> 00:19:58.377
+F to F: add to minute bucket, update sketches and hourly count.
+
+368
+00:19:58.657 --> 00:20:04.737
+F to F: minute close - z equals 6.3 versus 18h baseline, volume ok.
+
+369
+00:20:05.017 --> 00:20:05.977
+F to R:
+
+370
+00:20:06.257 --> 00:20:10.993
+ZADD trending BLR 6.3 4471.
+
+371
+00:20:11.273 --> 00:20:12.211
+S to R:
+
+372
+00:20:12.491 --> 00:20:14.987
+ZREVRANGE trending BLR 0 9.
+
+373
+00:20:15.267 --> 00:20:16.206
+R to S:
+
+374
+00:20:16.486 --> 00:20:19.558
+4471 and 6 others.
+
+375
+00:20:19.838 --> 00:20:21.523
+S to A: trending shelf.
+
+376
+00:20:25.373 --> 00:20:29.469
+Sequence: failure path, a late partition and a bad merge avoided.
+
+377
+00:20:29.749 --> 00:20:32.544
+The sequence diagram walks through it step by step.
+
+378
+00:20:32.824 --> 00:20:38.584
+P1 to F: window 18:00 to 18:05 partial sketches.
+
+379
+00:20:38.864 --> 00:20:42.768
+F to F: watermark holds window open within allowed lateness.
+
+380
+00:20:43.048 --> 00:20:47.805
+P16 to F: late partial sketch for 18:00 window.
+
+381
+00:20:48.085 --> 00:20:51.157
+F to F: merge sketches - union, not sum of counts.
+
+382
+00:20:51.437 --> 00:20:55.448
+F to O: upsert window 18:00 with version 2.
+
+383
+00:20:55.728 --> 00:20:58.949
+O to F: ok, dashboards show revised value.
+
+384
+00:21:02.799 --> 00:21:04.997
+State: a SKU on the trending shelf.
+
+385
+00:21:05.277 --> 00:21:06.621
+Here is the diagram.
+
+386
+00:21:10.471 --> 00:21:11.388
+Part 4.
+
+387
+00:21:11.668 --> 00:21:13.289
+Design Document Excerpt:
+
+388
+00:21:13.569 --> 00:21:15.041
+Live Analytics v2.
+
+389
+00:21:16.291 --> 00:21:17.038
+Note:
+
+390
+00:21:17.318 --> 00:21:22.715
+Design Document (excerpt), Live Analytics v2: sketches, merges and trending.
+
+391
+00:21:22.995 --> 00:21:23.891
+Status:
+
+392
+00:21:24.171 --> 00:21:25.451
+Accepted, Authors:
+
+393
+00:21:25.731 --> 00:21:27.694
+Data platform team, Reviewers:
+
+394
+00:21:27.974 --> 00:21:30.150
+Growth, Ads, Finance, SRE.
+
+395
+00:21:30.430 --> 00:21:33.118
+Context, The replica GROUP BY couldn't keep up.
+
+396
+00:21:33.398 --> 00:21:35.787
+Merging local top-10s lost items.
+
+397
+00:21:36.067 --> 00:21:37.859
+Dashboards summed distinct counts.
+
+398
+00:21:38.139 --> 00:21:40.806
+The trending shelf showed staples, then noise.
+
+399
+00:21:41.086 --> 00:21:45.481
+Decision, Flink keyed by (city, SKU) for exact per-city counts.
+
+400
+00:21:45.761 --> 00:21:49.835
+Space-Saving and Count-Min for national and long-window heavy hitters.
+
+401
+00:21:50.115 --> 00:21:53.742
+HLL per store-hour as the only distinct-count primitive.
+
+402
+00:21:54.022 --> 00:21:57.158
+Trending as a seasonal z-score with a volume floor.
+
+403
+00:21:57.438 --> 00:21:59.251
+Shelves precomputed in Redis.
+
+404
+00:21:59.531 --> 00:22:01.729
+Pinot for dashboards with sketch columns.
+
+405
+00:22:02.009 --> 00:22:04.483
+Billing clicks exactly-once and reconciled.
+
+406
+00:22:05.833 --> 00:22:14.260
+Related ADRs, ADR-370: partition by the ranking key; national top-K merges disjoint per-key results.
+
+407
+00:22:14.540 --> 00:22:17.164
+TPUT where re-keying isn't possible (L2).
+
+408
+00:22:17.444 --> 00:22:22.777
+ADR-371: sketches per 1-minute bucket, merged for windows (L1).
+
+409
+00:22:23.057 --> 00:22:32.209
+ADR-372: distinct counts only via HLL or Theta sketches; summing uniques is blocked in the semantic layer (L3).
+
+410
+00:22:32.489 --> 00:22:34.772
+ADR-373: trending:
+
+411
+00:22:35.052 --> 00:22:45.249
+EWMA baseline per SKU times hour-of-day times city, z 4, μ ≥ 2 per hour, confirm for 2 minutes, decay 30 min (L4).
+
+412
+00:22:45.529 --> 00:22:52.996
+ADR-374: click billing: dedup by signed click id, exactly-once sink, daily reconciliation.
+
+413
+00:22:53.276 --> 00:22:54.236
+Requirements.
+
+414
+00:22:54.516 --> 00:22:55.348
+R1:
+
+415
+00:22:55.628 --> 00:22:57.484
+Top-K per city within 10 s.
+
+416
+00:22:57.764 --> 00:23:03.140
+National top-100 recall ≥ 99% versus batch.
+
+417
+00:23:04.490 --> 00:23:05.322
+R2:
+
+418
+00:23:05.602 --> 00:23:11.149
+Distinct counts within 2% of exact for any store or city or time combination.
+
+419
+00:23:11.429 --> 00:23:12.282
+R3:
+
+420
+00:23:12.562 --> 00:23:19.218
+Trending shelf precision ≥ 85% in offline replays with labelled events.
+
+421
+00:23:19.498 --> 00:23:20.394
+R4:
+
+422
+00:23:20.674 --> 00:23:26.050
+Billing counts match batch recomputation exactly, or the difference is explained, daily.
+
+423
+00:23:26.330 --> 00:23:27.205
+R5:
+
+424
+00:23:27.485 --> 00:23:30.429
+Dashboard queries p99 200 ms.
+
+425
+00:23:30.709 --> 00:23:32.117
+Decisions in detail.
+
+426
+00:23:32.397 --> 00:23:34.423
+Keys (ADR-370):
+
+427
+00:23:34.703 --> 00:23:38.351
+Kafka topic analytics.view.v1 keyed by city:sku.
+
+428
+00:23:38.631 --> 00:23:44.349
+The national rollup consumes per-city top-1000 lists and exact counts for the candidates.
+
+429
+00:23:45.699 --> 00:23:48.280
+Windows (ADR-371):
+
+430
+00:23:48.560 --> 00:23:51.845
+1-minute tumbling buckets with 2-minute allowed lateness.
+
+431
+00:23:52.125 --> 00:23:54.451
+Sliding hours are merged from the buckets.
+
+432
+00:23:54.731 --> 00:23:57.269
+Sketches (ADR-372):
+
+433
+00:23:57.549 --> 00:24:00.429
+HLL precision 14 (Redis default).
+
+434
+00:24:00.709 --> 00:24:04.336
+Theta sketches where intersections are needed (campaign overlap).
+
+435
+00:24:04.616 --> 00:24:07.197
+Trending (ADR-373):
+
+436
+00:24:07.477 --> 00:24:12.683
+Baselines are checkpointed with Flink state, and a new SKU starts with its category's mean.
+
+437
+00:24:12.963 --> 00:24:17.720
+The trending list is suppressed for out-of-stock SKUs via the inventory stream.
+
+438
+00:24:17.000 --> 00:24:29.477
+Billing (ADR-374): click ids are signed by the ad server, kept in a 24 h dedup state, and written via transactional Kafka, then Pinot upsert.
+
+439
+00:24:30.827 --> 00:24:31.851
+Consequences.
+
+440
+00:24:32.131 --> 00:24:39.257
+We accept approximate numbers on dashboards (labelled), more state in the stream processor, and baseline tuning per city.
+
+441
+00:24:39.537 --> 00:24:47.473
+In return we get bounded memory, correct merges, honest distinct counts, a useful trending shelf, and billing that finance trusts.
+
+442
+00:24:48.823 --> 00:24:49.783
+Part 5.
+
+443
+00:24:50.063 --> 00:24:52.047
+Hands-On Code, Level Ladder.
+
+444
+00:24:53.297 --> 00:24:54.065
+Info:
+
+445
+00:24:54.345 --> 00:24:55.433
+What's real here.
+
+446
+00:24:55.713 --> 00:25:01.387
+L1 and L2 are real algorithms run over synthetic streams, with measured throughput.
+
+447
+00:25:01.667 --> 00:25:04.035
+L3 runs against a real Redis 7:
+
+448
+00:25:04.315 --> 00:25:09.841
+SADD or SUNIONSTORE versus PFADD or PFCOUNT, with memory read from INFO memory.
+
+449
+00:25:10.121 --> 00:25:13.982
+L4 is a deterministic simulation with injected trends.
+
+450
+00:25:14.262 --> 00:25:18.081
+Popularity, seasonality and trend shapes are stated assumptions.
+
+451
+00:25:18.361 --> 00:25:19.939
+Timings vary by machine.
+
+452
+00:25:21.289 --> 00:25:25.343
+L3 needs Redis 7 on port 6390.
+
+453
+00:25:25.623 --> 00:25:33.345
+Run L1 and L3 with -Xmx3g, and every lab with -Dstdout.encoding=UTF-8.
+
+454
+00:25:34.695 --> 00:25:37.106
+L1, Heavy hitters with bounded memory.
+
+455
+00:25:37.386 --> 00:25:38.325
+Requirement:
+
+456
+00:25:38.605 --> 00:25:44.002
+Know the 100 most-viewed products without keeping a counter for every product ever viewed.
+
+457
+00:25:44.282 --> 00:25:47.525
+20M Zipf-distributed views, counted four ways.
+
+458
+00:25:48.875 --> 00:25:52.096
+Here is the Java code, HeavyHittersL1.java.
+
+459
+00:25:52.376 --> 00:25:56.835
+It runs to 147 lines; the full listing is in the chapter.
+
+460
+00:25:57.115 --> 00:26:06.267
+HeavyHittersL1.java, run with: java -Xmx2g HeavyHittersL1.java (JDK 21, no dependencies).
+
+461
+00:26:06.547 --> 00:26:09.277
+WHAT ARE THE 100 MOST-VIEWED PRODUCTS RIGHT NOW?
+
+462
+00:26:09.557 --> 00:26:14.464
+20,000,000 product-view events over 1,000,000 SKUs, Zipf-distributed.
+
+463
+00:26:14.744 --> 00:26:21.443
+(s = 1.05, fixed seed), a few staples get most views, a long tail gets a handful.
+
+464
+00:26:21.723 --> 00:26:23.728
+One counting node, four methods:
+
+465
+00:26:26.578 --> 00:26:27.495
+On screen:
+
+466
+00:26:27.775 --> 00:26:50.175
+20,000,000 events, 845,461 distinct SKUs seen; the top-100 hold 44.5% of views; 100. has 15,104 views, 101 has 14,743. method top-100 count error state size throughput. recall (mean, top-100).
+
+467
+00:26:50.455 --> 00:26:51.821
+(M events per second).
+
+468
+00:26:52.101 --> 00:27:01.701
+H1) exact hash map of every SKU 100% 0.00% 64.5 MB 6.8.
+
+469
+00:27:01.981 --> 00:27:14.013
+H2) Count-Min 4 times 65,536 + top-100 heap 100% 0.12% 2.0 MB 9.8.
+
+470
+00:27:14.293 --> 00:27:22.911
+H3) Space-Saving, 1,000 counters 100% 0.00% 47 KB 4.2.
+
+471
+00:27:23.191 --> 00:27:40.258
+H4) 1% sample times 100 99% 5.05% 4.0 MB 84.6. then exact counting needs state for every distinct key ever seen in the window (state. size for H1 is an estimate:
+
+472
+00:27:40.538 --> 00:27:42.053
+The rest is in the chapter.
+
+473
+00:27:44.903 --> 00:27:45.756
+Reading it:
+
+474
+00:27:46.036 --> 00:27:48.639
+The sketches match the exact answer on the head.
+
+475
+00:27:48.919 --> 00:27:55.020
+Count-Min uses 1 or 30th of the memory, and Space-Saving 1 or 1,400th.
+
+476
+00:27:55.300 --> 00:28:05.028
+The top-100 cut is tight (15,104 views versus 14,743), yet both sketches found it exactly.
+
+477
+00:28:05.308 --> 00:28:09.788
+Sampling misses one item near the cut and is about 5% off on counts.
+
+478
+00:28:10.068 --> 00:28:12.671
+That is fine for a dashboard and not for billing.
+
+479
+00:28:12.951 --> 00:28:17.068
+Throughput in this single-threaded lab is dominated by map lookups.
+
+480
+00:28:17.348 --> 00:28:21.188
+The sampler is fastest because it skips 99% of events.
+
+481
+00:28:22.538 --> 00:28:25.162
+L2, Merging top-K across partitions.
+
+482
+00:28:25.442 --> 00:28:26.381
+Requirement:
+
+483
+00:28:26.661 --> 00:28:31.909
+National top-10 from 16 city partitions, exact, without shipping every count.
+
+484
+00:28:32.189 --> 00:28:35.474
+Cities share national tastes but each has local favourites.
+
+485
+00:28:36.824 --> 00:28:40.109
+Here is the Java code, MergeTopKL2.java.
+
+486
+00:28:40.389 --> 00:28:44.464
+It runs to 109 lines; the full listing is in the chapter.
+
+487
+00:28:44.744 --> 00:28:52.744
+MergeTopKL2.java, run with: java MergeTopKL2.java (JDK 21, no dependencies).
+
+488
+00:28:53.024 --> 00:28:58.379
+TOP-10 PRODUCTS ACROSS THE COUNTRY when the counting is spread over 16 partitions.
+
+489
+00:28:58.659 --> 00:29:00.408
+Views are partitioned by city.
+
+490
+00:29:00.688 --> 00:29:08.581
+(16 cities, 8,000,000 events, fixed seed): every city likes the national staples, but each also has local favourites.
+
+491
+00:29:11.431 --> 00:29:12.349
+On screen:
+
+492
+00:29:12.629 --> 00:29:28.010
+8,000,000 events in 16 city partitions; national 10 has 34,374 views, 11 has 31,562. method true top-10 reported counts pairs sent. found wrong.
+
+493
+00:29:28.290 --> 00:29:34.199
+M1) merge each partition's local top-10 6 or 10 5 or 10 160.
+
+494
+00:29:34.479 --> 00:29:41.541
+M2) merge each partition's local top-100 10 or 10 0 or 10 1,600.
+
+495
+00:29:41.821 --> 00:29:48.797
+M3) TPUT three-phase threshold (exact) 10 or 10 0 or 10 4,950.
+
+496
+00:29:49.077 --> 00:30:06.207
+M4) shuffle all counts by product (exact) 10 or 10 0 or 10 1,509,929. then an item that is, say, 12 in every city can be near the top nationally, yet. appears in nobody's local top-10.
+
+497
+00:30:06.487 --> 00:30:13.463
+Merging local top lists misses such items (4 of the true 10 here) and. under-counts the ones it does report.
+
+498
+00:30:13.743 --> 00:30:15.258
+The rest is in the chapter.
+
+499
+00:30:18.108 --> 00:30:18.961
+Reading it:
+
+500
+00:30:19.241 --> 00:30:24.340
+Merging local top-10s misses 4 of the true top-10 and gets half the counts wrong.
+
+501
+00:30:24.620 --> 00:30:28.353
+Local top-100s happened to work here, with no guarantee.
+
+502
+00:30:28.633 --> 00:30:35.268
+TPUT is exact at 4,950 pairs, about 300x less than shuffling everything.
+
+503
+00:30:35.548 --> 00:30:39.047
+In production, key by SKU so the problem disappears.
+
+504
+00:30:39.327 --> 00:30:40.777
+Use TPUT where you can't.
+
+505
+00:30:42.127 --> 00:30:45.818
+L3, Unique customers: sets versus HyperLogLog.
+
+506
+00:30:46.098 --> 00:30:47.037
+Requirement:
+
+507
+00:30:47.317 --> 00:30:53.354
+Daily active customers for any combination of stores and hours, on a dashboard, in milliseconds.
+
+508
+00:30:53.634 --> 00:30:59.885
+6.75M app opens written to a real Redis as exact sets and as HLLs.
+
+509
+00:31:01.235 --> 00:31:04.136
+Here is the Java code, UniquesL3.java.
+
+510
+00:31:04.416 --> 00:31:08.597
+It runs to 138 lines; the full listing is in the chapter.
+
+511
+00:31:08.877 --> 00:31:19.139
+UniquesL3.java, run with (Redis 7 on:6390): java UniquesL3.java (JDK 21, no dependencies).
+
+512
+00:31:19.419 --> 00:31:24.411
+HOW MANY DIFFERENT CUSTOMERS OPENED THE APP TODAY, PER STORE, PER HOUR, AND CITY-WIDE?
+
+513
+00:31:24.691 --> 00:31:30.899
+1,500,000 customers, 50. dark stores, 24 hours (fixed seed).
+
+514
+00:31:31.179 --> 00:31:36.939
+Each customer has a home store (90% of visits) and opens the app 1 to 8 times at.
+
+515
+00:31:39.789 --> 00:31:40.706
+On screen:
+
+516
+00:31:40.986 --> 00:31:53.637
+6,749,510 events from 1,500,000 customers across 50 stores times 24 hours (1,200 keys).
+
+517
+00:31:53.917 --> 00:32:29.879
+EXACT SETS (SADD or SCARD or SUNIONSTORE). memory in Redis 366.7 MB load 18.2 s. store 17, 19:00 5,040 (truth 5,040, +0.00%) in 5.35 ms. city, today 1,500,000 (truth 1,500,000, +0.00%) in 3956.3 ms. sum of the 1,200 per-store-hour counts:
+
+518
+00:32:30.159 --> 00:32:39.716
+6,243,573 (+316% versus truth) ← not a. unique count.
+
+519
+00:32:39.996 --> 00:33:12.587
+HYPERLOGLOG (PFADD or PFCOUNT over 1,200 keys). memory in Redis 16.5 MB load 8.3 s. store 17, 19:00 5,010 (truth 5,040, -0.60%) in 0.11 ms. city, today 1,507,654 (truth 1,500,000, +0.51%) in 24.3 ms.
+
+520
+00:33:12.867 --> 00:33:14.382
+The rest is in the chapter.
+
+521
+00:33:17.232 --> 00:33:18.085
+Reading it:
+
+522
+00:33:18.365 --> 00:33:24.637
+Exact sets are right, but take 367 MB and a 4-second union for one city-day.
+
+523
+00:33:24.917 --> 00:33:33.216
+HLL is within about 0.6%, at 16.5 MB and 24 ms, and it merges to any rollup.
+
+524
+00:33:33.496 --> 00:33:37.997
+Summing the per-key counts is wrong in both, by +316%.
+
+525
+00:33:38.277 --> 00:33:41.285
+That isn't a storage problem; it's a definition error.
+
+526
+00:33:42.635 --> 00:33:44.790
+L4, Trending versus popular.
+
+527
+00:33:45.070 --> 00:33:46.009
+Requirement:
+
+528
+00:33:46.289 --> 00:33:50.150
+A 'trending' shelf that shows real surges, not staples or noise.
+
+529
+00:33:50.430 --> 00:33:54.910
+Three weeks of hourly views, with 40 injected trends and four detectors.
+
+530
+00:33:56.260 --> 00:33:59.140
+Here is the Java code, TrendingL4.java.
+
+531
+00:33:59.420 --> 00:34:03.580
+It runs to 119 lines; the full listing is in the chapter.
+
+532
+00:34:03.860 --> 00:34:11.028
+TrendingL4.java, run with: java TrendingL4.java (JDK 21, no dependencies).
+
+533
+00:34:11.308 --> 00:34:13.356
+TRENDING NOW IS NOT MOST POPULAR.
+
+534
+00:34:13.636 --> 00:34:17.497
+5,000 SKUs, 21 days of hourly views (fixed seed):
+
+535
+00:34:17.777 --> 00:34:22.833
+Zipf popularity, a daily. cycle (evenings 3 times nights), Poisson noise.
+
+536
+00:34:23.113 --> 00:34:30.367
+On days 15 to 21 we inject 40 real trends, a SKU's demand ramps to 3 to 8 times its.
+
+537
+00:34:33.217 --> 00:34:34.134
+On screen:
+
+538
+00:34:34.414 --> 00:34:47.385
+5,000 SKUs times 21 days hourly; 40 injected trends on days 15 to 21; a 10-slot 'trending'. shelf each hour. detector precision recall median hours to.
+
+539
+00:34:47.665 --> 00:34:49.777
+(slots) (trends). first appearance.
+
+540
+00:34:50.057 --> 00:34:54.665
+T1) most views in the last hour 8% 20 or 40 0 h.
+
+541
+00:34:54.945 --> 00:35:00.427
+T2) growth versus same hour yesterday 5% 25 or 40 2 h.
+
+542
+00:35:00.707 --> 00:35:07.342
+T3) surprise versus seasonal baseline (z-score) 14% 39 or 40 1 h.
+
+543
+00:35:07.622 --> 00:35:24.134
+T4) T3 + minimum volume (μ ≥ 2 per hour) and z 4 92% 31 or 40 1 h. then the most-viewed list is the same staples every hour, popular, not trending; it. only 'finds' trends on.
+
+544
+00:35:24.414 --> 00:35:25.929
+The rest is in the chapter.
+
+545
+00:35:28.779 --> 00:35:29.632
+Reading it:
+
+546
+00:35:29.912 --> 00:35:35.779
+Popularity and growth ratios give shelves that are 92 to 95% not-trends.
+
+547
+00:35:36.059 --> 00:35:41.776
+The seasonal z-score catches 39 of 40 trends but fills the rest of the shelf with noise.
+
+548
+00:35:42.056 --> 00:35:50.227
+Adding a volume floor and a significance bar makes the shelf 92% real trends, at the cost of the smallest SKUs' trends.
+
+549
+00:35:51.577 --> 00:35:52.515
+Part 6.
+
+550
+00:35:52.795 --> 00:35:54.075
+Production Concerns.
+
+551
+00:35:55.325 --> 00:35:56.477
+Failure modes.
+
+552
+00:35:56.757 --> 00:35:58.101
+Here is a quick table:
+
+553
+00:35:58.381 --> 00:36:00.664
+Failure, and Symptom, and Mitigation.
+
+554
+00:36:00.944 --> 00:36:02.352
+GROUP BY on raw events.
+
+555
+00:36:02.632 --> 00:36:03.443
+Symptom:
+
+556
+00:36:03.723 --> 00:36:05.131
+Slow, replica lag.
+
+557
+00:36:05.411 --> 00:36:06.413
+Mitigation:
+
+558
+00:36:06.693 --> 00:36:09.189
+Stream pre-aggregation, OLAP rollups.
+
+559
+00:36:09.469 --> 00:36:11.837
+Exact counters for huge key spaces.
+
+560
+00:36:12.117 --> 00:36:12.928
+Symptom:
+
+561
+00:36:13.208 --> 00:36:14.851
+Memory blow-up (L1).
+
+562
+00:36:15.131 --> 00:36:16.133
+Mitigation:
+
+563
+00:36:16.413 --> 00:36:17.949
+Sketches, bounded state.
+
+564
+00:36:18.229 --> 00:36:19.851
+Merging local top-K.
+
+565
+00:36:20.131 --> 00:36:20.941
+Symptom:
+
+566
+00:36:21.221 --> 00:36:23.483
+Missing items, wrong counts (L2).
+
+567
+00:36:23.763 --> 00:36:24.765
+Mitigation:
+
+568
+00:36:25.045 --> 00:36:26.859
+Partition by key, TPUT.
+
+569
+00:36:27.139 --> 00:36:28.525
+Summing distinct counts.
+
+570
+00:36:28.805 --> 00:36:29.616
+Symptom:
+
+571
+00:36:29.896 --> 00:36:32.115
+Wildly inflated uniques (L3).
+
+572
+00:36:32.395 --> 00:36:33.397
+Mitigation:
+
+573
+00:36:33.677 --> 00:36:35.491
+HLL or Theta merges.
+
+574
+00:36:35.771 --> 00:36:37.307
+Popularity as trending.
+
+575
+00:36:37.587 --> 00:36:38.397
+Symptom:
+
+576
+00:36:38.677 --> 00:36:40.597
+Staples every hour (L4).
+
+577
+00:36:40.877 --> 00:36:41.880
+Mitigation:
+
+578
+00:36:42.160 --> 00:36:43.675
+Baseline anomaly score.
+
+579
+00:36:43.955 --> 00:36:45.043
+Growth ratios.
+
+580
+00:36:45.323 --> 00:36:46.133
+Symptom:
+
+581
+00:36:46.413 --> 00:36:47.779
+Tail noise (L4).
+
+582
+00:36:48.059 --> 00:36:49.061
+Mitigation:
+
+583
+00:36:49.341 --> 00:36:51.517
+Poisson-scaled z, volume floor.
+
+584
+00:36:52.867 --> 00:36:53.870
+Late events.
+
+585
+00:36:54.150 --> 00:36:54.961
+Symptom:
+
+586
+00:36:55.241 --> 00:36:56.158
+Under-counts.
+
+587
+00:36:56.438 --> 00:36:57.441
+Mitigation:
+
+588
+00:36:57.721 --> 00:37:00.174
+Watermarks, allowed lateness, revisions.
+
+589
+00:37:00.454 --> 00:37:01.286
+Bots.
+
+590
+00:37:01.566 --> 00:37:02.377
+Symptom:
+
+591
+00:37:02.657 --> 00:37:04.534
+Fake trends, inflated clicks.
+
+592
+00:37:04.814 --> 00:37:05.817
+Mitigation:
+
+593
+00:37:06.097 --> 00:37:07.675
+Filtering before counting.
+
+594
+00:37:07.955 --> 00:37:09.705
+Stream versus batch mismatch.
+
+595
+00:37:09.985 --> 00:37:10.795
+Symptom:
+
+596
+00:37:11.075 --> 00:37:11.993
+Distrust.
+
+597
+00:37:12.273 --> 00:37:13.275
+Mitigation:
+
+598
+00:37:13.555 --> 00:37:15.326
+Reconciliation, labels.
+
+599
+00:37:16.676 --> 00:37:17.764
+Observability.
+
+600
+00:37:18.044 --> 00:37:21.927
+Consumer lag per partition, watermark delay, late-event rate.
+
+601
+00:37:22.207 --> 00:37:27.241
+Sketch error checks: periodic exact counts on samples versus sketch estimates.
+
+602
+00:37:27.521 --> 00:37:31.553
+Trending shelf precision from labelled replays; editorial feedback.
+
+603
+00:37:31.833 --> 00:37:34.244
+Billing reconciliation diffs per campaign.
+
+604
+00:37:35.594 --> 00:37:37.151
+Security and privacy.
+
+605
+00:37:37.431 --> 00:37:42.210
+Aggregate before exposing: dashboards show counts, not user-level trails.
+
+606
+00:37:42.490 --> 00:37:45.839
+HLL registers can leak membership in small sets.
+
+607
+00:37:46.119 --> 00:37:52.391
+Don't expose raw sketches publicly, and apply minimum-count thresholds (k-anonymity) on breakdowns.
+
+608
+00:37:52.671 --> 00:37:55.317
+Signed click ids to prevent billing fraud.
+
+609
+00:37:56.667 --> 00:37:57.563
+Performance.
+
+610
+00:37:57.843 --> 00:38:01.363
+Key streams by aggregation key to avoid shuffles later.
+
+611
+00:38:01.643 --> 00:38:06.379
+Pre-aggregate at the edge (collector-side micro-batches) for very hot keys.
+
+612
+00:38:06.659 --> 00:38:10.307
+Precompute app-facing lists and keep them in Redis sorted sets.
+
+613
+00:38:11.657 --> 00:38:12.382
+Cost.
+
+614
+00:38:12.662 --> 00:38:17.867
+Sketches cut state and storage by one to two orders of magnitude (L1, L3).
+
+615
+00:38:18.147 --> 00:38:22.457
+Keep raw events in cheap storage for batch truth; keep only rollups hot.
+
+616
+00:38:22.737 --> 00:38:27.174
+Sampling for exploratory dashboards; exact only where money depends on it.
+
+617
+00:38:28.524 --> 00:38:29.463
+Part 7.
+
+618
+00:38:29.743 --> 00:38:31.449
+Anti-Patterns and Pitfalls.
+
+619
+00:38:32.699 --> 00:38:33.617
+Watch out:
+
+620
+00:38:33.897 --> 00:38:34.537
+1.
+
+621
+00:38:34.817 --> 00:38:37.590
+Ad-hoc GROUP BY on raw events for live views.
+
+622
+00:38:37.870 --> 00:38:39.385
+Scans grow with traffic.
+
+623
+00:38:40.735 --> 00:38:41.652
+Watch out:
+
+624
+00:38:41.932 --> 00:38:42.636
+2.
+
+625
+00:38:42.916 --> 00:38:45.113
+Exact counters for every key forever.
+
+626
+00:38:45.393 --> 00:38:47.761
+State grows with the key space (L1).
+
+627
+00:38:49.111 --> 00:38:50.029
+Watch out:
+
+628
+00:38:50.309 --> 00:38:51.055
+3.
+
+629
+00:38:51.335 --> 00:38:53.213
+Merging local top-K lists.
+
+630
+00:38:53.493 --> 00:38:57.354
+Items that are high everywhere but top nowhere disappear (L2).
+
+631
+00:38:58.704 --> 00:38:59.621
+Watch out:
+
+632
+00:38:59.901 --> 00:39:00.605
+4.
+
+633
+00:39:00.885 --> 00:39:02.592
+Assuming c, K is enough.
+
+634
+00:39:02.872 --> 00:39:05.027
+It usually works, with no guarantee.
+
+635
+00:39:06.377 --> 00:39:07.294
+Watch out:
+
+636
+00:39:07.574 --> 00:39:08.342
+5.
+
+637
+00:39:08.622 --> 00:39:12.867
+Summing distinct counts. +316% in L3.
+
+638
+00:39:14.217 --> 00:39:15.135
+Watch out:
+
+639
+00:39:15.415 --> 00:39:16.161
+6.
+
+640
+00:39:16.441 --> 00:39:18.233
+Exact sets for uniques at scale.
+
+641
+00:39:18.513 --> 00:39:21.735
+Hundreds of MB and seconds-long unions (L3).
+
+642
+00:39:23.085 --> 00:39:24.002
+Watch out:
+
+643
+00:39:24.282 --> 00:39:25.029
+7.
+
+644
+00:39:25.309 --> 00:39:27.015
+HLL for intersections.
+
+645
+00:39:27.295 --> 00:39:29.685
+Inclusion, exclusion error explodes.
+
+646
+00:39:29.965 --> 00:39:31.330
+Use Theta sketches.
+
+647
+00:39:32.680 --> 00:39:33.597
+Watch out:
+
+648
+00:39:33.877 --> 00:39:34.560
+8.
+
+649
+00:39:34.840 --> 00:39:36.461
+Trending = most viewed.
+
+650
+00:39:36.741 --> 00:39:38.661
+Staples every hour (L4).
+
+651
+00:39:40.011 --> 00:39:40.929
+Watch out:
+
+652
+00:39:41.209 --> 00:39:41.955
+9.
+
+653
+00:39:42.235 --> 00:39:44.027
+Trending = growth ratio.
+
+654
+00:39:44.307 --> 00:39:45.673
+Tail noise (L4).
+
+655
+00:39:47.023 --> 00:39:47.940
+Watch out:
+
+656
+00:39:48.220 --> 00:39:48.924
+10.
+
+657
+00:39:49.204 --> 00:39:50.591
+Always filling the shelf.
+
+658
+00:39:50.871 --> 00:39:52.855
+Forcing 10 items forces noise.
+
+659
+00:39:54.205 --> 00:39:55.122
+Watch out:
+
+660
+00:39:55.402 --> 00:39:56.234
+11.
+
+661
+00:39:56.514 --> 00:39:58.157
+Approximate counts for billing.
+
+662
+00:39:58.437 --> 00:40:02.234
+Finance needs exact, deduplicated, reconciled numbers.
+
+663
+00:40:03.584 --> 00:40:04.501
+Watch out:
+
+664
+00:40:04.781 --> 00:40:05.571
+12.
+
+665
+00:40:05.851 --> 00:40:07.856
+Unlabelled approximate dashboards.
+
+666
+00:40:08.136 --> 00:40:11.357
+People make decisions on numbers they assume are exact.
+
+667
+00:40:12.707 --> 00:40:13.582
+Part 8.
+
+668
+00:40:13.862 --> 00:40:15.206
+Interview Q and A.
+
+669
+00:40:16.456 --> 00:40:17.288
+Beginner.
+
+670
+00:40:17.568 --> 00:40:18.592
+Question 1.
+
+671
+00:40:18.872 --> 00:40:21.901
+Design 'top 10 most viewed products in the last hour'.
+
+672
+00:40:22.181 --> 00:40:23.547
+Thirty-second answer:
+
+673
+00:40:23.827 --> 00:40:39.827
+Stream view events through Kafka keyed by product (or city:product); a stream processor keeps per-minute counts per key and maintains a top-K per window by merging the last 60 buckets; results are written to a Redis sorted set that the app reads.
+
+674
+00:40:40.107 --> 00:40:45.056
+For huge key spaces, use Space-Saving or Count-Min + heap to bound memory.
+
+675
+00:40:46.406 --> 00:40:47.409
+Question 2.
+
+676
+00:40:47.689 --> 00:40:49.139
+What is a Count-Min sketch?
+
+677
+00:40:49.419 --> 00:40:50.785
+Thirty-second answer:
+
+678
+00:40:51.065 --> 00:41:00.174
+A d times w array of counters with d hash functions; each event increments one counter per row; the estimate is the minimum across rows.
+
+679
+00:41:00.454 --> 00:41:13.553
+It never under-estimates, over-estimates by at most εN with probability 1minus δ (w = e or ε, d = ln 1 or δ), and sketches merge by adding.
+
+680
+00:41:14.903 --> 00:41:15.948
+Question 3.
+
+681
+00:41:16.228 --> 00:41:18.937
+Why can't you sum unique-user counts across hours?
+
+682
+00:41:19.217 --> 00:41:20.583
+Thirty-second answer:
+
+683
+00:41:20.863 --> 00:41:25.620
+The same user appears in many hours (and stores); summing counts them repeatedly.
+
+684
+00:41:25.900 --> 00:41:31.191
+Store mergeable sketches (HLL) at the finest grain and union them for any range.
+
+685
+00:41:32.541 --> 00:41:33.607
+Question 4.
+
+686
+00:41:33.887 --> 00:41:35.295
+What is HyperLogLog?
+
+687
+00:41:35.575 --> 00:41:36.941
+Thirty-second answer:
+
+688
+00:41:37.221 --> 00:41:47.994
+A cardinality estimator that hashes items and tracks, per register, the maximum number of leading zeros seen; the harmonic mean across registers estimates the count.
+
+689
+00:41:48.274 --> 00:41:56.637
+Fixed small memory ( at most 12 KB in Redis), ~0.8% error, and union by taking register maxima.
+
+690
+00:41:57.987 --> 00:41:58.989
+Intermediate.
+
+691
+00:41:59.269 --> 00:42:00.379
+Question 5.
+
+692
+00:42:00.659 --> 00:42:03.667
+How do you merge top-K results from many partitions?
+
+693
+00:42:03.947 --> 00:42:05.312
+Thirty-second answer:
+
+694
+00:42:05.592 --> 00:42:08.067
+Local top-K lists don't merge correctly.
+
+695
+00:42:08.347 --> 00:42:24.240
+Either partition by the ranking key so each item lives in one partition (then merging disjoint local top-Ks is exact), or use a threshold algorithm like TPUT that fetches all items above a bound, or merge mergeable sketches.
+
+696
+00:42:25.590 --> 00:42:26.699
+Question 6.
+
+697
+00:42:26.979 --> 00:42:29.326
+What is Space-Saving (or Misra, Gries)?
+
+698
+00:42:29.606 --> 00:42:30.971
+Thirty-second answer:
+
+699
+00:42:31.251 --> 00:42:39.017
+Keep k counters; increment if the item has one; otherwise replace the minimum counter and inherit its count (+1).
+
+700
+00:42:39.297 --> 00:42:46.166
+Every item with frequency N or k is guaranteed to be present, with over-estimation at most N or k.
+
+701
+00:42:47.516 --> 00:42:48.604
+Question 7.
+
+702
+00:42:48.884 --> 00:42:50.335
+How do you define 'trending'?
+
+703
+00:42:50.615 --> 00:42:51.980
+Thirty-second answer:
+
+704
+00:42:52.260 --> 00:43:09.796
+Items whose current activity is surprisingly high relative to their own baseline for this time of day and place: a z-score like (x minus μ)/√(μ+1) with a seasonal EWMA baseline, a minimum volume, a significance threshold, confirmation and decay.
+
+705
+00:43:11.146 --> 00:43:12.170
+Question 8.
+
+706
+00:43:12.450 --> 00:43:15.010
+How do windows work in streaming aggregation?
+
+707
+00:43:15.290 --> 00:43:16.655
+Thirty-second answer:
+
+708
+00:43:16.935 --> 00:43:31.122
+Tumbling (fixed, non-overlapping), sliding or hopping (overlapping), and session windows; computed in event time with watermarks and allowed lateness; sliding windows are usually built from small tumbling buckets merged.
+
+709
+00:43:32.472 --> 00:43:33.539
+Question 9.
+
+710
+00:43:33.819 --> 00:43:35.739
+Where should live dashboards query from?
+
+711
+00:43:36.019 --> 00:43:37.384
+Thirty-second answer:
+
+712
+00:43:37.664 --> 00:43:51.104
+An OLAP store designed for real-time ingest and aggregation (Pinot, Druid, ClickHouse) with rollups and sketch columns, not the OLTP database or raw logs; app-facing lists precomputed into a cache.
+
+713
+00:43:52.454 --> 00:43:53.222
+Senior.
+
+714
+00:43:53.502 --> 00:43:54.547
+Question 10.
+
+715
+00:43:54.827 --> 00:43:58.134
+Design ad-click aggregation that finance can bill on.
+
+716
+00:43:58.414 --> 00:43:59.779
+Thirty-second answer:
+
+717
+00:44:00.059 --> 00:44:23.121
+Signed impression and click ids; collectors, then Kafka; dedup by click id in keyed state with TTL; bot or fraud filtering; windowed exact counts per campaign; exactly-once sink (transactions or idempotent upserts by window and campaign); OLAP for reporting; daily batch recomputation from raw logs and reconciliation with explained diffs.
+
+718
+00:44:24.471 --> 00:44:25.601
+Question 11.
+
+719
+00:44:25.881 --> 00:44:29.337
+How do you roll up distinct counts across arbitrary dimensions?
+
+720
+00:44:29.617 --> 00:44:30.983
+Thirty-second answer:
+
+721
+00:44:31.263 --> 00:44:43.892
+Store HLL (or Theta) sketches at the finest grain (store times hour times segment); union sketches at query time for any combination; OLAP stores support sketch columns natively.
+
+722
+00:44:45.242 --> 00:44:46.330
+Question 12.
+
+723
+00:44:46.610 --> 00:44:49.682
+How do you handle a very hot key in stream aggregation?
+
+724
+00:44:49.962 --> 00:44:51.327
+Thirty-second answer:
+
+725
+00:44:51.607 --> 00:45:05.261
+Pre-aggregate before the shuffle (local combiners or micro-batches at collectors), split the key with salting and merge (two-stage aggregation), and give the hot key more parallelism; sketches merge naturally.
+
+726
+00:45:06.611 --> 00:45:07.891
+Question 13.
+
+727
+00:45:08.171 --> 00:45:10.283
+How do you verify approximate numbers?
+
+728
+00:45:10.563 --> 00:45:11.928
+Thirty-second answer:
+
+729
+00:45:12.208 --> 00:45:24.048
+Compare against exact batch recomputation on samples or daily; monitor error distributions; label dashboards as approximate; set error budgets per metric; alert on drift.
+
+730
+00:45:25.398 --> 00:45:26.593
+Question 14.
+
+731
+00:45:26.873 --> 00:45:29.475
+How would you build 'trending near you' per city at scale?
+
+732
+00:45:29.755 --> 00:45:31.121
+Thirty-second answer:
+
+733
+00:45:31.401 --> 00:45:48.873
+Key events by city:SKU; per-key minute counts and seasonal baselines in Flink state; z-score with volume floor per minute; confirmation and decay; filter out-of-stock and policy items; write per-city sorted sets to Redis; replay-based evaluation with labelled events.
+
+734
+00:45:50.223 --> 00:45:51.119
+Architect.
+
+735
+00:45:51.399 --> 00:45:52.593
+Question 15.
+
+736
+00:45:52.873 --> 00:45:56.031
+Design the real-time analytics platform end to end.
+
+737
+00:45:56.311 --> 00:45:57.676
+Thirty-second answer:
+
+738
+00:45:57.956 --> 00:46:16.260
+Collectors, then Kafka (keyed by aggregation keys), then Flink with event-time windows and sketch state, then Redis for app-facing lists, OLAP for dashboards, exactly-once billing path; raw to the lake; batch warehouse as truth; reconciliation; governance of metric definitions.
+
+739
+00:46:17.610 --> 00:46:18.805
+Question 16.
+
+740
+00:46:19.085 --> 00:46:20.237
+Lambda or Kappa?
+
+741
+00:46:20.517 --> 00:46:21.882
+Thirty-second answer:
+
+742
+00:46:22.162 --> 00:46:37.991
+Kappa (one streaming codebase, reprocess by replaying Kafka) is simpler when retention allows replay and the stream processor is exact enough; Lambda (stream for fresh, batch for truth) persists where money or audits need batch recomputation.
+
+743
+00:46:38.271 --> 00:46:42.666
+Many run Kappa for features and Lambda-style reconciliation for billing.
+
+744
+00:46:44.016 --> 00:46:45.360
+Question 17.
+
+745
+00:46:45.640 --> 00:46:49.416
+How do you choose between Pinot, Druid, ClickHouse and a warehouse?
+
+746
+00:46:49.696 --> 00:46:51.061
+Thirty-second answer:
+
+747
+00:46:51.341 --> 00:47:07.512
+Pinot or Druid excel at real-time ingest with low-latency, high-QPS aggregations (user-facing analytics); ClickHouse at fast analytical SQL with flexible schemas; warehouses (BigQuery, Snowflake) at ad hoc and batch.
+
+748
+00:47:07.792 --> 00:47:11.803
+Choose by freshness, QPS, query shapes, and operations skills.
+
+749
+00:47:13.153 --> 00:47:14.326
+Question 18.
+
+750
+00:47:14.606 --> 00:47:17.806
+How can analytics be manipulated, and how do you defend?
+
+751
+00:47:18.086 --> 00:47:19.451
+Thirty-second answer:
+
+752
+00:47:19.731 --> 00:47:36.371
+Bots inflate views to fake trends or clicks to drain competitors' ad budgets; defend with device and behaviour signals, rate limits, signed ids, anomaly detection on traffic sources, excluding flagged traffic before counting, and auditing trending changes.
+
+753
+00:47:37.721 --> 00:47:38.959
+Question 19.
+
+754
+00:47:39.239 --> 00:47:42.439
+How do you keep metric definitions consistent across teams?
+
+755
+00:47:42.719 --> 00:47:44.084
+Thirty-second answer:
+
+756
+00:47:44.364 --> 00:48:03.116
+A semantic layer or metrics catalogue with owned definitions (for example, active customer = opened app, excluding bots, per IST day), computed once centrally, versioned, documented; dashboards reference metrics, not raw SQL; enforce that distinct counts come from sketches.
+
+757
+00:48:04.466 --> 00:48:05.575
+Question 20.
+
+758
+00:48:05.855 --> 00:48:08.223
+What makes real-time analytics trustworthy?
+
+759
+00:48:08.503 --> 00:48:09.869
+Thirty-second answer:
+
+760
+00:48:10.149 --> 00:48:22.927
+Correct merges and distinct counts, known and monitored error for approximations, clear labels, reconciliation with batch, controlled definitions, bot filtering, and lag or lateness visibility.
+
+761
+00:48:24.277 --> 00:48:25.173
+Part 9.
+
+762
+00:48:25.453 --> 00:48:26.861
+Summary and Practice.
+
+763
+00:48:28.111 --> 00:48:29.199
+Key takeaways.
+
+764
+00:48:29.479 --> 00:48:31.037
+Heavy hitters with sketches:
+
+765
+00:48:31.317 --> 00:48:33.919
+Count-Min + heap, Space-Saving (L1).
+
+766
+00:48:34.199 --> 00:48:38.018
+Merge correctly: partition by the ranking key, or use TPUT.
+
+767
+00:48:38.298 --> 00:48:40.666
+Local top-Ks don't merge (L2).
+
+768
+00:48:40.946 --> 00:48:42.439
+Distinct counts don't add.
+
+769
+00:48:42.719 --> 00:48:44.959
+HLL sketches merge (L3).
+
+770
+00:48:45.239 --> 00:48:49.058
+Trending is a baseline anomaly with a volume floor (L4).
+
+771
+00:48:49.338 --> 00:48:51.407
+Precompute, label, reconcile.
+
+772
+00:48:51.687 --> 00:48:53.117
+Exact paths for money.
+
+773
+00:48:54.467 --> 00:48:55.789
+Decision cheat sheet.
+
+774
+00:48:56.069 --> 00:48:57.413
+Here is a quick table:
+
+775
+00:48:57.693 --> 00:48:58.867
+Need, and Choice.
+
+776
+00:48:59.147 --> 00:49:00.683
+Top-K, big key space:
+
+777
+00:49:00.963 --> 00:49:03.821
+Space-Saving or Count-Min + heap, per bucket.
+
+778
+00:49:04.101 --> 00:49:05.253
+Global top-K:
+
+779
+00:49:05.533 --> 00:49:07.453
+Key by item; else TPUT.
+
+780
+00:49:07.733 --> 00:49:08.843
+Distinct counts:
+
+781
+00:49:09.123 --> 00:49:12.387
+HLL at finest grain; Theta for intersections.
+
+782
+00:49:12.667 --> 00:49:13.456
+Trending:
+
+783
+00:49:13.736 --> 00:49:16.872
+Seasonal EWMA baseline, Poisson z, floor, decay.
+
+784
+00:49:17.152 --> 00:49:18.112
+Dashboards:
+
+785
+00:49:18.392 --> 00:49:20.269
+OLAP with rollups + sketches.
+
+786
+00:49:20.549 --> 00:49:21.531
+Billing counts:
+
+787
+00:49:21.811 --> 00:49:25.011
+Dedup, exactly-once sink, batch reconciliation.
+
+788
+00:49:26.361 --> 00:49:27.491
+Exercises.
+
+789
+00:49:27.771 --> 00:49:32.102
+(B2) In L1, reduce the Count-Min width to 4,096.
+
+790
+00:49:32.382 --> 00:49:34.515
+What happens to the top-100 error?
+
+791
+00:49:34.795 --> 00:49:38.998
+(B3) In L2, make city preferences more local (80%).
+
+792
+00:49:39.278 --> 00:49:41.027
+Does 10 times K still work?
+
+793
+00:49:41.307 --> 00:49:48.305
+(B3) In L3, compute weekly uniques by PFMERGE of daily sketches, and compare with an exact union.
+
+794
+00:49:48.585 --> 00:49:54.302
+(B4) In L4, add bots that inflate 5 random SKUs, and design a filter.
+
+795
+00:49:54.582 --> 00:50:00.193
+(B4) Design exactly-once click counting with Kafka transactions and Pinot upserts.
+
+796
+00:50:01.543 --> 00:50:02.545
+Further reading.
+
+797
+00:50:02.825 --> 00:50:06.388
+Cormode and Muthukrishnan, An Improved Data Stream Summary:
+
+798
+00:50:06.668 --> 00:50:08.929
+The Count-Min Sketch (2005).
+
+799
+00:50:09.209 --> 00:50:18.340
+Metwally, Agrawal and El Abbadi, Efficient Computation of Frequent and Top-k Elements in Data Streams (Space-Saving, 2005).
+
+800
+00:50:18.620 --> 00:50:19.921
+Flajolet et al.
+
+801
+00:50:20.201 --> 00:50:23.124
+HyperLogLog (2007); Heule et al.
+
+802
+00:50:23.404 --> 00:50:26.391
+HyperLogLog in Practice (2013).
+
+803
+00:50:26.671 --> 00:50:33.433
+Cao and Wang, Efficient Top-K Query Calculation in Distributed Networks (TPUT, 2004).
+
+804
+00:50:33.713 --> 00:50:36.167
+Apache DataSketches documentation.
+
+805
+00:50:37.517 --> 00:50:38.754
+Related chapters.
+
+806
+00:50:39.034 --> 00:50:42.789
+Ch 21, Data at Scale: windows and watermarks.
+
+807
+00:50:43.069 --> 00:50:47.101
+Ch 11, Partitioning and Sharding: hot keys, scatter-gather.
+
+808
+00:50:47.381 --> 00:50:51.157
+Ch 42, Search Autocomplete: popularity signals.
+
+809
+00:50:51.437 --> 00:50:56.621
+Ch 43, Home Feed and Recommendations: trending as a candidate source.
+
+810
+00:50:57.971 --> 00:50:59.571
+That's the end of this chapter.
+
+811
+00:50:59.851 --> 00:51:05.888
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+812
+00:51:06.168 --> 00:51:07.619
+See you in the next chapter.
+

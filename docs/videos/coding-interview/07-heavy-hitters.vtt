@@ -1,0 +1,466 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.523
+Trending Top-K:
+
+2
+00:00:01.803 --> 00:00:03.297
+Count-Min Sketch + Heap.
+
+3
+00:00:03.577 --> 00:00:07.737
+Chapter 7, from the Coding Interview part of the System Design Playbook.
+
+4
+00:00:09.487 --> 00:00:10.340
+Part 1.
+
+5
+00:00:10.620 --> 00:00:11.516
+Problem.
+
+6
+00:00:12.766 --> 00:00:24.734
+Find the top 5 trending hashtags in a stream of 315,000 events with about 50,000 distinct tags, using fixed memory that doesn't grow with the number of distinct tags.
+
+7
+00:00:25.014 --> 00:00:27.937
+Prove the estimates stay within the theoretical error bound.
+
+8
+00:00:29.287 --> 00:00:30.161
+Part 2.
+
+9
+00:00:30.441 --> 00:00:31.359
+Key idea.
+
+10
+00:00:32.609 --> 00:00:36.107
+A Count-Min Sketch is a d times w grid of counters.
+
+11
+00:00:36.387 --> 00:00:41.422
+Each item increments one counter per row; the estimate is the minimum across rows.
+
+12
+00:00:41.702 --> 00:00:53.307
+It never underestimates, and overestimates by at most ε, N with probability 1 minus δ (w = e or ε, d = ln(1 or δ)).
+
+13
+00:00:53.587 --> 00:01:00.691
+Pair it with a size-K candidate set: after each update, an item enters if its estimate beats the weakest member.
+
+14
+00:01:02.041 --> 00:01:03.385
+Here is the diagram.
+
+15
+00:01:07.235 --> 00:01:08.131
+Part 3.
+
+16
+00:01:08.411 --> 00:01:09.265
+Solution.
+
+17
+00:01:10.515 --> 00:01:13.245
+Here is the Java code, HeavyHitters.java.
+
+18
+00:01:13.525 --> 00:01:17.536
+It runs to 103 lines; the full listing is in the chapter.
+
+19
+00:01:17.816 --> 00:01:22.104
+Problem: top-K trending hashtags over a huge stream in fixed memory:
+
+20
+00:01:22.384 --> 00:01:27.056
+Count-Min Sketch + a size-K min-heap. d rows x w counters.
+
+21
+00:01:27.336 --> 00:01:34.589
+Estimate = min over rows: never underestimates, overestimates by = epsN with prob 1-delta.
+
+22
+00:01:37.439 --> 00:01:38.357
+Part 4.
+
+23
+00:01:38.637 --> 00:01:39.469
+Walkthrough.
+
+24
+00:01:40.719 --> 00:01:42.063
+Here is a quick table:
+
+25
+00:01:42.343 --> 00:02:04.380
+Code, and Why. width = ceil(e or epsilon); depth = ceil(ln(1 or delta)): ε = 0.0005 and δ = 0.001 give 5,437 times 7 counters, independent of the number of distinct items. min over rows:
+
+26
+00:02:04.660 --> 00:02:15.049
+Collisions only ever add counts, so the smallest counter is the tightest upper bound. if (members.containsKey(item) members.size() k)... else replace weakest:
+
+27
+00:02:15.329 --> 00:02:16.631
+Candidate tracking.
+
+28
+00:02:16.911 --> 00:02:27.535
+The O(k) scan is fine for small k; use a heap with an index map for large k. check(estimate - exact = 0.0005 total):
+
+29
+00:02:27.815 --> 00:02:31.697
+The test asserts the ε, N bound for every trending tag.
+
+30
+00:02:31.977 --> 00:02:36.031
+The output shows +12 to +35 on counts of thousands.
+
+31
+00:02:37.381 --> 00:02:38.341
+Part 5.
+
+32
+00:02:38.621 --> 00:02:39.559
+Complexity.
+
+33
+00:02:40.809 --> 00:02:42.153
+Here is a quick table:
+
+34
+00:02:42.433 --> 00:02:44.951
+Approach, and Time, and Space. update.
+
+35
+00:02:45.231 --> 00:02:45.977
+Time:
+
+36
+00:02:46.257 --> 00:02:47.089
+O(d).
+
+37
+00:02:47.369 --> 00:02:48.223
+Space:
+
+38
+00:02:48.503 --> 00:02:51.852
+O(d, w) counters, fixed. top-K maintenance.
+
+39
+00:02:52.132 --> 00:02:52.879
+Time:
+
+40
+00:02:53.159 --> 00:02:56.551
+O(k) per update here (O(log k) with an indexed heap).
+
+41
+00:02:56.831 --> 00:02:57.684
+Space:
+
+42
+00:02:57.964 --> 00:02:58.796
+O(k).
+
+43
+00:03:00.146 --> 00:03:01.085
+Part 6.
+
+44
+00:03:01.365 --> 00:03:02.090
+Run it.
+
+45
+00:03:03.340 --> 00:03:04.663
+Here is the shell code.
+
+46
+00:03:07.513 --> 00:03:49.597
+On screen: stream=315000 events, distinct=49099; sketch uses 38059 counters (297 KB) versus exact map. of 49099 keys. worldcup estimate=50035 exact=50000. election estimate=30023 exact=30000. ai estimate=20012 exact=20000. budget estimate=10015 exact=10000. monsoon estimate=5025 exact=5000.
+
+47
+00:03:49.877 --> 00:03:50.624
+PASS.
+
+48
+00:03:53.474 --> 00:03:54.413
+Part 7.
+
+49
+00:03:54.693 --> 00:03:56.378
+Solve it with Spring Boot 4.
+
+50
+00:03:57.628 --> 00:04:04.647
+The sketch lives in a Redis hash per hourly window (row:col, then count) and a top-K sorted set beside it.
+
+51
+00:04:04.927 --> 00:04:12.031
+One Lua call increments the d counters, takes the minimum as the estimate, and updates the top-K, all atomically.
+
+52
+00:04:12.311 --> 00:04:14.188
+Old windows expire on their own.
+
+53
+00:04:15.538 --> 00:04:18.333
+The sequence diagram walks through it step by step.
+
+54
+00:04:18.613 --> 00:04:20.789
+E to T: record(product-7).
+
+55
+00:04:21.069 --> 00:04:22.029
+T to R:
+
+56
+00:04:22.309 --> 00:04:27.663
+HINCRBY cms:hour r:c x5, min - estimate, ZADD topk:hour, trim to K.
+
+57
+00:04:27.943 --> 00:04:28.882
+C to T:
+
+58
+00:04:29.162 --> 00:04:32.831
+GET or api or v1 or trending?k=5.
+
+59
+00:04:33.111 --> 00:04:34.071
+T to R:
+
+60
+00:04:34.351 --> 00:04:37.423
+ZREVRANGE topk:hour 0 4 WITHSCORES.
+
+61
+00:04:37.703 --> 00:04:39.645
+T to C: item, estimate.
+
+62
+00:04:43.495 --> 00:04:45.244
+Sketch + top-K (Lua).
+
+63
+00:04:45.524 --> 00:04:48.212
+Here is the LUA code, cms-topk.lua.
+
+64
+00:04:48.492 --> 00:04:51.991
+It runs to 16 lines; the full listing is in the chapter.
+
+65
+00:04:52.271 --> 00:04:55.172
+Count-Min Sketch + top-K in one atomic call.
+
+66
+00:04:55.452 --> 00:05:00.700
+KEYS1 = sketch hash (field row:col), KEYS2 = top-K sorted set.
+
+67
+00:05:00.980 --> 00:05:04.628
+ARGV: item, k, ttlms, colrow0, colrow1,...
+
+68
+00:05:07.478 --> 00:05:08.310
+Service.
+
+69
+00:05:08.590 --> 00:05:11.662
+Here is the Java code, TrendingService.java.
+
+70
+00:05:11.942 --> 00:05:15.675
+It runs to 55 lines; the full listing is in the chapter.
+
+71
+00:05:15.955 --> 00:05:25.043
+Trending in the last hour: a Count-Min Sketch (fixed memory, never undercounts) plus a top-K sorted set. kept per hourly window in Redis.
+
+72
+00:05:25.323 --> 00:05:31.318
+Width w and depth d give error = (e or w) N with probability 1 - e^-d.
+
+73
+00:05:34.168 --> 00:05:35.043
+Controller.
+
+74
+00:05:35.323 --> 00:05:38.416
+Here is the Java code, TrendingController.java.
+
+75
+00:05:38.696 --> 00:05:42.173
+It runs to 20 lines; the full listing is in the chapter.
+
+76
+00:05:42.453 --> 00:05:48.043
+In production this is fed by a Kafka consumer of view events rather than called per request.
+
+77
+00:05:50.893 --> 00:05:52.237
+Run it as a service.
+
+78
+00:05:52.517 --> 00:05:58.085
+The integration test TrendingIT.java drives the API against a real Redis.
+
+79
+00:05:58.365 --> 00:06:01.053
+This is its transcript ( request, response):
+
+80
+00:06:02.403 --> 00:06:03.320
+On screen:
+
+81
+00:06:03.600 --> 00:06:11.728
+20,000 views of 500 products (Zipf 1.1); sketch 5 x 2000 counters; max overcount 3.
+
+82
+00:06:12.008 --> 00:06:14.675
+(bound e or w N = 28).
+
+83
+00:06:14.955 --> 00:06:18.624
+GET or api or v1 or trending?k=5.
+
+84
+00:06:18.904 --> 00:06:55.335
+200. item:product-0,estimate:3794,item:product-1,estimate:1783,item:product-2,estimate:1148,item:product-3,estimate:814,item:product-4,estimate:635. exact top 5: product-0=3794, product-1=1783, product-2=1148, product-3=814. product-4=635.
+
+85
+00:06:55.615 --> 00:06:59.477
+POST or api or v1 or trending or product-0.
+
+86
+00:06:59.757 --> 00:07:00.845
+202.
+
+87
+00:07:01.125 --> 00:07:01.871
+PASS.
+
+88
+00:07:04.721 --> 00:07:06.812
+What changes from the interview version.
+
+89
+00:07:07.092 --> 00:07:08.436
+Here is a quick table:
+
+90
+00:07:08.716 --> 00:07:13.111
+Interview, and Production (Spring Boot 4). longdw + PriorityQueue:
+
+91
+00:07:13.391 --> 00:07:32.271
+Redis hash (5 x 2,000 counters) + sorted set, shared by all consumers. one stream forever: per-hour windows with TTL; last hour = current window (or sum the last 2 for sliding). separate increment and heap update: one Lua script: no lost updates between instances.
+
+92
+00:07:33.621 --> 00:07:41.493
+Measured: max overcount 3 against the bound e or w, N = 28, and the top 5 matched the exact counts.
+
+93
+00:07:41.773 --> 00:07:50.007
+At very high event rates, pre-aggregate in the consumer (count locally for 1 s, then one HINCRBY per item) to cut Redis calls.
+
+94
+00:07:51.357 --> 00:07:52.232
+Part 8.
+
+95
+00:07:52.512 --> 00:07:53.621
+Common mistakes.
+
+96
+00:07:54.871 --> 00:07:56.663
+Using the sketch for rare items.
+
+97
+00:07:56.943 --> 00:08:00.997
+The relative error is large when the true count is small compared with N.
+
+98
+00:08:01.277 --> 00:08:02.365
+Never decaying.
+
+99
+00:08:02.645 --> 00:08:09.685
+Trending means recent, so use time-bucketed sketches (one per minute, summed over a window) or exponential decay.
+
+100
+00:08:09.965 --> 00:08:14.637
+Hashing with correlated functions across rows, which defeats the min-of-rows trick.
+
+101
+00:08:15.987 --> 00:08:16.883
+Part 9.
+
+102
+00:08:17.163 --> 00:08:18.507
+Follow-up questions.
+
+103
+00:08:19.757 --> 00:08:20.631
+Question.
+
+104
+00:08:20.911 --> 00:08:24.517
+How would you compute trending over the last hour across many servers?
+
+105
+00:08:24.797 --> 00:08:26.162
+Thirty-second answer:
+
+106
+00:08:26.442 --> 00:08:28.383
+Each server keeps per-minute sketches.
+
+107
+00:08:28.663 --> 00:08:37.773
+Sketches are mergeable (cell-wise add), so a reducer sums the last 60 minutes from all servers, then picks the top-K from the merged candidates.
+
+108
+00:08:38.053 --> 00:08:40.741
+This is a classic Flink or Kafka Streams job.
+
+109
+00:08:42.091 --> 00:08:42.965
+Question.
+
+110
+00:08:43.245 --> 00:08:46.061
+Count-Min versus Space-Saving or Misra-Gries?
+
+111
+00:08:46.341 --> 00:08:47.707
+Thirty-second answer:
+
+112
+00:08:47.987 --> 00:08:56.093
+Space-Saving keeps exactly k counters and directly gives heavy hitters with a guaranteed error, but it isn't as easily mergeable.
+
+113
+00:08:56.373 --> 00:09:00.256
+Count-Min answers point queries for any item and merges trivially.
+
+114
+00:09:01.606 --> 00:09:03.206
+That's the end of this chapter.
+
+115
+00:09:03.486 --> 00:09:09.523
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+116
+00:09:09.803 --> 00:09:11.254
+See you in the next chapter.
+

@@ -1,0 +1,2854 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.822
+Ride-Hailing Platform.
+
+2
+00:00:02.102 --> 00:00:07.179
+Chapter I05, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:08.929 --> 00:00:09.889
+At a glance:
+
+4
+00:00:10.169 --> 00:00:11.343
+Chapter at a glance.
+
+5
+00:00:11.623 --> 00:00:12.433
+Sector:
+
+6
+00:00:12.713 --> 00:00:16.980
+Mobility, Format: system design walkthrough (no code), Reader bands:
+
+7
+00:00:17.260 --> 00:00:19.308
+B1, then B4, Builds on:
+
+8
+00:00:19.588 --> 00:00:26.628
+Ch 47 (dispatch, geo indexes, GPS ingestion), Ch 45, Ch 41.
+
+9
+00:00:26.908 --> 00:00:36.401
+What you get: the design of an Uber or Ola-style ride-hailing platform for Indian cities (cars, autos, bike taxis) and global markets.
+
+10
+00:00:36.681 --> 00:00:49.631
+It covers: the rider's trip, from opening the app to paying and rating, and the systems each step touches;. the driver's day: going online, positioning, accepting, navigating, earnings, incentives and payouts;.
+
+11
+00:00:50.981 --> 00:01:10.309
+the core engines: geospatial indexing, supply, demand forecasting, matching, ETA, upfront and dynamic pricing, routing and map matching, ride sharing, airport queues;. safety and trust: identity, masked calls, trip sharing, SOS, route-deviation and crash detection, fraud (GPS spoofing,
+
+12
+00:01:10.589 --> 00:01:20.679
+collusion);. the algorithms behind each engine;. the data platform: real-time streams, lakehouse, real-time OLAP, ML platform, experimentation;.
+
+13
+00:01:22.029 --> 00:01:29.453
+the tech stack, with what Uber has published as open source or on its engineering blog kept separate from reference choices;.
+
+14
+00:01:29.733 --> 00:01:34.960
+Indian specifics: cash, UPI, autos and bike taxis, aggregator guidelines.
+
+15
+00:01:35.240 --> 00:01:36.221
+Reading time:
+
+16
+00:01:36.501 --> 00:01:37.653
+85 min.
+
+17
+00:01:39.003 --> 00:01:39.750
+Warning:
+
+18
+00:01:40.030 --> 00:01:41.438
+Sources and honesty.
+
+19
+00:01:41.718 --> 00:01:44.342
+Uber has published a great deal about its systems:
+
+20
+00:01:44.622 --> 00:01:54.585
+H3, Michelangelo, Cadence, Apache Hudi, Pinot usage, Schemaless or Docstore, Jaeger, M3, Ringpop, and many engineering blog posts.
+
+21
+00:01:54.865 --> 00:01:57.809
+Those are marked as publicly described (VERIFY).
+
+22
+00:01:58.089 --> 00:01:59.945
+Ola and others have published less.
+
+23
+00:02:00.225 --> 00:02:02.465
+Everything else is a reference design.
+
+24
+00:02:02.745 --> 00:02:11.470
+Regulatory statements (for example, India's Motor Vehicle Aggregator Guidelines and their fare and surge provisions) are marked VERIFY.
+
+25
+00:02:11.750 --> 00:02:13.734
+Check the current texts and state rules.
+
+26
+00:02:15.084 --> 00:02:15.937
+Part 1.
+
+27
+00:02:16.217 --> 00:02:17.753
+The System in One Page.
+
+28
+00:02:19.003 --> 00:02:20.433
+What the platform must do.
+
+29
+00:02:20.713 --> 00:02:24.318
+A ride-hailing platform is a real-time two-sided market.
+
+30
+00:02:24.598 --> 00:02:43.265
+Every few seconds, in every neighbourhood, it must: see where riders want to go and where drivers are;. price each trip so riders accept and drivers are willing;. match riders to drivers so pickups are fast and the whole city stays efficient;. guide both to the pickup and the destination;. settle money correctly;.
+
+31
+00:02:44.615 --> 00:02:45.873
+keep everyone safe.
+
+32
+00:02:46.153 --> 00:02:56.287
+Mistakes are visible immediately: a 12-minute pickup, a surge that feels unfair, a driver sent across a flyover with no U-turn, an unpaid cash trip.
+
+33
+00:02:57.637 --> 00:02:58.725
+Main systems.
+
+34
+00:02:59.005 --> 00:03:00.370
+Here is a quick table:
+
+35
+00:03:00.650 --> 00:03:02.165
+System, and What it does.
+
+36
+00:03:02.445 --> 00:03:04.066
+Rider app or Driver app:
+
+37
+00:03:04.346 --> 00:03:08.015
+Booking, tracking, payment; driver shift, navigation, earnings.
+
+38
+00:03:08.295 --> 00:03:09.746
+Location ingestion:
+
+39
+00:03:10.026 --> 00:03:15.295
+Driver GPS every 1 to 4 s, map-matched to roads (Ch 47).
+
+40
+00:03:15.575 --> 00:03:17.026
+Geospatial index:
+
+41
+00:03:17.306 --> 00:03:19.141
+Which drivers are near a point, now.
+
+42
+00:03:19.421 --> 00:03:20.551
+Maps platform:
+
+43
+00:03:20.831 --> 00:03:25.141
+Road graph, routing, ETA, map matching, pickup points, geofences.
+
+44
+00:03:25.421 --> 00:03:27.213
+Marketplace: forecasting:
+
+45
+00:03:27.493 --> 00:03:30.351
+Demand and supply per area per few minutes ahead.
+
+46
+00:03:30.631 --> 00:03:32.253
+Marketplace: pricing:
+
+47
+00:03:32.533 --> 00:03:36.287
+Upfront fares, dynamic (surge) multipliers, promotions.
+
+48
+00:03:36.567 --> 00:03:38.210
+Marketplace: matching:
+
+49
+00:03:38.490 --> 00:03:41.519
+Assign drivers to requests (batched optimisation).
+
+50
+00:03:41.799 --> 00:03:42.823
+Trip service:
+
+51
+00:03:43.103 --> 00:03:45.855
+The trip state machine, from request to completion.
+
+52
+00:03:47.205 --> 00:03:48.464
+Payments and ledger:
+
+53
+00:03:48.744 --> 00:03:52.840
+Rider charges, driver earnings, commissions, payouts, cash handling.
+
+54
+00:03:53.120 --> 00:03:54.080
+Incentives:
+
+55
+00:03:54.360 --> 00:03:56.749
+Driver quests, guarantees, heat maps.
+
+56
+00:03:57.029 --> 00:03:57.883
+Safety:
+
+57
+00:03:58.163 --> 00:04:02.771
+Identity checks, SOS, trip sharing, anomaly detection, incident response.
+
+58
+00:04:03.051 --> 00:04:04.203
+Risk and fraud:
+
+59
+00:04:04.483 --> 00:04:08.173
+GPS spoofing, collusion, payment fraud, promo abuse.
+
+60
+00:04:08.453 --> 00:04:09.541
+Communication:
+
+61
+00:04:09.821 --> 00:04:13.491
+Masked calls, in-app chat (Ch 41), notifications.
+
+62
+00:04:13.771 --> 00:04:14.667
+Support:
+
+63
+00:04:14.947 --> 00:04:17.336
+Fare disputes, lost items, incidents.
+
+64
+00:04:17.616 --> 00:04:18.789
+Data platform:
+
+65
+00:04:19.069 --> 00:04:23.251
+Streams, lakehouse, real-time OLAP, ML platform, experiments.
+
+66
+00:04:24.601 --> 00:04:26.755
+Scale for this design (assumptions).
+
+67
+00:04:27.035 --> 00:04:28.401
+Here is a quick table:
+
+68
+00:04:28.681 --> 00:04:30.003
+Quantity, and Value.
+
+69
+00:04:30.283 --> 00:04:31.094
+Cities:
+
+70
+00:04:31.374 --> 00:04:33.763
+100 (India + international).
+
+71
+00:04:34.043 --> 00:04:35.046
+Trips per day:
+
+72
+00:04:35.326 --> 00:04:44.777
+5M; peak ~250 trips per second city-wide totals, ~2,000 requests per second including re-requests and fare checks.
+
+73
+00:04:45.057 --> 00:04:46.593
+Drivers online at peak:
+
+74
+00:04:46.873 --> 00:04:48.046
+600k.
+
+75
+00:04:48.326 --> 00:04:49.990
+Driver location updates:
+
+76
+00:04:50.270 --> 00:04:56.158
+600k drivers ÷ 4 s about 150k updates per second.
+
+77
+00:04:56.438 --> 00:05:02.497
+Fare estimates (where to? typing): ~20k per second at peak (many estimates per trip).
+
+78
+00:05:02.777 --> 00:05:07.385
+Trip events: ~20 state events per trip, then 100M per day.
+
+79
+00:05:08.735 --> 00:05:10.121
+Estimation highlights:
+
+80
+00:05:10.401 --> 00:05:12.961
+Location updates dominate write volume.
+
+81
+00:05:13.241 --> 00:05:17.828
+They are ephemeral: keep the latest position in memory and the history in the lake.
+
+82
+00:05:18.108 --> 00:05:20.732
+Fare estimates dominate read computation.
+
+83
+00:05:21.012 --> 00:05:23.337
+Each needs a route, an ETA and a price.
+
+84
+00:05:23.617 --> 00:05:29.953
+Matching is CPU-bound per area, not throughput-bound globally, so it is partitioned by geography.
+
+85
+00:05:31.303 --> 00:05:32.178
+Part 2.
+
+86
+00:05:32.458 --> 00:05:33.418
+Requirements.
+
+87
+00:05:34.668 --> 00:05:35.521
+Functional.
+
+88
+00:05:35.801 --> 00:05:47.428
+Riders set pickup and destination, see fare and ETA per product (auto, bike, mini, sedan, premium, shared), request, track, pay (cash, UPI, cards, wallet), rate and tip.
+
+89
+00:05:47.708 --> 00:05:59.143
+Drivers go online and offline, receive and accept or decline offers, navigate, start and end trips, collect cash or see digital payment, and see earnings, incentives and payouts.
+
+90
+00:05:59.423 --> 00:06:05.588
+Dynamic pricing within regulatory limits (VERIFY per jurisdiction); promotions and passes.
+
+91
+00:06:06.938 --> 00:06:11.951
+Scheduled rides, airport and railway-station queues, rentals (hourly), intercity.
+
+92
+00:06:12.231 --> 00:06:14.215
+Shared rides (pooling) where offered.
+
+93
+00:06:14.495 --> 00:06:21.237
+Safety features: verified identity, masked numbers, trip sharing, SOS, ride check-ins on anomalies.
+
+94
+00:06:21.517 --> 00:06:24.866
+Support for disputes, refunds, lost items, incidents.
+
+95
+00:06:26.216 --> 00:06:27.325
+Non-functional.
+
+96
+00:06:27.605 --> 00:06:28.971
+Here is a quick table:
+
+97
+00:06:29.251 --> 00:06:30.616
+Attribute, and Target.
+
+98
+00:06:30.896 --> 00:06:31.813
+Latency:
+
+99
+00:06:32.093 --> 00:06:40.840
+Fare estimate p95 300 ms; a match decision within a few seconds of the request; location to rider screen 2 s.
+
+100
+00:06:41.120 --> 00:06:42.187
+Availability:
+
+101
+00:06:42.467 --> 00:06:51.597
+Request, match and trip ≥ 99.99% per city; a trip in progress must survive any single service failure.
+
+102
+00:06:51.877 --> 00:06:52.795
+Correctness:
+
+103
+00:06:53.075 --> 00:07:00.968
+A driver is never assigned two trips at once (unless pooled); every trip is billed exactly once; driver earnings are exact.
+
+104
+00:07:01.248 --> 00:07:02.123
+Fairness:
+
+105
+00:07:02.403 --> 00:07:07.117
+Transparent fares; no discrimination in matching; consistent surge rules.
+
+106
+00:07:07.397 --> 00:07:08.315
+Privacy:
+
+107
+00:07:08.595 --> 00:07:12.797
+Location data minimised and access-controlled; phone numbers masked.
+
+108
+00:07:13.077 --> 00:07:13.931
+Safety:
+
+109
+00:07:14.211 --> 00:07:18.456
+SOS reaches responders within seconds; incident data preserved.
+
+110
+00:07:19.806 --> 00:07:20.702
+Part 3.
+
+111
+00:07:20.982 --> 00:07:22.518
+High-Level Architecture.
+
+112
+00:07:23.768 --> 00:07:25.112
+Here is the diagram.
+
+113
+00:07:28.962 --> 00:07:30.626
+Key architectural decisions:
+
+114
+00:07:31.976 --> 00:07:33.341
+Here is a quick table:
+
+115
+00:07:33.621 --> 00:07:35.392
+Decision, and Choice, and Why.
+
+116
+00:07:35.672 --> 00:07:36.589
+Partitioning.
+
+117
+00:07:36.869 --> 00:07:37.701
+Choice:
+
+118
+00:07:37.981 --> 00:07:45.299
+Marketplace services partitioned by city, then geo cells; cities are the unit of deployment and blast radius.
+
+119
+00:07:45.579 --> 00:07:46.261
+Why:
+
+120
+00:07:46.541 --> 00:07:49.784
+Supply and demand are local, and failures stay local.
+
+121
+00:07:50.064 --> 00:07:51.259
+Location state.
+
+122
+00:07:51.539 --> 00:07:52.371
+Choice:
+
+123
+00:07:52.651 --> 00:07:57.259
+In-memory, sharded by cell; latest position only; history to the stream.
+
+124
+00:07:57.539 --> 00:07:58.221
+Why:
+
+125
+00:07:58.501 --> 00:08:04.517
+150k writes per second of ephemeral data (Ch 47 L1, L2).
+
+126
+00:08:04.797 --> 00:08:05.715
+Trip state.
+
+127
+00:08:05.995 --> 00:08:06.827
+Choice:
+
+128
+00:08:07.107 --> 00:08:12.013
+Durable, strongly consistent per trip; a workflow engine for long-running steps.
+
+129
+00:08:12.293 --> 00:08:12.976
+Why:
+
+130
+00:08:13.256 --> 00:08:15.069
+Money and safety depend on it.
+
+131
+00:08:15.349 --> 00:08:16.821
+Communication with apps.
+
+132
+00:08:17.101 --> 00:08:17.933
+Choice:
+
+133
+00:08:18.213 --> 00:08:27.365
+Persistent connections (WebSocket or MQTT or gRPC streams) for offers and live updates; push notifications as fallback.
+
+134
+00:08:27.645 --> 00:08:28.328
+Why:
+
+135
+00:08:28.608 --> 00:08:30.272
+Offers must arrive in 1 s.
+
+136
+00:08:31.622 --> 00:08:32.859
+Geography model.
+
+137
+00:08:33.139 --> 00:08:33.971
+Choice:
+
+138
+00:08:34.251 --> 00:08:36.811
+Hexagonal hierarchical cells (H3).
+
+139
+00:08:37.091 --> 00:08:37.774
+Why:
+
+140
+00:08:38.054 --> 00:08:42.875
+Uniform neighbours, multi-resolution aggregation (§5.1).
+
+141
+00:08:43.155 --> 00:08:44.414
+Pricing and matching.
+
+142
+00:08:44.694 --> 00:08:45.526
+Choice:
+
+143
+00:08:45.806 --> 00:08:49.731
+Separate engines sharing forecasts; ML-driven with guard rails.
+
+144
+00:08:50.011 --> 00:08:50.694
+Why:
+
+145
+00:08:50.974 --> 00:08:52.787
+Different time scales and owners.
+
+146
+00:08:54.137 --> 00:08:55.055
+Part 4.
+
+147
+00:08:55.335 --> 00:08:57.212
+How It Works, Journeys End to End.
+
+148
+00:08:58.462 --> 00:09:01.555
+Journey 1: a rider books a sedan in Bengaluru.
+
+149
+00:09:01.835 --> 00:09:02.774
+Open the app.
+
+150
+00:09:03.054 --> 00:09:12.697
+The app sends its location and receives nearby cars (for display, with coarse and jittered positions to protect driver privacy) and each product's ETA.
+
+151
+00:09:12.977 --> 00:09:19.057
+These come from the geo index: a count and nearest-driver query in the rider's cell and its neighbours.
+
+152
+00:09:19.337 --> 00:09:20.787
+Choose the destination.
+
+153
+00:09:21.067 --> 00:09:29.622
+As the rider types, the place search service autocompletes: a places index with popularity and personalisation (Ch 42).
+
+154
+00:09:29.902 --> 00:09:37.027
+The pickup point is snapped to a safe, accessible spot: a gate or the correct side of the road, learned from past pickups.
+
+155
+00:09:38.377 --> 00:09:39.977
+Fare estimate per product:
+
+156
+00:09:40.257 --> 00:09:49.452
+Route and ETA: the maps service computes the route and trip ETA, a routing engine plus an ML correction for traffic (§6.3).
+
+157
+00:09:49.732 --> 00:10:02.724
+Upfront fare: pricing computes it from the base fare, per-km and per-minute components, estimated tolls and airport fees, and the dynamic multiplier for the pickup area and time (§6.4).
+
+158
+00:10:03.004 --> 00:10:04.924
+It applies promotions and taxes.
+
+159
+00:10:06.274 --> 00:10:10.178
+Fare quote: the fare is shown with a quote ID valid for a few minutes.
+
+160
+00:10:10.458 --> 00:10:15.898
+The quote is stored so the trip is billed at the quoted price, unless the route changes materially.
+
+161
+00:10:16.178 --> 00:10:17.053
+Request.
+
+162
+00:10:17.333 --> 00:10:25.013
+The trip service creates a trip in state REQUESTED, holding the quote, rider, pickup, destination, product and payment method.
+
+163
+00:10:25.293 --> 00:10:30.221
+An idempotency key prevents duplicate trips from double taps (Ch 20).
+
+164
+00:10:30.501 --> 00:10:36.538
+For digital payment, a small pre-authorisation or payment method check may run (VERIFY per method).
+
+165
+00:10:37.888 --> 00:10:38.720
+Matching.
+
+166
+00:10:38.000 --> 00:10:41.709
+The request joins the matching batch for its area.
+
+167
+00:10:41.989 --> 00:10:51.845
+Every few seconds the matcher solves an assignment across all open requests and available drivers (§6.2), and chooses this rider's driver.
+
+168
+00:10:52.125 --> 00:11:00.061
+Driver lock: the chosen driver is locked with a conditional update (available, then offered), so no other request can take them.
+
+169
+00:11:00.341 --> 00:11:01.045
+Offer.
+
+170
+00:11:01.325 --> 00:11:12.035
+The offer goes to the driver's app over the persistent connection, showing pickup distance, rider rating and estimated earnings (VERIFY what regulations require drivers see).
+
+171
+00:11:12.315 --> 00:11:15.152
+The driver has ~10 to 15 s to accept.
+
+172
+00:11:16.502 --> 00:11:23.158
+Decline or timeout: the driver is released, and the request re-enters the next batch with a priority boost.
+
+173
+00:11:23.438 --> 00:11:24.377
+Accepted.
+
+174
+00:11:24.657 --> 00:11:26.513
+The trip becomes DRIVERASSIGNED.
+
+175
+00:11:26.793 --> 00:11:31.571
+The rider sees the driver's name, photo, vehicle and plate, and the live position.
+
+176
+00:11:31.851 --> 00:11:34.795
+The driver's app switches to navigation to the pickup.
+
+177
+00:11:35.075 --> 00:11:38.105
+Masked calling and chat are enabled between the two.
+
+178
+00:11:38.385 --> 00:11:39.259
+Arriving.
+
+179
+00:11:39.539 --> 00:11:45.086
+Geofence detection marks ARRIVED when the driver is within ~50 m of the pickup.
+
+180
+00:11:46.436 --> 00:11:51.577
+A waiting timer starts: free waiting, then a per-minute charge, VERIFY local rules.
+
+181
+00:11:51.857 --> 00:11:52.625
+Start.
+
+182
+00:11:52.905 --> 00:11:56.105
+The rider shares a 4-digit PIN or OTP.
+
+183
+00:11:56.385 --> 00:11:59.223
+The driver enters it, and the trip becomes ONTRIP.
+
+184
+00:11:59.503 --> 00:12:01.337
+This prevents wrong-rider pickups.
+
+185
+00:12:01.617 --> 00:12:02.641
+During the trip:
+
+186
+00:12:02.921 --> 00:12:09.833
+Locations: the driver's positions are map-matched and stream to the rider's app and trusted contacts (if shared).
+
+187
+00:12:10.113 --> 00:12:18.135
+Safety monitoring: watches for long unexpected stops, route deviation and possible crashes (§5.9).
+
+188
+00:12:19.485 --> 00:12:24.669
+Destination change: the rider can change the destination, which gets a new fare quote.
+
+189
+00:12:24.949 --> 00:12:25.631
+End.
+
+190
+00:12:25.911 --> 00:12:30.050
+The driver ends the trip at the destination and the trip becomes COMPLETED.
+
+191
+00:12:30.330 --> 00:12:42.319
+The final fare is computed: the upfront fare if the route matched;. adjusted if there were stops, a destination change, significant detours, waiting or tolls (§5.6).
+
+192
+00:12:42.599 --> 00:12:43.389
+Payment:
+
+193
+00:12:44.739 --> 00:12:50.072
+Digital: charged via the payment method (UPI collect or autopay, card, wallet).
+
+194
+00:12:50.352 --> 00:12:54.576
+Cash: the driver's app shows the amount, and the driver confirms receipt.
+
+195
+00:12:54.856 --> 00:12:58.675
+The commission owed by the driver is debited from their earnings balance.
+
+196
+00:12:58.955 --> 00:13:07.104
+Ledger: the rider's charge, the driver's earnings, commission, taxes and promotions are all posted (§5.7).
+
+197
+00:13:07.384 --> 00:13:08.365
+Afterwards:
+
+198
+00:13:09.715 --> 00:13:11.763
+Rating: both sides rate each other.
+
+199
+00:13:12.043 --> 00:13:17.974
+Ratings feed quality systems (with bias controls), and tips go 100% to the driver.
+
+200
+00:13:18.254 --> 00:13:20.366
+Receipt: emailed and shown in the app.
+
+201
+00:13:20.646 --> 00:13:24.763
+The trip data is final, and disputes open a support case referencing it.
+
+202
+00:13:26.113 --> 00:13:27.927
+Journey 2: a driver's day.
+
+203
+00:13:28.207 --> 00:13:44.697
+Going online: the driver passes periodic selfie identity checks (face match against the onboarded photo; VERIFY consent and regulations);. document validity is checked (licence, permit, insurance, fitness certificate);. the driver goes ONLINE.
+
+204
+00:13:44.977 --> 00:13:45.895
+Positioning:
+
+205
+00:13:47.245 --> 00:14:01.943
+the app shows a demand heat map (forecast demand versus supply) and active incentives, for example, complete 12 trips between 7 to 11 am for 300 rupeesextra;. drivers may move to busier areas.
+
+206
+00:14:02.223 --> 00:14:04.485
+Offers: offers arrive while online.
+
+207
+00:14:04.765 --> 00:14:07.581
+The acceptance rate and cancellation rate are tracked.
+
+208
+00:14:07.861 --> 00:14:13.386
+Excessive declines may reduce priority, a policy decision with fairness considerations.
+
+209
+00:14:13.666 --> 00:14:21.282
+Destination mode: the driver can set a home direction, and matching then prefers trips heading that way (limited uses per day).
+
+210
+00:14:22.632 --> 00:14:40.829
+Earnings: each trip's earnings (fare minus commission, plus tips and incentives) appear in real time;. cash collected is netted against amounts owed to the platform;. the driver balance may go negative with heavy cash trips, in which case the driver must top up or earnings are deducted.
+
+211
+00:14:41.109 --> 00:14:50.709
+Payouts go to the driver's bank daily or weekly, with instant cash-out options (a payment rail such as IMPS or UPI; VERIFY) (I03).
+
+212
+00:14:52.059 --> 00:14:58.075
+Going offline: fatigue rules may force breaks after N hours online (VERIFY local rules).
+
+213
+00:14:59.425 --> 00:15:02.220
+Journey 3: a surge at 6 pm in the rain.
+
+214
+00:15:02.500 --> 00:15:05.785
+The spike: at 5:45 pm rain starts.
+
+215
+00:15:06.065 --> 00:15:14.855
+Requests in the business district's cells jump 3 times within minutes, while supply there stays flat, as drivers avoid rain or are stuck in traffic.
+
+216
+00:15:15.135 --> 00:15:31.135
+Forecasting: the real-time demand signal (app opens, fare checks, requests, unfulfilled requests per cell per minute) and the supply signal (open drivers, drivers finishing trips nearby) feed the forecaster;. it predicts the next 15 to 30 minutes.
+
+217
+00:15:32.485 --> 00:15:41.210
+Pricing computes a multiplier per area that balances expected demand with available and attracted supply (§6.4).
+
+218
+00:15:41.490 --> 00:15:57.831
+Within guard rails: smoothing over time;. caps (including regulatory caps; VERIFY);. consistency between neighbouring areas;. no surges during declared emergencies (a policy decision; many platforms cap pricing in emergencies, VERIFY).
+
+219
+00:15:58.111 --> 00:15:58.943
+Effects:
+
+220
+00:16:00.293 --> 00:16:10.576
+some riders wait or choose cheaper products;. drivers see the surge on the heat map and move in;. wait times recover;. the multiplier decays as balance returns.
+
+221
+00:16:10.856 --> 00:16:16.552
+Measurement: request completion rate, pickup ETAs and rider cancellations are measured per area.
+
+222
+00:16:16.832 --> 00:16:23.253
+Experiments test pricing policies by region-time units, not by user (§7.5).
+
+223
+00:16:24.603 --> 00:16:26.353
+Journey 4: airport pickup.
+
+224
+00:16:26.633 --> 00:16:30.345
+Arrival: the airport is a geofenced zone with a driver queue.
+
+225
+00:16:30.625 --> 00:16:34.593
+Drivers entering the holding area join a FIFO queue per product.
+
+226
+00:16:34.873 --> 00:16:37.347
+Request: a rider requests from the terminal.
+
+227
+00:16:37.627 --> 00:16:45.457
+The pickup point is fixed (a designated bay), and the first eligible driver in the queue is offered the trip, not the nearest one.
+
+228
+00:16:45.737 --> 00:16:48.681
+Fairness: drivers who leave the zone lose their place.
+
+229
+00:16:48.961 --> 00:16:57.835
+Short trips may give the driver a return to queue priority to avoid penalising them (a policy choice; VERIFY local airport rules and fees).
+
+230
+00:16:58.115 --> 00:17:01.443
+Fees: airport fees are added to the fare as regulated.
+
+231
+00:17:02.793 --> 00:17:04.543
+Journey 5: a shared ride.
+
+232
+00:17:04.823 --> 00:17:10.049
+Request: a rider requests shared and gets a lower fare with a wider arrival window.
+
+233
+00:17:10.329 --> 00:17:25.156
+Insertion: the pooling engine tries to insert the pickup and drop-off into existing trips' routes, where the added detour for existing riders is within limits (for example, + 8 min) and seats are available (§6.6).
+
+234
+00:17:25.436 --> 00:17:30.663
+Update: if inserted, the existing riders' ETAs update and the driver's route re-plans.
+
+235
+00:17:30.943 --> 00:17:35.252
+If not, a new pooled trip starts with this rider as the first passenger.
+
+236
+00:17:35.532 --> 00:17:37.495
+Fares are fixed upfront per rider.
+
+237
+00:17:37.775 --> 00:17:44.431
+A pool that doesn't materialise still charges the shared fare, which is the incentive for accepting uncertainty.
+
+238
+00:17:45.781 --> 00:17:47.829
+Journey 6: a safety incident.
+
+239
+00:17:48.109 --> 00:17:54.594
+Detection: during a night trip, the car stops for 12 minutes at an unscheduled location away from the route.
+
+240
+00:17:54.874 --> 00:18:01.999
+The safety monitor detects a long stop plus a route deviation, and triggers a ride check push to rider and driver:
+
+241
+00:18:02.279 --> 00:18:03.645
+Is everything OK?
+
+242
+00:18:03.925 --> 00:18:06.506
+Escalation: the rider presses SOS.
+
+243
+00:18:06.786 --> 00:18:20.013
+The app: calls the emergency number (112 in India; VERIFY integration requirements);. shares the live location and trip details with the platform's safety team and the rider's trusted contacts.
+
+244
+00:18:21.363 --> 00:18:28.317
+Response: the safety operations console shows a timeline of the trip (locations, events, driver history).
+
+245
+00:18:28.597 --> 00:18:32.800
+Agents follow a playbook, and the event data is preserved (legal hold).
+
+246
+00:18:33.080 --> 00:18:37.133
+After the trip: an investigation, and account actions per policy.
+
+247
+00:18:37.413 --> 00:18:42.149
+Data is shared with law enforcement only under lawful process (VERIFY).
+
+248
+00:18:43.499 --> 00:18:44.459
+Part 5.
+
+249
+00:18:44.739 --> 00:18:46.275
+Core Subsystems in Depth.
+
+250
+00:18:47.525 --> 00:18:50.107
+Geospatial model, hexagonal cells.
+
+251
+00:18:50.387 --> 00:19:14.259
+H3, Uber's open-source hierarchical hexagonal grid (publicly described; VERIFY), divides the earth into hexagons at 16 resolutions: at resolution 9, a hexagon is ~0.1 km² (edge ~170 m), good for local supply counts;. at resolution 7 (~5 km²), good for pricing areas.
+
+252
+00:19:14.539 --> 00:19:24.459
+Why hexagons: every neighbour is the same distance away (squares have diagonal neighbours at a different distance), so k-ring neighbourhoods approximate circles well.
+
+253
+00:19:24.739 --> 00:19:26.957
+Aggregation up the hierarchy is cheap.
+
+254
+00:19:27.237 --> 00:19:28.091
+Uses:
+
+255
+00:19:29.441 --> 00:19:42.091
+live supply per cell;. demand per cell;. pricing zones (groups of cells);. heat maps;. geofences (airports, restricted areas, as sets of cells plus exact polygons);. analytics.
+
+256
+00:19:43.441 --> 00:19:46.492
+Location ingestion and the live supply index.
+
+257
+00:19:46.772 --> 00:19:56.372
+Ingestion: driver apps send GPS every 1 to 4 s (adaptive by speed and trip state) over the persistent connection to location gateways.
+
+258
+00:19:56.652 --> 00:20:03.799
+Gateways validate the points, filtering impossible jumps and spoofing indicators (§5.10).
+
+259
+00:20:04.079 --> 00:20:11.311
+Map matching (§6.5) snaps points to road segments, which gives heading and road position for ETA.
+
+260
+00:20:11.591 --> 00:20:21.297
+The live index is sharded by city and cell, in memory: cell, then drivers (id, status, product, position, heading, last seen), updated on each ping;.
+
+261
+00:20:22.647 --> 00:20:30.711
+drivers moving between cells are moved between buckets;. drivers not seen for N seconds are marked stale and excluded from matching.
+
+262
+00:20:30.991 --> 00:20:34.063
+Replication: replicas per shard give failover.
+
+263
+00:20:34.343 --> 00:20:40.317
+A process restart rebuilds from the next pings in seconds, because the state is ephemeral by design.
+
+264
+00:20:40.597 --> 00:20:49.365
+History: every ping goes to Kafka, then the lake (for ETA training, safety investigations and disputes), with retention and access limits.
+
+265
+00:20:49.645 --> 00:20:56.279
+Details and measured trade-offs of geo indexes and ingestion are in Ch 47 L1, L2.
+
+266
+00:20:57.629 --> 00:20:58.739
+Maps platform.
+
+267
+00:20:59.019 --> 00:21:16.299
+Road graph: road segments with attributes (one-way, turn restrictions, speed classes, U-turn permissions), from licensed or open map data (OpenStreetMap plus a commercial provider) and corrected by driver trace mining (new roads, closures, wrong turn restrictions).
+
+268
+00:21:16.579 --> 00:21:18.435
+Routing: shortest-time paths.
+
+269
+00:21:18.715 --> 00:21:28.912
+At city scale, contraction hierarchies or similar precomputation make queries milliseconds, instead of Dijkstra over millions of nodes (§6.3).
+
+270
+00:21:30.262 --> 00:21:40.971
+Traffic: live segment speeds are computed from driver traces, a stream aggregation of speeds per segment per minute, and blended with historical profiles by time of day.
+
+271
+00:21:41.251 --> 00:21:45.198
+ETA service: route time from the graph, then an ML correction model.
+
+272
+00:21:45.478 --> 00:21:50.363
+Uber has published work on deep-learning ETA post-processing (VERIFY DeepETA).
+
+273
+00:21:50.643 --> 00:21:56.723
+Pickup points: clustering historical pickup locations per place to suggest the best pickup spots.
+
+274
+00:21:58.073 --> 00:21:59.033
+Forecasting.
+
+275
+00:21:59.313 --> 00:22:06.503
+What is predicted: demand (requests) and supply (drivers available) per cell group for the next 5 to 60 minutes.
+
+276
+00:22:06.783 --> 00:22:15.977
+Features: recent history, time of day and week, weather, events (concerts, cricket matches), holidays, airport flight arrivals and train arrivals.
+
+277
+00:22:16.257 --> 00:22:23.575
+Models: gradient-boosted trees or neural sequence models, with separate short-horizon and longer-horizon models.
+
+278
+00:22:23.855 --> 00:22:34.436
+Consumers: pricing (§6.4), incentives design, heat maps, and matching look-ahead, which avoids sending the last driver out of an area about to be busy.
+
+279
+00:22:35.786 --> 00:22:37.130
+Matching and dispatch.
+
+280
+00:22:37.410 --> 00:22:38.370
+Why batch?
+
+281
+00:22:38.650 --> 00:22:44.090
+Assigning each request immediately to its nearest driver is greedy and makes the city worse.
+
+282
+00:22:44.370 --> 00:22:49.191
+Example: a driver 2 minutes from rider A and 3 minutes from rider B gets A.
+
+283
+00:22:49.471 --> 00:22:57.151
+B then waits 9 minutes for the next driver, when giving the driver to B and another driver to A would have made both waits 4 minutes.
+
+284
+00:22:57.431 --> 00:23:11.234
+The batch: every 2 to 5 seconds per area, the matcher collects open requests and available drivers (including those about to finish trips nearby) and solves a minimum-cost bipartite matching (§6.2).
+
+285
+00:23:12.584 --> 00:23:23.976
+The cost: pickup ETA (from maps), plus penalties such as heading, driver's destination mode, product compatibility, driver fairness and rider priority after previous declines.
+
+286
+00:23:24.256 --> 00:23:31.275
+Constraints: product (auto versus sedan), accessibility, EV range, airport queue rules, driver preferences.
+
+287
+00:23:31.555 --> 00:23:33.859
+After solving, dispatch sends offers.
+
+288
+00:23:34.139 --> 00:23:37.104
+Acceptance and timeouts feed back into the next batch.
+
+289
+00:23:37.384 --> 00:23:38.408
+Consistency:
+
+290
+00:23:39.758 --> 00:23:58.190
+driver state transitions (available, then offered, then assigned) are compare-and-set operations on the driver's state, so two matchers can never assign one driver twice;. matchers are partitioned by area, with cross-boundary drivers handled by the area owning the request (with neighbour reads).
+
+291
+00:23:59.540 --> 00:24:02.079
+Pricing: upfront fares and final fares.
+
+292
+00:24:02.359 --> 00:24:15.607
+The upfront fare is quoted before the request: base + per-km times route distance + per-min times route time + fees + tolls, times dynamic multiplier, minus promotions, + taxes.
+
+293
+00:24:15.887 --> 00:24:17.444
+It is rounded per the rules.
+
+294
+00:24:17.724 --> 00:24:19.495
+The quote is stored with its inputs.
+
+295
+00:24:19.775 --> 00:24:27.988
+The final fare equals the quote, unless: the destination changed (re-quote);. stops were added;. waiting exceeded the free period;.
+
+296
+00:24:29.338 --> 00:24:34.074
+tolls differed;. the actual route diverged significantly because of the rider.
+
+297
+00:24:34.354 --> 00:24:41.117
+A reconciliation job compares the actual trip with the quote, and support rules auto-resolve common disputes.
+
+298
+00:24:41.397 --> 00:24:54.751
+Regulatory limits: in India, the aggregator guidelines set rules on fare structure and on surge relative to base fares, and states may notify their own fares (VERIFY the current guidelines and state rules).
+
+299
+00:24:55.031 --> 00:24:59.362
+The pricing engine enforces per-jurisdiction caps as hard constraints.
+
+300
+00:25:00.712 --> 00:25:04.232
+Promotions: rider discounts, passes and subscriptions.
+
+301
+00:25:04.512 --> 00:25:07.968
+Driver-side incentives are separate (§5.8).
+
+302
+00:25:09.318 --> 00:25:11.067
+Payments, ledger and payouts.
+
+303
+00:25:11.347 --> 00:25:12.414
+Rider payments:
+
+304
+00:25:12.694 --> 00:25:29.590
+UPI (collect, intent or autopay mandates), cards (tokenised), wallets, corporate accounts, cash;. payment happens after the trip, with retries and fallback to a secondary method;. unpaid balances block the next request until settled (Ch 45).
+
+305
+00:25:29.870 --> 00:25:37.102
+The ledger: double-entry accounts for rider payable, driver earnings, platform commission, taxes, promotions and tips.
+
+306
+00:25:38.452 --> 00:25:42.633
+Cash trips: the platform's commission becomes a receivable from the driver.
+
+307
+00:25:42.913 --> 00:25:46.689
+Digital trips: the driver's share becomes a payable to the driver.
+
+308
+00:25:46.969 --> 00:25:55.737
+Payouts: scheduled or instant transfers to drivers' bank accounts, with daily reconciliation against bank statements (I03).
+
+309
+00:25:56.017 --> 00:25:56.764
+Tax:
+
+310
+00:25:57.044 --> 00:26:05.172
+GST on the platform's services and TDS or TCS obligations for drivers' earnings as applicable (VERIFY).
+
+311
+00:26:06.522 --> 00:26:07.482
+Incentives.
+
+312
+00:26:07.762 --> 00:26:18.066
+Types: quests (N trips in a window, then bonus);. area boosts (extra per trip in a zone and time);. guarantees (minimum hourly earnings when online in a zone).
+
+313
+00:26:18.346 --> 00:26:24.106
+Design: incentives are budgeted by the forecast supply gap, with targeting by driver segment.
+
+314
+00:26:24.386 --> 00:26:27.906
+Uplift is measured by experiments against a control group.
+
+315
+00:26:29.256 --> 00:26:34.035
+Accounting: incentive payouts are ledger entries with the same rigour as fares.
+
+316
+00:26:35.385 --> 00:26:36.622
+Safety platform.
+
+317
+00:26:36.902 --> 00:26:45.265
+Onboarding checks: identity and document verification, background verification where required (VERIFY rules), vehicle checks.
+
+318
+00:26:45.545 --> 00:26:51.753
+In-trip features: a PIN to start, masked calls, share trip, SOS, and ride check on anomalies.
+
+319
+00:26:52.033 --> 00:27:00.651
+Anomaly detection: long unexpected stops;. route deviation (distance from the planned route beyond a threshold for a sustained time);.
+
+320
+00:27:02.001 --> 00:27:10.129
+possible crash (sudden deceleration from phone sensors followed by a stop);. unexpected trip end far from the destination.
+
+321
+00:27:10.409 --> 00:27:13.012
+Each has thresholds tuned to limit false alarms.
+
+322
+00:27:13.292 --> 00:27:19.799
+Safety operations: a 24 times 7 team with prioritised queues and trip replay tools.
+
+323
+00:27:20.079 --> 00:27:21.487
+Evidence is preserved.
+
+324
+00:27:21.767 --> 00:27:26.396
+Women-safety and night features in some markets (VERIFY features by market).
+
+325
+00:27:27.746 --> 00:27:28.834
+Fraud and risk.
+
+326
+00:27:29.114 --> 00:27:30.479
+Here is a quick table:
+
+327
+00:27:30.759 --> 00:27:32.615
+Fraud, and Signal, and Response.
+
+328
+00:27:32.895 --> 00:27:36.181
+GPS spoofing (fake location apps, emulators).
+
+329
+00:27:36.461 --> 00:27:37.229
+Signal:
+
+330
+00:27:37.509 --> 00:27:44.357
+Mock-location flags, impossible speeds, inconsistent sensors, cell tower versus GPS mismatch.
+
+331
+00:27:44.637 --> 00:27:45.554
+Response:
+
+332
+00:27:45.834 --> 00:27:47.626
+Block trips, suspend accounts.
+
+333
+00:27:47.906 --> 00:27:50.957
+Collusion (driver and rider fake trips for incentives).
+
+334
+00:27:51.237 --> 00:27:52.005
+Signal:
+
+335
+00:27:52.285 --> 00:27:56.957
+Repeated pairs, short trips with no real movement, shared devices or payment.
+
+336
+00:27:57.237 --> 00:27:58.154
+Response:
+
+337
+00:27:58.434 --> 00:28:00.034
+Withhold incentives, ban.
+
+338
+00:28:00.314 --> 00:28:01.402
+Payment fraud.
+
+339
+00:28:01.682 --> 00:28:02.450
+Signal:
+
+340
+00:28:02.730 --> 00:28:06.165
+Stolen cards, chargebacks, unpaid cash balances.
+
+341
+00:28:06.445 --> 00:28:07.362
+Response:
+
+342
+00:28:07.642 --> 00:28:10.373
+Risk scoring at request, payment method checks.
+
+343
+00:28:10.653 --> 00:28:11.762
+Promo abuse.
+
+344
+00:28:12.042 --> 00:28:12.810
+Signal:
+
+345
+00:28:13.090 --> 00:28:15.735
+Many new accounts on one device or payment.
+
+346
+00:28:16.015 --> 00:28:16.933
+Response:
+
+347
+00:28:17.213 --> 00:28:19.559
+Device fingerprinting, graph analysis.
+
+348
+00:28:20.909 --> 00:28:22.595
+Fare inflation by drivers.
+
+349
+00:28:22.875 --> 00:28:23.643
+Signal:
+
+350
+00:28:23.923 --> 00:28:25.971
+Detours, waiting manipulation.
+
+351
+00:28:26.251 --> 00:28:27.168
+Response:
+
+352
+00:28:27.448 --> 00:28:29.944
+Route versus plan checks, auto refunds.
+
+353
+00:28:31.294 --> 00:28:32.233
+Part 6.
+
+354
+00:28:32.513 --> 00:28:33.473
+Algorithms.
+
+355
+00:28:34.723 --> 00:28:43.299
+Nearest-driver search. k-ring search on H3: look up the rider's cell, then rings 1, 2, 3... until enough candidates are found.
+
+356
+00:28:43.579 --> 00:28:50.363
+Compute exact straight-line distance, then route ETA for the top candidates only, because ETA is expensive.
+
+357
+00:28:50.643 --> 00:28:57.213
+Alternatives: geohash prefix search, quadtrees, R-trees; compared in Ch 47 L1.
+
+358
+00:28:58.563 --> 00:28:59.694
+Batched matching.
+
+359
+00:28:59.974 --> 00:29:08.529
+Model: a bipartite graph of requests times drivers, with edges where the pickup ETA is under a maximum and constraints are satisfied.
+
+360
+00:29:08.809 --> 00:29:11.027
+The edge cost is ETA plus penalties.
+
+361
+00:29:11.307 --> 00:29:22.934
+Solving: the Hungarian algorithm (O(n³)) for small batches;. for larger batches, min-cost flow or auction algorithms, or greedy with local improvements when time-bounded.
+
+362
+00:29:23.214 --> 00:29:26.755
+Batches are per area, so n stays small (tens to hundreds).
+
+363
+00:29:28.105 --> 00:29:33.119
+Batch window trade-off: longer windows give better global matches but add waiting.
+
+364
+00:29:33.399 --> 00:29:36.940
+2 to 5 s is typical, tuned per city by experiment.
+
+365
+00:29:37.220 --> 00:29:41.977
+Look-ahead: include drivers finishing trips within ~2 min near the request.
+
+366
+00:29:42.257 --> 00:29:44.945
+Their availability time is added to the ETA.
+
+367
+00:29:45.225 --> 00:29:51.199
+Fairness terms: spread offers among waiting drivers (idle time bonus) to avoid starving some.
+
+368
+00:29:52.549 --> 00:29:53.637
+Routing and ETA.
+
+369
+00:29:53.917 --> 00:29:54.983
+Shortest paths:
+
+370
+00:29:55.263 --> 00:29:57.077
+Dijkstra and A are the basis.
+
+371
+00:29:57.357 --> 00:30:03.778
+Contraction hierarchies add shortcut edges in preprocessing so queries explore only upward nodes.
+
+372
+00:30:04.058 --> 00:30:06.447
+That is millisecond queries on city graphs.
+
+373
+00:30:06.727 --> 00:30:13.490
+Customisable variants (CCH or CRP) allow traffic weight updates without full re-preprocessing.
+
+374
+00:30:13.770 --> 00:30:22.474
+Traffic weights: per-segment speed estimates from recent traces (streaming aggregation), blended with the historical time-of-day profile.
+
+375
+00:30:23.824 --> 00:30:29.499
+ETA correction: a model predicts the residual between routing-engine ETA and actual time.
+
+376
+00:30:29.779 --> 00:30:33.384
+Features: route, time, weather, pickup or drop-off type, city.
+
+377
+00:30:33.664 --> 00:30:35.520
+It is trained on completed trips.
+
+378
+00:30:36.870 --> 00:30:38.107
+Dynamic pricing.
+
+379
+00:30:38.387 --> 00:30:43.614
+The goal is to keep the market in balance: requests fulfilled with reasonable pickup times.
+
+380
+00:30:43.894 --> 00:31:05.334
+A simple, explainable version: per pricing zone, compute imbalance = forecast demand or available supply over the next minutes;. map imbalance to a multiplier through a monotonic curve with caps;. smooth it over time (exponential smoothing or rate limits) and space (neighbour averaging), to avoid flicker and zone-boundary gaming.
+
+381
+00:31:06.684 --> 00:31:24.839
+More advanced versions: estimate demand elasticity (how many riders still request at each price) and supply elasticity (how many drivers move or stay online);. choose prices to maximise completed trips or a welfare objective, subject to caps and fairness constraints.
+
+382
+00:31:25.119 --> 00:31:34.164
+Guard rails: regulatory caps (VERIFY), emergency overrides, consistency between quote and charge, and audit logs of every multiplier.
+
+383
+00:31:34.444 --> 00:31:35.489
+Evaluation:
+
+384
+00:31:36.839 --> 00:31:51.325
+switchback experiments (alternate policies over time slots per city) avoid interference between treatment and control riders, who share the same drivers;. metrics: completion rate, wait time, cancellations, earnings per hour.
+
+385
+00:31:52.675 --> 00:31:53.720
+Map matching.
+
+386
+00:31:53.000 --> 00:32:01.381
+The problem: raw GPS points are noisy (±10 to 30 m in cities, worse near tall buildings).
+
+387
+00:32:01.661 --> 00:32:04.456
+The trip must be placed on the actual road sequence.
+
+388
+00:32:04.736 --> 00:32:11.093
+Hidden Markov model: hidden states: candidate road segments near each point;. emission probability:
+
+389
+00:32:11.373 --> 00:32:21.784
+Gaussian on the distance from point to segment;. transition probability: how plausible the move between segments is, comparing route distance with straight-line distance;.
+
+390
+00:32:23.134 --> 00:32:27.507
+solving: the Viterbi algorithm finds the most likely segment sequence.
+
+391
+00:32:27.787 --> 00:32:34.102
+Outputs: accurate distance for fares, road positions for ETA and traffic, and detection of detours.
+
+392
+00:32:35.452 --> 00:32:36.689
+Pooling insertion.
+
+393
+00:32:36.969 --> 00:32:47.209
+Insertion: for a new shared request, for each candidate trip, try inserting the pickup at position i and the drop-off at position j i in the stop sequence.
+
+394
+00:32:47.489 --> 00:32:53.975
+Check that: capacity is respected;. every existing rider's detour is within limits;. time windows are met.
+
+395
+00:32:54.255 --> 00:32:57.028
+Choose the insertion with the smallest added cost.
+
+396
+00:32:57.308 --> 00:33:03.025
+This is insertion heuristics for the dial-a-ride problem, with local search to improve sequences.
+
+397
+00:33:04.375 --> 00:33:10.434
+Pruning: only trips whose route passes near the new pickup, found by a geo index on route corridors.
+
+398
+00:33:11.784 --> 00:33:13.789
+Supply positioning and incentives.
+
+399
+00:33:14.069 --> 00:33:17.397
+Heat maps show forecast demand minus supply per cell.
+
+400
+00:33:17.677 --> 00:33:25.549
+Incentive targeting: allocate budget to zones and times with the largest forecast gaps and the highest expected response.
+
+401
+00:33:25.829 --> 00:33:27.920
+Uplift is modelled from experiments.
+
+402
+00:33:28.200 --> 00:33:35.944
+Repositioning suggestions: each idle driver gets a short list of nearby cells with the best expected earnings per hour.
+
+403
+00:33:36.224 --> 00:33:41.472
+Suggestions are randomised across drivers, so everyone doesn't converge on the same cell.
+
+404
+00:33:42.822 --> 00:33:43.910
+Fraud detection.
+
+405
+00:33:44.190 --> 00:33:55.625
+GPS spoofing: rules on physics (speed, acceleration), consistency (GPS versus network location, sensor data), and device integrity attestations.
+
+406
+00:33:55.905 --> 00:34:05.697
+Collusion: a graph of rider, driver pairs, devices and payment instruments; clusters with unusual repeated interactions and incentive-heavy patterns.
+
+407
+00:34:05.977 --> 00:34:11.523
+Community detection (for example, connected components, Louvain) plus supervised models.
+
+408
+00:34:12.873 --> 00:34:14.879
+ETA and fare quality monitoring.
+
+409
+00:34:15.159 --> 00:34:16.375
+Accuracy tracking:
+
+410
+00:34:16.655 --> 00:34:21.945
+ETA error distributions per city and hour; fare quote versus final fare differences.
+
+411
+00:34:22.225 --> 00:34:28.924
+Alerting: alerts when error drifts, which may indicate map data issues, traffic feed failures or model drift.
+
+412
+00:34:30.274 --> 00:34:31.213
+Part 7.
+
+413
+00:34:31.493 --> 00:34:32.815
+Data Architecture.
+
+414
+00:34:34.065 --> 00:34:35.452
+Operational stores.
+
+415
+00:34:35.732 --> 00:34:37.097
+Here is a quick table:
+
+416
+00:34:37.377 --> 00:34:39.553
+Data, and Store (reference), and Notes.
+
+417
+00:34:39.833 --> 00:34:42.031
+Live driver locations and status.
+
+418
+00:34:42.311 --> 00:34:43.548
+Store (reference):
+
+419
+00:34:43.828 --> 00:34:46.985
+In-memory sharded service (Redis Cluster or custom).
+
+420
+00:34:47.265 --> 00:34:48.076
+Notes:
+
+421
+00:34:48.356 --> 00:34:50.169
+Ephemeral; rebuilt from pings.
+
+422
+00:34:50.449 --> 00:34:51.217
+Trips.
+
+423
+00:34:51.497 --> 00:34:52.735
+Store (reference):
+
+424
+00:34:53.015 --> 00:35:00.524
+Sharded relational (MySQL or PostgreSQL, Vitess or Citus) or a distributed SQL database.
+
+425
+00:35:00.804 --> 00:35:01.615
+Notes:
+
+426
+00:35:01.895 --> 00:35:05.521
+Per-trip strong consistency; sharded by city or trip id.
+
+427
+00:35:05.801 --> 00:35:08.340
+Riders, drivers, vehicles, documents.
+
+428
+00:35:08.620 --> 00:35:09.857
+Store (reference):
+
+429
+00:35:10.137 --> 00:35:12.868
+Relational + object storage for documents.
+
+430
+00:35:13.148 --> 00:35:13.959
+Notes:
+
+431
+00:35:14.239 --> 00:35:15.604
+PII encrypted.
+
+432
+00:35:15.884 --> 00:35:16.652
+Ledger.
+
+433
+00:35:16.932 --> 00:35:18.169
+Store (reference):
+
+434
+00:35:18.449 --> 00:35:20.625
+Relational with double-entry constraints.
+
+435
+00:35:20.905 --> 00:35:21.716
+Notes:
+
+436
+00:35:21.996 --> 00:35:24.257
+Ch 45, I03.
+
+437
+00:35:24.537 --> 00:35:25.497
+Fare quotes.
+
+438
+00:35:25.777 --> 00:35:27.015
+Store (reference):
+
+439
+00:35:27.295 --> 00:35:28.724
+Key-value with TTL.
+
+440
+00:35:29.004 --> 00:35:29.815
+Notes:
+
+441
+00:35:30.095 --> 00:35:31.908
+Quote IDs referenced by trips.
+
+442
+00:35:33.258 --> 00:35:34.709
+Maps and routing data.
+
+443
+00:35:34.989 --> 00:35:36.226
+Store (reference):
+
+444
+00:35:36.506 --> 00:35:40.922
+In-memory routing engine instances; object storage for map versions.
+
+445
+00:35:41.202 --> 00:35:42.013
+Notes:
+
+446
+00:35:42.293 --> 00:35:43.765
+Versioned map releases.
+
+447
+00:35:44.045 --> 00:35:45.111
+Places search.
+
+448
+00:35:45.391 --> 00:35:46.629
+Store (reference):
+
+449
+00:35:46.909 --> 00:35:47.933
+OpenSearch.
+
+450
+00:35:48.213 --> 00:35:49.023
+Notes:
+
+451
+00:35:49.303 --> 00:35:50.605
+Autocomplete, POIs.
+
+452
+00:35:51.955 --> 00:35:53.960
+Publicly described (VERIFY):
+
+453
+00:35:54.240 --> 00:36:01.493
+Uber built Schemaless, a MySQL-backed append-only store, and later Docstore, and used Cassandra for some workloads.
+
+454
+00:36:01.773 --> 00:36:06.232
+Its Ringpop library provided consistent hashing for sharded services.
+
+455
+00:36:07.582 --> 00:36:08.435
+Streaming.
+
+456
+00:36:08.715 --> 00:36:17.163
+Kafka carries driver locations, app events, trip state changes, pricing decisions, match decisions, payments and safety events.
+
+457
+00:36:17.443 --> 00:36:21.838
+Uber has described running one of the largest Kafka deployments (VERIFY).
+
+458
+00:36:22.118 --> 00:36:23.377
+Stream processing:
+
+459
+00:36:23.657 --> 00:36:31.358
+Apache Flink computes per-cell supply and demand, segment speeds, surge inputs, fraud features and real-time dashboards;.
+
+460
+00:36:31.638 --> 00:36:36.481
+Uber has described Flink-based platforms for real-time features (VERIFY).
+
+461
+00:36:37.831 --> 00:36:38.791
+Lakehouse.
+
+462
+00:36:39.071 --> 00:36:46.580
+Storage: all streams and CDC land in a lakehouse on distributed storage (HDFS or object storage);.
+
+463
+00:36:46.860 --> 00:36:57.271
+Apache Hudi, created at Uber for incremental upserts on the lake (publicly described; VERIFY), handles late updates such as trip corrections and fare adjustments;.
+
+464
+00:36:57.551 --> 00:36:59.791
+Iceberg or Delta are alternatives.
+
+465
+00:37:00.071 --> 00:37:01.415
+Processing and query:
+
+466
+00:37:01.695 --> 00:37:09.503
+Spark for batch; Presto or Trino for interactive SQL (Uber has described large Presto deployments; VERIFY).
+
+467
+00:37:10.853 --> 00:37:28.410
+Models: facts: trips, requests (including unfulfilled), offers (accepted or declined or timeout), price quotes, payments, incentives, safety incidents, location aggregates;. dimensions: city, zone and cell (H3), driver, rider (pseudonymised), vehicle, product, time.
+
+468
+00:37:28.690 --> 00:37:31.677
+Governance: location data is highly sensitive.
+
+469
+00:37:31.957 --> 00:37:40.405
+Access is restricted by purpose, precise traces are retained only as long as needed, and aggregates are used for most analysis.
+
+470
+00:37:41.755 --> 00:37:42.992
+Real-time OLAP.
+
+471
+00:37:43.272 --> 00:38:02.877
+Apache Pinot, which Uber has described using heavily for real-time analytics (VERIFY), or ClickHouse or Druid, powers: city operations dashboards (requests, completion, ETAs per zone per minute);. surge monitoring;. driver earnings views;. restaurant or merchant dashboards in adjacent businesses.
+
+472
+00:38:04.227 --> 00:38:10.073
+Why: a sub-second query over fresh data (seconds old) that the batch warehouse cannot provide.
+
+473
+00:38:11.423 --> 00:38:13.577
+ML platform and experimentation.
+
+474
+00:38:13.857 --> 00:38:15.009
+ML platform:
+
+475
+00:38:15.289 --> 00:38:22.543
+Uber's publicly described Michelangelo covers feature management, training, deployment and monitoring (VERIFY).
+
+476
+00:38:22.823 --> 00:38:35.452
+Reference: a feature store (offline in the lake, online in a low-latency store), training on Spark or GPUs, model registry, online serving with shadow and canary deployment, drift monitoring.
+
+477
+00:38:35.732 --> 00:38:36.521
+Models:
+
+478
+00:38:36.801 --> 00:38:48.108
+ETA correction, demand and supply forecasts, pricing elasticity, fraud, safety anomaly scoring, destination prediction, pickup point suggestion, support ticket routing.
+
+479
+00:38:48.388 --> 00:38:49.625
+Experimentation:
+
+480
+00:38:50.975 --> 00:39:08.021
+A or B tests randomised by user for UI changes;. switchback and geo-randomised designs for marketplace changes (pricing, matching, incentives), because riders and drivers interact;. a central platform computes metrics with variance reduction.
+
+481
+00:39:09.371 --> 00:39:10.352
+Data flow.
+
+482
+00:39:10.632 --> 00:39:11.976
+Here is the diagram.
+
+483
+00:39:15.826 --> 00:39:16.701
+Part 8.
+
+484
+00:39:16.981 --> 00:39:17.898
+Tech Stack.
+
+485
+00:39:19.148 --> 00:39:20.513
+Here is a quick table:
+
+486
+00:39:20.793 --> 00:39:25.465
+Layer, and Publicly described by Uber (VERIFY each), and Reference choice.
+
+487
+00:39:25.745 --> 00:39:26.663
+Services.
+
+488
+00:39:26.943 --> 00:39:29.673
+Publicly described by Uber (VERIFY each):
+
+489
+00:39:29.953 --> 00:39:33.537
+Go and Java microservices (thousands of services).
+
+490
+00:39:33.817 --> 00:39:34.927
+Reference choice:
+
+491
+00:39:35.207 --> 00:39:38.663
+Go or Java or Kotlin (Spring Boot), gRPC.
+
+492
+00:39:38.943 --> 00:39:40.863
+Service discovery and sharding.
+
+493
+00:39:41.143 --> 00:39:43.873
+Publicly described by Uber (VERIFY each):
+
+494
+00:39:44.153 --> 00:39:46.713
+Ringpop (consistent hashing, historical).
+
+495
+00:39:46.993 --> 00:39:48.103
+Reference choice:
+
+496
+00:39:48.383 --> 00:39:51.497
+Kubernetes services, consistent hashing libraries.
+
+497
+00:39:51.777 --> 00:39:52.695
+Workflows.
+
+498
+00:39:52.975 --> 00:39:55.705
+Publicly described by Uber (VERIFY each):
+
+499
+00:39:55.985 --> 00:39:58.631
+Cadence (open source; Temporal is a fork).
+
+500
+00:39:58.911 --> 00:40:00.020
+Reference choice:
+
+501
+00:40:00.300 --> 00:40:01.111
+Temporal.
+
+502
+00:40:01.391 --> 00:40:02.265
+Storage.
+
+503
+00:40:02.545 --> 00:40:05.276
+Publicly described by Uber (VERIFY each):
+
+504
+00:40:05.556 --> 00:40:09.268
+Schemaless or Docstore on MySQL; Cassandra; Redis.
+
+505
+00:40:09.548 --> 00:40:10.657
+Reference choice:
+
+506
+00:40:10.937 --> 00:40:15.247
+MySQL or PostgreSQL sharded (Vitess), Redis, Cassandra.
+
+507
+00:40:15.527 --> 00:40:16.380
+Streaming.
+
+508
+00:40:16.660 --> 00:40:19.391
+Publicly described by Uber (VERIFY each):
+
+509
+00:40:19.671 --> 00:40:20.823
+Kafka; Flink.
+
+510
+00:40:21.103 --> 00:40:22.212
+Reference choice:
+
+511
+00:40:22.492 --> 00:40:23.644
+Kafka; Flink.
+
+512
+00:40:24.994 --> 00:40:25.954
+Lakehouse.
+
+513
+00:40:26.234 --> 00:40:28.965
+Publicly described by Uber (VERIFY each):
+
+514
+00:40:29.245 --> 00:40:33.575
+Apache Hudi on HDFS or object storage; Spark; Presto.
+
+515
+00:40:33.855 --> 00:40:34.965
+Reference choice:
+
+516
+00:40:35.245 --> 00:40:38.786
+Hudi or Iceberg on object storage; Spark; Trino.
+
+517
+00:40:39.066 --> 00:40:40.303
+Real-time OLAP.
+
+518
+00:40:40.583 --> 00:40:43.314
+Publicly described by Uber (VERIFY each):
+
+519
+00:40:43.594 --> 00:40:44.682
+Apache Pinot.
+
+520
+00:40:44.962 --> 00:40:46.071
+Reference choice:
+
+521
+00:40:46.351 --> 00:40:47.631
+Pinot or ClickHouse.
+
+522
+00:40:47.911 --> 00:40:48.658
+ML.
+
+523
+00:40:48.938 --> 00:40:51.669
+Publicly described by Uber (VERIFY each):
+
+524
+00:40:51.949 --> 00:40:53.101
+Michelangelo.
+
+525
+00:40:53.381 --> 00:40:54.490
+Reference choice:
+
+526
+00:40:54.770 --> 00:40:58.631
+Feature store (Feast), MLflow, Ray or Spark, KServe.
+
+527
+00:40:58.911 --> 00:40:59.999
+Geospatial.
+
+528
+00:41:00.279 --> 00:41:03.010
+Publicly described by Uber (VERIFY each):
+
+529
+00:41:03.290 --> 00:41:04.207
+H3.
+
+530
+00:41:04.487 --> 00:41:05.597
+Reference choice:
+
+531
+00:41:05.877 --> 00:41:07.391
+H3 (open source).
+
+532
+00:41:07.671 --> 00:41:08.994
+Tracing and metrics.
+
+533
+00:41:09.274 --> 00:41:12.005
+Publicly described by Uber (VERIFY each):
+
+534
+00:41:12.285 --> 00:41:15.143
+Jaeger (created at Uber), M3 (metrics).
+
+535
+00:41:15.423 --> 00:41:16.533
+Reference choice:
+
+536
+00:41:16.813 --> 00:41:21.527
+OpenTelemetry + Jaeger or Tempo, Prometheus or M3 or Mimir.
+
+537
+00:41:22.877 --> 00:41:23.624
+Maps.
+
+538
+00:41:23.904 --> 00:41:26.635
+Publicly described by Uber (VERIFY each):
+
+539
+00:41:26.915 --> 00:41:29.005
+Internal maps stack plus providers.
+
+540
+00:41:29.285 --> 00:41:30.395
+Reference choice:
+
+541
+00:41:30.675 --> 00:41:35.816
+OSRM or Valhalla or GraphHopper (open source routing) + commercial map data.
+
+542
+00:41:36.096 --> 00:41:36.843
+Mobile.
+
+543
+00:41:37.123 --> 00:41:39.853
+Publicly described by Uber (VERIFY each):
+
+544
+00:41:40.133 --> 00:41:44.976
+Native iOS or Android; RIBs architecture (open source).
+
+545
+00:41:45.256 --> 00:41:46.365
+Reference choice:
+
+546
+00:41:46.645 --> 00:41:48.267
+Native Kotlin or Swift.
+
+547
+00:41:48.547 --> 00:41:49.635
+Communication.
+
+548
+00:41:49.915 --> 00:41:52.645
+Publicly described by Uber (VERIFY each):
+
+549
+00:41:52.925 --> 00:41:54.760
+Persistent connections; push.
+
+550
+00:41:55.040 --> 00:41:56.149
+Reference choice:
+
+551
+00:41:56.429 --> 00:42:02.509
+WebSockets or gRPC streams, FCM or APNs, a CPaaS for masked calls.
+
+552
+00:42:03.859 --> 00:42:04.755
+Part 9.
+
+553
+00:42:05.035 --> 00:42:07.851
+Security, Privacy, Safety and Compliance.
+
+554
+00:42:09.101 --> 00:42:26.701
+Location privacy: precise traces are restricted to purposes (trip, safety, disputes);. access is logged;. retention is limited, with aggregates for analytics;. riders see drivers' approximate positions before the trip and exact positions only during their trip.
+
+555
+00:42:28.051 --> 00:42:40.851
+Personal data: masked phone numbers (a CPaaS proxy), minimal data shared between rider and driver, DPDP Act obligations in India (VERIFY) and GDPR where applicable.
+
+556
+00:42:41.131 --> 00:42:59.243
+Aggregator regulation (India): licensing, driver verification, vehicle fitness, fare and surge rules, grievance redressal, safety features and data localisation provisions in the Motor Vehicle Aggregator Guidelines and state rules (VERIFY current texts; state rules vary).
+
+557
+00:42:59.523 --> 00:43:00.377
+Payments:
+
+558
+00:43:00.657 --> 00:43:08.017
+PCI scope reduction by tokenisation; RBI rules for card storage and payment aggregators (VERIFY).
+
+559
+00:43:09.367 --> 00:43:16.257
+Safety data: incident data preserved and access-controlled; lawful process for law enforcement requests.
+
+560
+00:43:17.607 --> 00:43:18.461
+Part 10.
+
+561
+00:43:18.741 --> 00:43:20.661
+Reliability and Operations.
+
+562
+00:43:21.911 --> 00:43:30.636
+City isolation: each city's marketplace runs in its own partitions, so a bad deploy or a runaway surge bug affects one city.
+
+563
+00:43:30.916 --> 00:43:34.457
+Deploys roll out city by city (cells; Ch 34).
+
+564
+00:43:34.737 --> 00:43:49.201
+Trips in progress must survive: the trip service is strongly consistent and replicated;. apps cache the trip state and continue navigation offline;. fare computation can happen after reconnection from buffered GPS.
+
+565
+00:43:49.481 --> 00:43:50.740
+Degradation order:
+
+566
+00:43:52.090 --> 00:43:54.799
+Heat maps and non-critical features go first.
+
+567
+00:43:55.079 --> 00:43:57.575
+Then pooling, falling back to single rides.
+
+568
+00:43:57.855 --> 00:44:01.183
+Then dynamic pricing falls back to a fixed multiplier.
+
+569
+00:44:01.463 --> 00:44:05.687
+Matching falls back to greedy nearest-driver if the optimiser is slow.
+
+570
+00:44:05.967 --> 00:44:17.082
+Multi-region: active-active across regions for stateless services; the trip store is replicated with failover; driver and rider connections reconnect to the healthy region.
+
+571
+00:44:18.432 --> 00:44:29.909
+Observability: per-city dashboards of request, then match, then pickup, then complete funnel, ETA error, match latency, offer acceptance, payment success, and SOS response times.
+
+572
+00:44:30.189 --> 00:44:39.299
+Peak events (New Year's Eve, cricket finals, festivals): forecasts feed pre-scaling and incentive plans, and operations teams are on standby.
+
+573
+00:44:40.649 --> 00:44:41.651
+Part 11.
+
+574
+00:44:41.931 --> 00:44:42.955
+Key Trade-offs.
+
+575
+00:44:44.205 --> 00:44:45.571
+Here is a quick table:
+
+576
+00:44:45.851 --> 00:44:48.368
+Decision, and Chosen, and Accepted cost.
+
+577
+00:44:48.648 --> 00:44:49.480
+Matching.
+
+578
+00:44:49.760 --> 00:44:50.592
+Chosen:
+
+579
+00:44:50.872 --> 00:44:53.645
+Batched optimisation (2 to 5 s windows).
+
+580
+00:44:53.925 --> 00:44:55.099
+Accepted cost:
+
+581
+00:44:55.379 --> 00:44:57.811
+A few seconds of extra waiting per request.
+
+582
+00:44:58.091 --> 00:44:59.093
+Geography.
+
+583
+00:44:59.373 --> 00:45:00.205
+Chosen:
+
+584
+00:45:00.485 --> 00:45:01.808
+H3 hexagons.
+
+585
+00:45:02.088 --> 00:45:03.261
+Accepted cost:
+
+586
+00:45:03.541 --> 00:45:07.424
+Learning curve; exact polygons still needed for legal boundaries.
+
+587
+00:45:07.704 --> 00:45:08.899
+Location state.
+
+588
+00:45:09.179 --> 00:45:10.011
+Chosen:
+
+589
+00:45:10.291 --> 00:45:11.699
+In-memory, ephemeral.
+
+590
+00:45:11.979 --> 00:45:13.152
+Accepted cost:
+
+591
+00:45:13.432 --> 00:45:15.267
+Brief rebuild after failover.
+
+592
+00:45:15.547 --> 00:45:16.379
+Pricing.
+
+593
+00:45:16.659 --> 00:45:17.491
+Chosen:
+
+594
+00:45:17.771 --> 00:45:19.883
+Upfront fares with reconciliation.
+
+595
+00:45:20.163 --> 00:45:21.336
+Accepted cost:
+
+596
+00:45:21.616 --> 00:45:25.349
+Risk of quote versus actual mismatch; needs dispute rules.
+
+597
+00:45:25.629 --> 00:45:26.440
+Surge.
+
+598
+00:45:26.720 --> 00:45:27.552
+Chosen:
+
+599
+00:45:27.832 --> 00:45:29.944
+Smoothed, capped, experiment-tested.
+
+600
+00:45:30.224 --> 00:45:31.397
+Accepted cost:
+
+601
+00:45:31.677 --> 00:45:33.704
+Slower reaction to sudden spikes.
+
+602
+00:45:33.984 --> 00:45:34.901
+Trip store.
+
+603
+00:45:35.181 --> 00:45:36.013
+Chosen:
+
+604
+00:45:36.293 --> 00:45:38.021
+Strong consistency per trip.
+
+605
+00:45:38.301 --> 00:45:39.475
+Accepted cost:
+
+606
+00:45:39.755 --> 00:45:42.251
+Higher write latency than eventual stores.
+
+607
+00:45:43.601 --> 00:45:44.646
+Experiments.
+
+608
+00:45:44.926 --> 00:45:45.758
+Chosen:
+
+609
+00:45:46.038 --> 00:45:47.745
+Switchbacks for the marketplace.
+
+610
+00:45:48.025 --> 00:45:49.198
+Accepted cost:
+
+611
+00:45:49.478 --> 00:45:52.251
+Longer experiments, more complex analysis.
+
+612
+00:45:53.601 --> 00:45:54.540
+Part 12.
+
+613
+00:45:54.820 --> 00:45:56.164
+Interview Q and A.
+
+614
+00:45:57.414 --> 00:45:58.246
+Beginner.
+
+615
+00:45:58.526 --> 00:45:59.550
+Question 1.
+
+616
+00:45:59.830 --> 00:46:03.009
+Walk me through what happens when a rider requests a ride.
+
+617
+00:46:03.289 --> 00:46:04.654
+Thirty-second answer:
+
+618
+00:46:04.934 --> 00:46:24.902
+Fare estimate (route, ETA, price with multiplier), then request creates a trip with the quote, then matching assigns a driver in the next batch, locking the driver, then offer to driver, then accept, then navigation to pickup, arrival, PIN to start, then live tracking, then end and final fare, then payment, ledger, ratings.
+
+619
+00:46:26.252 --> 00:46:27.255
+Question 2.
+
+620
+00:46:27.535 --> 00:46:29.561
+How do you find drivers near a rider?
+
+621
+00:46:29.841 --> 00:46:31.207
+Thirty-second answer:
+
+622
+00:46:31.487 --> 00:46:44.735
+Keep live driver positions in an in-memory geo index sharded by cell (for example, H3 hexagons); search the rider's cell and neighbouring rings, then compute route ETAs for the closest candidates only.
+
+623
+00:46:46.085 --> 00:46:47.130
+Question 3.
+
+624
+00:46:47.410 --> 00:46:49.629
+How does the app show the car moving on the map?
+
+625
+00:46:49.909 --> 00:46:51.274
+Thirty-second answer:
+
+626
+00:46:51.554 --> 00:47:02.541
+The driver app sends GPS every few seconds; the server map-matches it to roads and pushes it to the rider over a persistent connection; the rider app animates between points.
+
+627
+00:47:03.891 --> 00:47:04.957
+Question 4.
+
+628
+00:47:05.237 --> 00:47:08.011
+Why does the driver ask for a PIN at the start?
+
+629
+00:47:08.291 --> 00:47:09.656
+Thirty-second answer:
+
+630
+00:47:09.936 --> 00:47:17.509
+To confirm the right rider got into the right car, preventing wrong pickups and some fraud, and to mark the trip start reliably.
+
+631
+00:47:18.859 --> 00:47:19.862
+Intermediate.
+
+632
+00:47:20.142 --> 00:47:21.251
+Question 5.
+
+633
+00:47:21.531 --> 00:47:23.409
+How would you design surge pricing?
+
+634
+00:47:23.689 --> 00:47:25.054
+Thirty-second answer:
+
+635
+00:47:25.334 --> 00:47:43.041
+Forecast demand and supply per zone for the next minutes, map the imbalance to a multiplier with a monotonic curve, smooth over time and space, apply caps (including regulatory ones) and emergency overrides, show it in the upfront fare, and evaluate with switchback experiments.
+
+636
+00:47:44.391 --> 00:47:45.500
+Question 6.
+
+637
+00:47:45.780 --> 00:47:48.639
+How are upfront fares calculated and kept honest?
+
+638
+00:47:48.919 --> 00:47:50.284
+Thirty-second answer:
+
+639
+00:47:50.564 --> 00:48:08.932
+From route distance and time, fees, tolls, multiplier, promotions and taxes; stored as a quote with inputs; the final fare equals the quote unless the rider changed the trip (destination, stops, waiting), reconciliation compares actual versus quote and auto-resolves disputes.
+
+640
+00:48:10.282 --> 00:48:11.370
+Question 7.
+
+641
+00:48:11.650 --> 00:48:14.615
+How do you prevent a driver from being assigned two trips?
+
+642
+00:48:14.895 --> 00:48:16.261
+Thirty-second answer:
+
+643
+00:48:16.541 --> 00:48:29.874
+Driver state is changed only with compare-and-set (available, then offered, then assigned) in a strongly consistent store; matchers are partitioned by area; offers time out and release the driver explicitly.
+
+644
+00:48:31.224 --> 00:48:32.248
+Question 8.
+
+645
+00:48:32.528 --> 00:48:34.448
+How do cash trips work in the ledger?
+
+646
+00:48:34.728 --> 00:48:36.093
+Thirty-second answer:
+
+647
+00:48:36.373 --> 00:48:48.853
+The rider pays the driver; the driver confirms; the platform's commission becomes a receivable from the driver, netted against digital earnings or collected via top-up; everything posts as double-entry.
+
+648
+00:48:50.203 --> 00:48:51.270
+Question 9.
+
+649
+00:48:51.550 --> 00:48:54.131
+How do airport queues differ from normal matching?
+
+650
+00:48:54.411 --> 00:48:55.777
+Thirty-second answer:
+
+651
+00:48:56.057 --> 00:49:10.905
+The airport is a geofenced zone with a FIFO driver queue per product; requests from the terminal go to the first eligible driver in the queue, not the nearest; leaving the zone forfeits the place; short trips may get queue priority on return.
+
+652
+00:49:12.255 --> 00:49:13.023
+Senior.
+
+653
+00:49:13.303 --> 00:49:14.348
+Question 10.
+
+654
+00:49:14.628 --> 00:49:18.105
+Why batch matching instead of nearest driver, and how does it work?
+
+655
+00:49:18.385 --> 00:49:19.751
+Thirty-second answer:
+
+656
+00:49:20.031 --> 00:49:39.679
+Greedy nearest-driver is locally optimal but globally poor; batching requests and drivers every few seconds and solving a min-cost bipartite matching (Hungarian or min-cost flow) on ETA plus penalties lowers average pickup times; include drivers finishing trips nearby; tune the window per city.
+
+657
+00:49:41.029 --> 00:49:42.159
+Question 11.
+
+658
+00:49:42.439 --> 00:49:44.167
+How do you compute accurate ETAs?
+
+659
+00:49:44.447 --> 00:49:45.813
+Thirty-second answer:
+
+660
+00:49:46.093 --> 00:50:03.671
+A road graph with turn restrictions, live segment speeds from driver traces blended with historical profiles, fast shortest paths (contraction hierarchies), and an ML model that corrects the routing ETA using features like time, weather and pickup type, monitored for error drift.
+
+661
+00:50:05.021 --> 00:50:06.109
+Question 12.
+
+662
+00:50:06.389 --> 00:50:07.947
+How does map matching work?
+
+663
+00:50:08.227 --> 00:50:09.592
+Thirty-second answer:
+
+664
+00:50:09.872 --> 00:50:25.829
+A hidden Markov model: candidate road segments near each GPS point are states, emission probabilities come from distance to segment, transition probabilities from route versus straight-line distance, and Viterbi finds the most likely road sequence.
+
+665
+00:50:27.179 --> 00:50:28.459
+Question 13.
+
+666
+00:50:28.739 --> 00:50:30.595
+How would you implement shared rides?
+
+667
+00:50:30.875 --> 00:50:32.241
+Thirty-second answer:
+
+668
+00:50:32.521 --> 00:50:48.926
+For a new request, find candidate trips whose routes pass near the pickup, try insertion positions for pickup and drop-off, check capacity, detour limits and time windows, and choose the cheapest insertion; fix each rider's fare upfront; re-plan the driver's route.
+
+669
+00:50:50.276 --> 00:50:51.471
+Question 14.
+
+670
+00:50:51.751 --> 00:50:54.524
+How do you detect GPS spoofing and collusion?
+
+671
+00:50:54.804 --> 00:50:56.169
+Thirty-second answer:
+
+672
+00:50:56.449 --> 00:51:15.543
+Spoofing via physics checks (speed, jumps), mock-location and device integrity signals, GPS versus network location consistency; collusion via graphs of rider, driver pairs, devices and payments with community detection plus supervised models; act on incentives and accounts.
+
+673
+00:51:16.893 --> 00:51:17.789
+Architect.
+
+674
+00:51:18.069 --> 00:51:19.263
+Question 15.
+
+675
+00:51:19.543 --> 00:51:22.338
+Design the data platform for a ride-hailing company.
+
+676
+00:51:22.618 --> 00:51:23.983
+Thirty-second answer:
+
+677
+00:51:24.263 --> 00:51:46.322
+Kafka for all events; Flink for real-time features and aggregates feeding marketplace engines and a real-time OLAP store (Pinot) for ops dashboards; a Hudi or Iceberg lakehouse for trips, offers, quotes and payments with late updates; Presto or Trino and Spark for analysis; a feature store and ML platform; strict governance for location data.
+
+678
+00:51:47.672 --> 00:51:48.867
+Question 16.
+
+679
+00:51:49.147 --> 00:51:52.048
+How do you experiment on pricing or matching fairly?
+
+680
+00:51:52.328 --> 00:51:53.693
+Thirty-second answer:
+
+681
+00:51:53.973 --> 00:52:12.555
+Riders and drivers share one market, so user-level A or B tests interfere; use switchback designs (alternate policies across time slots per city) or geo-randomisation, with enough slots, pre-registered metrics (completion, wait, cancellations, driver earnings) and variance reduction.
+
+682
+00:52:13.905 --> 00:52:15.249
+Question 17.
+
+683
+00:52:15.529 --> 00:52:18.771
+How would you make a city's marketplace resilient to failures?
+
+684
+00:52:19.051 --> 00:52:20.417
+Thirty-second answer:
+
+685
+00:52:20.697 --> 00:52:37.678
+Partition by city with independent deployments, strongly consistent replicated trip store, apps that continue trips offline, graceful fallbacks (fixed multiplier, greedy matching, no pooling), multi-region failover for connections, and per-city funnel monitoring.
+
+686
+00:52:39.028 --> 00:52:40.201
+Question 18.
+
+687
+00:52:40.481 --> 00:52:44.151
+How do regulations shape a ride-hailing platform in India?
+
+688
+00:52:44.431 --> 00:52:45.796
+Thirty-second answer:
+
+689
+00:52:46.076 --> 00:53:07.025
+Aggregator licensing and guidelines set rules on driver verification, vehicle fitness, fare structure and surge limits, safety features, grievance handling and data localisation, with state-level variations, so pricing caps, onboarding checks and data residency must be configurable per jurisdiction (VERIFY current texts).
+
+690
+00:53:08.375 --> 00:53:09.613
+Question 19.
+
+691
+00:53:09.893 --> 00:53:13.562
+How would you design driver incentives without wasting budget?
+
+692
+00:53:13.842 --> 00:53:15.207
+Thirty-second answer:
+
+693
+00:53:15.487 --> 00:53:31.573
+Target incentives to forecast supply gaps by zone and time, segment drivers by expected response, measure uplift against control groups, cap budgets, randomise repositioning suggestions to avoid herding, and account for incentives in the ledger.
+
+694
+00:53:32.923 --> 00:53:34.032
+Question 20.
+
+695
+00:53:34.312 --> 00:53:38.515
+Compare ride-hailing dispatch with food or grocery delivery dispatch.
+
+696
+00:53:38.795 --> 00:53:40.160
+Thirty-second answer:
+
+697
+00:53:40.440 --> 00:54:02.243
+Both match moving couriers to jobs with ETAs; rides have a single pickup-drop-off with the customer present and price elasticity at request time, while delivery adds preparation time uncertainty, batching multiple orders per courier and store-side waits, so delivery dispatch optimises over longer horizons with batching (Ch 47).
+
+698
+00:54:03.593 --> 00:54:04.638
+Part 13.
+
+699
+00:54:04.918 --> 00:54:05.686
+Summary.
+
+700
+00:54:06.936 --> 00:54:16.600
+Ride-hailing is a real-time, local market: partitioned by city and hexagonal cell, with ephemeral in-memory location state and durable trip state.
+
+701
+00:54:16.880 --> 00:54:20.059
+Matching is batched optimisation, not nearest-driver.
+
+702
+00:54:20.339 --> 00:54:25.352
+Pricing balances the market with smoothed, capped multipliers tested by switchbacks.
+
+703
+00:54:25.632 --> 00:54:33.568
+Maps are the hidden core: road graphs, fast routing, live traffic from driver traces, ML-corrected ETAs, HMM map matching.
+
+704
+00:54:33.848 --> 00:54:43.640
+Money and safety need strong guarantees: idempotent trips, a double-entry ledger with cash receivables, SOS and anomaly detection, fraud graphs.
+
+705
+00:54:44.990 --> 00:54:46.291
+The data platform:
+
+706
+00:54:46.571 --> 00:54:56.171
+Kafka, then Flink, then real-time OLAP for operations; lakehouse (Hudi), then SQL and ML for everything else; strict location privacy.
+
+707
+00:54:57.521 --> 00:54:58.759
+Related chapters.
+
+708
+00:54:59.039 --> 00:55:11.092
+Ch 47, Delivery Dispatch and Live Tracking, Ch 45, Payments, Ch 41, Chat, Ch 21, Data at Scale, I03, Core Banking and UPI.
+
+709
+00:55:11.372 --> 00:55:12.567
+Next in this tab:
+
+710
+00:55:12.847 --> 00:55:15.599
+I06, Video Streaming and Live Cricket.
+
+711
+00:55:16.949 --> 00:55:18.549
+That's the end of this chapter.
+
+712
+00:55:18.829 --> 00:55:24.951
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+713
+00:55:25.231 --> 00:55:26.682
+See you in the next chapter.
+

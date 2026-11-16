@@ -1,0 +1,494 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.587
+HyperLogLog:
+
+2
+00:00:01.867 --> 00:00:03.915
+Count Distinct in 16 KB.
+
+3
+00:00:04.195 --> 00:00:08.121
+Chapter 12, from the Coding Interview part of the System Design Playbook.
+
+4
+00:00:09.871 --> 00:00:10.724
+Part 1.
+
+5
+00:00:11.004 --> 00:00:11.900
+Problem.
+
+6
+00:00:13.150 --> 00:00:17.438
+Count unique daily visitors across a billion events on many servers.
+
+7
+00:00:17.718 --> 00:00:26.251
+Use kilobytes instead of gigabytes, accept about 1% error, and be able to merge counts from different servers or days without double counting.
+
+8
+00:00:27.601 --> 00:00:28.476
+Part 2.
+
+9
+00:00:28.756 --> 00:00:29.673
+Key idea.
+
+10
+00:00:30.923 --> 00:00:32.075
+Hash each item.
+
+11
+00:00:32.355 --> 00:00:35.854
+The first p bits choose one of m = 2^p registers.
+
+12
+00:00:36.134 --> 00:00:47.099
+Each register keeps the maximum position of the first 1-bit seen in the remaining bits, because a run of k leading zeros happens about once per 2^k distinct items.
+
+13
+00:00:47.379 --> 00:00:53.481
+The estimate is a bias-corrected harmonic mean over the registers, with linear counting for small sets.
+
+14
+00:00:53.761 --> 00:00:56.214
+A merge is the register-wise maximum.
+
+15
+00:00:56.494 --> 00:01:06.179
+The standard error is 1.04 / √m, about 0.81% for m = 16,384.
+
+16
+00:01:07.529 --> 00:01:08.873
+Here is the diagram.
+
+17
+00:01:12.723 --> 00:01:13.619
+Part 3.
+
+18
+00:01:13.899 --> 00:01:14.753
+Solution.
+
+19
+00:01:16.003 --> 00:01:18.989
+Here is the Java code, HyperLogLog.java.
+
+20
+00:01:19.269 --> 00:01:22.960
+It runs to 78 lines; the full listing is in the chapter.
+
+21
+00:01:23.240 --> 00:01:32.435
+Problem: count unique visitors per day across billions of events in ~12 KB, mergeable across servers (Redis PFADD or PFCOUNT).
+
+22
+00:01:35.285 --> 00:01:36.202
+Part 4.
+
+23
+00:01:36.482 --> 00:01:37.314
+Walkthrough.
+
+24
+00:01:38.564 --> 00:01:39.908
+Here is a quick table:
+
+25
+00:01:40.188 --> 00:01:46.268
+Code, and Why. int idx = (int) (h (64 - p)); long rest = h p;:
+
+26
+00:01:46.548 --> 00:01:52.159
+Split the hash: the top p bits select the register, the rest supply the leading-zero count.
+
+27
+00:01:52.439 --> 00:01:55.191
+Long.numberOfLeadingZeros(rest) + 1:
+
+28
+00:01:55.471 --> 00:01:57.988
+The rank is the position of the first 1-bit.
+
+29
+00:01:58.268 --> 00:02:02.193
+A hardware instruction makes this O(1). alpha m m or sum:
+
+30
+00:02:02.473 --> 00:02:15.679
+The harmonic mean of 2^register dampens outlier registers, which is the Hyper improvement over LogLog. if (e = 2.5 m and and zeros 0) e = m log(m or zeros):
+
+31
+00:02:15.959 --> 00:02:18.327
+Small-range correction (linear counting).
+
+32
+00:02:18.607 --> 00:02:27.311
+The output shows an exact 100 for 100 distinct items. registersi = max(registersi, other.registersi):
+
+33
+00:02:27.591 --> 00:02:33.436
+Merging is lossless and order-independent, so you can combine shards or days (PFMERGE).
+
+34
+00:02:34.786 --> 00:02:35.746
+Part 5.
+
+35
+00:02:36.026 --> 00:02:36.965
+Complexity.
+
+36
+00:02:38.215 --> 00:02:39.559
+Here is a quick table:
+
+37
+00:02:39.839 --> 00:02:42.143
+Approach, and Time, and Space. add.
+
+38
+00:02:42.423 --> 00:02:43.169
+Time:
+
+39
+00:02:43.449 --> 00:02:44.324
+O(1).
+
+40
+00:02:44.604 --> 00:02:49.575
+Space: m registers (16 KB for p = 14). estimate.
+
+41
+00:02:49.855 --> 00:02:50.601
+Time:
+
+42
+00:02:50.881 --> 00:02:51.735
+O(m).
+
+43
+00:02:52.015 --> 00:02:53.465
+Space: -. merge.
+
+44
+00:02:53.745 --> 00:02:54.492
+Time:
+
+45
+00:02:54.772 --> 00:02:55.625
+O(m).
+
+46
+00:02:55.905 --> 00:02:56.759
+Space: -.
+
+47
+00:02:58.109 --> 00:02:59.047
+Part 6.
+
+48
+00:02:59.327 --> 00:03:00.053
+Run it.
+
+49
+00:03:01.303 --> 00:03:02.625
+Here is the shell code.
+
+50
+00:03:05.475 --> 00:03:29.881
+On screen: exact distinct = 289110, HLL estimate after merge = 291514 (error 0.83%; standard. error 1.04 or sqrt(m) = 0.81%). server1 alone estimated 244046; memory:
+
+51
+00:03:30.161 --> 00:03:35.025
+16 KB of registers versus ~17 MB for a HashSet.
+
+52
+00:03:35.305 --> 00:03:42.558
+100 distinct among 1000 events - estimate 100 (linear-counting correction for small. sets).
+
+53
+00:03:42.838 --> 00:03:43.585
+PASS.
+
+54
+00:03:46.435 --> 00:03:47.373
+Part 7.
+
+55
+00:03:47.653 --> 00:03:49.339
+Solve it with Spring Boot 4.
+
+56
+00:03:50.589 --> 00:03:52.679
+Redis has HyperLogLog built in:
+
+57
+00:03:52.959 --> 00:04:02.005
+PFADD per visit and PFCOUNT per query, about 12 KB per key whatever the cardinality, with 0.81% standard error.
+
+58
+00:04:02.285 --> 00:04:08.983
+One key per page per day; PFCOUNT k1 k2... unions days on the fly with no double counting.
+
+59
+00:04:10.333 --> 00:04:13.128
+The sequence diagram walks through it step by step.
+
+60
+00:04:13.408 --> 00:04:14.368
+C to V:
+
+61
+00:04:14.648 --> 00:04:19.640
+POST or api or v1 or pages or home or visits visitorId.
+
+62
+00:04:19.920 --> 00:04:20.880
+V to R:
+
+63
+00:04:21.160 --> 00:04:26.109
+PFADD hll:home:2026 to 01 to 15 u-1.
+
+64
+00:04:26.389 --> 00:04:27.349
+C to V:
+
+65
+00:04:27.629 --> 00:04:36.995
+GET or unique-visitors?from=2026 to 01 to 14 and to=2026 to 01 to 15.
+
+66
+00:04:37.275 --> 00:04:38.235
+V to R:
+
+67
+00:04:38.515 --> 00:04:48.157
+PFCOUNT hll:home:2026 to 01 to 14 hll:home:2026 to 01 to 15.
+
+68
+00:04:48.437 --> 00:04:53.195
+R to V: ~130,000 (union, overlap counted once).
+
+69
+00:04:53.475 --> 00:04:55.437
+V to C: uniqueVisitors.
+
+70
+00:04:59.287 --> 00:05:00.119
+Service.
+
+71
+00:05:00.399 --> 00:05:03.898
+Here is the Java code, UniqueVisitorService.java.
+
+72
+00:05:04.178 --> 00:05:07.890
+It runs to 34 lines; the full listing is in the chapter.
+
+73
+00:05:08.170 --> 00:05:20.266
+Unique visitors per page per day with Redis HyperLogLog (PFADD or PFCOUNT): ~12 KB per key whatever the. cardinality, 0.81% standard error.
+
+74
+00:05:20.546 --> 00:05:26.157
+Multi-day counts union the daily HLLs on the fly (PFCOUNT k1 k2...).
+
+75
+00:05:29.007 --> 00:05:29.881
+Controller.
+
+76
+00:05:30.161 --> 00:05:33.724
+Here is the Java code, UniqueVisitorController.java.
+
+77
+00:05:34.004 --> 00:05:37.716
+It runs to 33 lines; the full listing is in the chapter.
+
+78
+00:05:40.566 --> 00:05:41.910
+Run it as a service.
+
+79
+00:05:42.190 --> 00:05:48.334
+The integration test HyperLogLogIT.java drives the API against a real Redis.
+
+80
+00:05:48.614 --> 00:05:51.302
+This is its transcript ( request, response):
+
+81
+00:05:52.652 --> 00:06:09.057
+On screen: day 1: exact 100,000, HLL 100,165 (0.17% error); days 1 to 2: exact 130,000, HLL 130,468.
+
+82
+00:06:09.337 --> 00:06:13.988
+(0.36% error). size of day 1's HLL in Redis:
+
+83
+00:06:14.268 --> 00:06:20.689
+12304 bytes (an exact set of 100,000 ids needs. megabytes).
+
+84
+00:06:20.969 --> 00:06:26.772
+POST or api or v1 or pages or pricing or visits visitorId:u-1.
+
+85
+00:06:27.052 --> 00:06:28.140
+202.
+
+86
+00:06:28.420 --> 00:06:34.137
+POST or api or v1 or pages or pricing or visits visitorId:u-2.
+
+87
+00:06:34.417 --> 00:06:35.505
+202.
+
+88
+00:06:35.785 --> 00:06:37.321
+(u-1 visited twice).
+
+89
+00:06:37.601 --> 00:06:50.316
+GET or api or v1 or pages or pricing or unique-visitors?from=2026 to 01 to 15 and to=2026 to 01 to 15.
+
+90
+00:06:50.596 --> 00:07:00.793
+200 page:pricing,from:2026 to 01 to 15,to:2026 to 01 to 15,uniqueVisitors:2.
+
+91
+00:07:01.073 --> 00:07:01.820
+PASS.
+
+92
+00:07:04.670 --> 00:07:06.761
+What changes from the interview version.
+
+93
+00:07:07.041 --> 00:07:08.385
+Here is a quick table:
+
+94
+00:07:08.665 --> 00:07:11.097
+Interview, and Production (Spring Boot 4).
+
+95
+00:07:11.377 --> 00:07:13.403
+2^14 registers in an array:
+
+96
+00:07:13.683 --> 00:07:22.323
+Redis HLL string (sparse when small, 12,304 bytes dense), shared by every instance. merge two sketches:
+
+97
+00:07:22.603 --> 00:07:27.851
+PFCOUNT over many keys (or PFMERGE into a weekly key). add one at a time:
+
+98
+00:07:28.131 --> 00:07:41.571
+PFADD is variadic: batch 1,000 ids per call when back-filling. no key layout: hll:page:date: the page hash tag keeps a page's days on one cluster slot for multi-key PFCOUNT.
+
+99
+00:07:42.921 --> 00:07:43.668
+Measured:
+
+100
+00:07:43.948 --> 00:07:56.492
+0.17% error for 100,000 visitors and 0.36% for the two-day union, both well inside the 3σ about 2.4% band.
+
+101
+00:07:57.842 --> 00:07:58.717
+Part 8.
+
+102
+00:07:58.997 --> 00:08:00.106
+Common mistakes.
+
+103
+00:08:01.356 --> 00:08:04.108
+A weak hash (for example String.hashCode).
+
+104
+00:08:04.388 --> 00:08:08.036
+HyperLogLog depends on uniformly distributed bits.
+
+105
+00:08:08.316 --> 00:08:10.172
+Adding counts from different servers.
+
+106
+00:08:10.452 --> 00:08:12.564
+That double counts users seen by both.
+
+107
+00:08:12.844 --> 00:08:14.444
+Merge the sketches instead.
+
+108
+00:08:14.724 --> 00:08:16.985
+Expecting intersections to be accurate.
+
+109
+00:08:17.265 --> 00:08:23.921
+Inclusion-exclusion on HLLs has large errors; use MinHash or Theta sketches for intersections.
+
+110
+00:08:25.271 --> 00:08:26.167
+Part 9.
+
+111
+00:08:26.447 --> 00:08:27.791
+Follow-up questions.
+
+112
+00:08:29.041 --> 00:08:29.916
+Question.
+
+113
+00:08:30.196 --> 00:08:32.969
+How does Redis store HLL in 12 KB?
+
+114
+00:08:33.249 --> 00:08:34.615
+Thirty-second answer:
+
+115
+00:08:34.895 --> 00:08:42.063
+16,384 registers times 6 bits = 12 KB in the dense encoding.
+
+116
+00:08:42.343 --> 00:08:49.383
+Small cardinalities use a sparse run-length encoding of a few hundred bytes, switching to dense as the count grows.
+
+117
+00:08:50.733 --> 00:08:51.607
+Question.
+
+118
+00:08:51.887 --> 00:08:54.234
+Where would you use HyperLogLog in a design?
+
+119
+00:08:54.514 --> 00:08:55.879
+Thirty-second answer:
+
+120
+00:08:56.159 --> 00:09:08.554
+Unique visitors per page per day, distinct search queries, unique IPs per minute for DDoS detection, and cardinality estimates in query planners (Presto, BigQuery APPROXCOUNTDISTINCT).
+
+121
+00:09:09.904 --> 00:09:11.504
+That's the end of this chapter.
+
+122
+00:09:11.784 --> 00:09:17.821
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+123
+00:09:18.101 --> 00:09:19.552
+See you in the next chapter.
+

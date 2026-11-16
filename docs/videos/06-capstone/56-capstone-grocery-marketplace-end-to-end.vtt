@@ -1,0 +1,3530 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.267
+Capstone:
+
+2
+00:00:01.547 --> 00:00:03.766
+The Grocery Marketplace, End to End.
+
+3
+00:00:04.046 --> 00:00:08.163
+Chapter 56, from the Capstone part of the System Design Playbook.
+
+4
+00:00:09.913 --> 00:00:10.873
+At a glance:
+
+5
+00:00:11.153 --> 00:00:12.327
+Chapter at a glance.
+
+6
+00:00:12.607 --> 00:00:13.609
+Reader bands:
+
+7
+00:00:13.889 --> 00:00:29.377
+B3, then B4, Prerequisites: the whole handbook, especially Ch 00 (the platform and its 26 services), Ch 18, Ch 27, Ch 31 to 32 and case studies 38 to 55.
+
+8
+00:00:29.657 --> 00:00:32.580
+What you will build: the whole platform as one design.
+
+9
+00:00:32.860 --> 00:00:51.057
+It covers requirements and capacity; the service and data architecture; the event backbone; the critical paths with their latency budgets; failure isolation; SLOs that are arithmetically achievable; deployment topology; security, compliance and cost; and an evolution roadmap.
+
+10
+00:00:51.337 --> 00:00:53.620
+Every earlier chapter solved one part.
+
+11
+00:00:53.900 --> 00:00:56.225
+This chapter checks that the parts compose.
+
+12
+00:00:56.505 --> 00:00:57.572
+The four labs:
+
+13
+00:00:57.852 --> 00:01:01.031
+L1: latency budget of place-order (simulation).
+
+14
+00:01:01.311 --> 00:01:02.527
+1M checkouts.
+
+15
+00:01:03.877 --> 00:01:10.447
+The external payment gateway is most of the median (~180 of 222 ms).
+
+16
+00:01:10.727 --> 00:01:18.727
+Our own part's p99 is ~1.2 s, even though each hop's own p99 is under 60 ms:
+
+17
+00:01:19.007 --> 00:01:22.911
+0.5% outliers across 7 hops compound.
+
+18
+00:01:23.191 --> 00:01:36.653
+Timeouts plus honest degradation for optional calls, and hedged pricing, cut our p99 from 1,231 to 1,050 ms, degrading 1.06% of checkouts.
+
+19
+00:01:36.933 --> 00:01:42.714
+A page that needs 30 calls waits on a p99-slow one 26% of the time.
+
+20
+00:01:42.994 --> 00:01:48.135
+L2: the whole checkout under failure (real HTTP + PostgreSQL).
+
+21
+00:01:48.415 --> 00:01:52.767
+2,000 checkouts, with lost payment replies and orchestrator crashes.
+
+22
+00:01:54.117 --> 00:02:03.013
+The naive design produced 60 customers charged with no order, 139 double charges and 44 leaked reservations.
+
+23
+00:02:03.293 --> 00:02:08.392
+Idempotency, a payment-status check and a saga log removed the double charges.
+
+24
+00:02:08.672 --> 00:02:11.893
+Adding a recovery sweeper brought every invariant to zero.
+
+25
+00:02:12.173 --> 00:02:18.019
+L3: blast radius of each service (real graph analysis of the 26-service map).
+
+26
+00:02:18.299 --> 00:02:19.152
+As-built:
+
+27
+00:02:19.432 --> 00:02:23.784
+22 services could break user traffic, and 16 could break checkout.
+
+28
+00:02:24.064 --> 00:02:27.520
+Identity alone took down 100% of requests.
+
+29
+00:02:28.870 --> 00:02:43.099
+Designed: local token checks, async side effects and soft optional features left 15 and 10, and cut total traffic lost across all single failures from 649% to 385%.
+
+30
+00:02:43.379 --> 00:02:44.254
+L4:
+
+31
+00:02:44.534 --> 00:02:46.795
+SLO composition (simulation).
+
+32
+00:02:47.075 --> 00:02:54.393
+Ten hard dependencies at 99.95% each give a checkout of 99.46%.
+
+33
+00:02:54.673 --> 00:02:58.107
+Every month broke a 99.95% budget.
+
+34
+00:02:58.387 --> 00:03:00.158
+Shared databases make it worse.
+
+35
+00:03:00.438 --> 00:03:03.553
+Cells cap one outage at a quarter to a half of customers.
+
+36
+00:03:04.903 --> 00:03:11.367
+Even 99.995% per service reached only 99.94%.
+
+37
+00:03:11.647 --> 00:03:15.060
+Journey SLOs must be set with this arithmetic in hand.
+
+38
+00:03:15.340 --> 00:03:16.321
+Reading time:
+
+39
+00:03:16.601 --> 00:03:18.521
+120 min + code.
+
+40
+00:03:19.871 --> 00:03:20.725
+Part 1.
+
+41
+00:03:21.005 --> 00:03:22.925
+Introduction and Why It Matters.
+
+42
+00:03:24.175 --> 00:03:26.329
+A story: every service was green.
+
+43
+00:03:26.609 --> 00:03:27.591
+Sale night.
+
+44
+00:03:27.871 --> 00:03:37.492
+Every service dashboard was green: each service met its 99.95% SLO, and each team's p99 was under 60 ms.
+
+45
+00:03:37.772 --> 00:03:38.433
+But:
+
+46
+00:03:38.713 --> 00:03:41.487
+The checkout success rate was 91%.
+
+47
+00:03:41.767 --> 00:03:44.817
+Support queues were full of money deducted, no order.
+
+48
+00:03:45.097 --> 00:03:47.124
+Some customers were charged twice.
+
+49
+00:03:47.404 --> 00:03:56.577
+For 12 minutes, nobody could log in, because the identity service hit its connection limit and every request validated tokens there, not just logins.
+
+50
+00:03:57.927 --> 00:04:03.005
+The home page stalled when the recommendation service slowed, because the page waited for it.
+
+51
+00:04:03.285 --> 00:04:07.487
+In the post-mortem, the service owners were right that their services were fine.
+
+52
+00:04:07.767 --> 00:04:09.090
+The platform was not.
+
+53
+00:04:09.370 --> 00:04:21.018
+Its guarantees are properties of how the parts compose: latency adds along paths;. availability multiplies across hard dependencies;. failures travel along synchronous edges;.
+
+54
+00:04:22.368 --> 00:04:28.789
+money is only safe if every step of a saga is idempotent and every abandoned saga is finished by someone.
+
+55
+00:04:29.069 --> 00:04:33.464
+That is what an architect owns: not the boxes, but the arrows between them.
+
+56
+00:04:34.814 --> 00:04:35.497
+Quote:
+
+57
+00:04:35.777 --> 00:04:37.441
+The thesis of this chapter.
+
+58
+00:04:37.721 --> 00:04:44.526
+A platform is correct only if its journeys are correct, fast and available end to end, not just its services.
+
+59
+00:04:44.806 --> 00:04:49.819
+Budget latency along the critical path, and remove optional work from it (L1).
+
+60
+00:04:50.099 --> 00:04:59.657
+Make every money-moving flow a saga with idempotent steps, explicit handling of unknown outcomes, and a sweeper that finishes abandoned work (L2).
+
+61
+00:04:59.937 --> 00:05:07.766
+Draw the dependency graph and shrink the critical set: async side effects, local verification, degraded answers (L3).
+
+62
+00:05:09.116 --> 00:05:20.636
+Set SLOs using composition arithmetic, engineer the small critical set to a higher standard than the journey, and use cells to bound how many customers one failure touches (L4).
+
+63
+00:05:21.986 --> 00:05:23.586
+The platform in one page.
+
+64
+00:05:23.866 --> 00:05:25.210
+Here is a quick table:
+
+65
+00:05:25.490 --> 00:05:28.903
+Dimension, and Normal day, and Sale day, and Source chapters.
+
+66
+00:05:29.183 --> 00:05:30.591
+Daily active users.
+
+67
+00:05:30.871 --> 00:05:31.853
+Normal day:
+
+68
+00:05:32.133 --> 00:05:33.007
+2M.
+
+69
+00:05:33.287 --> 00:05:34.226
+Sale day:
+
+70
+00:05:34.506 --> 00:05:35.381
+6M.
+
+71
+00:05:35.661 --> 00:05:36.834
+Source chapters:
+
+72
+00:05:37.114 --> 00:05:39.695
+Ch 00, Ch 02.
+
+73
+00:05:39.975 --> 00:05:41.085
+Orders per day.
+
+74
+00:05:41.365 --> 00:05:42.346
+Normal day:
+
+75
+00:05:42.626 --> 00:05:43.757
+400k.
+
+76
+00:05:44.037 --> 00:05:44.975
+Sale day:
+
+77
+00:05:45.255 --> 00:05:46.514
+1.5M.
+
+78
+00:05:46.794 --> 00:05:47.967
+Source chapters:
+
+79
+00:05:48.247 --> 00:05:49.570
+Ch 46.
+
+80
+00:05:49.850 --> 00:05:50.874
+Peak factor.
+
+81
+00:05:51.154 --> 00:05:52.135
+Normal day:
+
+82
+00:05:52.415 --> 00:05:54.655
+5 times (7 to 10 pm).
+
+83
+00:05:54.935 --> 00:05:55.874
+Sale day:
+
+84
+00:05:56.154 --> 00:05:58.138
+20 times (sale start minute).
+
+85
+00:05:58.418 --> 00:05:59.591
+Source chapters:
+
+86
+00:05:59.871 --> 00:06:01.173
+Ch 09.
+
+87
+00:06:01.453 --> 00:06:03.138
+Dark stores or SKUs.
+
+88
+00:06:03.418 --> 00:06:04.399
+Normal day:
+
+89
+00:06:04.679 --> 00:06:07.047
+500 or 250k.
+
+90
+00:06:07.327 --> 00:06:08.501
+Source chapters:
+
+91
+00:06:08.781 --> 00:06:10.103
+Ch 47.
+
+92
+00:06:10.383 --> 00:06:11.855
+Riders online (peak).
+
+93
+00:06:12.135 --> 00:06:13.117
+Normal day:
+
+94
+00:06:13.397 --> 00:06:14.335
+40k.
+
+95
+00:06:14.615 --> 00:06:15.554
+Sale day:
+
+96
+00:06:15.834 --> 00:06:16.751
+80k.
+
+97
+00:06:17.031 --> 00:06:18.205
+Source chapters:
+
+98
+00:06:18.485 --> 00:06:19.807
+Ch 47.
+
+99
+00:06:20.087 --> 00:06:21.005
+Services.
+
+100
+00:06:21.285 --> 00:06:22.266
+Normal day:
+
+101
+00:06:22.546 --> 00:06:23.527
+26.
+
+102
+00:06:23.807 --> 00:06:24.981
+Source chapters:
+
+103
+00:06:25.261 --> 00:06:27.607
+Ch 00, Ch 16.
+
+104
+00:06:28.957 --> 00:06:30.280
+Learning objectives.
+
+105
+00:06:30.560 --> 00:06:32.459
+By the end you will be able to:
+
+106
+00:06:32.739 --> 00:06:38.157
+Compose an end-to-end design, and trace every requirement to a component and an ADR.
+
+107
+00:06:38.437 --> 00:06:41.360
+Budget latency along critical paths (L1).
+
+108
+00:06:41.640 --> 00:06:44.904
+Prove money safety of the order flow under failure (L2).
+
+109
+00:06:45.184 --> 00:06:48.747
+Analyse blast radius and shrink the critical set (L3).
+
+110
+00:06:49.027 --> 00:06:55.149
+Set achievable SLOs by composition, and choose cells and redundancy accordingly (L4).
+
+111
+00:06:56.499 --> 00:06:59.635
+Plan evolution: what to build first, and what to defer.
+
+112
+00:07:00.985 --> 00:07:01.860
+Part 2.
+
+113
+00:07:02.140 --> 00:07:04.017
+Core Concepts, Beginner to Deep.
+
+114
+00:07:05.267 --> 00:07:08.275
+Intuition: a relay race, not a set of sprinters.
+
+115
+00:07:08.555 --> 00:07:11.329
+Every runner can be fast, and the relay still lose.
+
+116
+00:07:11.609 --> 00:07:25.497
+It loses at the handovers (latency adds up), if any runner falls (availability multiplies), if a dropped baton isn't picked up (sagas without recovery), or if one runner's stumble trips the others (synchronous coupling).
+
+117
+00:07:25.777 --> 00:07:27.761
+The architect coaches the handovers.
+
+118
+00:07:29.111 --> 00:07:30.732
+Requirements, end to end.
+
+119
+00:07:31.012 --> 00:07:33.380
+Customer journeys (the unit of design).
+
+120
+00:07:34.730 --> 00:07:36.074
+Here is a quick table:
+
+121
+00:07:36.354 --> 00:07:40.301
+Journey, and Share of requests, and Freshness or correctness, and Target.
+
+122
+00:07:40.581 --> 00:07:41.711
+Home or browse.
+
+123
+00:07:41.991 --> 00:07:44.445
+Share of requests: ~40%.
+
+124
+00:07:44.725 --> 00:07:46.218
+Freshness or correctness:
+
+125
+00:07:46.498 --> 00:07:49.485
+Prices at most 60 s stale, stock indicative.
+
+126
+00:07:49.765 --> 00:07:54.159
+Target: p99 400 ms, 99.9%.
+
+127
+00:07:54.439 --> 00:07:55.207
+Search.
+
+128
+00:07:55.487 --> 00:07:58.090
+Share of requests: ~22%.
+
+129
+00:07:58.370 --> 00:07:59.863
+Freshness or correctness:
+
+130
+00:08:00.143 --> 00:08:02.085
+Index at most 60 s behind.
+
+131
+00:08:02.365 --> 00:08:06.845
+Target: p99 300 ms, 99.9%.
+
+132
+00:08:07.125 --> 00:08:08.149
+Add to cart.
+
+133
+00:08:08.429 --> 00:08:10.925
+Share of requests: ~15%.
+
+134
+00:08:11.205 --> 00:08:12.698
+Freshness or correctness:
+
+135
+00:08:12.978 --> 00:08:14.045
+Read-your-writes.
+
+136
+00:08:14.325 --> 00:08:19.146
+Target: p99 200 ms, 99.95%.
+
+137
+00:08:19.426 --> 00:08:20.322
+Checkout.
+
+138
+00:08:20.602 --> 00:08:23.055
+Share of requests: ~5%.
+
+139
+00:08:23.335 --> 00:08:24.829
+Freshness or correctness:
+
+140
+00:08:25.109 --> 00:08:26.965
+Exact stock, exact money.
+
+141
+00:08:27.245 --> 00:08:32.983
+Target: p99 2.5 s (with gateway), 99.95%.
+
+142
+00:08:33.263 --> 00:08:34.202
+Track order.
+
+143
+00:08:34.482 --> 00:08:36.807
+Share of requests: ~10%.
+
+144
+00:08:37.087 --> 00:08:38.581
+Freshness or correctness:
+
+145
+00:08:38.861 --> 00:08:40.653
+Position at most 10 s old.
+
+146
+00:08:40.933 --> 00:08:45.370
+Target: p99 500 ms, 99.9%.
+
+147
+00:08:46.720 --> 00:08:48.256
+Login or OTP.
+
+148
+00:08:48.536 --> 00:08:50.904
+Share of requests: ~3%.
+
+149
+00:08:51.184 --> 00:08:55.643
+Target: p99 3 s (SMS), 99.9%.
+
+150
+00:08:55.923 --> 00:08:57.565
+Seller: catalogue updates.
+
+151
+00:08:57.845 --> 00:09:00.299
+Share of requests: ~5%.
+
+152
+00:09:00.579 --> 00:09:02.072
+Freshness or correctness:
+
+153
+00:09:02.352 --> 00:09:04.080
+Visible in at most 5 min.
+
+154
+00:09:04.360 --> 00:09:05.149
+Target:
+
+155
+00:09:05.429 --> 00:09:07.328
+99.5%.
+
+156
+00:09:08.678 --> 00:09:09.659
+Cross-cutting.
+
+157
+00:09:09.939 --> 00:09:13.993
+No customer is charged without an order, and none is charged twice.
+
+158
+00:09:14.273 --> 00:09:16.406
+No stock is sold that doesn't exist.
+
+159
+00:09:16.686 --> 00:09:20.547
+GST-correct invoices; data residency for payments data.
+
+160
+00:09:20.827 --> 00:09:24.582
+Sale-day surge handled with a waiting room rather than failure.
+
+161
+00:09:25.932 --> 00:09:27.511
+The architecture in layers.
+
+162
+00:09:27.791 --> 00:09:29.135
+Here is a quick table:
+
+163
+00:09:29.415 --> 00:09:31.484
+Layer, and Components, and Chapters.
+
+164
+00:09:31.764 --> 00:09:32.447
+Edge.
+
+165
+00:09:32.727 --> 00:09:33.644
+Components:
+
+166
+00:09:33.924 --> 00:09:41.327
+CDN (images, static), WAF, API gateway (JWT verification, rate limits), waiting room.
+
+167
+00:09:41.607 --> 00:09:42.503
+Chapters:
+
+168
+00:09:42.783 --> 00:09:47.519
+Ch 03, Ch 08, Ch 39, Ch 52.
+
+169
+00:09:47.799 --> 00:09:48.716
+Discovery.
+
+170
+00:09:48.996 --> 00:09:49.913
+Components:
+
+171
+00:09:50.193 --> 00:09:54.396
+Catalog, search, autocomplete, recommendations, pricing, promotions.
+
+172
+00:09:54.676 --> 00:09:55.572
+Chapters:
+
+173
+00:09:55.852 --> 00:10:00.439
+Ch 22, Ch 42, Ch 43, Ch 49.
+
+174
+00:10:00.719 --> 00:10:01.700
+Transaction.
+
+175
+00:10:01.980 --> 00:10:02.897
+Components:
+
+176
+00:10:03.177 --> 00:10:08.105
+Cart, checkout (saga orchestrator), inventory, slots, payments, orders, wallet.
+
+177
+00:10:08.385 --> 00:10:09.281
+Chapters:
+
+178
+00:10:09.561 --> 00:10:13.999
+Ch 13, Ch 45, Ch 46, Ch 48.
+
+179
+00:10:14.279 --> 00:10:15.260
+Fulfilment.
+
+180
+00:10:15.540 --> 00:10:16.457
+Components:
+
+181
+00:10:16.737 --> 00:10:19.681
+Picking, dispatch, tracking, chat, notifications.
+
+182
+00:10:19.961 --> 00:10:20.857
+Chapters:
+
+183
+00:10:21.137 --> 00:10:24.359
+Ch 40, Ch 41, Ch 47.
+
+184
+00:10:24.639 --> 00:10:25.663
+Back office.
+
+185
+00:10:25.943 --> 00:10:26.860
+Components:
+
+186
+00:10:27.140 --> 00:10:31.577
+Settlement, invoices, reconciliation, audit, support, sourcing exchange.
+
+187
+00:10:31.857 --> 00:10:32.753
+Chapters:
+
+188
+00:10:33.033 --> 00:10:36.703
+Ch 45, Ch 55, Ch 36.
+
+189
+00:10:38.053 --> 00:10:38.949
+Backbone.
+
+190
+00:10:39.229 --> 00:10:40.146
+Components:
+
+191
+00:10:40.426 --> 00:10:44.735
+Kafka event bus + outbox, schema registry, job scheduler.
+
+192
+00:10:45.015 --> 00:10:45.911
+Chapters:
+
+193
+00:10:46.191 --> 00:10:50.266
+Ch 14, Ch 15, Ch 28, Ch 50.
+
+194
+00:10:50.546 --> 00:10:51.357
+Data.
+
+195
+00:10:51.637 --> 00:10:52.554
+Components:
+
+196
+00:10:52.834 --> 00:10:58.167
+PostgreSQL per service, Redis, OpenSearch, object storage, lake + OLAP.
+
+197
+00:10:58.447 --> 00:10:59.343
+Chapters:
+
+198
+00:10:59.623 --> 00:11:04.679
+Ch 05, Ch 06, Ch 21, Ch 51.
+
+199
+00:11:04.959 --> 00:11:05.898
+Platform.
+
+200
+00:11:06.178 --> 00:11:07.095
+Components:
+
+201
+00:11:07.375 --> 00:11:11.109
+Kubernetes, CI or CD, observability, secrets, cost.
+
+202
+00:11:11.389 --> 00:11:12.285
+Chapters:
+
+203
+00:11:12.565 --> 00:11:16.106
+Ch 24, Ch 26, Ch 35.
+
+204
+00:11:17.456 --> 00:11:19.632
+Critical paths and latency budgets.
+
+205
+00:11:19.912 --> 00:11:22.963
+L1 ran 1M simulated place-order requests:
+
+206
+00:11:24.313 --> 00:11:25.657
+Here is a quick table:
+
+207
+00:11:25.937 --> 00:11:35.515
+Design, and End-to-end p50, and End-to-end p99, and Our part p99, and Our part p99.9, and Degraded.
+
+208
+00:11:35.795 --> 00:11:37.139
+Everything sequential.
+
+209
+00:11:37.419 --> 00:11:38.827
+End-to-end p50:
+
+210
+00:11:39.107 --> 00:11:40.793
+252 ms.
+
+211
+00:11:41.073 --> 00:11:42.630
+End-to-end p99:
+
+212
+00:11:42.910 --> 00:11:45.641
+1,561 ms.
+
+213
+00:11:45.921 --> 00:11:47.478
+Our part p99:
+
+214
+00:11:47.758 --> 00:11:50.275
+1,269 ms.
+
+215
+00:11:50.555 --> 00:11:52.518
+Our part p99.9:
+
+216
+00:11:52.798 --> 00:11:55.422
+1,549 ms.
+
+217
+00:11:55.702 --> 00:11:56.619
+Degraded:
+
+218
+00:11:56.899 --> 00:11:57.966
+0%.
+
+219
+00:11:58.246 --> 00:11:59.953
+Pre-payment checks in parallel.
+
+220
+00:12:00.233 --> 00:12:01.641
+End-to-end p50:
+
+221
+00:12:01.921 --> 00:12:03.585
+224 ms.
+
+222
+00:12:03.865 --> 00:12:05.422
+End-to-end p99:
+
+223
+00:12:05.702 --> 00:12:08.305
+1,524 ms.
+
+224
+00:12:08.585 --> 00:12:10.142
+Our part p99:
+
+225
+00:12:10.422 --> 00:12:12.833
+1,231 ms.
+
+226
+00:12:13.113 --> 00:12:15.075
+Our part p99.9:
+
+227
+00:12:15.355 --> 00:12:17.617
+1,508 ms.
+
+228
+00:12:17.897 --> 00:12:18.814
+Degraded:
+
+229
+00:12:19.094 --> 00:12:23.233
+0%. + timeouts or degradation + hedged pricing.
+
+230
+00:12:23.513 --> 00:12:24.921
+End-to-end p50:
+
+231
+00:12:25.201 --> 00:12:26.886
+222 ms.
+
+232
+00:12:27.166 --> 00:12:28.723
+End-to-end p99:
+
+233
+00:12:29.003 --> 00:12:31.414
+1,418 ms.
+
+234
+00:12:31.694 --> 00:12:33.251
+Our part p99:
+
+235
+00:12:33.531 --> 00:12:35.174
+1,050 ms.
+
+236
+00:12:35.454 --> 00:12:37.417
+Our part p99.9:
+
+237
+00:12:37.697 --> 00:12:40.193
+1,492 ms.
+
+238
+00:12:40.473 --> 00:12:41.390
+Degraded:
+
+239
+00:12:41.670 --> 00:12:43.462
+1.06%.
+
+240
+00:12:44.812 --> 00:12:47.863
+The external payment gateway is most of the median.
+
+241
+00:12:48.143 --> 00:12:52.260
+Show progress, and resolve lost outcomes asynchronously (L2).
+
+242
+00:12:52.540 --> 00:12:55.932
+Our tail is made of rare outliers compounded across hops.
+
+243
+00:12:56.212 --> 00:12:57.748
+No single team sees it.
+
+244
+00:12:58.028 --> 00:13:01.825
+Allocate a budget per hop, and track journey-level p99.
+
+245
+00:13:02.105 --> 00:13:03.940
+Parallelise independent calls.
+
+246
+00:13:04.220 --> 00:13:13.052
+Put tight timeouts with honest degraded answers on optional calls: a cached serviceability answer, coupon couldn't be applied, you can retry.
+
+247
+00:13:13.332 --> 00:13:14.825
+Hedge idempotent reads.
+
+248
+00:13:16.175 --> 00:13:24.709
+Tail amplification: a page needing 30 calls hits a slow one 26% of the time (1 minus 0.99³⁰).
+
+249
+00:13:24.989 --> 00:13:31.410
+Aggregate in backend-for-frontend layers, and cache aggressively on browse paths (Ch 07).
+
+250
+00:13:32.760 --> 00:13:34.744
+Money safety: the order saga.
+
+251
+00:13:35.024 --> 00:13:45.029
+L2 ran real services on real PostgreSQL, with 5% declines, 8% lost payment replies and 3% orchestrator crashes:
+
+252
+00:13:46.379 --> 00:13:47.723
+Here is a quick table:
+
+253
+00:13:48.003 --> 00:13:54.254
+Design, and Orders, and Charged, no order, and Charged twice, and Oversold, and Leaked reservations.
+
+254
+00:13:54.534 --> 00:13:55.387
+Naive.
+
+255
+00:13:55.667 --> 00:13:56.457
+Orders:
+
+256
+00:13:56.737 --> 00:13:58.977
+1,627.
+
+257
+00:13:59.257 --> 00:14:00.579
+Charged, no order:
+
+258
+00:14:00.859 --> 00:14:01.713
+60.
+
+259
+00:14:01.993 --> 00:14:03.102
+Charged twice:
+
+260
+00:14:03.382 --> 00:14:04.790
+139.
+
+261
+00:14:05.070 --> 00:14:06.009
+Oversold:
+
+262
+00:14:06.289 --> 00:14:07.035
+0.
+
+263
+00:14:07.315 --> 00:14:08.659
+Leaked reservations:
+
+264
+00:14:08.939 --> 00:14:09.899
+44.
+
+265
+00:14:10.179 --> 00:14:12.889
+Idempotent + status check + saga log.
+
+266
+00:14:13.169 --> 00:14:13.958
+Orders:
+
+267
+00:14:14.238 --> 00:14:16.201
+1,660.
+
+268
+00:14:16.481 --> 00:14:17.803
+Charged, no order:
+
+269
+00:14:18.083 --> 00:14:19.065
+39.
+
+270
+00:14:19.345 --> 00:14:20.454
+Charged twice:
+
+271
+00:14:20.734 --> 00:14:21.481
+0.
+
+272
+00:14:21.761 --> 00:14:22.699
+Oversold:
+
+273
+00:14:22.979 --> 00:14:23.726
+0.
+
+274
+00:14:24.006 --> 00:14:25.350
+Leaked reservations:
+
+275
+00:14:25.630 --> 00:14:27.827
+44. + recovery sweeper.
+
+276
+00:14:28.107 --> 00:14:28.897
+Orders:
+
+277
+00:14:29.177 --> 00:14:31.011
+1,709.
+
+278
+00:14:31.291 --> 00:14:32.614
+Charged, no order:
+
+279
+00:14:32.894 --> 00:14:33.641
+0.
+
+280
+00:14:33.921 --> 00:14:35.030
+Charged twice:
+
+281
+00:14:35.310 --> 00:14:36.057
+0.
+
+282
+00:14:36.337 --> 00:14:37.275
+Oversold:
+
+283
+00:14:37.555 --> 00:14:38.302
+0.
+
+284
+00:14:38.582 --> 00:14:39.926
+Leaked reservations:
+
+285
+00:14:40.206 --> 00:14:40.953
+0.
+
+286
+00:14:42.303 --> 00:14:44.543
+A timeout means unknown, not failed.
+
+287
+00:14:44.823 --> 00:14:52.375
+Resolve it by asking the gateway for the payment's status with the same idempotency key (Ch 20, Ch 45).
+
+288
+00:14:52.655 --> 00:14:59.375
+Every step is idempotent on the order id: reserve, charge, create order, consume stock and release.
+
+289
+00:14:59.655 --> 00:15:01.980
+A saga log is only half the solution.
+
+290
+00:15:02.260 --> 00:15:10.111
+A sweeper must resume or compensate abandoned sagas, and then notify customers whose failed checkout actually completed.
+
+291
+00:15:11.461 --> 00:15:18.799
+Database invariants (conditional stock updates) kept overselling at zero in every design (Ch 46).
+
+292
+00:15:19.079 --> 00:15:27.271
+Reconciliation with the payment gateway's settlement files is the final net: anything the sweeper missed shows up there (Ch 45).
+
+293
+00:15:28.621 --> 00:15:31.395
+Failure isolation: the dependency graph.
+
+294
+00:15:31.675 --> 00:15:35.899
+L3 analysed the 26-service map's journeys as call trees:
+
+295
+00:15:37.249 --> 00:15:38.593
+Here is a quick table:
+
+296
+00:15:38.873 --> 00:15:46.467
+Version, and Services whose failure breaks traffic, and ...that break checkout, and Traffic lost, summed over all single failures.
+
+297
+00:15:46.747 --> 00:15:49.030
+As-built (everything hard and synchronous).
+
+298
+00:15:49.310 --> 00:15:51.443
+Services whose failure breaks traffic:
+
+299
+00:15:51.723 --> 00:15:53.643
+22. ...that break checkout:
+
+300
+00:15:53.923 --> 00:15:54.862
+16.
+
+301
+00:15:55.142 --> 00:15:57.937
+Traffic lost, summed over all single failures:
+
+302
+00:15:58.217 --> 00:16:00.051
+649%.
+
+303
+00:16:00.331 --> 00:16:01.185
+Designed.
+
+304
+00:16:01.465 --> 00:16:03.598
+Services whose failure breaks traffic:
+
+305
+00:16:03.878 --> 00:16:05.627
+15. ...that break checkout:
+
+306
+00:16:05.907 --> 00:16:06.611
+10.
+
+307
+00:16:06.891 --> 00:16:09.686
+Traffic lost, summed over all single failures:
+
+308
+00:16:09.966 --> 00:16:11.694
+385%.
+
+309
+00:16:13.044 --> 00:16:19.636
+Local token verification (signed JWTs at the gateway) takes identity off every request.
+
+310
+00:16:19.916 --> 00:16:22.967
+As-built, identity was a 100% outage.
+
+311
+00:16:23.247 --> 00:16:31.887
+Events for side effects: confirmation SMS, audit, invoice and fulfilment all leave checkout, via the outbox (Ch 15).
+
+312
+00:16:32.167 --> 00:16:39.825
+Degraded answers: recommendations, then bestsellers;. promotions, then no auto-coupon;. search, then category browse;.
+
+313
+00:16:41.175 --> 00:16:45.143
+tracking map, then status only;. cart stock, then check at checkout.
+
+314
+00:16:45.423 --> 00:16:59.695
+The remaining critical set gets redundancy, cells, the strictest SLOs and the most careful change management: gateway, catalog, pricing, serviceability, cart, checkout, customer, inventory, slot, payment and order.
+
+315
+00:16:59.975 --> 00:17:03.794
+Draw the graph from traces, not diagrams (Ch 24).
+
+316
+00:17:04.074 --> 00:17:08.170
+Hidden synchronous calls are how platforms drift into the as-built graph.
+
+317
+00:17:09.520 --> 00:17:11.397
+SLO composition and cells.
+
+318
+00:17:11.677 --> 00:17:14.259
+L4 simulated a year of the checkout journey:
+
+319
+00:17:15.609 --> 00:17:16.953
+Here is a quick table:
+
+320
+00:17:17.233 --> 00:17:26.641
+Checkout journey, and Availability, and Outage min per month, and Months over 99.95% budget, and Most customers down at once.
+
+321
+00:17:26.921 --> 00:17:30.611
+As-built, 16 hard deps at 99.95%.
+
+322
+00:17:30.891 --> 00:17:31.958
+Availability:
+
+323
+00:17:32.238 --> 00:17:34.755
+99.091%.
+
+324
+00:17:35.035 --> 00:17:36.379
+Outage min per month:
+
+325
+00:17:36.659 --> 00:17:38.409
+398.1.
+
+326
+00:17:38.689 --> 00:17:42.038
+Months over 99.95% budget:
+
+327
+00:17:42.318 --> 00:17:43.107
+12.
+
+328
+00:17:43.387 --> 00:17:45.030
+Most customers down at once:
+
+329
+00:17:45.310 --> 00:17:46.569
+100%.
+
+330
+00:17:46.849 --> 00:17:50.625
+Designed, 10 hard deps at 99.95%.
+
+331
+00:17:50.905 --> 00:17:51.971
+Availability:
+
+332
+00:17:52.251 --> 00:17:54.534
+99.458%.
+
+333
+00:17:54.814 --> 00:17:56.158
+Outage min per month:
+
+334
+00:17:56.438 --> 00:17:58.294
+237.3.
+
+335
+00:17:58.574 --> 00:18:01.923
+Months over 99.95% budget:
+
+336
+00:18:02.203 --> 00:18:02.993
+12.
+
+337
+00:18:03.273 --> 00:18:04.915
+Most customers down at once:
+
+338
+00:18:05.195 --> 00:18:06.454
+100%.
+
+339
+00:18:06.734 --> 00:18:08.931
+Designed, shared PostgreSQL.
+
+340
+00:18:09.211 --> 00:18:10.278
+Availability:
+
+341
+00:18:10.558 --> 00:18:13.182
+99.400%.
+
+342
+00:18:13.462 --> 00:18:14.806
+Outage min per month:
+
+343
+00:18:15.086 --> 00:18:16.878
+262.9.
+
+344
+00:18:17.158 --> 00:18:20.507
+Months over 99.95% budget:
+
+345
+00:18:20.787 --> 00:18:21.577
+12.
+
+346
+00:18:21.857 --> 00:18:23.499
+Most customers down at once:
+
+347
+00:18:23.779 --> 00:18:25.038
+100%.
+
+348
+00:18:25.318 --> 00:18:26.683
+Designed, 4 cells.
+
+349
+00:18:26.963 --> 00:18:28.030
+Availability:
+
+350
+00:18:28.310 --> 00:18:30.699
+99.453%.
+
+351
+00:18:30.979 --> 00:18:32.323
+Outage min per month:
+
+352
+00:18:32.603 --> 00:18:34.438
+239.7.
+
+353
+00:18:34.718 --> 00:18:38.067
+Months over 99.95% budget:
+
+354
+00:18:38.347 --> 00:18:39.137
+12.
+
+355
+00:18:39.417 --> 00:18:41.059
+Most customers down at once:
+
+356
+00:18:41.339 --> 00:18:42.406
+50%.
+
+357
+00:18:42.686 --> 00:18:45.801
+Designed, each at 99.99%.
+
+358
+00:18:46.081 --> 00:18:47.147
+Availability:
+
+359
+00:18:47.427 --> 00:18:50.051
+99.904%.
+
+360
+00:18:50.331 --> 00:18:51.675
+Outage min per month:
+
+361
+00:18:51.955 --> 00:18:53.278
+42.3.
+
+362
+00:18:53.558 --> 00:18:56.907
+Months over 99.95% budget:
+
+363
+00:18:57.187 --> 00:18:57.934
+6.
+
+364
+00:18:58.214 --> 00:18:59.857
+Most customers down at once:
+
+365
+00:19:00.137 --> 00:19:01.395
+100%.
+
+366
+00:19:02.745 --> 00:19:06.351
+Designed, each at 99.995%.
+
+367
+00:19:06.631 --> 00:19:07.697
+Availability:
+
+368
+00:19:07.977 --> 00:19:10.217
+99.938%.
+
+369
+00:19:10.497 --> 00:19:11.841
+Outage min per month:
+
+370
+00:19:12.121 --> 00:19:13.572
+27.1.
+
+371
+00:19:13.852 --> 00:19:17.201
+Months over 99.95% budget:
+
+372
+00:19:17.481 --> 00:19:18.228
+6.
+
+373
+00:19:18.508 --> 00:19:20.151
+Most customers down at once:
+
+374
+00:19:20.431 --> 00:19:21.689
+100%.
+
+375
+00:19:23.039 --> 00:19:27.669
+Journey availability at most the product of its hard dependencies' availability.
+
+376
+00:19:27.949 --> 00:19:38.466
+A 99.95% journey needs critical services at ~99.99 to 99.995%, and fewer of them.
+
+377
+00:19:38.746 --> 00:19:41.093
+Shared infrastructure is a dependency.
+
+378
+00:19:41.373 --> 00:19:44.509
+Count databases, Kafka, DNS and the gateway.
+
+379
+00:19:44.789 --> 00:19:51.722
+Cells (independent stacks per city group, Ch 30, Ch 27) don't raise average availability.
+
+380
+00:19:52.002 --> 00:19:56.034
+They cap blast radius, which is what customers and regulators feel.
+
+381
+00:19:57.384 --> 00:20:04.765
+Set SLOs per journey, derive per-service SLOs from them, and spend error budgets deliberately (Ch 24).
+
+382
+00:20:06.115 --> 00:20:07.438
+Data architecture.
+
+383
+00:20:07.718 --> 00:20:11.942
+Database per service (PostgreSQL), with an outbox for events.
+
+384
+00:20:12.222 --> 00:20:15.422
+No shared tables across services (Ch 16).
+
+385
+00:20:15.702 --> 00:20:16.747
+Read models:
+
+386
+00:20:17.027 --> 00:20:18.499
+OpenSearch for search.
+
+387
+00:20:18.779 --> 00:20:21.873
+Redis for carts, slots, rate limits and hot reads.
+
+388
+00:20:22.153 --> 00:20:23.475
+Precomputed shelves.
+
+389
+00:20:24.825 --> 00:20:28.388
+Money: a double-entry ledger in wallet and payment services.
+
+390
+00:20:28.668 --> 00:20:35.345
+Order snapshots are the source for invoices, refunds and settlement (Ch 45, Ch 49).
+
+391
+00:20:35.625 --> 00:20:39.764
+Analytics: events, then lake (object storage, Iceberg), then warehouse.
+
+392
+00:20:40.044 --> 00:20:42.220
+Streaming to OLAP for live dashboards.
+
+393
+00:20:42.500 --> 00:20:47.492
+Reconciliation of stream versus batch (Ch 21, Ch 51).
+
+394
+00:20:47.772 --> 00:21:00.145
+Residency and retention: payments data stays in India (VERIFY current RBI rules); PII is minimised; retention is encoded as lifecycle rules (Ch 36).
+
+395
+00:21:01.495 --> 00:21:02.925
+Deployment topology.
+
+396
+00:21:03.205 --> 00:21:06.533
+Region: one primary region in India with 3 AZs.
+
+397
+00:21:06.813 --> 00:21:14.386
+A DR region holds async replicas of critical databases and has a tested failover runbook (Ch 27).
+
+398
+00:21:14.666 --> 00:21:21.493
+Cells: city groups as cells for the transaction layer (cart, checkout, inventory, slots, orders, dispatch).
+
+399
+00:21:21.773 --> 00:21:28.301
+Global services (catalog, identity, pricing books) are replicated read-mostly into every cell.
+
+400
+00:21:28.581 --> 00:21:34.895
+Sale readiness: pre-scaling from forecasts (Ch 02);. a waiting room (Ch 46);.
+
+401
+00:21:36.245 --> 00:21:39.915
+load tests of whole journeys;. a feature freeze;. game days.
+
+402
+00:21:41.265 --> 00:21:42.843
+Security and compliance.
+
+403
+00:21:43.123 --> 00:21:44.041
+Identity:
+
+404
+00:21:44.321 --> 00:21:55.201
+OTP login, JWT access tokens verified at the gateway, mTLS between services, and least-privilege service identities (Ch 23).
+
+405
+00:21:55.481 --> 00:22:02.478
+Payments: card data never touches our systems (a tokenised gateway), plus PCI scope minimisation.
+
+406
+00:22:02.758 --> 00:22:08.710
+Audit: append-only audit trail with hash chaining for money and admin actions (Ch 36).
+
+407
+00:22:08.990 --> 00:22:15.326
+Abuse: rate limits, bot defences, coupon abuse detection (Ch 39, Ch 49).
+
+408
+00:22:16.676 --> 00:22:17.977
+Evolution roadmap.
+
+409
+00:22:18.257 --> 00:22:19.601
+Here is a quick table:
+
+410
+00:22:19.881 --> 00:22:22.185
+Stage, and Scale, and Architecture.
+
+411
+00:22:22.465 --> 00:22:23.575
+0, then 1.
+
+412
+00:22:23.855 --> 00:22:24.601
+Scale:
+
+413
+00:22:24.881 --> 00:22:27.079
+1 city, 10k orders per day.
+
+414
+00:22:27.359 --> 00:22:28.383
+Architecture:
+
+415
+00:22:28.663 --> 00:22:34.679
+Modular monolith (clear bounded contexts), one PostgreSQL, managed queue, CDN.
+
+416
+00:22:34.959 --> 00:22:36.068
+1, then 10.
+
+417
+00:22:36.348 --> 00:22:37.095
+Scale:
+
+418
+00:22:37.375 --> 00:22:39.636
+10 cities, 100k per day.
+
+419
+00:22:39.916 --> 00:22:40.940
+Architecture:
+
+420
+00:22:41.220 --> 00:22:47.407
+Extract checkout or payments, catalog or search and dispatch; outbox + Kafka; read models.
+
+421
+00:22:47.687 --> 00:22:49.095
+10, then 100.
+
+422
+00:22:49.375 --> 00:22:50.121
+Scale:
+
+423
+00:22:50.401 --> 00:22:52.407
+National, 1M+/day.
+
+424
+00:22:52.687 --> 00:22:53.711
+Architecture:
+
+425
+00:22:53.991 --> 00:23:00.988
+The 26-service map, cells for transactions, multi-AZ + DR, platform team, journey SLOs.
+
+426
+00:23:02.338 --> 00:23:05.986
+Don't start at the end (Ch 34, Ch 37).
+
+427
+00:23:06.266 --> 00:23:10.063
+Each extraction needs a reason in load, team or change rate.
+
+428
+00:23:11.413 --> 00:23:13.675
+Interview framing: design the whole thing.
+
+429
+00:23:13.955 --> 00:23:15.405
+Work through it in this order:
+
+430
+00:23:15.685 --> 00:23:17.691
+Clarify the journeys and their numbers.
+
+431
+00:23:17.971 --> 00:23:19.997
+Sketch layers and the critical path.
+
+432
+00:23:20.277 --> 00:23:25.760
+Deep-dive where money and scarcity meet: the checkout saga, inventory, slots, payments.
+
+433
+00:23:26.040 --> 00:23:29.837
+Show failure thinking: the dependency graph, degradation, cells.
+
+434
+00:23:30.117 --> 00:23:33.147
+Close with SLO arithmetic, cost and evolution.
+
+435
+00:23:34.497 --> 00:23:43.115
+Staff-level signals: journey-level thinking, a small critical set, unknown is not failed, and SLOs derived by composition.
+
+436
+00:23:44.465 --> 00:23:45.361
+Part 3.
+
+437
+00:23:45.641 --> 00:23:47.369
+Architecture and Diagrams.
+
+438
+00:23:48.619 --> 00:23:49.665
+Component view.
+
+439
+00:23:49.945 --> 00:23:51.289
+Here is the diagram.
+
+440
+00:23:55.139 --> 00:23:57.165
+Sequence: happy path, place order.
+
+441
+00:23:57.445 --> 00:24:00.240
+The sequence diagram walks through it step by step.
+
+442
+00:24:00.520 --> 00:24:04.360
+U to G: place order, JWT verified locally.
+
+443
+00:24:04.640 --> 00:24:07.371
+G to C: checkout with idempotency key.
+
+444
+00:24:07.651 --> 00:24:09.805
+C to C: saga log STARTED.
+
+445
+00:24:10.085 --> 00:24:16.037
+C to P: serviceability, pricing, promotion, inventory reserve, slot hold in parallel.
+
+446
+00:24:16.317 --> 00:24:20.179
+P to C: ok, promotion degraded after 80 ms.
+
+447
+00:24:20.459 --> 00:24:22.997
+C to Y: charge with order id as key.
+
+448
+00:24:23.277 --> 00:24:24.792
+Y to C: captured.
+
+449
+00:24:25.072 --> 00:24:27.397
+C to O: create order idempotent.
+
+450
+00:24:27.677 --> 00:24:30.067
+O to K: order placed via outbox.
+
+451
+00:24:30.347 --> 00:24:32.224
+C to U: order confirmed.
+
+452
+00:24:32.504 --> 00:24:36.664
+K to K: fulfilment, invoice, notification, audit consume.
+
+453
+00:24:40.514 --> 00:24:44.290
+Sequence: failure path, lost payment reply and a crashed pod.
+
+454
+00:24:44.570 --> 00:24:47.365
+The sequence diagram walks through it step by step.
+
+455
+00:24:47.645 --> 00:24:48.519
+C to L:
+
+456
+00:24:48.799 --> 00:24:49.631
+RESERVED.
+
+457
+00:24:49.911 --> 00:24:53.410
+C to Y: charge key o-8812.
+
+458
+00:24:53.690 --> 00:24:56.293
+Y to C: reply lost after capture.
+
+459
+00:24:56.573 --> 00:24:59.773
+S to L: sagas stuck in RESERVED for over 2 min.
+
+460
+00:25:00.053 --> 00:25:03.466
+S to Y: status of o-8812.
+
+461
+00:25:03.746 --> 00:25:05.239
+Y to S: captured.
+
+462
+00:25:05.519 --> 00:25:09.850
+S to O: create order o-8812 idempotent.
+
+463
+00:25:10.130 --> 00:25:12.221
+S to I: consume reservation.
+
+464
+00:25:12.501 --> 00:25:13.397
+S to L:
+
+465
+00:25:13.677 --> 00:25:14.338
+DONE.
+
+466
+00:25:14.618 --> 00:25:17.413
+S to S: notify customer - order went through.
+
+467
+00:25:21.263 --> 00:25:22.735
+State: the order saga.
+
+468
+00:25:23.015 --> 00:25:24.359
+Here is the diagram.
+
+469
+00:25:28.209 --> 00:25:29.126
+Part 4.
+
+470
+00:25:29.406 --> 00:25:31.027
+Design Document Excerpt:
+
+471
+00:25:31.307 --> 00:25:33.121
+Platform Architecture v3.
+
+472
+00:25:34.371 --> 00:25:35.117
+Note:
+
+473
+00:25:35.397 --> 00:25:40.453
+Design Document (excerpt), Grocery Marketplace Platform Architecture v3.
+
+474
+00:25:40.733 --> 00:25:41.629
+Status:
+
+475
+00:25:41.909 --> 00:25:43.189
+Accepted, Authors:
+
+476
+00:25:43.469 --> 00:25:45.133
+Architecture group, Reviewers:
+
+477
+00:25:45.413 --> 00:25:48.869
+All domain leads, SRE, Security, Finance, Legal.
+
+478
+00:25:49.149 --> 00:25:56.061
+Context, Sale-night incident: all services met their SLOs, but checkout success was 91%.
+
+479
+00:25:56.341 --> 00:26:06.219
+There were charged-no-order and double-charge cases, a login outage caused by identity being on every request, and the home page stalled on recommendations.
+
+480
+00:26:07.569 --> 00:26:12.177
+Decision, Journey-level SLOs with composition-derived service SLOs.
+
+481
+00:26:12.457 --> 00:26:17.897
+A critical set of 11 services engineered to 99.99%+.
+
+482
+00:26:18.177 --> 00:26:20.673
+Cells per city group for the transaction layer.
+
+483
+00:26:20.953 --> 00:26:23.662
+JWT verification at the gateway.
+
+484
+00:26:23.942 --> 00:26:26.246
+All side effects via outbox events.
+
+485
+00:26:26.526 --> 00:26:29.342
+Degraded modes for every optional dependency.
+
+486
+00:26:29.622 --> 00:26:34.017
+Checkout saga with idempotent steps, status resolution and a sweeper.
+
+487
+00:26:34.297 --> 00:26:36.579
+A latency budget per hop on place-order.
+
+488
+00:26:37.929 --> 00:26:50.815
+Related ADRs, ADR-420 Journeys and SLOs: checkout 99.95%, browse 99.9%; per-service SLOs derived (L4).
+
+489
+00:26:51.095 --> 00:26:54.465
+ADR-421 Critical set and cells:
+
+490
+00:26:54.745 --> 00:27:00.783
+11 services, 4 city-group cells, shared nothing in the transaction layer (L3, L4).
+
+491
+00:27:01.063 --> 00:27:12.796
+ADR-422 Checkout saga: idempotency by order id, unknown resolution, sweeper every minute, customer notification on late completion (L2).
+
+492
+00:27:13.076 --> 00:27:26.729
+ADR-423 Latency budget: parallel pre-payment checks; timeouts for promotion (80 ms) and serviceability (50 ms, cached fallback); hedged pricing at 30 ms (L1).
+
+493
+00:27:27.009 --> 00:27:38.764
+ADR-424 Dependency hygiene: trace-derived dependency graph reviewed monthly; any new synchronous edge into the critical set needs an ADR (L3).
+
+494
+00:27:40.114 --> 00:27:41.074
+Requirements.
+
+495
+00:27:41.354 --> 00:27:42.186
+R1:
+
+496
+00:27:42.466 --> 00:27:48.589
+Checkout journey 99.95% monthly, measured end to end from real traffic.
+
+497
+00:27:48.869 --> 00:27:49.701
+R2:
+
+498
+00:27:49.981 --> 00:27:53.031
+Zero charged-without-order older than 15 minutes.
+
+499
+00:27:53.311 --> 00:27:54.826
+Zero double charges.
+
+500
+00:27:55.106 --> 00:27:55.959
+R3:
+
+501
+00:27:56.239 --> 00:27:59.567
+Our part of place-order p99 800 ms.
+
+502
+00:27:59.847 --> 00:28:03.773
+End-to-end p99 2.5 s including the gateway.
+
+503
+00:28:04.053 --> 00:28:04.949
+R4:
+
+504
+00:28:05.229 --> 00:28:09.794
+No single service failure outside the critical set breaks checkout or browse.
+
+505
+00:28:10.074 --> 00:28:10.949
+R5:
+
+506
+00:28:11.229 --> 00:28:14.983
+A single-cell failure affects at most 30% of customers.
+
+507
+00:28:16.333 --> 00:28:17.741
+Decisions in detail.
+
+508
+00:28:18.021 --> 00:28:19.877
+SLOs (ADR-420).
+
+509
+00:28:20.157 --> 00:28:23.741
+Journey probes and real-user monitoring define the SLO.
+
+510
+00:28:24.021 --> 00:28:26.027
+Error budgets gate risky launches.
+
+511
+00:28:26.307 --> 00:28:28.696
+Cells (ADR-421).
+
+512
+00:28:28.976 --> 00:28:30.789
+City-group routing at the gateway.
+
+513
+00:28:31.069 --> 00:28:33.139
+Cell-local databases and Kafka.
+
+514
+00:28:33.419 --> 00:28:36.875
+Global read-mostly services replicated into cells.
+
+515
+00:28:37.155 --> 00:28:39.331
+Saga (ADR-422).
+
+516
+00:28:39.611 --> 00:28:42.384
+The saga log lives in the checkout database.
+
+517
+00:28:42.664 --> 00:28:46.248
+The sweeper is a scheduled job (Ch 50) with fencing.
+
+518
+00:28:46.528 --> 00:28:48.832
+Payment reconciliation runs daily.
+
+519
+00:28:50.182 --> 00:28:52.849
+Latency (ADR-423).
+
+520
+00:28:53.129 --> 00:28:55.113
+Outlier budgets are tracked per hop.
+
+521
+00:28:55.393 --> 00:28:59.873
+Teams own their hop's p99.9, not just its p99.
+
+522
+00:29:00.153 --> 00:29:02.819
+Hygiene (ADR-424).
+
+523
+00:29:03.099 --> 00:29:10.097
+A fitness function in CI fails builds that add synchronous calls from critical-set services to non-critical ones.
+
+524
+00:29:10.377 --> 00:29:11.401
+Consequences.
+
+525
+00:29:11.681 --> 00:29:21.323
+Costs: more infrastructure (cells, DR); stricter engineering for 11 services; governance of dependency edges; more complex operations.
+
+526
+00:29:21.603 --> 00:29:25.721
+Benefits: guarantees that hold for customers, not just dashboards.
+
+527
+00:29:27.071 --> 00:29:28.031
+Part 5.
+
+528
+00:29:28.311 --> 00:29:30.295
+Hands-On Code, Level Ladder.
+
+529
+00:29:31.545 --> 00:29:32.313
+Info:
+
+530
+00:29:32.593 --> 00:29:33.681
+What's real here.
+
+531
+00:29:33.961 --> 00:29:46.633
+L2 is the capstone's real system: three services over real HTTP with their own PostgreSQL tables, real concurrency, injected failures, and invariants checked by SQL.
+
+532
+00:29:46.913 --> 00:29:50.603
+L3 is real graph analysis of the handbook's service map.
+
+533
+00:29:50.883 --> 00:29:53.337
+The journeys and edges are the stated model.
+
+534
+00:29:53.617 --> 00:29:55.857
+L1 and L4 are simulations.
+
+535
+00:29:56.137 --> 00:30:01.705
+Per-hop latencies, outlier rates, availabilities and repair times are stated assumptions.
+
+536
+00:30:03.055 --> 00:30:07.855
+L2 needs PostgreSQL on port 5581.
+
+537
+00:30:08.135 --> 00:30:10.247
+The other labs have no dependencies.
+
+538
+00:30:10.527 --> 00:30:14.537
+Run everything with -Dstdout.encoding=UTF-8.
+
+539
+00:30:15.887 --> 00:30:18.234
+L1, The place-order latency budget.
+
+540
+00:30:18.514 --> 00:30:19.453
+Requirement:
+
+541
+00:30:19.733 --> 00:30:25.066
+Our part of place-order under 800 ms at p99, and know where the rest goes.
+
+542
+00:30:25.346 --> 00:30:28.887
+1M simulated checkouts through the real critical path shape.
+
+543
+00:30:30.237 --> 00:30:33.800
+Here is the Java code, LatencyBudgetL1.java.
+
+544
+00:30:34.080 --> 00:30:37.707
+It runs to 98 lines; the full listing is in the chapter.
+
+545
+00:30:37.987 --> 00:30:46.371
+LatencyBudgetL1.java, run with: java LatencyBudgetL1.java (JDK 21, no dependencies).
+
+546
+00:30:46.651 --> 00:30:48.443
+THE CHECKOUT'S LATENCY BUDGET.
+
+547
+00:30:48.723 --> 00:31:00.029
+Place-order goes: api-gateway, then checkout, then serviceability, pricing, promotion. inventory reserve, slot hold, then payment (external gateway), then order create.
+
+548
+00:31:00.309 --> 00:31:02.869
+Each hop's latency is lognormal with the.
+
+549
+00:31:05.719 --> 00:31:23.362
+On screen: place-order critical path; per-hop lognormal latencies + 0.5% slow outliers; 1,000,000. checkouts. design end-to-end end-to-end our part our part degraded. p50 p99. p99. p99.9.
+
+550
+00:31:23.642 --> 00:31:37.999
+C1) everything sequential 252 ms 1561 ms 1269 ms 1549 ms 0.00%.
+
+551
+00:31:38.279 --> 00:31:53.063
+C2) five pre-payment checks in parallel 224 ms 1524 ms 1231 ms 1508 ms 0.00%.
+
+552
+00:31:53.343 --> 00:32:14.698
+C3) C2 + timeouts or degradation (non-critical) + hedged pricing 222 ms 1418 ms 1050. ms 1492 ms 1.06%. why parallelism alone doesn't fix the tail: the slowest of five parallel calls.
+
+553
+00:32:14.978 --> 00:32:16.493
+The rest is in the chapter.
+
+554
+00:32:19.343 --> 00:32:20.196
+Reading it:
+
+555
+00:32:20.476 --> 00:32:22.503
+The payment gateway sets the median.
+
+556
+00:32:22.783 --> 00:32:24.361
+Our outliers set the tail.
+
+557
+00:32:24.641 --> 00:32:33.580
+The slowest of five parallel checks has a p99 of about 1 s, although each check alone has a p99 of 60 ms or less.
+
+558
+00:32:33.860 --> 00:32:40.089
+Degrading optional calls and hedging pricing takes about 180 ms off our p99.
+
+559
+00:32:40.369 --> 00:32:43.228
+The rest of the tail is outliers in critical calls.
+
+560
+00:32:43.508 --> 00:32:49.780
+R3 (800 ms) is not yet met, and the remaining work is at the source of those outliers.
+
+561
+00:32:51.130 --> 00:32:53.839
+L2, The checkout under failure, end to end.
+
+562
+00:32:54.119 --> 00:32:55.058
+Requirement:
+
+563
+00:32:55.338 --> 00:33:00.906
+No customer charged without an order, none charged twice, no stock oversold or leaked.
+
+564
+00:33:01.186 --> 00:33:09.186
+Three real services over HTTP on real PostgreSQL, with payment failures and orchestrator crashes injected.
+
+565
+00:33:10.536 --> 00:33:13.779
+Here is the Java code, CheckoutSagaL2.java.
+
+566
+00:33:14.059 --> 00:33:18.411
+It runs to 264 lines; the full listing is in the chapter.
+
+567
+00:33:18.691 --> 00:33:40.408
+CheckoutSagaL2.java, run with (PostgreSQL on:5581, db shop): java -Dsun.net.httpserver.nodelay=true -Duser.timezone=UTC -cp or tmp or eslab or postgresql-42.7.4.jar CheckoutSagaL2.java.
+
+568
+00:33:40.688 --> 00:33:43.632
+THE WHOLE CHECKOUT, END TO END, WITH THINGS GOING WRONG.
+
+569
+00:33:43.912 --> 00:33:48.179
+Three REAL services over HTTP, each with its own tables in.
+
+570
+00:33:51.029 --> 00:33:51.946
+On screen:
+
+571
+00:33:52.226 --> 00:34:02.231
+3 real HTTP services on real PostgreSQL; 2,000 checkouts, 20 concurrent, 40 SKUs with. limited stock;. payment:
+
+572
+00:34:02.511 --> 00:34:19.706
+5% declined, 8% succeed but the reply is lost (1 s timeout); orchestrator. crashes in 3% of checkouts. design orders charged, charged order w or o oversold leaked told. placed NO order twice charge units. reserv.
+
+573
+00:34:19.986 --> 00:34:20.797
+'failed'.
+
+574
+00:34:21.077 --> 00:34:32.106
+S1) naive: retry charge, release on failure 1627 60 139 0 0 44 373.
+
+575
+00:34:32.386 --> 00:34:42.370
+S2) idempotent steps + status check + saga log 1660 39 0 0 0 44 340.
+
+576
+00:34:42.650 --> 00:34:55.194
+S3) S2 + recovery sweeper for crashed sagas 1709 0 0 0 0 0 334. then a timeout is not a failure, it is 'unknown'.
+
+577
+00:34:55.474 --> 00:34:57.629
+The naive design turns every lost.
+
+578
+00:34:57.909 --> 00:34:59.423
+The rest is in the chapter.
+
+579
+00:35:02.273 --> 00:35:03.127
+Reading it:
+
+580
+00:35:03.407 --> 00:35:11.535
+The naive design converts lost replies into second charges (139) and failures into charged-no-order (60).
+
+581
+00:35:11.815 --> 00:35:15.377
+Idempotency and status checks remove the double charges.
+
+582
+00:35:15.657 --> 00:35:18.537
+Only the sweeper finishes what crashed pods abandoned.
+
+583
+00:35:18.817 --> 00:35:21.292
+After it runs, every invariant is zero.
+
+584
+00:35:21.572 --> 00:35:24.281
+Told 'failed' is mostly sold-out customers.
+
+585
+00:35:24.561 --> 00:35:30.215
+Some customers the crashed pods told failed received an order from the sweeper, and must be notified.
+
+586
+00:35:31.565 --> 00:35:33.399
+Counts vary slightly between runs.
+
+587
+00:35:33.679 --> 00:35:35.813
+The failure draws race across threads.
+
+588
+00:35:37.163 --> 00:35:39.787
+L3, Blast radius on the service map.
+
+589
+00:35:40.067 --> 00:35:41.005
+Requirement:
+
+590
+00:35:41.285 --> 00:35:45.104
+No failure outside the critical set may break checkout or browse.
+
+591
+00:35:45.384 --> 00:35:49.843
+A real graph analysis of the handbook's journeys, as-built versus designed.
+
+592
+00:35:51.193 --> 00:35:54.563
+Here is the Java code, BlastRadiusL3.java.
+
+593
+00:35:54.843 --> 00:35:59.131
+It runs to 136 lines; the full listing is in the chapter.
+
+594
+00:35:59.411 --> 00:36:07.774
+BlastRadiusL3.java, run with: java BlastRadiusL3.java (JDK 21, no dependencies).
+
+595
+00:36:08.054 --> 00:36:09.803
+WHAT BREAKS WHEN ONE SERVICE FAILS?
+
+596
+00:36:10.083 --> 00:36:20.174
+The platform's 26 services (Ch 00) and its main user journeys, as a dependency. graph: each journey is a tree of synchronous calls.
+
+597
+00:36:20.454 --> 00:36:22.459
+Two versions of the SAME platform:
+
+598
+00:36:25.309 --> 00:36:26.227
+On screen:
+
+599
+00:36:26.507 --> 00:36:46.880
+AS-BUILT, 22 services on synchronous paths. journey longest sync chain services it can't work without. home or browse 2 api-gateway, catalog-service, identity-service, pricing-service. promotion-service, recommendation-service, serviceability-service. search 3 api-gateway, catalog-service,
+
+600
+00:36:47.160 --> 00:37:06.915
+identity-service, pricing-service. search-service. add to cart 3 api-gateway, cart-service, catalog-service, identity-service. inventory-service, pricing-service. checkout 4 api-gateway, audit-service, cart-service, checkout-service. customer-service, fulfilment-service, identity-service,
+
+601
+00:37:07.195 --> 00:37:23.301
+inventory-service. invoice-service, notification-service, order-service, payment-service. pricing-service, promotion-service, serviceability-service, slot-service. track order 3 api-gateway, dispatch-service, identity-service, order-service.
+
+602
+00:37:23.581 --> 00:37:25.096
+The rest is in the chapter.
+
+603
+00:37:27.946 --> 00:37:28.799
+Reading it:
+
+604
+00:37:29.079 --> 00:37:34.946
+As-built, identity and the gateway each take down everything, and 16 services can break checkout.
+
+605
+00:37:35.226 --> 00:37:41.306
+Designed, the list of services checkout can't work without is 10, and identity only affects login.
+
+606
+00:37:41.586 --> 00:37:43.570
+What remains is the critical set.
+
+607
+00:37:43.850 --> 00:37:48.778
+The model's edges are stated assumptions; in production, derive them from traces.
+
+608
+00:37:50.128 --> 00:37:52.688
+L4, SLO composition and cells.
+
+609
+00:37:52.968 --> 00:37:53.907
+Requirement:
+
+610
+00:37:54.187 --> 00:37:59.712
+Set a checkout SLO we can actually meet, and bound how many customers one failure touches.
+
+611
+00:37:59.992 --> 00:38:02.104
+A simulated year, minute by minute.
+
+612
+00:38:03.454 --> 00:38:07.059
+Here is the Java code, SloCompositionL4.java.
+
+613
+00:38:07.339 --> 00:38:11.073
+It runs to 87 lines; the full listing is in the chapter.
+
+614
+00:38:11.353 --> 00:38:19.971
+SloCompositionL4.java, run with: java SloCompositionL4.java (JDK 21, no dependencies).
+
+615
+00:38:20.251 --> 00:38:23.366
+CAN CHECKOUT PROMISE 99.95%?
+
+616
+00:38:23.646 --> 00:38:38.601
+Each service on its own meets 99.95% ( about 22 min of outage a month): outages arrive. randomly (mean 30 min time-to-repair, fixed seed) and independently, except where services share infrastructure.
+
+617
+00:38:41.451 --> 00:38:49.600
+On screen: each service 99.95% on its own; outages random, mean 30 min; one simulated year;.
+
+618
+00:38:49.880 --> 00:38:59.352
+99.95% budget = 21.6 min per month. checkout journey availability outage months over most customers.
+
+619
+00:38:59.632 --> 00:39:00.955
+(traffic- min per month.
+
+620
+00:39:01.235 --> 00:39:06.397
+99.95% budget down. at once. weighted) (of 12).
+
+621
+00:39:06.677 --> 00:39:07.851
+A1) as-built:
+
+622
+00:39:08.131 --> 00:39:16.344
+16 hard dependencies 99.091% 398.1 12 100%.
+
+623
+00:39:16.624 --> 00:39:17.776
+A2) designed:
+
+624
+00:39:18.056 --> 00:39:25.715
+10 hard dependencies 99.458% 237.3 12 100%.
+
+625
+00:39:25.995 --> 00:39:37.237
+A3) designed, but all 10 share one PostgreSQL cluster 99.400% 262.9 12 100%.
+
+626
+00:39:37.517 --> 00:39:46.349
+A4) designed, 4 independent cells 99.453% 239.7 12 50%.
+
+627
+00:39:46.629 --> 00:39:57.083
+A5) designed, each critical service at 99.99% 99.904% 42.3 6 100%.
+
+628
+00:39:57.363 --> 00:39:58.877
+The rest is in the chapter.
+
+629
+00:40:01.727 --> 00:40:02.581
+Reading it:
+
+630
+00:40:02.861 --> 00:40:10.946
+The product rule makes 99.95% on 10 services at 99.95% each impossible.
+
+631
+00:40:11.226 --> 00:40:17.690
+Cells don't change the average; they cut the worst moment from 100% of customers to 50%.
+
+632
+00:40:17.970 --> 00:40:25.031
+Even 99.995% per service landed at 99.94% in this year.
+
+633
+00:40:25.311 --> 00:40:28.810
+Some years are unlucky, so journey SLOs need margin.
+
+634
+00:40:30.160 --> 00:40:31.099
+Part 6.
+
+635
+00:40:31.379 --> 00:40:32.659
+Production Concerns.
+
+636
+00:40:33.909 --> 00:40:35.850
+Failure modes (platform level).
+
+637
+00:40:36.130 --> 00:40:37.474
+Here is a quick table:
+
+638
+00:40:37.754 --> 00:40:40.037
+Failure, and Symptom, and Mitigation.
+
+639
+00:40:40.317 --> 00:40:42.130
+Service-level SLOs only.
+
+640
+00:40:42.410 --> 00:40:43.221
+Symptom:
+
+641
+00:40:43.501 --> 00:40:45.613
+Everything green, customers failing.
+
+642
+00:40:45.893 --> 00:40:46.895
+Mitigation:
+
+643
+00:40:47.175 --> 00:40:49.437
+Journey SLOs, end-to-end probes.
+
+644
+00:40:49.717 --> 00:40:51.082
+Long critical paths.
+
+645
+00:40:51.362 --> 00:40:52.173
+Symptom:
+
+646
+00:40:52.453 --> 00:40:54.159
+Compounded tails (L1).
+
+647
+00:40:54.439 --> 00:40:55.442
+Mitigation:
+
+648
+00:40:55.722 --> 00:40:58.047
+Parallelism, budgets, degradation.
+
+649
+00:40:58.327 --> 00:41:00.461
+Unknown outcomes treated as failures.
+
+650
+00:41:00.741 --> 00:41:01.551
+Symptom:
+
+651
+00:41:01.831 --> 00:41:04.455
+Double charges, charged-no-order (L2).
+
+652
+00:41:04.735 --> 00:41:05.738
+Mitigation:
+
+653
+00:41:06.018 --> 00:41:08.301
+Status resolution, idempotency.
+
+654
+00:41:08.581 --> 00:41:09.818
+Abandoned sagas.
+
+655
+00:41:10.098 --> 00:41:10.909
+Symptom:
+
+656
+00:41:11.189 --> 00:41:13.023
+Leaked money and stock (L2).
+
+657
+00:41:13.303 --> 00:41:14.306
+Mitigation:
+
+658
+00:41:14.586 --> 00:41:16.314
+Sweeper, reconciliation.
+
+659
+00:41:16.594 --> 00:41:18.066
+Hidden synchronous edges.
+
+660
+00:41:18.346 --> 00:41:19.157
+Symptom:
+
+661
+00:41:19.437 --> 00:41:21.485
+Wide blast radius (L3).
+
+662
+00:41:21.765 --> 00:41:22.767
+Mitigation:
+
+663
+00:41:23.047 --> 00:41:25.330
+Trace-derived graph, fitness functions.
+
+664
+00:41:25.610 --> 00:41:26.975
+Shared infrastructure.
+
+665
+00:41:27.255 --> 00:41:28.066
+Symptom:
+
+666
+00:41:28.346 --> 00:41:30.309
+Correlated outages (L4).
+
+667
+00:41:30.589 --> 00:41:31.591
+Mitigation:
+
+668
+00:41:31.871 --> 00:41:33.727
+Cells, per-cell databases.
+
+669
+00:41:35.077 --> 00:41:36.315
+Big critical set.
+
+670
+00:41:36.595 --> 00:41:37.405
+Symptom:
+
+671
+00:41:37.685 --> 00:41:39.797
+Unachievable SLOs (L4).
+
+672
+00:41:40.077 --> 00:41:41.080
+Mitigation:
+
+673
+00:41:41.360 --> 00:41:43.088
+Shrink it, engineer it better.
+
+674
+00:41:43.368 --> 00:41:44.499
+Sale surges.
+
+675
+00:41:44.779 --> 00:41:45.589
+Symptom:
+
+676
+00:41:45.869 --> 00:41:46.787
+Overload.
+
+677
+00:41:47.067 --> 00:41:48.069
+Mitigation:
+
+678
+00:41:48.349 --> 00:41:50.760
+Pre-scaling, waiting room, load shedding.
+
+679
+00:41:52.110 --> 00:41:53.198
+Observability.
+
+680
+00:41:53.478 --> 00:41:57.745
+Journey dashboards: success rate and p99 per journey, per cell.
+
+681
+00:41:58.025 --> 00:42:04.339
+Saga health: counts by state, age of the oldest stuck saga, sweeper actions, reconciliation diffs.
+
+682
+00:42:04.619 --> 00:42:07.926
+Dependency graph from traces: new edges highlighted.
+
+683
+00:42:08.206 --> 00:42:11.065
+Error budgets per journey and per critical service.
+
+684
+00:42:12.415 --> 00:42:13.353
+Security.
+
+685
+00:42:13.633 --> 00:42:17.751
+Zero-trust between services (mTLS + authorisation).
+
+686
+00:42:18.031 --> 00:42:19.311
+Secrets from a vault.
+
+687
+00:42:19.591 --> 00:42:21.447
+Audit trail for money and admin.
+
+688
+00:42:21.727 --> 00:42:26.313
+Threat modelling per journey (checkout fraud, coupon abuse, account takeover).
+
+689
+00:42:27.663 --> 00:42:28.559
+Performance.
+
+690
+00:42:28.839 --> 00:42:29.991
+Budgets per hop.
+
+691
+00:42:30.271 --> 00:42:31.530
+Cache browse paths.
+
+692
+00:42:31.810 --> 00:42:33.666
+Aggregate calls in BFFs.
+
+693
+00:42:33.946 --> 00:42:35.567
+Keep payload sizes small.
+
+694
+00:42:35.847 --> 00:42:40.967
+Load-test journeys, not endpoints, with production-like data and failures injected.
+
+695
+00:42:42.317 --> 00:42:43.043
+Cost.
+
+696
+00:42:43.323 --> 00:42:47.312
+Cost per order as the north-star unit metric (Ch 35).
+
+697
+00:42:47.592 --> 00:42:50.515
+The critical set and cells are the expensive parts.
+
+698
+00:42:50.795 --> 00:42:53.675
+Everything else can be cheaper, with degraded modes.
+
+699
+00:42:55.025 --> 00:42:55.963
+Part 7.
+
+700
+00:42:56.243 --> 00:42:57.950
+Anti-Patterns and Pitfalls.
+
+701
+00:42:59.200 --> 00:43:00.117
+Watch out:
+
+702
+00:43:00.397 --> 00:43:01.037
+1.
+
+703
+00:43:01.317 --> 00:43:03.771
+Judging the platform by service dashboards.
+
+704
+00:43:04.051 --> 00:43:05.864
+Customers experience journeys.
+
+705
+00:43:07.214 --> 00:43:08.131
+Watch out:
+
+706
+00:43:08.411 --> 00:43:09.115
+2.
+
+707
+00:43:09.395 --> 00:43:11.251
+Every call synchronous and hard.
+
+708
+00:43:11.531 --> 00:43:17.889
+649% versus 385% summed blast radius (L3).
+
+709
+00:43:19.239 --> 00:43:20.156
+Watch out:
+
+710
+00:43:20.436 --> 00:43:21.183
+3.
+
+711
+00:43:21.463 --> 00:43:23.297
+Identity on every request.
+
+712
+00:43:23.577 --> 00:43:26.692
+A 100% outage from one service (L3).
+
+713
+00:43:28.042 --> 00:43:28.959
+Watch out:
+
+714
+00:43:29.239 --> 00:43:29.943
+4.
+
+715
+00:43:30.223 --> 00:43:31.994
+Side effects inside checkout.
+
+716
+00:43:32.274 --> 00:43:36.242
+SMS, audit and invoice outages become checkout outages.
+
+717
+00:43:37.592 --> 00:43:38.509
+Watch out:
+
+718
+00:43:38.789 --> 00:43:39.557
+5.
+
+719
+00:43:39.837 --> 00:43:41.501
+Treating timeouts as failures.
+
+720
+00:43:41.781 --> 00:43:43.509
+Double charges (L2).
+
+721
+00:43:44.859 --> 00:43:45.777
+Watch out:
+
+722
+00:43:46.057 --> 00:43:46.803
+6.
+
+723
+00:43:47.083 --> 00:43:48.726
+Saga logs without sweepers.
+
+724
+00:43:49.006 --> 00:43:50.990
+Charged-no-order persists (L2).
+
+725
+00:43:52.340 --> 00:43:53.257
+Watch out:
+
+726
+00:43:53.537 --> 00:43:54.284
+7.
+
+727
+00:43:54.564 --> 00:43:56.996
+SLO targets without composition math.
+
+728
+00:43:57.276 --> 00:43:59.495
+Unachievable promises (L4).
+
+729
+00:44:00.845 --> 00:44:01.762
+Watch out:
+
+730
+00:44:02.042 --> 00:44:02.725
+8.
+
+731
+00:44:03.005 --> 00:44:05.842
+Shared databases across 'independent' services.
+
+732
+00:44:06.122 --> 00:44:07.679
+Hidden coupling (L4).
+
+733
+00:44:09.029 --> 00:44:09.947
+Watch out:
+
+734
+00:44:10.227 --> 00:44:10.973
+9.
+
+735
+00:44:11.253 --> 00:44:13.515
+Optional features on the critical path.
+
+736
+00:44:13.795 --> 00:44:15.480
+Tail latency (L1).
+
+737
+00:44:16.830 --> 00:44:17.747
+Watch out:
+
+738
+00:44:18.027 --> 00:44:18.731
+10.
+
+739
+00:44:19.011 --> 00:44:21.379
+Starting with 26 microservices.
+
+740
+00:44:21.659 --> 00:44:24.710
+Complexity before need (§2.11).
+
+741
+00:44:26.060 --> 00:44:26.977
+Watch out:
+
+742
+00:44:27.257 --> 00:44:28.089
+11.
+
+743
+00:44:28.369 --> 00:44:30.247
+Diagrams instead of traces.
+
+744
+00:44:30.527 --> 00:44:31.956
+The real graph differs.
+
+745
+00:44:33.306 --> 00:44:34.223
+Watch out:
+
+746
+00:44:34.503 --> 00:44:35.293
+12.
+
+747
+00:44:35.573 --> 00:44:36.682
+No game days.
+
+748
+00:44:36.962 --> 00:44:40.119
+Degraded modes that were never exercised don't work.
+
+749
+00:44:41.469 --> 00:44:42.344
+Part 8.
+
+750
+00:44:42.624 --> 00:44:43.968
+Interview Q and A.
+
+751
+00:44:45.218 --> 00:44:46.050
+Beginner.
+
+752
+00:44:46.330 --> 00:44:47.354
+Question 1.
+
+753
+00:44:47.634 --> 00:44:51.559
+Walk me through the architecture of a quick-commerce grocery platform.
+
+754
+00:44:51.839 --> 00:44:53.205
+Thirty-second answer:
+
+755
+00:44:53.485 --> 00:45:13.559
+Edge (CDN, WAF, gateway with JWT checks and rate limits), discovery services (catalog, search, pricing, promotions, recommendations), a transaction layer in cells (cart, checkout saga, inventory, slots, payments, orders), an event backbone (outbox, then Kafka) feeding fulfilment, dispatch,
+
+756
+00:45:13.839 --> 00:45:20.538
+notifications, invoices and audit, per-service databases plus read models, and a lake for analytics.
+
+757
+00:45:21.888 --> 00:45:22.891
+Question 2.
+
+758
+00:45:23.171 --> 00:45:25.496
+What is a critical path, and why budget it?
+
+759
+00:45:25.776 --> 00:45:27.141
+Thirty-second answer:
+
+760
+00:45:27.421 --> 00:45:41.800
+The chain of calls a user action must complete; its latency is the sum of sequential steps and the max of parallel ones, and its tail compounds each hop's outliers, so each hop gets a budget and optional work leaves the path.
+
+761
+00:45:43.150 --> 00:45:44.195
+Question 3.
+
+762
+00:45:44.475 --> 00:45:47.846
+Why can't a checkout be more available than its dependencies?
+
+763
+00:45:48.126 --> 00:45:49.491
+Thirty-second answer:
+
+764
+00:45:49.771 --> 00:46:05.835
+If any hard dependency is down, the journey is down; with independent failures the journey's availability is at most the product of the dependencies' availabilities, 10 services at 99.95% give ~99.5%.
+
+765
+00:46:07.185 --> 00:46:08.252
+Question 4.
+
+766
+00:46:08.532 --> 00:46:10.751
+What does 'degraded mode' mean in practice?
+
+767
+00:46:11.031 --> 00:46:12.396
+Thirty-second answer:
+
+768
+00:46:12.676 --> 00:46:27.865
+A defined, honest reduced answer when an optional dependency fails or is slow: bestsellers instead of recommendations, category browse instead of search, no auto-coupon (with a message), cached serviceability, so the journey completes.
+
+769
+00:46:29.215 --> 00:46:30.218
+Intermediate.
+
+770
+00:46:30.498 --> 00:46:31.607
+Question 5.
+
+771
+00:46:31.887 --> 00:46:35.450
+How do you make sure no customer is charged without getting an order?
+
+772
+00:46:35.730 --> 00:46:37.095
+Thirty-second answer:
+
+773
+00:46:37.375 --> 00:46:56.490
+Idempotent saga steps keyed by order id; treat payment timeouts as unknown and resolve via the gateway's status API; a saga log; a sweeper that completes or compensates abandoned sagas; customer notification on late completion; daily reconciliation with gateway settlement files.
+
+774
+00:46:57.840 --> 00:46:58.949
+Question 6.
+
+775
+00:46:59.229 --> 00:47:03.432
+How do you keep identity from being a platform-wide single point of failure?
+
+776
+00:47:03.712 --> 00:47:05.077
+Thirty-second answer:
+
+777
+00:47:05.357 --> 00:47:17.197
+Issue signed short-lived tokens and verify them locally at the gateway (public keys cached), so only login or refresh depends on identity; add revocation lists for emergencies.
+
+778
+00:47:18.547 --> 00:47:19.635
+Question 7.
+
+779
+00:47:19.915 --> 00:47:21.793
+Which work should leave the checkout path?
+
+780
+00:47:22.073 --> 00:47:23.438
+Thirty-second answer:
+
+781
+00:47:23.718 --> 00:47:36.497
+Anything the customer doesn't need to wait for: confirmation messages, invoices, audit records, fulfilment kickoff, analytics, loyalty, published as events via the outbox and consumed asynchronously.
+
+782
+00:47:37.847 --> 00:47:38.871
+Question 8.
+
+783
+00:47:39.151 --> 00:47:41.135
+What is a cell, and when do you use it?
+
+784
+00:47:41.415 --> 00:47:42.780
+Thirty-second answer:
+
+785
+00:47:43.060 --> 00:47:57.609
+A complete, independent copy of a stack serving a subset of customers (city group); failures and bad deploys stay inside one cell; use when blast radius matters and the domain partitions naturally (grocery by city).
+
+786
+00:47:58.959 --> 00:48:00.026
+Question 9.
+
+787
+00:48:00.306 --> 00:48:01.949
+How do you measure platform health?
+
+788
+00:48:02.229 --> 00:48:03.594
+Thirty-second answer:
+
+789
+00:48:03.874 --> 00:48:18.167
+Journey success rates and p99 per cell, saga health (stuck sagas, sweeper actions, reconciliation diffs), error budgets per journey, and business metrics (orders per minute, conversion), not just service dashboards.
+
+790
+00:48:19.517 --> 00:48:20.285
+Senior.
+
+791
+00:48:20.565 --> 00:48:21.611
+Question 10.
+
+792
+00:48:21.891 --> 00:48:25.347
+How would you derive per-service SLOs from journey SLOs?
+
+793
+00:48:25.627 --> 00:48:26.992
+Thirty-second answer:
+
+794
+00:48:27.272 --> 00:48:49.139
+Start from the journey target (checkout 99.95%), list its hard dependencies (including infrastructure), allocate the unavailability budget across them (for example, 10 critical services at ~99.995%), reduce the list where the math doesn't work, and verify with measured journey availability.
+
+795
+00:48:50.489 --> 00:48:51.619
+Question 11.
+
+796
+00:48:51.899 --> 00:48:54.331
+How do you find hidden synchronous dependencies?
+
+797
+00:48:54.611 --> 00:48:55.977
+Thirty-second answer:
+
+798
+00:48:56.257 --> 00:49:08.822
+Build the dependency graph from distributed traces continuously, diff it against the intended architecture, flag new edges into the critical set, and enforce with CI fitness functions and ADRs.
+
+799
+00:49:10.172 --> 00:49:11.260
+Question 12.
+
+800
+00:49:11.540 --> 00:49:13.204
+How do you prepare for sale day?
+
+801
+00:49:13.484 --> 00:49:14.849
+Thirty-second answer:
+
+802
+00:49:15.129 --> 00:49:29.807
+Forecast load per journey; pre-scale; load-test journeys with failures; waiting room and admission control; freeze changes; verify degraded modes in game days; war room with journey dashboards; runbooks for top failure modes.
+
+803
+00:49:31.157 --> 00:49:32.437
+Question 13.
+
+804
+00:49:32.717 --> 00:49:34.765
+What order would you build this platform in?
+
+805
+00:49:35.045 --> 00:49:36.410
+Thirty-second answer:
+
+806
+00:49:36.690 --> 00:49:54.205
+Modular monolith with clean bounded contexts and one database first; extract checkout or payments, catalog or search and dispatch when load or team size demands; add the event backbone and read models; then cells and DR as scale and blast-radius needs grow.
+
+807
+00:49:55.555 --> 00:49:56.749
+Question 14.
+
+808
+00:49:57.029 --> 00:49:59.525
+How does money flow through the platform correctly?
+
+809
+00:49:59.805 --> 00:50:01.171
+Thirty-second answer:
+
+810
+00:50:01.451 --> 00:50:18.688
+Payment capture via gateway with idempotency; order snapshot with per-line allocations; double-entry ledger for wallets and refunds; settlements to sellers from the ledger; daily three-way reconciliation (orders, ledger, gateway); every step event-sourced or audited.
+
+811
+00:50:20.038 --> 00:50:20.934
+Architect.
+
+812
+00:50:21.214 --> 00:50:22.409
+Question 15.
+
+813
+00:50:22.689 --> 00:50:26.443
+Design the entire quick-commerce platform in 45 minutes.
+
+814
+00:50:26.723 --> 00:50:28.089
+Thirty-second answer:
+
+815
+00:50:28.369 --> 00:50:45.499
+Clarify journeys and numbers; sketch layers; deep-dive checkout (saga, inventory, slots, payments) with failure handling; show dependency graph and degraded modes; cells and SLO arithmetic; data and events; security and compliance; cost and evolution.
+
+816
+00:50:46.849 --> 00:50:48.044
+Question 16.
+
+817
+00:50:48.324 --> 00:50:51.759
+How do you keep 26 services and 15 teams coherent?
+
+818
+00:50:52.039 --> 00:50:53.404
+Thirty-second answer:
+
+819
+00:50:53.684 --> 00:51:13.183
+Clear bounded contexts and ownership, ADRs and design reviews, platform paved roads (service template, observability, outbox, idempotency libraries), architecture fitness functions, journey SLOs owned jointly, and an architecture group that curates standards rather than approving every change.
+
+820
+00:51:14.533 --> 00:51:15.877
+Question 17.
+
+821
+00:51:16.157 --> 00:51:20.039
+What would you do in the first 90 days as architect of this platform?
+
+822
+00:51:20.319 --> 00:51:21.685
+Thirty-second answer:
+
+823
+00:51:21.965 --> 00:51:38.263
+Measure journeys end to end, map the real dependency graph from traces, audit money flows for unknown-outcome handling and sweepers, identify the critical set and its SLO math, fix the top blast-radius edges, and publish ADRs and a roadmap.
+
+824
+00:51:39.613 --> 00:51:40.787
+Question 18.
+
+825
+00:51:41.067 --> 00:51:43.285
+How do you handle a full region outage?
+
+826
+00:51:43.565 --> 00:51:44.931
+Thirty-second answer:
+
+827
+00:51:45.211 --> 00:52:02.363
+DR region with async replicas and tested runbooks; decide RPO or RTO per data class (payments near-zero RPO via synchronous replication or gateway reconciliation); stop the world, promote, reroute; reconcile after; practise it.
+
+828
+00:52:03.713 --> 00:52:04.950
+Question 19.
+
+829
+00:52:05.230 --> 00:52:07.897
+How do cost and reliability trade off here?
+
+830
+00:52:08.177 --> 00:52:09.542
+Thirty-second answer:
+
+831
+00:52:09.822 --> 00:52:27.721
+Reliability spend concentrates on the critical set (redundancy, cells, DR, higher engineering standards) while non-critical services run cheaper with degraded modes; measure cost per order and error budgets together; every extra nine should be justified by revenue at risk.
+
+832
+00:52:29.071 --> 00:52:30.180
+Question 20.
+
+833
+00:52:30.460 --> 00:52:32.593
+What makes this architecture 'done' for now?
+
+834
+00:52:32.873 --> 00:52:34.239
+Thirty-second answer:
+
+835
+00:52:34.519 --> 00:52:51.799
+Journey SLOs met with measured budgets, money invariants proven under failure, blast radius bounded by cells, dependency graph governed, costs per order known, and a roadmap for the next order of magnitude, reviewed continuously, because architectures are never finished.
+
+836
+00:52:53.149 --> 00:52:54.045
+Part 9.
+
+837
+00:52:54.325 --> 00:52:55.733
+Summary and Practice.
+
+838
+00:52:56.983 --> 00:52:58.071
+Key takeaways.
+
+839
+00:52:58.351 --> 00:52:59.652
+Design for journeys.
+
+840
+00:52:59.932 --> 00:53:01.937
+Services are means (all labs).
+
+841
+00:53:02.217 --> 00:53:03.753
+Budget the critical path.
+
+842
+00:53:04.033 --> 00:53:07.596
+Tails compound, and optional work leaves the path (L1).
+
+843
+00:53:07.876 --> 00:53:14.468
+Money flows are sagas: idempotent steps, unknown is not failed, sweepers, reconciliation (L2).
+
+844
+00:53:14.748 --> 00:53:19.825
+Shrink the critical set: local verification, events, degraded modes (L3).
+
+845
+00:53:20.105 --> 00:53:21.983
+Set SLOs by composition.
+
+846
+00:53:22.263 --> 00:53:24.673
+Cells bound blast radius (L4).
+
+847
+00:53:26.023 --> 00:53:27.346
+Decision cheat sheet.
+
+848
+00:53:27.626 --> 00:53:28.970
+Here is a quick table:
+
+849
+00:53:29.250 --> 00:53:30.637
+Concern, and Decision.
+
+850
+00:53:30.917 --> 00:53:31.834
+Latency:
+
+851
+00:53:32.114 --> 00:53:36.679
+Per-hop budgets, parallel checks, timeouts + degradation, hedged reads.
+
+852
+00:53:36.959 --> 00:53:37.642
+Money:
+
+853
+00:53:37.922 --> 00:53:42.103
+Idempotent saga, status resolution, sweeper, reconciliation.
+
+854
+00:53:42.383 --> 00:53:43.151
+Coupling:
+
+855
+00:53:43.431 --> 00:53:48.487
+Outbox events for side effects, JWT at gateway, soft optional deps.
+
+856
+00:53:48.767 --> 00:53:49.834
+Availability:
+
+857
+00:53:50.114 --> 00:53:55.383
+Journey SLOs, small critical set at 99.99%+, cells.
+
+858
+00:53:55.663 --> 00:53:56.538
+Governance:
+
+859
+00:53:56.818 --> 00:53:59.463
+Trace-derived graph, fitness functions, ADRs.
+
+860
+00:53:59.743 --> 00:54:00.661
+Evolution:
+
+861
+00:54:00.941 --> 00:54:04.717
+Monolith, then extracted cores, then cells, driven by need.
+
+862
+00:54:06.067 --> 00:54:07.197
+Exercises.
+
+863
+00:54:07.477 --> 00:54:11.467
+(B3) In L1, remove the outliers from inventory only.
+
+864
+00:54:11.747 --> 00:54:14.051
+How much does our p99 improve?
+
+865
+00:54:14.331 --> 00:54:19.621
+(B3) In L2, add a slot-hold step with its own failures, and extend the sweeper.
+
+866
+00:54:19.901 --> 00:54:25.149
+(B4) In L3, add chat and review services, and analyse where they must be soft.
+
+867
+00:54:25.429 --> 00:54:31.808
+(B4) In L4, model correlated AZ outages across all services, and compare with cells.
+
+868
+00:54:33.158 --> 00:54:39.238
+(B4) Write the platform's ADR index, linking each decision to the chapter that justifies it.
+
+869
+00:54:40.588 --> 00:54:41.591
+Further reading.
+
+870
+00:54:41.871 --> 00:54:48.228
+Google SRE Book, Service Level Objectives; The Calculus of Service Availability (Treynor et al.).
+
+871
+00:54:48.508 --> 00:54:52.412
+AWS, Reducing the Scope of Impact with Cell-Based Architecture.
+
+872
+00:54:52.692 --> 00:54:56.148
+Dean and Barroso, The Tail at Scale (2013).
+
+873
+00:54:56.428 --> 00:55:00.183
+Garcia-Molina and Salem, Sagas (1987).
+
+874
+00:55:01.533 --> 00:55:02.770
+Related chapters.
+
+875
+00:55:03.050 --> 00:55:07.701
+Ch 00, How to Use This Handbook: the platform and service map.
+
+876
+00:55:07.981 --> 00:55:11.693
+Ch 27, Reliability and Disaster Recovery:
+
+877
+00:55:11.973 --> 00:55:13.210
+DR and cells.
+
+878
+00:55:13.490 --> 00:55:17.245
+Ch 46, Grocery Checkout: the checkout deep dive.
+
+879
+00:55:17.525 --> 00:55:21.621
+Ch 57 onward: interview preparation (next part).
+
+880
+00:55:22.971 --> 00:55:24.571
+That's the end of this chapter.
+
+881
+00:55:24.851 --> 00:55:30.888
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+882
+00:55:31.168 --> 00:55:32.619
+See you in the next chapter.
+

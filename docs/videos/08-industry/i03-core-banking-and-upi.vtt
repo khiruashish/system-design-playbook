@@ -1,0 +1,2670 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.398
+Core Banking and UPI Payments.
+
+2
+00:00:02.678 --> 00:00:07.627
+Chapter I03, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:09.377 --> 00:00:10.337
+At a glance:
+
+4
+00:00:10.617 --> 00:00:11.791
+Chapter at a glance.
+
+5
+00:00:12.071 --> 00:00:12.881
+Sector:
+
+6
+00:00:13.161 --> 00:00:14.953
+Banking (India), Reader bands:
+
+7
+00:00:15.233 --> 00:00:17.281
+B1, then B4, Builds on:
+
+8
+00:00:17.561 --> 00:00:23.407
+Ch 05, Ch 13, Ch 20, Ch 36, Ch 45.
+
+9
+00:00:23.687 --> 00:00:28.743
+What you get: the design of a bank's core ledger and its UPI switch integration.
+
+10
+00:00:29.023 --> 00:00:38.260
+It covers: accounts, balances and holds;. the general ledger and end-of-day processing in a 24 times 7 world;. hot merchant accounts;.
+
+11
+00:00:38.540 --> 00:00:43.212
+UPI's multi-party flow and what to do when a response never arrives;.
+
+12
+00:00:44.562 --> 00:00:48.871
+interest accrual to the paisa;. finding mule accounts in the payment graph.
+
+13
+00:00:49.151 --> 00:00:55.509
+Ch 45 covers a merchant's payment system (gateways, webhooks, ledger, reconciliation).
+
+14
+00:00:55.789 --> 00:00:58.583
+This chapter is the bank's side of the same money.
+
+15
+00:00:58.863 --> 00:01:00.122
+What the labs measured:
+
+16
+00:01:01.472 --> 00:01:13.035
+L1 (hot account, real PostgreSQL): a single balance row handles 1,585 txn per second with p50 6.7 ms.
+
+17
+00:01:13.315 --> 00:01:24.387
+An append-only journal with a 200 ms roll-up handles 5,687 per second, and 16 sub-accounts 3,932 per second.
+
+18
+00:01:24.667 --> 00:01:36.357
+In a refund storm (30% debits) the gap narrows to 1,741 versus ~2,450 per second, because debits must serialise.
+
+19
+00:01:36.637 --> 00:01:39.069
+The balance invariant held in every run.
+
+20
+00:01:39.349 --> 00:01:41.184
+L2 (UPI timeouts):
+
+21
+00:01:41.464 --> 00:01:47.075
+Reversing immediately on a timeout paid 60,381 people twice.
+
+22
+00:01:47.355 --> 00:01:54.800
+Treating the payment as successful left 49,494 payers short for over 24 h.
+
+23
+00:01:56.150 --> 00:02:05.878
+Status checks with backoff, plus reversal at the next settlement cycle for anything still unknown, left 0 short for over 24 h and 0 paid twice.
+
+24
+00:02:06.158 --> 00:02:08.163
+L3 (interest, BigDecimal):
+
+25
+00:02:08.443 --> 00:02:15.782
+Rounding daily interest to the paisa looks harmless in total (+306 rupeeson 95 crore rupees).
+
+26
+00:02:16.062 --> 00:02:24.766
+It still changes 977,265 of 1,000,000 accounts by up to 0.45 rupees.
+
+27
+00:02:25.046 --> 00:02:34.881
+Truncating underpays by 4.38 lakh rupees, and dividing by 365 in a leap year overpays by 26 lakh rupees.
+
+28
+00:02:35.161 --> 00:02:36.611
+L4 (mule accounts):
+
+29
+00:02:37.961 --> 00:02:43.423
+Fan-in or pass-through rules alone have 2% and 0.5% precision.
+
+30
+00:02:43.703 --> 00:02:49.100
+Combining them in the same 2-hour window reaches 98.5% precision.
+
+31
+00:02:49.380 --> 00:02:57.103
+Following the money to accounts fed by ≥ 2 flagged mules finds 23 of 24 collectors:
+
+32
+00:02:57.383 --> 00:03:02.225
+90 of 104 bad accounts at 96.8% precision.
+
+33
+00:03:02.505 --> 00:03:03.487
+Reading time:
+
+34
+00:03:03.767 --> 00:03:04.919
+85 min.
+
+35
+00:03:06.269 --> 00:03:07.015
+Warning:
+
+36
+00:03:07.295 --> 00:03:08.703
+Regulatory content.
+
+37
+00:03:08.983 --> 00:03:10.967
+Banking is heavily regulated.
+
+38
+00:03:11.247 --> 00:03:22.938
+Statements about RBI or NPCI rules are summaries and are marked VERIFY: turnaround times and compensation, UPI limits, KYC, data localisation, reporting.
+
+39
+00:03:23.218 --> 00:03:27.634
+Check the current circulars and your bank's compliance function before building on them.
+
+40
+00:03:27.914 --> 00:03:30.005
+Numbers in the labs are illustrative.
+
+41
+00:03:31.355 --> 00:03:32.208
+Part 1.
+
+42
+00:03:32.488 --> 00:03:34.408
+Introduction and Why It Matters.
+
+43
+00:03:35.658 --> 00:03:37.877
+A story: the timeout that paid twice.
+
+44
+00:03:38.157 --> 00:03:42.466
+At 2:10 pm a beneficiary bank's UPI systems slow down.
+
+45
+00:03:42.746 --> 00:03:51.023
+The remitter bank has already debited its customers' accounts, sent the credit requests through the UPI switch, and is now receiving timeouts.
+
+46
+00:03:51.303 --> 00:03:52.413
+The first fix.
+
+47
+00:03:52.693 --> 00:03:56.106
+An engineer adds a rule: on timeout, reverse the debit.
+
+48
+00:03:56.386 --> 00:03:59.799
+Customers get their money back immediately, and complaints stop.
+
+49
+00:04:00.079 --> 00:04:01.189
+The morning after.
+
+50
+00:04:01.469 --> 00:04:07.186
+The settlement file shows that more than half of those failed payments were in fact credited to the beneficiary.
+
+51
+00:04:07.466 --> 00:04:14.698
+The bank has paid tens of thousands of payments twice, and must now recover money from customers who believe they did nothing wrong.
+
+52
+00:04:16.048 --> 00:04:17.115
+Rolling it back.
+
+53
+00:04:17.395 --> 00:04:20.339
+The rule is reversed to treat timeouts as successful.
+
+54
+00:04:20.619 --> 00:04:25.781
+At the next incident, customers whose payments really failed wait a day or more for their money.
+
+55
+00:04:26.061 --> 00:04:31.523
+Some go past the regulator's turnaround time, and the bank owes compensation (VERIFY:
+
+56
+00:04:31.803 --> 00:04:35.024
+RBI's TAT framework for failed transactions).
+
+57
+00:04:35.304 --> 00:04:37.736
+Both rules were simple, and both were wrong.
+
+58
+00:04:38.016 --> 00:04:43.968
+The correct answer is a state machine with status checks, settlement-driven resolution and a deadline.
+
+59
+00:04:44.248 --> 00:04:51.032
+Banking is full of these: money that must never be created or lost, even when the systems holding it disagree.
+
+60
+00:04:52.382 --> 00:04:53.065
+Quote:
+
+61
+00:04:53.345 --> 00:04:55.009
+The thesis of this chapter.
+
+62
+00:04:55.289 --> 00:04:57.273
+A bank is a ledger with deadlines.
+
+63
+00:04:57.553 --> 00:05:01.713
+Every rupee is in exactly one account at every moment (double entry).
+
+64
+00:05:01.993 --> 00:05:05.107
+Every state change is recorded and never overwritten.
+
+65
+00:05:05.387 --> 00:05:08.694
+Hot accounts are fed by an append-only journal (L1).
+
+66
+00:05:08.974 --> 00:05:13.795
+Unknown outcomes are resolved by status and settlement, not guesses (L2).
+
+67
+00:05:14.075 --> 00:05:17.446
+Arithmetic follows the product terms to the paisa (L3).
+
+68
+00:05:17.726 --> 00:05:21.651
+The payment graph is watched for money that moves like fraud (L4).
+
+69
+00:05:23.001 --> 00:05:24.623
+Core banking in one picture.
+
+70
+00:05:24.903 --> 00:05:26.268
+Here is a quick table:
+
+71
+00:05:26.548 --> 00:05:27.849
+Concept, and Meaning.
+
+72
+00:05:28.129 --> 00:05:29.537
+Customer (CIF):
+
+73
+00:05:29.817 --> 00:05:32.761
+The customer information file, linked to KYC.
+
+74
+00:05:33.041 --> 00:05:33.895
+Account:
+
+75
+00:05:34.175 --> 00:05:40.233
+Savings, current, loan, fixed deposit; a product defines its rules (interest, limits, fees).
+
+76
+00:05:40.513 --> 00:05:41.623
+Ledger balance:
+
+77
+00:05:41.903 --> 00:05:43.439
+The sum of posted entries.
+
+78
+00:05:43.719 --> 00:05:44.913
+Available balance:
+
+79
+00:05:45.193 --> 00:05:49.289
+Ledger balance minus holds (liens) + any overdraft limit.
+
+80
+00:05:49.569 --> 00:05:50.700
+Hold or lien:
+
+81
+00:05:50.980 --> 00:05:58.020
+Money reserved for a pending debit (a card authorisation, a UPI debit awaiting the outcome, a court order).
+
+82
+00:05:58.300 --> 00:05:59.132
+Posting:
+
+83
+00:05:59.412 --> 00:06:03.252
+A balanced set of entries (debits = credits) with a value date.
+
+84
+00:06:04.602 --> 00:06:06.245
+General ledger (GL):
+
+85
+00:06:06.525 --> 00:06:13.991
+Bank-level accounts (for example, UPI settlement receivable, interest expense) that customer postings roll into.
+
+86
+00:06:14.271 --> 00:06:15.295
+EOD or BOD:
+
+87
+00:06:15.575 --> 00:06:22.957
+End- and beginning-of-day processing: interest accrual, charges, standing instructions, statements, GL balancing.
+
+88
+00:06:24.307 --> 00:06:25.629
+Learning objectives.
+
+89
+00:06:25.909 --> 00:06:27.787
+By the end you will be able to:
+
+90
+00:06:28.067 --> 00:06:31.971
+Model accounts, holds and double-entry postings with value dates.
+
+91
+00:06:32.251 --> 00:06:35.579
+Scale hot accounts without breaking the no-overdraft rule.
+
+92
+00:06:35.859 --> 00:06:40.147
+Handle UPI timeouts with a state machine that meets turnaround times.
+
+93
+00:06:40.427 --> 00:06:44.075
+Compute interest and fees exactly as the product terms say.
+
+94
+00:06:44.355 --> 00:06:48.152
+Detect mule accounts using time-windowed, graph-aware features.
+
+95
+00:06:49.502 --> 00:06:50.377
+Part 2.
+
+96
+00:06:50.657 --> 00:06:52.555
+Core Concepts, Beginner to Deep.
+
+97
+00:06:53.805 --> 00:06:56.109
+Intuition: a very careful notebook.
+
+98
+00:06:56.389 --> 00:07:07.824
+A bank's core system is a notebook where every line moves money from one page to another, the two sides always add up, and nobody ever erases a line: mistakes are fixed with new lines.
+
+99
+00:07:08.104 --> 00:07:11.155
+The balance on each page is just the sum of its lines.
+
+100
+00:07:11.435 --> 00:07:21.355
+Everything else (apps, UPI, cards, branches) is a way of asking the notebook to add lines, and every one of them must be answered yes, written or no, not written.
+
+101
+00:07:21.635 --> 00:07:23.725
+Maybe must never be the final answer.
+
+102
+00:07:25.075 --> 00:07:26.035
+Requirements.
+
+103
+00:07:26.315 --> 00:07:27.681
+Here is a quick table:
+
+104
+00:07:27.961 --> 00:07:29.262
+Type, and Requirement.
+
+105
+00:07:29.542 --> 00:07:30.417
+Functional:
+
+106
+00:07:30.697 --> 00:07:44.158
+Open accounts (with KYC); deposits, withdrawals and transfers (IMPS, NEFT, RTGS, UPI); holds; interest and fees; statements; loans and EMIs; standing instructions; disputes.
+
+107
+00:07:44.438 --> 00:07:45.697
+Scale (assumptions):
+
+108
+00:07:45.977 --> 00:08:00.547
+50M accounts; UPI peak of a few thousand transactions per second for a large bank, much more for the switch as a whole (VERIFY current NPCI volumes); a few merchant accounts receiving hundreds of credits per second.
+
+109
+00:08:00.827 --> 00:08:01.745
+Correctness:
+
+110
+00:08:02.025 --> 00:08:10.963
+Double entry always balanced; no overdraft beyond the limit; exactly-once posting per request; interest exactly per product terms.
+
+111
+00:08:11.243 --> 00:08:12.310
+Availability:
+
+112
+00:08:12.590 --> 00:08:17.753
+UPI and cards 24 times 7, with no EOD downtime for payments.
+
+113
+00:08:18.033 --> 00:08:18.929
+Deadlines:
+
+114
+00:08:19.209 --> 00:08:25.459
+Failed-transaction reversals within regulator TATs, with compensation otherwise (VERIFY).
+
+115
+00:08:26.809 --> 00:08:27.748
+Compliance:
+
+116
+00:08:28.028 --> 00:08:35.836
+KYC or AML, transaction monitoring, payment data stored in India (VERIFY RBI storage directive), audit trails.
+
+117
+00:08:37.186 --> 00:08:39.170
+Postings, holds and balances.
+
+118
+00:08:39.450 --> 00:08:52.271
+A posting is a set of entries that sum to zero: a debit to the customer's account;. a credit to the UPI settlement GL;. and for fees, lines to the fee income GL and a GST GL.
+
+119
+00:08:52.551 --> 00:08:53.959
+Entries are immutable.
+
+120
+00:08:54.239 --> 00:08:58.271
+A correction is a reversing posting that references the original.
+
+121
+00:08:59.621 --> 00:09:01.584
+Holds separate intent from movement.
+
+122
+00:09:01.864 --> 00:09:07.923
+A UPI debit or card authorisation first places a hold, which reduces available balance.
+
+123
+00:09:08.203 --> 00:09:11.552
+The hold is then either converted to a posting or released.
+
+124
+00:09:11.832 --> 00:09:14.115
+Holds have expiry times and reasons.
+
+125
+00:09:14.395 --> 00:09:15.525
+Idempotency.
+
+126
+00:09:15.805 --> 00:09:27.816
+Every posting carries the upstream reference (for UPI, the transaction's reference id) with a unique constraint, so a retried request returns the original result (Ch 20).
+
+127
+00:09:28.096 --> 00:09:33.429
+Value date versus posting date: interest is computed on value-dated balances.
+
+128
+00:09:33.709 --> 00:09:37.869
+A back-dated correction changes interest, which needs recomputation.
+
+129
+00:09:39.219 --> 00:09:40.201
+Hot accounts.
+
+130
+00:09:40.481 --> 00:09:46.625
+A large merchant's or aggregator's settlement account can receive hundreds or thousands of credits per second.
+
+131
+00:09:46.905 --> 00:09:51.854
+Updating one balance row serialises all of them on one row lock (L1:
+
+132
+00:09:52.134 --> 00:09:59.387
+1,585 txn per second, p50 6.7 ms with 16 clients).
+
+133
+00:09:59.667 --> 00:10:04.233
+Credits are safe to decouple: adding money can never break the no-overdraft rule.
+
+134
+00:10:04.513 --> 00:10:11.979
+Append-only journal: each credit is an insert, and a roll-up folds committed rows into the balance every few hundred ms.
+
+135
+00:10:12.259 --> 00:10:13.091
+L1:
+
+136
+00:10:13.371 --> 00:10:16.123
+5,687 per second.
+
+137
+00:10:16.403 --> 00:10:19.646
+Sub-accounts: credits are spread across N balance rows.
+
+138
+00:10:19.926 --> 00:10:20.758
+L1:
+
+139
+00:10:21.038 --> 00:10:23.641
+3,932 per second.
+
+140
+00:10:24.991 --> 00:10:26.719
+Debits must see the whole balance.
+
+141
+00:10:26.999 --> 00:10:35.084
+They take a per-account lock and check the effective balance: rolled-up balance plus unrolled journal rows, or the sum of the sub-accounts.
+
+142
+00:10:35.364 --> 00:10:44.687
+In a refund storm, debits dominate and all designs converge (L1: ~2,450 per second at 30% debits).
+
+143
+00:10:44.967 --> 00:10:46.311
+The sequence-gap trap:
+
+144
+00:10:46.591 --> 00:10:54.868
+Rolling up everything below sequence N skips rows whose transactions haven't committed yet, because sequences are assigned before commit.
+
+145
+00:10:55.148 --> 00:10:59.436
+L1 marks rows as rolled instead, which only sees committed rows.
+
+146
+00:11:00.786 --> 00:11:10.194
+Alternatives: roll up rows older than the longest possible transaction, or use the database's commit-order facilities (VERIFY for your database).
+
+147
+00:11:10.474 --> 00:11:14.485
+The display balance for a hot account may lag by the roll-up interval.
+
+148
+00:11:14.765 --> 00:11:16.258
+The debit check never does.
+
+149
+00:11:17.608 --> 00:11:19.741
+UPI: four parties and one truth.
+
+150
+00:11:20.021 --> 00:11:34.677
+The parties (P2M example): the payer's app (payer PSP);. the UPI switch (NPCI);. the payer's bank (remitter), which debits;. the beneficiary's bank, which credits;. plus the merchant's PSP or aggregator.
+
+151
+00:11:34.957 --> 00:11:39.544
+The simplified flow (VERIFY against the current NPCI specifications):
+
+152
+00:11:40.894 --> 00:11:44.222
+Collect or intent, then PIN on the payer's device.
+
+153
+00:11:44.502 --> 00:11:48.065
+Debit request to the remitter bank, which debits and responds.
+
+154
+00:11:48.345 --> 00:11:52.121
+Credit request to the beneficiary bank, which credits and responds.
+
+155
+00:11:52.401 --> 00:11:54.491
+Final status to both PSPs.
+
+156
+00:11:54.771 --> 00:11:58.718
+Net settlement between banks happens in cycles, with settlement files.
+
+157
+00:11:58.998 --> 00:12:02.177
+Where it breaks: any hop can time out after doing its work.
+
+158
+00:12:02.457 --> 00:12:10.414
+The most dangerous case is the one this chapter's story is about: the remitter has debited but doesn't know whether the beneficiary credited.
+
+159
+00:12:11.764 --> 00:12:14.324
+The design rule: no participant guesses.
+
+160
+00:12:14.604 --> 00:12:28.663
+Each has: a state machine;. a status-check operation keyed by the transaction reference;. a reconciliation against settlement files;. a deadline: reversal within the regulator's TAT, or compensation (VERIFY).
+
+161
+00:12:30.013 --> 00:12:31.847
+Resolving unknown outcomes.
+
+162
+00:12:32.127 --> 00:12:33.493
+Here is a quick table:
+
+163
+00:12:33.773 --> 00:12:35.671
+Policy, and What L2 showed.
+
+164
+00:12:35.951 --> 00:12:37.637
+R1 reverse immediately:
+
+165
+00:12:37.917 --> 00:12:44.722
+60,381 paid twice: the beneficiary had credited, and the payer was refunded too.
+
+166
+00:12:45.002 --> 00:12:47.455
+Recovery is painful and customer-hostile.
+
+167
+00:12:47.735 --> 00:12:49.954
+R2 treat as success, fix later:
+
+168
+00:12:50.234 --> 00:12:58.810
+49,494 payers short for more than 24 h, all failed payments waiting for the T+1 batch.
+
+169
+00:12:59.090 --> 00:13:02.013
+R3 status checks with backoff, then decide:
+
+170
+00:13:02.293 --> 00:13:03.957
+Most resolved within minutes.
+
+171
+00:13:04.237 --> 00:13:13.495
+Those still unknown after the checks (the beneficiary's status API was down during its 3.5 h incident) fall to T+1:
+
+172
+00:13:13.775 --> 00:13:17.850
+19,530 short for more than 24 h.
+
+173
+00:13:18.130 --> 00:13:21.501
+R4 R3, plus reverse at the next settlement cycle:
+
+174
+00:13:21.781 --> 00:13:26.773
+0 paid twice, 0 short for more than 24 h, no manual cases.
+
+175
+00:13:27.053 --> 00:13:35.565
+22,593 were short for more than 1 h: those waiting for the settlement cycle after a long incident.
+
+176
+00:13:36.915 --> 00:13:38.237
+Engineering details:
+
+177
+00:13:38.517 --> 00:13:41.653
+Hold the debit as PENDING (not reversed, not final).
+
+178
+00:13:41.933 --> 00:13:46.925
+Schedule status checks at growing intervals (Ch 18) and budget their load:
+
+179
+00:13:47.205 --> 00:13:53.243
+R3 or R4 made 705k calls, concentrated at incident recovery.
+
+180
+00:13:53.523 --> 00:13:54.440
+Add jitter.
+
+181
+00:13:54.720 --> 00:13:58.880
+Consume settlement and reconciliation files as the source of truth.
+
+182
+00:13:59.160 --> 00:14:03.512
+Track every PENDING against the TAT deadline, with alerts well before it.
+
+183
+00:14:04.862 --> 00:14:06.761
+Interest, fees and the paisa.
+
+184
+00:14:07.041 --> 00:14:23.489
+Product terms define the arithmetic: rate, day-count convention (actual or 365, actual or actual, 30 or 360), accrual frequency, rounding and credit frequency (VERIFY RBI rules for savings interest).
+
+185
+00:14:23.769 --> 00:14:25.454
+L3 on a million accounts:
+
+186
+00:14:25.734 --> 00:14:32.113
+Daily rounding looks harmless in aggregate: +306 rupeeson 95 crore rupees.
+
+187
+00:14:32.393 --> 00:14:40.819
+But it changes 977k accounts by up to 0.45, rupeesso no account matches the product terms.
+
+188
+00:14:41.099 --> 00:14:47.670
+Truncation systematically underpays: minus 4.38 lakh rupees a quarter, a conduct risk.
+
+189
+00:14:49.020 --> 00:14:53.052
+The wrong day count in a leap year overpays 26 lakh rupees.
+
+190
+00:14:53.332 --> 00:15:05.876
+The rules: accrue at high precision (a decimal type, never floating point);. round once at posting, as the terms specify;. store the accrual basis for audit;. test against published examples.
+
+191
+00:15:07.226 --> 00:15:13.989
+EOD at 24 times 7: accrual runs against a consistent snapshot of value-dated balances.
+
+192
+00:15:14.269 --> 00:15:21.181
+It must not freeze payments, so use snapshot reads or an accrual journal fed by postings (Ch 21).
+
+193
+00:15:22.531 --> 00:15:24.920
+Mule accounts and transaction monitoring.
+
+194
+00:15:25.200 --> 00:15:32.539
+Mule accounts receive fraud proceeds from many victims and forward them within minutes to collector accounts before cash-out.
+
+195
+00:15:32.819 --> 00:15:35.997
+Legitimate accounts look similar on any single feature:
+
+196
+00:15:37.347 --> 00:15:38.713
+Here is a quick table:
+
+197
+00:15:38.993 --> 00:15:40.806
+Feature, and Also seen in.
+
+198
+00:15:41.086 --> 00:15:42.067
+Many payers:
+
+199
+00:15:42.347 --> 00:15:43.179
+Shops.
+
+200
+00:15:43.459 --> 00:15:44.611
+Fast pass-through:
+
+201
+00:15:44.891 --> 00:15:46.427
+Salary followed by rent.
+
+202
+00:15:46.707 --> 00:15:48.542
+Many payers, then one payment:
+
+203
+00:15:48.822 --> 00:15:50.678
+Group collections paid to a vendor.
+
+204
+00:15:52.028 --> 00:15:53.799
+L4 on synthetic data:
+
+205
+00:15:54.079 --> 00:15:59.924
+Single-feature rules flag thousands of accounts, at 0.5 to 2% precision.
+
+206
+00:16:00.204 --> 00:16:14.476
+Requiring fan-in, pass-through, few receivers and a meaningful amount in the same 2-hour window, excluding payments to registered merchants, reaches 98.5% precision and finds 67 of 80 mules.
+
+207
+00:16:14.756 --> 00:16:22.031
+Following the money (accounts fed by ≥ 2 flagged mules) finds 23 of 24 collectors.
+
+208
+00:16:22.311 --> 00:16:23.292
+In production:
+
+209
+00:16:24.642 --> 00:16:46.701
+features are computed in streaming windows (Ch 21, Ch 51);. graph features are refreshed frequently;. a model is trained on labelled cases;. actions are graded: monitor, then a credit hold, then a debit freeze, subject to legal process (VERIFY);. suspicious transaction reporting follows regulatory requirements (VERIFY).
+
+210
+00:16:48.051 --> 00:16:58.696
+Real-time controls at payment time: device binding, new-device cooling limits, per-transaction and daily limits, and beneficiary risk (VERIFY current UPI limits).
+
+211
+00:17:00.046 --> 00:17:03.331
+24 times 7 banking and the end of end of day.
+
+212
+00:17:03.611 --> 00:17:08.326
+Traditional core banking systems ran EOD batches that paused transactions.
+
+213
+00:17:08.606 --> 00:17:10.889
+Instant payments made that unacceptable.
+
+214
+00:17:11.169 --> 00:17:12.107
+Approaches:
+
+215
+00:17:12.387 --> 00:17:17.230
+Separate the payment ledger (always on) from batch processes that read snapshots.
+
+216
+00:17:17.510 --> 00:17:23.547
+Business date versus calendar date: transactions after the cut-over belong to the next business date.
+
+217
+00:17:23.827 --> 00:17:27.241
+Accrual and charges as streaming jobs over postings.
+
+218
+00:17:28.591 --> 00:17:38.937
+Stand-in processing during core maintenance: a shadow ledger authorises within limits, and postings are replayed later (VERIFY applicability per product and regulator).
+
+219
+00:17:39.217 --> 00:17:52.572
+Modernising a legacy core is a strangler migration (Ch 16): a payments hub in front of the old core;. new products on a new ledger;. accounts migrated in cohorts, with dual-run reconciliation.
+
+220
+00:17:53.922 --> 00:17:56.482
+Resilience, residency and regulators.
+
+221
+00:17:56.762 --> 00:17:58.127
+Here is a quick table:
+
+222
+00:17:58.407 --> 00:17:59.794
+Concern, and Design.
+
+223
+00:18:00.074 --> 00:18:01.482
+Data localisation:
+
+224
+00:18:01.762 --> 00:18:08.525
+Payment system data stored in India (VERIFY the RBI directive and FAQs) (Ch 36).
+
+225
+00:18:08.805 --> 00:18:09.573
+DR:
+
+226
+00:18:09.853 --> 00:18:23.314
+Near-zero RPO for the ledger (synchronous replication within a region, async to the DR site); tested DR drills; regulator expectations for recovery times (VERIFY) (Ch 27).
+
+227
+00:18:23.594 --> 00:18:24.405
+Audit:
+
+228
+00:18:24.685 --> 00:18:29.677
+Immutable postings, maker-checker for manual entries, privileged access logging.
+
+229
+00:18:29.957 --> 00:18:31.194
+Change management:
+
+230
+00:18:31.474 --> 00:18:37.917
+Controlled releases outside peak hours; regulator reporting of outages where required (VERIFY).
+
+231
+00:18:38.197 --> 00:18:39.263
+Third parties:
+
+232
+00:18:39.543 --> 00:18:43.426
+Outsourcing and cloud guidelines for regulated entities (VERIFY).
+
+233
+00:18:44.776 --> 00:18:45.672
+Part 3.
+
+234
+00:18:45.952 --> 00:18:47.680
+Architecture and Diagrams.
+
+235
+00:18:48.930 --> 00:18:49.997
+Component view.
+
+236
+00:18:50.277 --> 00:18:51.621
+Here is the diagram.
+
+237
+00:18:55.471 --> 00:18:58.159
+Sequence: a UPI payment (happy path).
+
+238
+00:18:58.439 --> 00:19:01.105
+The sequence diagram walks through it step by step.
+
+239
+00:19:01.385 --> 00:19:06.740
+P to N: pay 540 rupees to merchant, PIN verified on device.
+
+240
+00:19:07.020 --> 00:19:11.329
+N to R: debit request, txn ref U123.
+
+241
+00:19:11.609 --> 00:19:17.135
+R to R: risk checks, hold then post debit, idempotent on U123.
+
+242
+00:19:17.415 --> 00:19:19.207
+R to N: debit success.
+
+243
+00:19:19.487 --> 00:19:22.452
+N to B: credit request U123.
+
+244
+00:19:22.732 --> 00:19:25.548
+B to B: post credit to merchant account journal.
+
+245
+00:19:25.828 --> 00:19:27.620
+B to N: credit success.
+
+246
+00:19:27.900 --> 00:19:29.905
+N to P: payment successful.
+
+247
+00:19:33.755 --> 00:19:37.254
+Sequence: credit timeout resolved by status and settlement.
+
+248
+00:19:37.534 --> 00:19:40.201
+The sequence diagram walks through it step by step.
+
+249
+00:19:40.481 --> 00:19:43.979
+N to R: debit request U777.
+
+250
+00:19:44.259 --> 00:19:46.051
+R to N: debit success.
+
+251
+00:19:46.331 --> 00:19:49.638
+N to B: credit request U777.
+
+252
+00:19:49.918 --> 00:19:52.201
+B to N: timeout - bank degraded.
+
+253
+00:19:52.481 --> 00:19:54.934
+N to R: status deemed or pending.
+
+254
+00:19:55.214 --> 00:20:00.889
+R to R: mark U777 PENDING, customer told payment is processing.
+
+255
+00:20:01.169 --> 00:20:04.987
+R to N: status check at 30 seconds, 2 and 5 minutes.
+
+256
+00:20:05.267 --> 00:20:06.974
+N to R: still unknown.
+
+257
+00:20:07.254 --> 00:20:11.243
+S to R: next cycle - U777 not credited.
+
+258
+00:20:11.523 --> 00:20:16.089
+R to R: reverse debit, notify customer, well inside TAT.
+
+259
+00:20:19.939 --> 00:20:22.307
+State: a remitter-side UPI debit.
+
+260
+00:20:22.587 --> 00:20:23.931
+Here is the diagram.
+
+261
+00:20:27.781 --> 00:20:28.698
+Part 4.
+
+262
+00:20:28.978 --> 00:20:30.621
+Design Document Excerpt.
+
+263
+00:20:31.871 --> 00:20:32.617
+Note:
+
+264
+00:20:32.897 --> 00:20:37.697
+Design Document (excerpt), Pending-Outcome Resolution for UPI Debits.
+
+265
+00:20:37.977 --> 00:20:44.036
+Context, Credit-leg timeouts during beneficiary-bank incidents leave debited payments unknown.
+
+266
+00:20:44.316 --> 00:20:51.228
+The current auto-reverse rule caused double payments, and the previous treat as success rule caused TAT breaches.
+
+267
+00:20:51.508 --> 00:20:56.735
+Decision, A PENDING state with scheduled status checks (30 s to 2 h, jittered).
+
+268
+00:20:57.015 --> 00:21:01.836
+Resolution from status responses or settlement files, whichever arrives first.
+
+269
+00:21:02.116 --> 00:21:08.921
+Unknowns are reversed at the next settlement cycle, never later than the TAT deadline minus a safety margin.
+
+270
+00:21:09.201 --> 00:21:23.943
+Related ADRs, ADR-I03 to 1 append-only journal for hot accounts; ADR-I03 to 2 decimal accrual with single rounding; ADR-I03 to 3 mule scoring with graph features.
+
+271
+00:21:25.293 --> 00:21:26.253
+Requirements.
+
+272
+00:21:26.533 --> 00:21:27.365
+R1:
+
+273
+00:21:27.645 --> 00:21:32.786
+No customer is refunded for a payment that was credited (no double payment from our side).
+
+274
+00:21:33.066 --> 00:21:33.898
+R2:
+
+275
+00:21:34.178 --> 00:21:42.114
+Every failed payment is reversed within the TAT (VERIFY current TAT), and at P99 within the same business day.
+
+276
+00:21:42.394 --> 00:21:43.247
+R3:
+
+277
+00:21:43.527 --> 00:21:48.413
+Status checks never exceed an agreed rate towards the switch, even after an incident.
+
+278
+00:21:48.693 --> 00:21:49.589
+R4:
+
+279
+00:21:49.869 --> 00:21:53.773
+Customers see the PENDING status and an expected resolution time.
+
+280
+00:21:55.123 --> 00:21:55.997
+R5:
+
+281
+00:21:56.277 --> 00:22:01.995
+Every PENDING has an audit trail: checks, responses, the settlement record and the final action.
+
+282
+00:22:02.275 --> 00:22:03.683
+Decisions in detail.
+
+283
+00:22:03.963 --> 00:22:06.160
+Settlement files are the source of truth.
+
+284
+00:22:06.440 --> 00:22:08.168
+Status checks shorten the wait.
+
+285
+00:22:08.448 --> 00:22:14.784
+Reversal is itself idempotent on the transaction reference, and can race with a late credit confirmation.
+
+286
+00:22:15.064 --> 00:22:18.755
+The state machine guards it: only PENDING can move to REVERSED.
+
+287
+00:22:19.035 --> 00:22:24.325
+Status-check load is spread with jitter and capped by a token bucket (Ch 39).
+
+288
+00:22:25.675 --> 00:22:29.537
+TAT dashboards show the oldest PENDING per beneficiary bank.
+
+289
+00:22:29.817 --> 00:22:30.841
+Consequences.
+
+290
+00:22:31.121 --> 00:22:34.491
+Some customers wait hours after long incidents (L2:
+
+291
+00:22:34.771 --> 00:22:38.483
+22,593 more than 1 h).
+
+292
+00:22:38.763 --> 00:22:42.091
+Messaging and expectation-setting are part of the design.
+
+293
+00:22:43.441 --> 00:22:44.401
+Part 5.
+
+294
+00:22:44.681 --> 00:22:46.665
+Hands-On Code, Level Ladder.
+
+295
+00:22:47.915 --> 00:22:48.683
+Info:
+
+296
+00:22:48.963 --> 00:22:50.051
+What's real here.
+
+297
+00:22:50.331 --> 00:22:57.350
+L1 runs against a real PostgreSQL 16 database (fsync=on, 16 connections).
+
+298
+00:22:57.630 --> 00:23:01.513
+L3 is exact decimal arithmetic on a million accounts.
+
+299
+00:23:01.793 --> 00:23:05.953
+L2 and L4 are simulations with illustrative parameters.
+
+300
+00:23:06.233 --> 00:23:09.539
+Regulatory rules are summarised and marked VERIFY.
+
+301
+00:23:10.889 --> 00:23:12.873
+L1, The hot merchant account.
+
+302
+00:23:13.153 --> 00:23:14.092
+Requirement:
+
+303
+00:23:14.372 --> 00:23:19.279
+Absorb thousands of credits per second on one account, and never let a refund overdraw it.
+
+304
+00:23:20.629 --> 00:23:23.701
+Here is the Java code, HotAccountL1.java.
+
+305
+00:23:23.981 --> 00:23:28.226
+It runs to 185 lines; the full listing is in the chapter.
+
+306
+00:23:28.506 --> 00:23:30.490
+L1, The hot merchant account.
+
+307
+00:23:30.770 --> 00:23:39.005
+A large merchant's settlement account receives thousands of UPI credits per second. while refunds (debits) must never overdraw it.
+
+308
+00:23:39.285 --> 00:23:44.938
+Real PostgreSQL 16, fsync on, 16 client threads, 5 s per run.
+
+309
+00:23:45.218 --> 00:23:50.871
+A: one balance row, UPDATE per credit or debit (debit guarded by balance = amount).
+
+310
+00:23:53.721 --> 00:24:01.913
+On screen: one merchant account, 16 threads, 5 s per run, credits 1 rupees, 2,000; fsync on. normal day:
+
+311
+00:24:02.193 --> 00:24:11.345
+5% debits (refunds, payouts). design txn per second p50 ms p99 ms refused errors invariant.
+
+312
+00:24:11.625 --> 00:24:19.775
+A single balance row 1,585 6.65 48.27 0 0 holds.
+
+313
+00:24:20.055 --> 00:24:30.188
+B journal + roll-up every 200 ms 5,687 1.38 31.90 0 0 holds.
+
+314
+00:24:30.468 --> 00:24:40.601
+C 16 sub-account rows 3,932 1.44 41.00 0 0 holds. refund storm:
+
+315
+00:24:40.881 --> 00:24:49.991
+30% debits (refunds, payouts). design txn per second p50 ms p99 ms refused errors invariant.
+
+316
+00:24:50.271 --> 00:24:58.591
+A single balance row 1,741 6.26 41.02 0 0 holds.
+
+317
+00:24:58.871 --> 00:25:08.663
+B journal + roll-up every 200 ms 2,446 0.85 30.16 0 0 holds.
+
+318
+00:25:08.943 --> 00:25:17.689
+C 16 sub-account rows 2,449 1.18 25.86 0 0 holds.
+
+319
+00:25:20.539 --> 00:25:21.393
+Reading it:
+
+320
+00:25:21.673 --> 00:25:32.745
+A single balance row caps out at ~1,600 txn per second, with p50 6.7 ms, because every transaction queues on one row lock.
+
+321
+00:25:33.025 --> 00:25:42.198
+Journal + roll-up: credits become plain inserts, giving 5,687 per second, with p50 1.4 ms.
+
+322
+00:25:42.478 --> 00:25:45.273
+The balance is corrected every 200 ms.
+
+323
+00:25:45.553 --> 00:25:50.075
+Sub-accounts spread the lock and reach 3,932 per second.
+
+324
+00:25:50.355 --> 00:25:57.417
+In a refund storm (30% debits), both designs fall to ~2,450 per second.
+
+325
+00:25:57.697 --> 00:26:03.222
+Debits must see the whole balance, so they serialise on the account lock whatever you do to credits.
+
+326
+00:26:04.572 --> 00:26:11.335
+The invariant held in every run: final balance = opening + credits minus debits, never negative.
+
+327
+00:26:11.615 --> 00:26:16.457
+The check constraint, the debit lock and the effective-balance check guarantee it together.
+
+328
+00:26:16.737 --> 00:26:21.516
+A design note from building it: the first roll-up remembered rolled up to sequence N.
+
+329
+00:26:21.796 --> 00:26:27.940
+A lower sequence can still be uncommitted when a higher one commits, so that version could skip credits forever.
+
+330
+00:26:28.220 --> 00:26:32.124
+Marking rows rolled in one statement sees only committed rows.
+
+331
+00:26:32.404 --> 00:26:35.817
+Timings vary about ±10% between runs.
+
+332
+00:26:37.167 --> 00:26:40.837
+L2, UPI timeouts: reverse, trust, or find out?
+
+333
+00:26:41.117 --> 00:26:42.055
+Requirement:
+
+334
+00:26:42.335 --> 00:26:46.645
+Never pay twice, and never leave a customer short beyond the turnaround time.
+
+335
+00:26:47.995 --> 00:26:51.216
+Here is the Java code, UpiTimeoutL2.java.
+
+336
+00:26:51.496 --> 00:26:54.909
+It runs to 90 lines; the full listing is in the chapter.
+
+337
+00:26:55.189 --> 00:26:57.749
+L2, Money debited, but the payment failed.
+
+338
+00:26:58.029 --> 00:27:03.640
+In UPI the payer's bank debits, and the beneficiary bank's credit. response can time out.
+
+339
+00:27:03.920 --> 00:27:07.952
+The payer's bank must then decide without knowing whether the credit happened.
+
+340
+00:27:08.232 --> 00:27:15.187
+One day, 2,000,000 payments; a beneficiary bank has three incidents where 30% of its responses time out.
+
+341
+00:27:18.037 --> 00:27:18.954
+On screen:
+
+342
+00:27:19.234 --> 00:27:28.237
+2,000,000 payments in a day; 109,875 timed out with the outcome unknown (5.49%).
+
+343
+00:27:28.517 --> 00:27:41.999
+60,381 of those were in fact credited to the beneficiary. remitter bank's action on timeout paid twice payer short 1 h payer short 24 h status. calls exceptions.
+
+344
+00:27:42.279 --> 00:27:50.770
+R1 reverse the debit immediately 60,381 0 0 0 60,381.
+
+345
+00:27:51.050 --> 00:28:02.954
+R2 treat as success, fix at settlement 0 49,494 49,494 0 49,494.
+
+346
+00:28:03.234 --> 00:28:17.634
+R3 status checks with backoff, then decide 0 30,993 19,530 705,361 43,707.
+
+347
+00:28:17.914 --> 00:28:39.930
+R4 R3 + unresolved, then reverse at settlement 0 22,593 0 705,361 0. paid twice: payer refunded although the beneficiary was credited (bank must recover. the money). payer short: payer's money neither with the payer nor with the beneficiary for longer.
+
+348
+00:28:40.210 --> 00:28:41.725
+The rest is in the chapter.
+
+349
+00:28:44.575 --> 00:28:46.708
+Reading it (illustrative parameters):
+
+350
+00:28:46.988 --> 00:28:54.647
+R1, reversing on timeout: refunded 60,381 payers whose money had reached the beneficiary.
+
+351
+00:28:54.927 --> 00:28:56.889
+Each of those is a recovery case.
+
+352
+00:28:57.169 --> 00:29:07.239
+R2, treating the timeout as success: left 49,494 payers short for more than 24 h, waiting for the T+1 batch.
+
+353
+00:29:07.519 --> 00:29:11.167
+R3, status checks: resolve most cases within minutes.
+
+354
+00:29:11.447 --> 00:29:18.444
+The 3.5-hour incident outlasts the 2-hour checking window, and those payments fall back to T+1:
+
+355
+00:29:18.724 --> 00:29:22.799
+19,530 short for more than 24 h.
+
+356
+00:29:24.149 --> 00:29:28.010
+R4, the same checks plus reversal at the next settlement cycle:
+
+357
+00:29:28.290 --> 00:29:33.175
+0 paid twice, 0 short for more than 24 h, 0 exceptions.
+
+358
+00:29:33.455 --> 00:29:39.407
+22,593 wait more than an hour, the price of a long incident.
+
+359
+00:29:39.687 --> 00:29:45.341
+Load: the status checks cost 705k calls, concentrated around recoveries.
+
+360
+00:29:45.621 --> 00:29:47.989
+Budget them with jitter and a token bucket.
+
+361
+00:29:48.269 --> 00:29:53.154
+Specific TAT values and compensation come from the regulator (VERIFY).
+
+362
+00:29:53.434 --> 00:29:54.906
+The lesson is structural:
+
+363
+00:29:55.186 --> 00:29:57.255
+PENDING + evidence + deadline.
+
+364
+00:29:58.605 --> 00:30:00.547
+L3, Interest to the paisa.
+
+365
+00:30:00.827 --> 00:30:01.765
+Requirement:
+
+366
+00:30:02.045 --> 00:30:05.139
+Pay every account exactly what the product terms say.
+
+367
+00:30:05.419 --> 00:30:12.437
+This lab uses exact BigDecimal arithmetic on 1,000,000 accounts over a 91-day leap-year quarter.
+
+368
+00:30:12.717 --> 00:30:14.232
+It takes about 90 s.
+
+369
+00:30:15.582 --> 00:30:18.547
+Here is the Java code, InterestL3.java.
+
+370
+00:30:18.827 --> 00:30:22.497
+It runs to 68 lines; the full listing is in the chapter.
+
+371
+00:30:22.777 --> 00:30:25.145
+L3, Savings interest to the paisa.
+
+372
+00:30:25.425 --> 00:30:31.739
+1,000,000 accounts, 3.0% p.a. on the end-of-day balance, credited at quarter end.
+
+373
+00:30:32.019 --> 00:30:33.683
+(Jan, Mar of a leap year:
+
+374
+00:30:33.963 --> 00:30:35.158
+91 days).
+
+375
+00:30:35.438 --> 00:30:40.665
+Compare rounding policies against exact arithmetic (BigDecimal, 20 digits).
+
+376
+00:30:40.945 --> 00:30:48.390
+Rates, balances and the day-count convention are ILLUSTRATIVE; the bank's product terms and regulator decide (VERIFY).
+
+377
+00:30:51.240 --> 00:30:52.157
+On screen:
+
+378
+00:30:52.437 --> 00:30:56.277
+1,000,000 savings accounts, 3.0% p.a.
+
+379
+00:30:56.557 --> 00:31:20.664
+91 days (leap-year quarter), interest credited. once at quarter end. policy total interest ₹ versus exact ₹ accounts differ max per acct. exact (20 digits), round once at credit 949,788,960.77 +0.00 0 0 rupees. round each day's interest HALFUP,
+
+380
+00:31:20.944 --> 00:32:32.179
+sum 949,789,266.74 +305.97 977,265 0.45 rupees. truncate each day's interest (DOWN), sum 949,350,649.28 to 438,311.49 998,429 0.91 rupees. round each day HALFEVEN, sum 949,789,228.32 +267.55 977,267 0.46 rupees. round once, but divide by 365 in a leap year 952,391,117.65 +2,602,156.88 975,601.
+
+381
+00:32:32.459 --> 00:32:38.219
+40.92 rupees. accounts earning 0.00 rupeesthis quarter:
+
+382
+00:32:38.499 --> 00:32:39.886
+395.
+
+383
+00:32:42.736 --> 00:32:43.589
+Reading it:
+
+384
+00:32:43.869 --> 00:32:51.251
+Rounding each day's interest to the paisa nets out to just +306 rupeeson 95 crore rupees.
+
+385
+00:32:51.531 --> 00:32:57.867
+The errors cancel in aggregate, which is exactly why this bug survives reviews that only check totals.
+
+386
+00:32:58.147 --> 00:33:08.941
+Yet 977,265 accounts get a different amount from the terms, by up to 0.45. rupeesHALFEVEN behaves the same.
+
+387
+00:33:09.221 --> 00:33:16.816
+Truncating each day always rounds down: minus 4.38 lakh rupees in one quarter, taken from customers.
+
+388
+00:33:17.096 --> 00:33:19.891
+That is a conduct problem, not a rounding detail.
+
+389
+00:33:21.241 --> 00:33:29.283
+Dividing by 365 in a leap year overpays 26 lakh rupees (about 0.27% more).
+
+390
+00:33:29.563 --> 00:33:32.358
+Up to 40.92 rupeesper account.
+
+391
+00:33:32.638 --> 00:33:40.723
+395 accounts earn 0.00 rupees: tiny balances, where the terms' minimums and rounding matter.
+
+392
+00:33:41.003 --> 00:33:47.425
+The fix: accrue at high precision, round once at posting, and use the day-count convention the terms state.
+
+393
+00:33:47.705 --> 00:33:51.651
+Keep a test suite of worked examples from the product documentation.
+
+394
+00:33:53.001 --> 00:33:54.943
+L4, Finding mule accounts.
+
+395
+00:33:55.223 --> 00:33:56.161
+Requirement:
+
+396
+00:33:56.441 --> 00:34:02.756
+Find accounts laundering fraud proceeds without flagging shops, salaried people or friends splitting a bill.
+
+397
+00:34:04.106 --> 00:34:06.837
+Here is the Java code, MuleL4.java.
+
+398
+00:34:07.117 --> 00:34:11.405
+It runs to 131 lines; the full listing is in the chapter.
+
+399
+00:34:11.685 --> 00:34:13.199
+L4, Mule accounts.
+
+400
+00:34:13.479 --> 00:34:20.690
+Fraud proceeds are sent by many victims to mule accounts, which forward them within minutes. to a few collector accounts.
+
+401
+00:34:20.970 --> 00:34:31.167
+Legitimate look-alikes exist: small shops (many payers), people who pay rent right after. salary (pass-through), friends collecting group money and paying a vendor.
+
+402
+00:34:31.447 --> 00:34:34.114
+One simulated day of transfers; compare.
+
+403
+00:34:36.964 --> 00:34:37.881
+On screen:
+
+404
+00:34:38.161 --> 00:34:44.881
+623,328 transfers among 200,000 accounts; hidden:
+
+405
+00:34:45.161 --> 00:34:49.449
+80 mules and 24 collectors in 8. rings. look-alikes:
+
+406
+00:34:49.729 --> 00:34:57.857
+3,000 shops, 2,000 salary-then-rent payers, 800 group collectors. rule flagged true bad precision recall.
+
+407
+00:34:58.137 --> 00:35:09.572
+D1 fan-in: ≥ 15 distinct senders within 2 h 3,482 80 2.3% 76.9%.
+
+408
+00:35:09.852 --> 00:35:22.012
+D2 pass-through: ≥ 80% of 2-h inflow sent on (P2P) 15,040 81 0.5% 77.9%.
+
+409
+00:35:22.292 --> 00:35:37.780
+D3 fan-in + pass ≥ 85% to at most 2 receivers + ≥ 15 thousand rupees (same 2 h) 68 67 98.5% 64.4%.
+
+410
+00:35:38.060 --> 00:35:49.559
+D4 D3 + accounts fed by ≥ 2 D3 accounts (collectors) 93 90 96.8% 86.5%.
+
+411
+00:35:49.839 --> 00:35:58.436
+D3 finds 67 of 80 mules and 0 collectors; D4 adds 23 of 24 collectors. false positives:
+
+412
+00:35:58.716 --> 00:36:00.593
+D3 1, D4 3.
+
+413
+00:36:03.443 --> 00:36:04.297
+Reading it:
+
+414
+00:36:04.577 --> 00:36:12.406
+Fan-in alone (D1) flags 3,482 accounts, mostly shops, at 2.3% precision.
+
+415
+00:36:12.686 --> 00:36:22.499
+Pass-through alone (D2) flags 15,040, catching salaried people paying rent and group collectors, at 0.5% precision.
+
+416
+00:36:22.779 --> 00:36:24.635
+Either would drown investigators.
+
+417
+00:36:24.915 --> 00:36:33.577
+Combining them in the same 2-hour window (D3) reaches 98.5% precision and finds 67 of 80 mules.
+
+418
+00:36:33.857 --> 00:36:38.913
+The window requires: many senders;. ≥ 85% forwarded;.
+
+419
+00:36:40.263 --> 00:36:44.956
+to at most 2 personal accounts;. ≥ 15,000 rupees.
+
+420
+00:36:45.236 --> 00:36:50.569
+Excluding payments to registered merchants removes group collections, which pay a vendor.
+
+421
+00:36:50.849 --> 00:36:58.828
+Following the money (D4): accounts fed by ≥ 2 flagged mules add 23 of 24 collectors.
+
+422
+00:36:59.108 --> 00:37:04.164
+Overall that is 90 of 104 bad accounts, with 3 false positives.
+
+423
+00:37:04.444 --> 00:37:07.132
+The misses and the design choices were deliberate:
+
+424
+00:37:08.482 --> 00:37:12.087
+The first version measured pass-through after the last credit of the day.
+
+425
+00:37:12.367 --> 00:37:17.103
+Ordinary transfers arriving later hid the pattern, and recall was 5%.
+
+426
+00:37:17.383 --> 00:37:18.877
+Windowed features fixed it.
+
+427
+00:37:19.157 --> 00:37:25.237
+Counting receivers over the whole day also hid mules, so the receiver count is now taken within the window.
+
+428
+00:37:25.517 --> 00:37:27.373
+Synthetic data flatters rules.
+
+429
+00:37:27.653 --> 00:37:34.799
+Real deployments need labelled cases, models, and review before account restrictions (VERIFY legal process).
+
+430
+00:37:36.149 --> 00:37:37.088
+Part 6.
+
+431
+00:37:37.368 --> 00:37:38.648
+Production Concerns.
+
+432
+00:37:39.898 --> 00:37:41.050
+Failure modes.
+
+433
+00:37:41.330 --> 00:37:42.695
+Here is a quick table:
+
+434
+00:37:42.975 --> 00:37:45.151
+Failure, and Effect, and Mitigation.
+
+435
+00:37:45.431 --> 00:37:46.647
+Credit leg timeout.
+
+436
+00:37:46.927 --> 00:37:47.717
+Effect:
+
+437
+00:37:47.997 --> 00:37:49.127
+Money in limbo.
+
+438
+00:37:49.407 --> 00:37:50.410
+Mitigation:
+
+439
+00:37:50.690 --> 00:37:53.207
+PENDING + status + settlement (L2).
+
+440
+00:37:53.487 --> 00:37:54.831
+Hot merchant account.
+
+441
+00:37:55.111 --> 00:37:55.901
+Effect:
+
+442
+00:37:56.181 --> 00:37:57.802
+Latency, lock waits.
+
+443
+00:37:58.082 --> 00:37:59.085
+Mitigation:
+
+444
+00:37:59.365 --> 00:38:01.242
+Journal + roll-up (L1).
+
+445
+00:38:01.522 --> 00:38:03.399
+Roll-up past an uncommitted row.
+
+446
+00:38:03.679 --> 00:38:04.469
+Effect:
+
+447
+00:38:04.749 --> 00:38:05.815
+Lost credit.
+
+448
+00:38:06.095 --> 00:38:07.098
+Mitigation:
+
+449
+00:38:07.378 --> 00:38:09.959
+Mark rows, not high-water marks (L1).
+
+450
+00:38:10.239 --> 00:38:12.010
+Rounding and day-count bugs.
+
+451
+00:38:12.290 --> 00:38:13.079
+Effect:
+
+452
+00:38:13.359 --> 00:38:14.874
+Mis-paid interest at scale.
+
+453
+00:38:15.154 --> 00:38:16.157
+Mitigation:
+
+454
+00:38:16.437 --> 00:38:20.341
+Decimal types, single rounding, tests against the terms (L3).
+
+455
+00:38:20.621 --> 00:38:21.602
+Mule rings.
+
+456
+00:38:21.882 --> 00:38:22.671
+Effect:
+
+457
+00:38:22.951 --> 00:38:25.234
+Fraud losses, regulatory action.
+
+458
+00:38:25.514 --> 00:38:26.517
+Mitigation:
+
+459
+00:38:26.797 --> 00:38:29.101
+Windowed and graph features (L4).
+
+460
+00:38:29.381 --> 00:38:31.151
+EOD batch blocking payments.
+
+461
+00:38:31.431 --> 00:38:32.221
+Effect:
+
+462
+00:38:32.501 --> 00:38:33.802
+Outages at midnight.
+
+463
+00:38:34.082 --> 00:38:35.085
+Mitigation:
+
+464
+00:38:35.365 --> 00:38:39.013
+Snapshot-based batches, business dates (§2.9).
+
+465
+00:38:40.363 --> 00:38:41.451
+Observability.
+
+466
+00:38:41.731 --> 00:38:46.403
+PENDING count and age per counterparty bank, with the time to TAT deadline.
+
+467
+00:38:46.683 --> 00:38:47.941
+Status-check rate.
+
+468
+00:38:48.221 --> 00:38:49.949
+Roll-up lag for hot accounts.
+
+469
+00:38:50.229 --> 00:38:54.176
+GL balancing checks (debits = credits) every few minutes.
+
+470
+00:38:54.456 --> 00:38:56.461
+Accrual totals versus expected.
+
+471
+00:38:56.741 --> 00:38:58.981
+Mule alert volumes and their outcomes.
+
+472
+00:39:00.331 --> 00:39:01.270
+Security.
+
+473
+00:39:01.550 --> 00:39:06.819
+Device binding and SIM checks for UPI apps (at the PSP; VERIFY).
+
+474
+00:39:07.099 --> 00:39:08.507
+HSM-backed keys.
+
+475
+00:39:08.787 --> 00:39:10.921
+Maker-checker for manual postings.
+
+476
+00:39:11.201 --> 00:39:15.595
+Least privilege and full audit for operations staff (Ch 23).
+
+477
+00:39:16.945 --> 00:39:18.289
+Performance and cost.
+
+478
+00:39:18.569 --> 00:39:22.452
+The journal pattern moves hot-row contention to insert throughput.
+
+479
+00:39:22.732 --> 00:39:24.929
+Status-check budgets protect the switch.
+
+480
+00:39:25.209 --> 00:39:28.559
+Batches run on replicas or snapshots, off the primary.
+
+481
+00:39:29.909 --> 00:39:30.805
+Compliance.
+
+482
+00:39:31.085 --> 00:39:32.109
+KYC or AML.
+
+483
+00:39:32.389 --> 00:39:37.210
+RBI directions on payment data storage, outsourcing and IT governance.
+
+484
+00:39:37.490 --> 00:39:39.346
+TAT and compensation.
+
+485
+00:39:39.626 --> 00:39:42.698
+Customer protection for unauthorised transactions.
+
+486
+00:39:42.978 --> 00:39:45.538
+Reporting to the financial intelligence unit.
+
+487
+00:39:45.818 --> 00:39:50.405
+All of these are VERIFY items against current texts (Ch 36).
+
+488
+00:39:51.755 --> 00:39:52.693
+Part 7.
+
+489
+00:39:52.973 --> 00:39:54.680
+Anti-Patterns and Pitfalls.
+
+490
+00:39:55.930 --> 00:39:56.847
+Watch out:
+
+491
+00:39:57.127 --> 00:39:57.767
+1.
+
+492
+00:39:58.047 --> 00:40:00.778
+Updating balances in place without postings.
+
+493
+00:40:01.058 --> 00:40:03.810
+There is no audit trail and no way to reconcile.
+
+494
+00:40:05.160 --> 00:40:06.077
+Watch out:
+
+495
+00:40:06.357 --> 00:40:07.061
+2.
+
+496
+00:40:07.341 --> 00:40:09.965
+One hot balance row for a large merchant.
+
+497
+00:40:10.245 --> 00:40:12.549
+It serialises every credit (L1).
+
+498
+00:40:13.899 --> 00:40:14.817
+Watch out:
+
+499
+00:40:15.097 --> 00:40:15.843
+3.
+
+500
+00:40:16.123 --> 00:40:18.299
+Rolling up by sequence high-water mark.
+
+501
+00:40:18.579 --> 00:40:20.158
+Credits in flight are skipped.
+
+502
+00:40:21.508 --> 00:40:22.425
+Watch out:
+
+503
+00:40:22.705 --> 00:40:23.409
+4.
+
+504
+00:40:23.689 --> 00:40:25.268
+Auto-reversing on timeout.
+
+505
+00:40:25.548 --> 00:40:27.127
+Double payments (L2).
+
+506
+00:40:28.477 --> 00:40:29.394
+Watch out:
+
+507
+00:40:29.674 --> 00:40:30.442
+5.
+
+508
+00:40:30.722 --> 00:40:32.407
+Treating timeouts as success.
+
+509
+00:40:32.687 --> 00:40:34.501
+TAT breaches (L2).
+
+510
+00:40:35.851 --> 00:40:36.768
+Watch out:
+
+511
+00:40:37.048 --> 00:40:37.795
+6.
+
+512
+00:40:38.075 --> 00:40:40.059
+Unbounded status-check retries.
+
+513
+00:40:40.339 --> 00:40:42.323
+They storm the switch after an incident.
+
+514
+00:40:43.673 --> 00:40:44.590
+Watch out:
+
+515
+00:40:44.870 --> 00:40:45.617
+7.
+
+516
+00:40:45.897 --> 00:40:47.305
+Floating point for money.
+
+517
+00:40:47.585 --> 00:40:49.035
+Always use decimals.
+
+518
+00:40:50.385 --> 00:40:51.303
+Watch out:
+
+519
+00:40:51.583 --> 00:40:52.265
+8.
+
+520
+00:40:52.545 --> 00:40:55.404
+Rounding interest daily when the terms say otherwise.
+
+521
+00:40:55.684 --> 00:40:57.412
+Per-account errors (L3).
+
+522
+00:40:58.762 --> 00:40:59.679
+Watch out:
+
+523
+00:40:59.959 --> 00:41:00.706
+9.
+
+524
+00:41:00.986 --> 00:41:03.482
+Hard-coding 365 days.
+
+525
+00:41:03.762 --> 00:41:05.575
+Leap years overpay (L3).
+
+526
+00:41:06.925 --> 00:41:07.843
+Watch out:
+
+527
+00:41:08.123 --> 00:41:08.827
+10.
+
+528
+00:41:09.107 --> 00:41:10.813
+Single-feature fraud rules.
+
+529
+00:41:11.093 --> 00:41:13.184
+Thousands of false alerts (L4).
+
+530
+00:41:14.534 --> 00:41:15.451
+Watch out:
+
+531
+00:41:15.731 --> 00:41:16.563
+11.
+
+532
+00:41:16.843 --> 00:41:18.827
+EOD batches that stop payments.
+
+533
+00:41:19.107 --> 00:41:21.838
+Unacceptable for 24 times 7 rails.
+
+534
+00:41:23.188 --> 00:41:24.105
+Watch out:
+
+535
+00:41:24.385 --> 00:41:25.175
+12.
+
+536
+00:41:25.455 --> 00:41:27.268
+Unaudited manual corrections.
+
+537
+00:41:27.548 --> 00:41:28.657
+Insider risk.
+
+538
+00:41:30.007 --> 00:41:30.882
+Part 8.
+
+539
+00:41:31.162 --> 00:41:32.506
+Interview Q and A.
+
+540
+00:41:33.756 --> 00:41:34.588
+Beginner.
+
+541
+00:41:34.868 --> 00:41:35.892
+Question 1.
+
+542
+00:41:36.172 --> 00:41:39.308
+What is double-entry bookkeeping and why do banks use it?
+
+543
+00:41:39.588 --> 00:41:40.953
+Thirty-second answer:
+
+544
+00:41:41.233 --> 00:41:54.417
+Every transaction is recorded as equal debits and credits across accounts, so money is only ever moved, never created or lost; the books always balance, which makes errors detectable and audits possible.
+
+545
+00:41:55.767 --> 00:41:56.770
+Question 2.
+
+546
+00:41:57.050 --> 00:42:00.506
+What is the difference between ledger balance and available balance?
+
+547
+00:42:00.786 --> 00:42:02.151
+Thirty-second answer:
+
+548
+00:42:02.431 --> 00:42:14.890
+Ledger is the sum of posted entries; available is ledger minus holds (pending debits like card authorisations or pending UPI) plus any overdraft limit, what you can actually spend now.
+
+549
+00:42:16.240 --> 00:42:17.285
+Question 3.
+
+550
+00:42:17.565 --> 00:42:20.211
+Walk through a UPI payment at a high level.
+
+551
+00:42:20.491 --> 00:42:21.856
+Thirty-second answer:
+
+552
+00:42:22.136 --> 00:42:35.875
+The payer approves with a PIN in their UPI app; the switch asks the payer's bank to debit, then the beneficiary's bank to credit; both respond and the apps show success; banks settle net amounts in cycles later.
+
+553
+00:42:37.225 --> 00:42:38.291
+Question 4.
+
+554
+00:42:38.571 --> 00:42:41.217
+Why must banks never use floating point for money?
+
+555
+00:42:41.497 --> 00:42:42.862
+Thirty-second answer:
+
+556
+00:42:43.142 --> 00:42:57.435
+Binary floating point can't represent most decimal fractions exactly, so sums drift by fractions of a paisa and comparisons fail; banks use fixed-point integers (paise) or decimal types with explicit rounding rules.
+
+557
+00:42:58.785 --> 00:42:59.788
+Intermediate.
+
+558
+00:43:00.068 --> 00:43:01.177
+Question 5.
+
+559
+00:43:01.457 --> 00:43:03.441
+How do you make postings idempotent?
+
+560
+00:43:03.721 --> 00:43:05.087
+Thirty-second answer:
+
+561
+00:43:05.367 --> 00:43:21.196
+Every posting carries the upstream reference (UPI transaction id, request id) with a unique constraint; a retry finds the existing posting and returns its result; reversals reference the original posting and are unique too.
+
+562
+00:43:22.546 --> 00:43:23.655
+Question 6.
+
+563
+00:43:23.935 --> 00:43:26.218
+What is a hold (lien) and when is it used?
+
+564
+00:43:26.498 --> 00:43:27.863
+Thirty-second answer:
+
+565
+00:43:28.143 --> 00:43:42.458
+A reservation that reduces available balance without posting, for card authorisations, pending UPI debits, legal orders or collateral; it is converted into a posting or released, with an expiry and a reason.
+
+566
+00:43:43.808 --> 00:43:44.896
+Question 7.
+
+567
+00:43:45.176 --> 00:43:49.571
+What happens in end-of-day processing, and why is it a problem for UPI?
+
+568
+00:43:49.851 --> 00:43:51.216
+Thirty-second answer:
+
+569
+00:43:51.496 --> 00:44:08.392
+Accrual, charges, standing instructions, statements and GL balancing on a closed business date, traditionally blocking transactions; UPI is 24 times 7, so batches must run on snapshots or streams with business dates, never pausing payments.
+
+570
+00:44:09.742 --> 00:44:10.766
+Question 8.
+
+571
+00:44:11.046 --> 00:44:15.163
+How do settlement and reconciliation work between banks for UPI?
+
+572
+00:44:15.443 --> 00:44:16.809
+Thirty-second answer:
+
+573
+00:44:17.089 --> 00:44:33.153
+Transactions are cleared in cycles; the switch computes net positions per bank and settles through accounts at the central bank; each bank reconciles its own records against the settlement files and resolves mismatches, the files are the final truth for outcomes.
+
+574
+00:44:34.503 --> 00:44:35.569
+Question 9.
+
+575
+00:44:35.849 --> 00:44:38.132
+How do you compute savings interest correctly?
+
+576
+00:44:38.412 --> 00:44:39.777
+Thirty-second answer:
+
+577
+00:44:40.057 --> 00:44:55.375
+Follow the product terms: daily balances on value dates, the specified day-count convention, high-precision accrual, a single rounding at posting with the specified mode, credited at the specified frequency, and test against worked examples.
+
+578
+00:44:56.725 --> 00:44:57.493
+Senior.
+
+579
+00:44:57.773 --> 00:44:58.818
+Question 10.
+
+580
+00:44:59.098 --> 00:45:02.490
+A merchant account receives 3,000 credits per second.
+
+581
+00:45:02.770 --> 00:45:04.370
+How do you design its balance?
+
+582
+00:45:04.650 --> 00:45:06.015
+Thirty-second answer:
+
+583
+00:45:06.295 --> 00:45:23.362
+Credits become inserts into an append-only journal (or spread over sub-accounts); a roll-up folds committed rows into the balance frequently; debits take a per-account lock and check balance plus unrolled rows; roll-up marks rows rather than using a sequence high-water mark.
+
+584
+00:45:24.712 --> 00:45:25.843
+Question 11.
+
+585
+00:45:26.123 --> 00:45:29.003
+The credit leg of a UPI payment times out.
+
+586
+00:45:29.283 --> 00:45:30.840
+What does the remitter bank do?
+
+587
+00:45:31.120 --> 00:45:32.485
+Thirty-second answer:
+
+588
+00:45:32.765 --> 00:45:50.664
+Keep the debit in PENDING, neither reverse nor finalise; run jittered status checks with backoff; resolve from status or settlement files, whichever comes first; reverse at the next settlement cycle if still unknown, well before the TAT deadline; tell the customer it's processing.
+
+589
+00:45:52.014 --> 00:45:53.102
+Question 12.
+
+590
+00:45:53.382 --> 00:45:55.153
+How would you detect mule accounts?
+
+591
+00:45:55.433 --> 00:45:56.798
+Thirty-second answer:
+
+592
+00:45:57.078 --> 00:46:14.358
+Combine features in the same short window, fan-in from many distinct senders, rapid pass-through, few receivers, meaningful amounts, excluding payments to registered merchants, then follow the money to accounts fed by several suspects; score, review, and act proportionately.
+
+593
+00:46:15.708 --> 00:46:16.988
+Question 13.
+
+594
+00:46:17.268 --> 00:46:21.897
+How do you run interest accrual for 50 million accounts without stopping payments?
+
+595
+00:46:22.177 --> 00:46:23.543
+Thirty-second answer:
+
+596
+00:46:23.823 --> 00:46:39.055
+Read a consistent snapshot of value-dated balances (replica or snapshot export), or maintain accrual incrementally from the posting stream; post accruals as balanced entries under the business date; reconcile totals against the GL.
+
+597
+00:46:40.405 --> 00:46:41.599
+Question 14.
+
+598
+00:46:41.879 --> 00:46:45.634
+What makes a bank's DR design different from a typical web service?
+
+599
+00:46:45.914 --> 00:46:47.279
+Thirty-second answer:
+
+600
+00:46:47.559 --> 00:47:03.581
+Near-zero RPO for the ledger (you cannot lose postings), regulator expectations on recovery and drills, data localisation limiting where DR can be, and reconciliation after failover to prove no posting was lost or duplicated.
+
+601
+00:47:04.931 --> 00:47:05.827
+Architect.
+
+602
+00:47:06.107 --> 00:47:07.301
+Question 15.
+
+603
+00:47:07.581 --> 00:47:10.483
+How would you modernise a legacy core banking system?
+
+604
+00:47:10.763 --> 00:47:12.128
+Thirty-second answer:
+
+605
+00:47:12.408 --> 00:47:30.413
+Strangler approach: a payments hub and API layer in front of the old core, new products on a new ledger, migrate account cohorts with dual-run reconciliation, move batch work to streams, and retire old modules only after sustained parity, with regulator engagement throughout.
+
+606
+00:47:31.763 --> 00:47:32.958
+Question 16.
+
+607
+00:47:33.238 --> 00:47:36.267
+How do regulatory deadlines shape system design?
+
+608
+00:47:36.547 --> 00:47:37.913
+Thirty-second answer:
+
+609
+00:47:38.193 --> 00:47:55.153
+They become explicit timers in state machines (TAT for reversals, reporting windows, dispute timelines), with dashboards of the oldest item per deadline, alerts ahead of breach, and automatic safe actions at the deadline, plus audit evidence that the timers ran.
+
+610
+00:47:56.503 --> 00:47:57.847
+Question 17.
+
+611
+00:47:58.127 --> 00:48:01.113
+Design the risk controls for a bank's UPI payments.
+
+612
+00:48:01.393 --> 00:48:02.759
+Thirty-second answer:
+
+613
+00:48:03.039 --> 00:48:21.833
+Device and SIM binding at the PSP, limits per transaction per day and for new devices or beneficiaries, real-time scoring using velocity and graph features, beneficiary mule scores, step-up or decline actions, and post-transaction monitoring with case management and reporting.
+
+614
+00:48:23.183 --> 00:48:24.357
+Question 18.
+
+615
+00:48:24.637 --> 00:48:28.541
+How would you ensure a bank's ledger is always balanced and proven so?
+
+616
+00:48:28.821 --> 00:48:30.186
+Thirty-second answer:
+
+617
+00:48:30.466 --> 00:48:48.578
+Enforce balanced postings at write time (constraint or transactional check), immutable entries, continuous GL balancing jobs, reconciliation with external statements and settlement files, and independent audits of the tooling, alerting on any non-zero imbalance immediately.
+
+618
+00:48:49.928 --> 00:48:51.165
+Question 19.
+
+619
+00:48:51.445 --> 00:48:54.923
+What are the design implications of payment data localisation?
+
+620
+00:48:55.203 --> 00:48:56.568
+Thirty-second answer:
+
+621
+00:48:56.848 --> 00:49:15.984
+Payment system data must be stored in the country (per the regulator's directive), which constrains cloud regions, DR sites, analytics and vendors; processing abroad may have conditions; design data classification and regional storage from the start (VERIFY current RBI rules and FAQs).
+
+622
+00:49:17.334 --> 00:49:18.443
+Question 20.
+
+623
+00:49:18.723 --> 00:49:23.502
+Compare a merchant's payment system (Ch 45) with a bank's core ledger.
+
+624
+00:49:23.782 --> 00:49:25.147
+Thirty-second answer:
+
+625
+00:49:25.427 --> 00:49:45.310
+The merchant integrates gateways and reconciles against them, owning order state and a ledger of receivables; the bank owns the actual accounts, holds, interest and regulatory deadlines, participates in the switch and settlement, and must never create money, both need idempotency, state machines and reconciliation.
+
+626
+00:49:46.660 --> 00:49:47.556
+Part 9.
+
+627
+00:49:47.836 --> 00:49:49.244
+Summary and Practice.
+
+628
+00:49:50.494 --> 00:49:51.582
+Key takeaways.
+
+629
+00:49:51.862 --> 00:49:55.979
+Double entry, immutable postings and holds are the bank's data model.
+
+630
+00:49:56.259 --> 00:50:03.150
+Hot accounts: credits go to an append-only journal, debits check under a lock, and the roll-up marks rows (L1).
+
+631
+00:50:03.430 --> 00:50:10.086
+Unknown outcomes stay PENDING until resolved by status checks or settlement, before the TAT (L2).
+
+632
+00:50:10.366 --> 00:50:16.297
+Interest follows the terms: decimal arithmetic, single rounding, the correct day count (L3).
+
+633
+00:50:16.577 --> 00:50:20.758
+Detect mules with windowed combinations and graph features (L4).
+
+634
+00:50:22.108 --> 00:50:23.089
+Cheat sheet.
+
+635
+00:50:23.369 --> 00:50:24.735
+Here is a quick table:
+
+636
+00:50:25.015 --> 00:50:26.401
+Problem, and Pattern.
+
+637
+00:50:26.681 --> 00:50:27.705
+Money movement:
+
+638
+00:50:27.985 --> 00:50:31.207
+Balanced postings, idempotent on upstream reference.
+
+639
+00:50:31.487 --> 00:50:32.532
+Pending debit:
+
+640
+00:50:32.812 --> 00:50:34.668
+Hold, then posting or release.
+
+641
+00:50:34.948 --> 00:50:36.292
+Hot merchant account:
+
+642
+00:50:36.572 --> 00:50:38.897
+Journal + roll-up; locked debits.
+
+643
+00:50:39.177 --> 00:50:40.393
+UPI timeout:
+
+644
+00:50:40.673 --> 00:50:43.745
+PENDING, status checks, settlement, TAT timer.
+
+645
+00:50:44.025 --> 00:50:44.879
+Interest:
+
+646
+00:50:45.159 --> 00:50:47.953
+Decimal accrual, round once, day-count per terms.
+
+647
+00:50:48.233 --> 00:50:49.065
+Mules:
+
+648
+00:50:49.345 --> 00:50:53.313
+Fan-in + pass-through + few receivers in a window; follow the money.
+
+649
+00:50:54.663 --> 00:50:55.794
+Exercises.
+
+650
+00:50:56.074 --> 00:51:05.311
+(B1) Write the postings (all lines) for a 500 rupeesUPI payment with a 2 rupeesfee and 18% GST on the fee.
+
+651
+00:51:05.591 --> 00:51:10.114
+(B2) Add hold expiry to L1: debits first place a hold, then post.
+
+652
+00:51:10.394 --> 00:51:13.295
+(B3) Change L2's incident to 8 hours.
+
+653
+00:51:13.575 --> 00:51:15.602
+When does R4 risk the TAT?
+
+654
+00:51:15.882 --> 00:51:20.447
+(B3) Add a 30 or 360 day-count to L3 and compare.
+
+655
+00:51:20.727 --> 00:51:26.871
+(B4) Add a money mule marketplace pattern to L4, with mules rotating collectors every hour.
+
+656
+00:51:27.151 --> 00:51:28.581
+Which feature catches it?
+
+657
+00:51:29.931 --> 00:51:30.933
+Further reading.
+
+658
+00:51:31.213 --> 00:51:37.165
+NPCI's UPI documentation and procedural guidelines (VERIFY current versions).
+
+659
+00:51:37.445 --> 00:51:48.069
+RBI circulars on TAT harmonisation for failed transactions, storage of payment system data, and outsourcing of IT services (VERIFY current texts).
+
+660
+00:51:48.349 --> 00:51:53.747
+Core banking and accounting references on double entry, accruals and day-count conventions.
+
+661
+00:51:55.097 --> 00:51:56.334
+Related chapters.
+
+662
+00:51:56.614 --> 00:52:05.766
+Ch 45, Payment System, Ch 20, Idempotency, Ch 13, Distributed Transactions, Ch 36, Compliance.
+
+663
+00:52:06.046 --> 00:52:07.241
+Next in this tab:
+
+664
+00:52:07.521 --> 00:52:10.977
+I04, Hospital EHR and Telemedicine.
+
+665
+00:52:12.327 --> 00:52:13.927
+That's the end of this chapter.
+
+666
+00:52:14.207 --> 00:52:20.329
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+667
+00:52:20.609 --> 00:52:22.060
+See you in the next chapter.
+

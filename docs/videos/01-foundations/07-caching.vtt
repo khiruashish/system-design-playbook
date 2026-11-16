@@ -1,0 +1,5518 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.182
+Caching.
+
+2
+00:00:01.462 --> 00:00:05.835
+Chapter 07, from the Foundations part of the System Design Playbook.
+
+3
+00:00:07.585 --> 00:00:08.545
+At a glance:
+
+4
+00:00:08.825 --> 00:00:09.999
+Chapter at a glance.
+
+5
+00:00:10.279 --> 00:00:11.281
+Reader bands:
+
+6
+00:00:11.561 --> 00:00:13.865
+B1, then B4, Prerequisites:
+
+7
+00:00:14.145 --> 00:00:18.860
+Ch 02, Ch 05, Ch 06, What you will build:
+
+8
+00:00:19.140 --> 00:00:37.977
+The product-card cache, taken from LRU + single-flight + XFetch in plain Java (L1) to a two-level Caffeine + Redis cache with race-free versioned writes, event-driven invalidation across pods, hot-key protection, CDN surrogate keys and pre-sale warming (L4), Reading time:
+
+9
+00:00:38.257 --> 00:00:39.879
+100 min + code.
+
+10
+00:00:41.229 --> 00:00:42.082
+Part 1.
+
+11
+00:00:42.362 --> 00:00:44.282
+Introduction and Why It Matters.
+
+12
+00:00:45.532 --> 00:00:48.561
+A story: flush the cache so the sale prices show up.
+
+13
+00:00:48.841 --> 00:00:53.961
+At 7:59 pm on sale day, the pricing team loaded the festival prices.
+
+14
+00:00:54.241 --> 00:01:04.225
+To make them show up immediately, someone ran FLUSHALL on the catalog Redis cluster at 8:00:00, the exact second the sale opened.
+
+15
+00:01:04.505 --> 00:01:05.401
+Stampede.
+
+16
+00:01:05.681 --> 00:01:12.700
+110 K req per second that had been served ~98 % from cache now all missed at once.
+
+17
+00:01:12.980 --> 00:01:16.137
+Every miss ran the same 8 ms product-card query.
+
+18
+00:01:16.417 --> 00:01:24.439
+The catalog PostgreSQL went from 2 K to 60 K queries per second and hit 100 % CPU in seconds.
+
+19
+00:01:24.719 --> 00:01:30.713
+Queries slowed to 2 s, and the cache couldn't refill because every loader was stuck waiting on the database.
+
+20
+00:01:32.063 --> 00:01:33.557
+Stale prices anyway.
+
+21
+00:01:33.837 --> 00:01:40.535
+Each catalog pod also had an in-process cache (Caffeine, 10-minute TTL) that FLUSHALL didn't touch.
+
+22
+00:01:40.815 --> 00:01:48.282
+For ten minutes, customers saw old prices on some requests and new prices on others, depending on which pod served them.
+
+23
+00:01:48.562 --> 00:01:52.487
+The cart re-priced at checkout, and customers saw price changed errors.
+
+24
+00:01:52.767 --> 00:01:54.282
+One stale price forever.
+
+25
+00:01:54.562 --> 00:02:04.247
+A price update raced with a cache fill: a reader loaded the old price, the writer updated the DB and deleted the key, and then the reader wrote the old price back.
+
+26
+00:02:04.527 --> 00:02:08.133
+It stayed until the Redis TTL expired six hours later.
+
+27
+00:02:09.483 --> 00:02:21.045
+Every one of these is a caching design failure, not a database failure: no stampede protection, no invalidation across cache layers, and no protection against the read or write race.
+
+28
+00:02:22.395 --> 00:02:23.078
+Quote:
+
+29
+00:02:23.358 --> 00:02:25.022
+The thesis of this chapter.
+
+30
+00:02:25.302 --> 00:02:29.441
+A cache is a copy of data with a lifetime and a staleness contract.
+
+31
+00:02:29.721 --> 00:02:32.174
+Caching is easy to add and hard to get right.
+
+32
+00:02:32.454 --> 00:02:39.771
+The hard parts are what happens on a miss storm, how copies are invalidated, and what staleness each reader is allowed to see.
+
+33
+00:02:41.121 --> 00:02:43.425
+Where this lives in the grocery platform.
+
+34
+00:02:43.705 --> 00:02:45.071
+Here is a quick table:
+
+35
+00:02:45.351 --> 00:02:47.889
+Layer, and What's cached, and Staleness allowed.
+
+36
+00:02:48.169 --> 00:02:49.599
+Mobile app or browser.
+
+37
+00:02:49.879 --> 00:02:50.839
+What's cached:
+
+38
+00:02:51.119 --> 00:02:53.359
+Category trees, images, config.
+
+39
+00:02:53.639 --> 00:02:54.812
+Staleness allowed:
+
+40
+00:02:55.092 --> 00:02:58.057
+Minutes to hours (versioned URLs for images).
+
+41
+00:02:58.337 --> 00:02:59.276
+CDN.
+
+42
+00:02:59.556 --> 00:03:00.516
+What's cached:
+
+43
+00:03:00.796 --> 00:03:04.465
+Product images, static assets, anonymous category listings.
+
+44
+00:03:04.745 --> 00:03:05.919
+Staleness allowed:
+
+45
+00:03:06.199 --> 00:03:07.713
+Minutes; purge on change.
+
+46
+00:03:07.993 --> 00:03:10.084
+API gateway or BFF.
+
+47
+00:03:10.364 --> 00:03:11.324
+What's cached:
+
+48
+00:03:11.604 --> 00:03:13.396
+Rarely: some anonymous GETs.
+
+49
+00:03:13.676 --> 00:03:14.849
+Staleness allowed:
+
+50
+00:03:15.129 --> 00:03:15.940
+Seconds.
+
+51
+00:03:16.220 --> 00:03:18.652
+Service in-process (L1, Caffeine).
+
+52
+00:03:18.932 --> 00:03:19.892
+What's cached:
+
+53
+00:03:20.172 --> 00:03:25.335
+Hot product cards, GST rates, serviceability snapshot (Ch 01).
+
+54
+00:03:25.615 --> 00:03:26.788
+Staleness allowed:
+
+55
+00:03:27.068 --> 00:03:27.879
+Seconds.
+
+56
+00:03:28.159 --> 00:03:30.313
+Distributed cache (L2, Redis).
+
+57
+00:03:30.593 --> 00:03:31.553
+What's cached:
+
+58
+00:03:31.833 --> 00:03:34.585
+Product cards, store prices, cart, sessions.
+
+59
+00:03:34.865 --> 00:03:36.039
+Staleness allowed:
+
+60
+00:03:36.319 --> 00:03:38.900
+Seconds to minutes, invalidated on change.
+
+61
+00:03:39.180 --> 00:03:40.183
+Database.
+
+62
+00:03:40.463 --> 00:03:41.423
+What's cached:
+
+63
+00:03:41.703 --> 00:03:43.388
+Buffer cache, query plans.
+
+64
+00:03:43.668 --> 00:03:46.697
+Staleness allowed: n or a (always consistent).
+
+65
+00:03:48.047 --> 00:03:49.370
+Learning objectives.
+
+66
+00:03:49.650 --> 00:03:51.015
+Here is a quick table:
+
+67
+00:03:51.295 --> 00:03:53.493
+Band, and After this chapter you can....
+
+68
+00:03:53.773 --> 00:03:54.605
+B1:
+
+69
+00:03:54.885 --> 00:04:00.367
+Explain cache hits and misses, TTLs, LRU or LFU, and where caches sit.
+
+70
+00:04:00.647 --> 00:04:01.522
+B2:
+
+71
+00:04:01.802 --> 00:04:08.245
+Choose cache-aside, read-through, write-through, write-behind or refresh-ahead, and use Spring Cache with Redis.
+
+72
+00:04:08.525 --> 00:04:09.421
+B3:
+
+73
+00:04:09.701 --> 00:04:16.869
+Prevent stampedes, fix the cache-aside race, handle hot keys, design multi-level caches, and measure hit ratios.
+
+74
+00:04:17.149 --> 00:04:18.045
+B4:
+
+75
+00:04:18.325 --> 00:04:28.543
+Design invalidation across layers (L1, L2, CDN), cache warming, per-data staleness contracts, and caching's cost and availability trade-offs.
+
+76
+00:04:29.893 --> 00:04:30.768
+Part 2.
+
+77
+00:04:31.048 --> 00:04:32.947
+Core Concepts, Beginner to Deep.
+
+78
+00:04:34.197 --> 00:04:36.501
+Intuition: the shopkeeper's counter.
+
+79
+00:04:36.781 --> 00:04:44.162
+A kirana shopkeeper keeps the ten most-asked-for items on the counter (cache) and everything else in the storeroom (database).
+
+80
+00:04:44.442 --> 00:04:47.301
+Most customers are served from the counter: a hit.
+
+81
+00:04:47.581 --> 00:04:51.058
+For something rare, the shopkeeper walks to the storeroom: a miss.
+
+82
+00:04:51.338 --> 00:04:53.087
+He may then keep it on the counter.
+
+83
+00:04:53.367 --> 00:04:59.639
+The counter is small, so when it's full he removes what nobody asked for recently: eviction (LRU).
+
+84
+00:04:59.919 --> 00:05:07.642
+If the price of sugar changes, the price tag on the counter must change too, or customers pay the wrong price: invalidation.
+
+85
+00:05:08.992 --> 00:05:16.565
+If 50 customers ask for sugar at once and the counter is empty, he shouldn't make 50 trips to the storeroom: stampede protection.
+
+86
+00:05:17.915 --> 00:05:19.750
+The numbers that make caching worth it.
+
+87
+00:05:20.030 --> 00:05:21.011
+The formula:
+
+88
+00:05:21.291 --> 00:05:29.953
+Effective latency = h times t cache + (1-h) times t origin Origin load = (1-h) times request rate.
+
+89
+00:05:31.303 --> 00:05:32.668
+Here is a quick table:
+
+90
+00:05:32.948 --> 00:05:41.737
+Hit ratio h, and Origin load at 110 K req per second, and Effective latency (cache 1 ms, origin 10 ms).
+
+91
+00:05:42.017 --> 00:05:43.084
+0 %.
+
+92
+00:05:43.364 --> 00:05:46.308
+Origin load at 110 K req per second:
+
+93
+00:05:46.588 --> 00:05:48.401
+110 K per second.
+
+94
+00:05:48.681 --> 00:05:52.329
+Effective latency (cache 1 ms, origin 10 ms):
+
+95
+00:05:52.609 --> 00:05:53.633
+10 ms.
+
+96
+00:05:53.913 --> 00:05:55.001
+90 %.
+
+97
+00:05:55.281 --> 00:05:58.225
+Origin load at 110 K req per second:
+
+98
+00:05:58.505 --> 00:05:59.913
+11 K per second.
+
+99
+00:06:00.193 --> 00:06:03.841
+Effective latency (cache 1 ms, origin 10 ms):
+
+100
+00:06:04.121 --> 00:06:05.508
+1.9 ms.
+
+101
+00:06:05.788 --> 00:06:07.047
+98 %.
+
+102
+00:06:07.327 --> 00:06:10.271
+Origin load at 110 K req per second:
+
+103
+00:06:10.551 --> 00:06:12.193
+2.2 K per second.
+
+104
+00:06:12.473 --> 00:06:16.121
+Effective latency (cache 1 ms, origin 10 ms):
+
+105
+00:06:16.401 --> 00:06:18.023
+1.18 ms.
+
+106
+00:06:18.303 --> 00:06:20.201
+99.5 %.
+
+107
+00:06:20.481 --> 00:06:23.425
+Origin load at 110 K req per second:
+
+108
+00:06:23.705 --> 00:06:25.433
+550 per second.
+
+109
+00:06:25.713 --> 00:06:29.361
+Effective latency (cache 1 ms, origin 10 ms):
+
+110
+00:06:29.641 --> 00:06:31.455
+1.05 ms.
+
+111
+00:06:32.805 --> 00:06:33.722
+Watch out:
+
+112
+00:06:34.002 --> 00:06:36.989
+Your database is sized for the misses, not the hits.
+
+113
+00:06:37.269 --> 00:06:41.493
+At 98 % hits, the database sees 2.2 K per second.
+
+114
+00:06:41.773 --> 00:06:47.554
+If the cache disappears, it sees 110 K per second, 50 times its normal load.
+
+115
+00:06:47.834 --> 00:06:50.863
+The cache has become a load-bearing part of availability.
+
+116
+00:06:51.143 --> 00:06:56.050
+Design for cache loss: stampede protection, gradual warming, and load shedding.
+
+117
+00:06:57.400 --> 00:06:58.339
+Where to cache.
+
+118
+00:06:58.619 --> 00:06:59.963
+Here is the diagram.
+
+119
+00:07:03.813 --> 00:07:05.178
+Here is a quick table:
+
+120
+00:07:05.458 --> 00:07:09.895
+Layer, and Latency, and Scope, and Invalidation difficulty, and Best for.
+
+121
+00:07:10.175 --> 00:07:10.965
+Client.
+
+122
+00:07:11.245 --> 00:07:12.162
+Latency:
+
+123
+00:07:12.442 --> 00:07:13.189
+0.
+
+124
+00:07:13.469 --> 00:07:14.194
+Scope:
+
+125
+00:07:14.474 --> 00:07:15.413
+One user.
+
+126
+00:07:15.693 --> 00:07:17.378
+Invalidation difficulty:
+
+127
+00:07:17.658 --> 00:07:19.279
+Hard (you don't control it).
+
+128
+00:07:19.559 --> 00:07:20.413
+Best for:
+
+129
+00:07:20.693 --> 00:07:23.829
+Immutable or versioned assets, config with ETags.
+
+130
+00:07:24.109 --> 00:07:25.047
+CDN.
+
+131
+00:07:25.327 --> 00:07:28.421
+Latency: ~10 to 30 ms from user.
+
+132
+00:07:28.701 --> 00:07:29.426
+Scope:
+
+133
+00:07:29.706 --> 00:07:31.050
+Region or global.
+
+134
+00:07:31.330 --> 00:07:33.015
+Invalidation difficulty:
+
+135
+00:07:33.295 --> 00:07:35.002
+Purge APIs (seconds).
+
+136
+00:07:35.282 --> 00:07:36.135
+Best for:
+
+137
+00:07:36.415 --> 00:07:39.231
+Static assets, anonymous pages, images.
+
+138
+00:07:39.511 --> 00:07:40.770
+L1 in-process.
+
+139
+00:07:41.050 --> 00:07:44.293
+Latency: ~100 ns, 1 µs.
+
+140
+00:07:44.573 --> 00:07:45.298
+Scope:
+
+141
+00:07:45.578 --> 00:07:46.495
+One pod.
+
+142
+00:07:46.775 --> 00:07:48.461
+Invalidation difficulty:
+
+143
+00:07:48.741 --> 00:07:49.466
+Hard:
+
+144
+00:07:49.746 --> 00:07:50.727
+N copies.
+
+145
+00:07:51.007 --> 00:07:51.861
+Best for:
+
+146
+00:07:52.141 --> 00:07:55.362
+Hot, small, read-mostly data with short TTLs.
+
+147
+00:07:55.642 --> 00:07:57.029
+L2 distributed.
+
+148
+00:07:57.309 --> 00:08:00.295
+Latency: ~0.3 to 1 ms.
+
+149
+00:08:00.575 --> 00:08:01.301
+Scope:
+
+150
+00:08:01.581 --> 00:08:02.541
+All pods.
+
+151
+00:08:02.821 --> 00:08:04.506
+Invalidation difficulty:
+
+152
+00:08:04.786 --> 00:08:06.215
+Easy: one copy.
+
+153
+00:08:06.495 --> 00:08:07.349
+Best for:
+
+154
+00:08:07.629 --> 00:08:09.975
+Shared data, sessions, computed views.
+
+155
+00:08:10.255 --> 00:08:11.599
+DB buffer cache.
+
+156
+00:08:11.879 --> 00:08:12.797
+Latency:
+
+157
+00:08:13.077 --> 00:08:13.951
+Automatic.
+
+158
+00:08:14.231 --> 00:08:14.957
+Scope:
+
+159
+00:08:15.237 --> 00:08:16.111
+DB.
+
+160
+00:08:16.391 --> 00:08:18.077
+Invalidation difficulty:
+
+161
+00:08:18.357 --> 00:08:19.231
+Automatic.
+
+162
+00:08:19.511 --> 00:08:20.365
+Best for:
+
+163
+00:08:20.645 --> 00:08:21.861
+Everything (free).
+
+164
+00:08:23.211 --> 00:08:24.341
+Caching patterns.
+
+165
+00:08:24.621 --> 00:08:25.987
+Here is a quick table:
+
+166
+00:08:26.267 --> 00:08:30.896
+Pattern, and Read path, and Write path, and Pros, and Cons, and Grocery use.
+
+167
+00:08:31.176 --> 00:08:33.011
+Cache-aside (lazy loading).
+
+168
+00:08:33.291 --> 00:08:34.229
+Read path:
+
+169
+00:08:34.509 --> 00:08:38.989
+App checks the cache, and on a miss loads from the DB and populates the cache.
+
+170
+00:08:39.269 --> 00:08:40.187
+Write path:
+
+171
+00:08:40.467 --> 00:08:43.155
+App writes the DB, then deletes the cache key.
+
+172
+00:08:43.435 --> 00:08:44.288
+Pros:
+
+173
+00:08:44.568 --> 00:08:48.728
+Simple; cache only holds what's read; cache failure doesn't block reads.
+
+174
+00:08:49.008 --> 00:08:49.819
+Cons:
+
+175
+00:08:50.099 --> 00:08:54.664
+First read is slow; race conditions (§2.8); stampedes.
+
+176
+00:08:54.944 --> 00:08:55.947
+Grocery use:
+
+177
+00:08:56.227 --> 00:08:58.104
+Product cards, store prices.
+
+178
+00:08:58.384 --> 00:08:59.344
+Read-through.
+
+179
+00:08:59.624 --> 00:09:00.563
+Read path:
+
+180
+00:09:00.843 --> 00:09:03.488
+Cache library loads on a miss (loader function).
+
+181
+00:09:03.768 --> 00:09:04.685
+Write path:
+
+182
+00:09:04.965 --> 00:09:06.139
+As cache-aside.
+
+183
+00:09:06.419 --> 00:09:07.272
+Pros:
+
+184
+00:09:07.552 --> 00:09:09.771
+Cleaner code; enables single-flight.
+
+185
+00:09:10.051 --> 00:09:10.861
+Cons:
+
+186
+00:09:11.141 --> 00:09:12.507
+Same staleness issues.
+
+187
+00:09:12.787 --> 00:09:13.789
+Grocery use:
+
+188
+00:09:14.069 --> 00:09:15.712
+Caffeine LoadingCache L1.
+
+189
+00:09:17.062 --> 00:09:17.979
+Write-through.
+
+190
+00:09:18.259 --> 00:09:19.198
+Read path:
+
+191
+00:09:19.478 --> 00:09:21.249
+Cache is always populated.
+
+192
+00:09:21.529 --> 00:09:22.446
+Write path:
+
+193
+00:09:22.726 --> 00:09:25.009
+Write to cache and DB synchronously.
+
+194
+00:09:25.289 --> 00:09:26.142
+Pros:
+
+195
+00:09:26.422 --> 00:09:28.214
+Reads always hit after writes.
+
+196
+00:09:28.494 --> 00:09:29.305
+Cons:
+
+197
+00:09:29.585 --> 00:09:34.961
+Write latency; caches data nobody reads; still inconsistent if one write fails.
+
+198
+00:09:35.241 --> 00:09:36.243
+Grocery use:
+
+199
+00:09:36.523 --> 00:09:38.230
+Rarely: config values.
+
+200
+00:09:38.510 --> 00:09:40.089
+Write-behind (write-back).
+
+201
+00:09:40.369 --> 00:09:41.307
+Read path:
+
+202
+00:09:41.587 --> 00:09:42.825
+Reads from the cache.
+
+203
+00:09:43.105 --> 00:09:44.022
+Write path:
+
+204
+00:09:44.302 --> 00:09:47.310
+Write to the cache; flush to the DB asynchronously.
+
+205
+00:09:47.590 --> 00:09:48.443
+Pros:
+
+206
+00:09:48.723 --> 00:09:50.430
+Very fast writes; batching.
+
+207
+00:09:50.710 --> 00:09:51.521
+Cons:
+
+208
+00:09:51.801 --> 00:09:55.875
+Data loss on cache failure; ordering and consistency complexity.
+
+209
+00:09:56.155 --> 00:09:57.158
+Grocery use:
+
+210
+00:09:57.438 --> 00:10:00.254
+Counters for analytics (view counts), never money.
+
+211
+00:10:00.534 --> 00:10:01.579
+Refresh-ahead.
+
+212
+00:10:01.859 --> 00:10:02.798
+Read path:
+
+213
+00:10:03.078 --> 00:10:05.809
+Serve from the cache; refresh before expiry.
+
+214
+00:10:06.089 --> 00:10:06.942
+Pros:
+
+215
+00:10:07.222 --> 00:10:08.545
+Hot keys never miss.
+
+216
+00:10:08.825 --> 00:10:09.635
+Cons:
+
+217
+00:10:09.915 --> 00:10:12.347
+Refreshes data that may not be read again.
+
+218
+00:10:12.627 --> 00:10:13.630
+Grocery use:
+
+219
+00:10:13.910 --> 00:10:17.366
+Hot SKUs during sales; GST rate tables.
+
+220
+00:10:18.716 --> 00:10:19.356
+Tip:
+
+221
+00:10:19.636 --> 00:10:22.025
+Delete, don't update, on writes (cache-aside).
+
+222
+00:10:22.305 --> 00:10:26.444
+After a DB write, delete the cache key rather than writing the new value.
+
+223
+00:10:26.724 --> 00:10:33.508
+Two concurrent writers updating the cache can leave the older value last (their DB order and cache order differ).
+
+224
+00:10:33.788 --> 00:10:36.839
+Deleting means the next reader loads the current value.
+
+225
+00:10:37.119 --> 00:10:41.961
+That's not the whole story, though: see the read or write race in §2.8.
+
+226
+00:10:43.311 --> 00:10:44.613
+Eviction policies.
+
+227
+00:10:44.893 --> 00:10:46.258
+Here is a quick table:
+
+228
+00:10:46.538 --> 00:10:49.119
+Policy, and Evicts, and Good for, and Weakness.
+
+229
+00:10:49.399 --> 00:10:50.317
+LRU.
+
+230
+00:10:50.597 --> 00:10:51.386
+Evicts:
+
+231
+00:10:51.666 --> 00:10:53.074
+Least recently used.
+
+232
+00:10:53.354 --> 00:10:54.186
+Good for:
+
+233
+00:10:54.466 --> 00:10:55.981
+Recency-heavy workloads.
+
+234
+00:10:56.261 --> 00:10:57.114
+Weakness:
+
+235
+00:10:57.394 --> 00:11:00.530
+A one-off scan (bulk export) flushes hot items.
+
+236
+00:11:00.810 --> 00:11:01.685
+LFU.
+
+237
+00:11:01.965 --> 00:11:02.754
+Evicts:
+
+238
+00:11:03.034 --> 00:11:04.421
+Least frequently used.
+
+239
+00:11:04.701 --> 00:11:05.533
+Good for:
+
+240
+00:11:05.813 --> 00:11:08.266
+Stable popularity (top SKUs).
+
+241
+00:11:08.546 --> 00:11:09.399
+Weakness:
+
+242
+00:11:09.679 --> 00:11:13.221
+Slow to adapt; old popular items linger (use aging).
+
+243
+00:11:13.501 --> 00:11:15.421
+W-TinyLFU (Caffeine).
+
+244
+00:11:15.701 --> 00:11:16.490
+Evicts:
+
+245
+00:11:16.770 --> 00:11:19.842
+Admission by frequency sketch + windowed LRU.
+
+246
+00:11:20.122 --> 00:11:20.954
+Good for:
+
+247
+00:11:21.234 --> 00:11:23.645
+Mixed workloads; near-optimal hit rates.
+
+248
+00:11:23.925 --> 00:11:24.778
+Weakness:
+
+249
+00:11:25.058 --> 00:11:27.810
+(the best default for JVM L1 caches).
+
+250
+00:11:28.090 --> 00:11:29.733
+TTL or TTI.
+
+251
+00:11:30.013 --> 00:11:30.802
+Evicts:
+
+252
+00:11:31.082 --> 00:11:33.941
+Expired entries (time-to-live or time-to-idle).
+
+253
+00:11:34.221 --> 00:11:35.053
+Good for:
+
+254
+00:11:35.333 --> 00:11:36.527
+Bounding staleness.
+
+255
+00:11:36.807 --> 00:11:37.661
+Weakness:
+
+256
+00:11:37.941 --> 00:11:39.946
+Not a memory policy by itself.
+
+257
+00:11:40.226 --> 00:11:41.015
+Random.
+
+258
+00:11:41.295 --> 00:11:42.085
+Evicts:
+
+259
+00:11:42.365 --> 00:11:43.474
+Random entry.
+
+260
+00:11:43.754 --> 00:11:44.586
+Good for:
+
+261
+00:11:44.866 --> 00:11:45.783
+Very cheap.
+
+262
+00:11:46.063 --> 00:11:46.917
+Weakness:
+
+263
+00:11:47.197 --> 00:11:48.242
+Unpredictable.
+
+264
+00:11:49.592 --> 00:12:03.715
+Redis maxmemory-policy: allkeys-lru or allkeys-lfu for pure caches, volatile- when only keys with TTLs may be evicted, and noeviction for stateful data (writes fail instead of silently losing data).
+
+265
+00:12:05.065 --> 00:12:07.305
+TTLs and the staleness contract.
+
+266
+00:12:07.585 --> 00:12:13.430
+Every cached item has a staleness contract: the maximum time a reader may see an old value.
+
+267
+00:12:13.710 --> 00:12:18.382
+The TTL is the safety net that bounds it even when invalidation fails.
+
+268
+00:12:18.662 --> 00:12:22.481
+It isn't the primary freshness mechanism for data that changes.
+
+269
+00:12:23.831 --> 00:12:25.196
+Here is a quick table:
+
+270
+00:12:25.476 --> 00:12:30.553
+Data, and Changes, and Invalidation, and TTL (safety net), and Contract.
+
+271
+00:12:30.833 --> 00:12:33.415
+Product content (name, images, description).
+
+272
+00:12:33.695 --> 00:12:34.612
+Changes:
+
+273
+00:12:34.892 --> 00:12:35.724
+Rarely.
+
+274
+00:12:36.004 --> 00:12:37.092
+Invalidation:
+
+275
+00:12:37.372 --> 00:12:38.652
+Event-driven delete.
+
+276
+00:12:38.932 --> 00:12:40.575
+TTL (safety net):
+
+277
+00:12:40.855 --> 00:12:42.860
+6 h ± jitter.
+
+278
+00:12:43.140 --> 00:12:48.623
+Contract: at most ~5 s after change (event), at most 6 h worst case.
+
+279
+00:12:48.903 --> 00:12:49.905
+Store price.
+
+280
+00:12:50.185 --> 00:12:51.103
+Changes:
+
+281
+00:12:51.383 --> 00:12:53.985
+Several times per day; bursts before sales.
+
+282
+00:12:54.265 --> 00:12:55.353
+Invalidation:
+
+283
+00:12:55.633 --> 00:12:57.831
+Event-driven delete + versioned writes.
+
+284
+00:12:58.111 --> 00:12:59.753
+TTL (safety net):
+
+285
+00:13:00.033 --> 00:13:01.975
+10 min ± jitter.
+
+286
+00:13:02.255 --> 00:13:06.735
+Contract: at most ~5 s; checkout re-prices from the SoR.
+
+287
+00:13:07.015 --> 00:13:08.615
+Stock availability badge.
+
+288
+00:13:08.895 --> 00:13:09.812
+Changes:
+
+289
+00:13:10.092 --> 00:13:11.009
+Constantly.
+
+290
+00:13:11.289 --> 00:13:12.377
+Invalidation:
+
+291
+00:13:12.657 --> 00:13:15.175
+Not cached, or 5 to 10 s TTL.
+
+292
+00:13:15.455 --> 00:13:17.097
+TTL (safety net):
+
+293
+00:13:17.377 --> 00:13:18.252
+10 s.
+
+294
+00:13:18.532 --> 00:13:19.364
+Contract:
+
+295
+00:13:19.644 --> 00:13:23.804
+In stock is a hint; reservation is exact (Ch 05).
+
+296
+00:13:25.154 --> 00:13:26.626
+GST rate table.
+
+297
+00:13:26.906 --> 00:13:27.823
+Changes:
+
+298
+00:13:28.103 --> 00:13:30.109
+Rarely (government notification).
+
+299
+00:13:30.389 --> 00:13:31.477
+Invalidation:
+
+300
+00:13:31.757 --> 00:13:33.357
+Event + refresh-ahead.
+
+301
+00:13:33.637 --> 00:13:35.279
+TTL (safety net):
+
+302
+00:13:35.559 --> 00:13:36.434
+1 h.
+
+303
+00:13:36.714 --> 00:13:38.485
+Contract: at most 1 min.
+
+304
+00:13:38.765 --> 00:13:39.874
+Serviceability.
+
+305
+00:13:40.154 --> 00:13:41.071
+Changes:
+
+306
+00:13:41.351 --> 00:13:42.183
+Rarely.
+
+307
+00:13:42.463 --> 00:13:43.551
+Invalidation:
+
+308
+00:13:43.831 --> 00:13:45.709
+Snapshot (Ch 01).
+
+309
+00:13:45.989 --> 00:13:47.631
+TTL (safety net):
+
+310
+00:13:47.911 --> 00:13:49.383
+Full reload 30 s.
+
+311
+00:13:49.663 --> 00:13:50.495
+Contract:
+
+312
+00:13:50.775 --> 00:13:53.293
+Browse at most 60 s; checkout fresh.
+
+313
+00:13:54.643 --> 00:13:55.389
+Warning:
+
+314
+00:13:55.669 --> 00:13:57.205
+Add jitter to TTLs.
+
+315
+00:13:57.485 --> 00:14:08.173
+If 250 K keys are warmed at 7:30 pm with TTL = 30 min, they all expire at 8:00 pm, at the sale start.
+
+316
+00:14:08.453 --> 00:14:13.509
+Use TTL times (1 ± 10 %) so expiries spread out.
+
+317
+00:14:14.859 --> 00:14:16.737
+Cache stampede (thundering herd).
+
+318
+00:14:17.017 --> 00:14:26.958
+A stampede happens when many requests miss the same key at the same time (the key expired, was deleted, or the cache was cold) and all of them hit the origin.
+
+319
+00:14:27.238 --> 00:14:29.414
+L1 (§5) measures it:
+
+320
+00:14:29.694 --> 00:14:35.774
+1,000 concurrent requests, then 1,000 DB calls naively, 1 with single-flight.
+
+321
+00:14:37.124 --> 00:14:38.489
+Here is a quick table:
+
+322
+00:14:38.769 --> 00:14:40.369
+Technique, and How, and Scope.
+
+323
+00:14:40.649 --> 00:14:42.847
+Single-flight or request coalescing.
+
+324
+00:14:43.127 --> 00:14:43.788
+How:
+
+325
+00:14:44.068 --> 00:14:46.948
+Concurrent misses for a key share one in-flight load.
+
+326
+00:14:47.228 --> 00:14:47.953
+Scope:
+
+327
+00:14:48.233 --> 00:14:51.049
+Per process (Caffeine does this for get(key, loader)).
+
+328
+00:14:51.329 --> 00:14:52.951
+Distributed lock on miss.
+
+329
+00:14:53.231 --> 00:14:53.892
+How:
+
+330
+00:14:54.172 --> 00:14:59.868
+SET lock:key NX PX 3000: the winner loads, others wait or serve stale.
+
+331
+00:15:00.148 --> 00:15:00.873
+Scope:
+
+332
+00:15:01.153 --> 00:15:03.628
+Across pods (costlier; deadline needed).
+
+333
+00:15:03.908 --> 00:15:05.252
+Stale-while-revalidate.
+
+334
+00:15:05.532 --> 00:15:06.193
+How:
+
+335
+00:15:06.473 --> 00:15:09.951
+Keep serving the expired value while one caller refreshes.
+
+336
+00:15:10.231 --> 00:15:10.956
+Scope:
+
+337
+00:15:11.236 --> 00:15:14.180
+Needs a soft TTL plus a hard TTL.
+
+338
+00:15:14.460 --> 00:15:17.148
+Probabilistic early expiration (XFetch).
+
+339
+00:15:17.428 --> 00:15:18.089
+How:
+
+340
+00:15:18.369 --> 00:15:22.977
+Each reader refreshes early with a probability that rises near expiry.
+
+341
+00:15:23.257 --> 00:15:23.983
+Scope:
+
+342
+00:15:24.263 --> 00:15:26.545
+Across pods, with no coordination.
+
+343
+00:15:26.825 --> 00:15:28.788
+Refresh-ahead for known hot keys.
+
+344
+00:15:29.068 --> 00:15:29.729
+How:
+
+345
+00:15:30.009 --> 00:15:32.079
+Background refresh before expiry.
+
+346
+00:15:32.359 --> 00:15:33.084
+Scope:
+
+347
+00:15:33.364 --> 00:15:34.623
+Hot SKUs, config.
+
+348
+00:15:35.973 --> 00:15:37.146
+TTL jitter.
+
+349
+00:15:37.426 --> 00:15:38.087
+How:
+
+350
+00:15:38.367 --> 00:15:40.181
+Avoid synchronized expiry.
+
+351
+00:15:40.461 --> 00:15:41.186
+Scope:
+
+352
+00:15:41.466 --> 00:15:42.319
+Everywhere.
+
+353
+00:15:42.599 --> 00:15:43.367
+Warming.
+
+354
+00:15:43.647 --> 00:15:44.309
+How:
+
+355
+00:15:44.589 --> 00:15:46.445
+Pre-populate before known peaks.
+
+356
+00:15:46.725 --> 00:15:47.450
+Scope:
+
+357
+00:15:47.730 --> 00:15:50.333
+Sales, deploys, cache node replacement.
+
+358
+00:15:50.613 --> 00:15:53.237
+Load shedding or circuit breaker at origin.
+
+359
+00:15:53.517 --> 00:15:54.178
+How:
+
+360
+00:15:54.458 --> 00:15:56.869
+Protect the DB if misses spike anyway.
+
+361
+00:15:57.149 --> 00:15:57.874
+Scope:
+
+362
+00:15:58.154 --> 00:15:59.946
+Last line (Ch 18).
+
+363
+00:16:01.296 --> 00:16:02.896
+XFetch (Vattani et al.
+
+364
+00:16:03.176 --> 00:16:06.483
+VLDB 2015) refreshes early when:
+
+365
+00:16:07.833 --> 00:16:12.889
+The formula: now - delta, beta, ln(rand()) ≥ expiry.
+
+366
+00:16:14.239 --> 00:16:19.679
+where δ is the recompute time and β ≥ 1 is aggressiveness.
+
+367
+00:16:19.959 --> 00:16:28.172
+From L1's run, with 10,000 req per second on one key, a 300 s TTL and δ = 0.2 s:
+
+368
+00:16:29.522 --> 00:16:33.106
+On screen: at t=298.0s:
+
+369
+00:16:33.386 --> 00:16:39.423
+1 of 10,000 callers would refresh early. at t=299.0s:
+
+370
+00:16:39.703 --> 00:16:46.082
+64 of 10,000 callers would refresh early. at t=299.8s:
+
+371
+00:16:46.362 --> 00:16:51.375
+3,667 of 10,000 callers would refresh early.
+
+372
+00:16:54.225 --> 00:17:02.972
+In practice the first early refresh (~2 s before expiry) repopulates the key, so the key never actually expires under load.
+
+373
+00:17:03.252 --> 00:17:06.943
+Combined with single-flight, only one caller per pod does the work.
+
+374
+00:17:08.293 --> 00:17:10.533
+The cache-aside race and versioned writes.
+
+375
+00:17:10.813 --> 00:17:13.479
+The sequence diagram walks through it step by step.
+
+376
+00:17:13.759 --> 00:17:14.677
+R to C:
+
+377
+00:17:14.957 --> 00:17:18.477
+GET price:BLR-HSR-01:ONION, then miss.
+
+378
+00:17:18.757 --> 00:17:19.823
+R to DB:
+
+379
+00:17:20.103 --> 00:17:22.834
+SELECT price, then 40 rupees (v7).
+
+380
+00:17:23.114 --> 00:17:24.415
+W to DB:
+
+381
+00:17:24.695 --> 00:17:27.917
+UPDATE price = 1 rupees (v8), COMMIT.
+
+382
+00:17:28.197 --> 00:17:29.242
+W to C:
+
+383
+00:17:29.522 --> 00:17:32.893
+DEL price:BLR-HSR-01:ONION.
+
+384
+00:17:33.173 --> 00:17:34.090
+R to C:
+
+385
+00:17:34.370 --> 00:17:40.727
+SET price... = 40 rupees (v7) ← stale value written AFTER the delete.
+
+386
+00:17:44.577 --> 00:17:45.943
+Here is a quick table:
+
+387
+00:17:46.223 --> 00:17:47.951
+Fix, and How, and Trade-off.
+
+388
+00:17:48.231 --> 00:17:49.767
+Versioned conditional set.
+
+389
+00:17:50.047 --> 00:17:50.708
+How:
+
+390
+00:17:50.988 --> 00:18:00.823
+Store version, value and only SET if the incoming version ≥ the cached version (Lua); the delete writes a tombstone with the new version.
+
+391
+00:18:01.103 --> 00:18:01.999
+Trade-off:
+
+392
+00:18:02.279 --> 00:18:07.377
+Needs a monotonic version from the SoR (row version column); a small Lua script.
+
+393
+00:18:07.657 --> 00:18:08.809
+Short TTL.
+
+394
+00:18:09.089 --> 00:18:09.751
+How:
+
+395
+00:18:10.031 --> 00:18:11.567
+Bounds the staleness window.
+
+396
+00:18:11.847 --> 00:18:12.743
+Trade-off:
+
+397
+00:18:13.023 --> 00:18:14.601
+Only reduces the damage.
+
+398
+00:18:14.881 --> 00:18:16.247
+Delayed double delete.
+
+399
+00:18:16.527 --> 00:18:17.188
+How:
+
+400
+00:18:17.468 --> 00:18:20.241
+Delete, then delete again after ~1 s.
+
+401
+00:18:20.521 --> 00:18:21.417
+Trade-off:
+
+402
+00:18:21.697 --> 00:18:23.639
+Heuristic; timing-dependent.
+
+403
+00:18:23.919 --> 00:18:26.052
+Lease tokens (Facebook memcache).
+
+404
+00:18:26.332 --> 00:18:26.993
+How:
+
+405
+00:18:27.273 --> 00:18:33.524
+A miss returns a lease; the set is accepted only with a valid lease, and a delete invalidates leases.
+
+406
+00:18:33.804 --> 00:18:34.700
+Trade-off:
+
+407
+00:18:34.980 --> 00:18:36.260
+Needs cache support.
+
+408
+00:18:37.610 --> 00:18:40.767
+Update the cache from the change stream only (CDC).
+
+409
+00:18:41.047 --> 00:18:41.709
+How:
+
+410
+00:18:41.989 --> 00:18:45.573
+Only the CDC consumer writes the cache, in commit order.
+
+411
+00:18:45.853 --> 00:18:46.749
+Trade-off:
+
+412
+00:18:47.029 --> 00:18:49.909
+More infrastructure; the app never writes the cache.
+
+413
+00:18:51.259 --> 00:18:58.149
+L3 implements versioned conditional sets with version tombstones, which is simple and robust with Redis Lua.
+
+414
+00:18:59.499 --> 00:19:01.270
+Invalidation across layers.
+
+415
+00:19:01.550 --> 00:19:06.627
+There are only two hard things in Computer Science: cache invalidation and naming things.
+
+416
+00:19:06.907 --> 00:19:07.974
+Phil Karlton.
+
+417
+00:19:09.324 --> 00:19:10.689
+Here is a quick table:
+
+418
+00:19:10.969 --> 00:19:14.084
+Layer, and Invalidation mechanism, and Latency.
+
+419
+00:19:14.364 --> 00:19:15.388
+L2 Redis.
+
+420
+00:19:15.668 --> 00:19:17.247
+Invalidation mechanism:
+
+421
+00:19:17.527 --> 00:19:21.111
+Writer (or CDC consumer) deletes or versions the key.
+
+422
+00:19:21.391 --> 00:19:22.884
+Latency: ms.
+
+423
+00:19:23.164 --> 00:19:24.380
+L1 per pod.
+
+424
+00:19:24.660 --> 00:19:26.239
+Invalidation mechanism:
+
+425
+00:19:26.519 --> 00:19:34.220
+Broadcast event (Kafka, per-pod group; or Redis Pub or Sub), then each pod evicts locally; plus a short TTL.
+
+426
+00:19:34.500 --> 00:19:36.356
+Latency: ~1 s.
+
+427
+00:19:36.636 --> 00:19:37.575
+CDN.
+
+428
+00:19:37.855 --> 00:19:39.433
+Invalidation mechanism:
+
+429
+00:19:39.713 --> 00:19:46.220
+Purge by URL or surrogate key (tag all pages containing SKU X, then purge the tag).
+
+430
+00:19:46.500 --> 00:19:48.036
+Latency: seconds.
+
+431
+00:19:48.316 --> 00:19:49.489
+Browser or app.
+
+432
+00:19:49.769 --> 00:19:51.348
+Invalidation mechanism:
+
+433
+00:19:51.628 --> 00:19:56.001
+Cache-Control + ETags; versioned URLs for immutable assets.
+
+434
+00:19:56.281 --> 00:19:57.199
+Latency:
+
+435
+00:19:57.479 --> 00:19:59.889
+Next request (or never, if immutable).
+
+436
+00:20:01.239 --> 00:20:06.509
+The order matters: invalidate from the inside out (L2, then L1, then CDN).
+
+437
+00:20:06.789 --> 00:20:11.802
+Otherwise an outer layer can re-fill from an inner layer that still holds the old value.
+
+438
+00:20:13.152 --> 00:20:14.091
+Hot keys.
+
+439
+00:20:14.371 --> 00:20:24.739
+A single key receiving a large share of traffic (1 rupeesonions product card during the sale) concentrates load on one Redis shard (Ch 06).
+
+440
+00:20:26.089 --> 00:20:27.454
+Here is a quick table:
+
+441
+00:20:27.734 --> 00:20:28.865
+Technique, and How.
+
+442
+00:20:29.145 --> 00:20:30.617
+L1 in-process cache:
+
+443
+00:20:30.897 --> 00:20:36.849
+Each pod absorbs repeated reads; Redis sees ~1 read per pod per L1 TTL.
+
+444
+00:20:37.129 --> 00:20:38.281
+Key replication:
+
+445
+00:20:38.561 --> 00:20:43.702
+Write card:ONION0..7 and read a random replica, spreading across shards.
+
+446
+00:20:43.982 --> 00:20:46.798
+Client-side caching (Redis 6 plus tracking):
+
+447
+00:20:47.078 --> 00:20:50.299
+The server notifies clients when keys they cached change.
+
+448
+00:20:50.579 --> 00:20:51.817
+Pre-computation:
+
+449
+00:20:52.097 --> 00:20:55.787
+Build the sale landing page once and serve it from the CDN.
+
+450
+00:20:57.137 --> 00:20:58.631
+Spring Cache abstraction.
+
+451
+00:20:58.911 --> 00:21:00.276
+Here is a quick table:
+
+452
+00:21:00.556 --> 00:21:03.265
+Annotation, and Meaning. @EnableCaching:
+
+453
+00:21:03.545 --> 00:21:10.180
+Turns on cache proxies. @Cacheable(cacheNames = productCard, key = sku, sync = true):
+
+454
+00:21:10.460 --> 00:21:25.500
+Cache-aside read. sync = true makes concurrent misses in the same JVM wait for one loader (single-flight per JVM, if the cache provider supports it). @CacheEvict(cacheNames = productCard, key = sku):
+
+455
+00:21:25.780 --> 00:21:27.657
+Delete on write. @CachePut:
+
+456
+00:21:27.937 --> 00:21:31.713
+Always execute and put the result (write-through style). @Caching:
+
+457
+00:21:31.993 --> 00:21:33.081
+Combine several.
+
+458
+00:21:34.431 --> 00:21:35.370
+Pitfalls:
+
+459
+00:21:35.650 --> 00:21:46.423
+Proxies don't intercept self-invocation. @CacheEvict runs before the transaction commits, unless you defer it to after commit, which opens a stale-read window.
+
+460
+00:21:46.703 --> 00:21:50.351
+There's no versioning, so the §2.8 race remains.
+
+461
+00:21:50.631 --> 00:21:53.127
+Default Java serialization is fragile.
+
+462
+00:21:53.407 --> 00:21:55.498
+Use JSON with explicit types.
+
+463
+00:21:55.778 --> 00:22:00.621
+Null values get cached (or don't) depending on disableCachingNullValues.
+
+464
+00:22:01.971 --> 00:22:08.520
+Keys need explicit namespaces and versions (v2::productCard::SKU) for schema changes.
+
+465
+00:22:09.870 --> 00:22:12.942
+Caching and consistency: what must never be cached.
+
+466
+00:22:13.222 --> 00:22:14.587
+Here is a quick table:
+
+467
+00:22:14.867 --> 00:22:17.939
+Never serve from a cache for..., and Why, and Instead.
+
+468
+00:22:18.219 --> 00:22:20.203
+Stock decisions at reservation.
+
+469
+00:22:20.483 --> 00:22:21.166
+Why:
+
+470
+00:22:21.446 --> 00:22:23.345
+Oversell (Ch 05).
+
+471
+00:22:23.625 --> 00:22:24.435
+Instead:
+
+472
+00:22:24.715 --> 00:22:26.209
+Atomic DB update.
+
+473
+00:22:26.489 --> 00:22:28.814
+Payment status for fulfilment decisions.
+
+474
+00:22:29.094 --> 00:22:29.777
+Why:
+
+475
+00:22:30.057 --> 00:22:30.718
+Money.
+
+476
+00:22:30.998 --> 00:22:31.809
+Instead:
+
+477
+00:22:32.089 --> 00:22:33.817
+SoR or payment provider.
+
+478
+00:22:34.097 --> 00:22:35.654
+Final price at checkout.
+
+479
+00:22:35.934 --> 00:22:36.617
+Why:
+
+480
+00:22:36.897 --> 00:22:38.091
+Price contracts.
+
+481
+00:22:38.371 --> 00:22:39.182
+Instead:
+
+482
+00:22:39.462 --> 00:22:43.686
+Re-price from the SoR at checkout (show price updated if it changed).
+
+483
+00:22:43.966 --> 00:22:46.889
+Authorization decisions with revocation needs.
+
+484
+00:22:47.169 --> 00:22:47.851
+Why:
+
+485
+00:22:48.131 --> 00:22:49.070
+Security.
+
+486
+00:22:49.350 --> 00:22:50.161
+Instead:
+
+487
+00:22:50.441 --> 00:22:53.918
+Short TTLs plus revocation events, or direct checks.
+
+488
+00:22:54.198 --> 00:22:55.606
+Idempotency records.
+
+489
+00:22:55.886 --> 00:22:56.569
+Why:
+
+490
+00:22:56.849 --> 00:22:57.766
+Correctness.
+
+491
+00:22:58.046 --> 00:22:58.857
+Instead:
+
+492
+00:22:59.137 --> 00:23:02.379
+Same DB as the business write (Ch 04).
+
+493
+00:23:03.729 --> 00:23:08.231
+The pattern: use caches for displaying, and the system of record for deciding.
+
+494
+00:23:09.581 --> 00:23:10.477
+Part 3.
+
+495
+00:23:10.757 --> 00:23:12.485
+Architecture and Diagrams.
+
+496
+00:23:13.735 --> 00:23:16.017
+Component view: product card caching.
+
+497
+00:23:16.297 --> 00:23:17.641
+Here is the diagram.
+
+498
+00:23:21.491 --> 00:23:26.462
+Sequence: happy path, L1 miss, L2 hit, and a price change propagating.
+
+499
+00:23:26.742 --> 00:23:29.409
+The sequence diagram walks through it step by step.
+
+500
+00:23:29.689 --> 00:23:30.734
+App to Pod:
+
+501
+00:23:31.014 --> 00:23:36.603
+GET or stores or BLR-HSR-01 or products or ONION-1KG.
+
+502
+00:23:36.883 --> 00:23:39.038
+Pod to L1: get(card, price).
+
+503
+00:23:39.318 --> 00:23:41.025
+L1 to Pod: miss.
+
+504
+00:23:41.305 --> 00:23:42.478
+Pod to L2:
+
+505
+00:23:42.758 --> 00:23:48.881
+MGET card:ONION-1KG, price:BLR-HSR-01:ONION-1KG.
+
+506
+00:23:49.161 --> 00:23:52.339
+L2 to Pod: hit (card v12, price v8).
+
+507
+00:23:52.619 --> 00:23:55.414
+Pod to L1: put (TTL 5 s).
+
+508
+00:23:55.694 --> 00:23:56.654
+Pod to App:
+
+509
+00:23:56.934 --> 00:23:59.110
+200 card + 40 rupees.
+
+510
+00:23:59.390 --> 00:24:03.891
+DB to K: pricing.price.changed.v1 store, sku, version 9.
+
+511
+00:24:04.171 --> 00:24:08.374
+K to Pod: per-pod consumer, then L1.invalidate(price key).
+
+512
+00:24:08.654 --> 00:24:13.454
+K to L2: invalidator writes tombstone v9, deleted for price key.
+
+513
+00:24:13.734 --> 00:24:14.779
+App to Pod:
+
+514
+00:24:15.059 --> 00:24:15.913
+GET again.
+
+515
+00:24:16.193 --> 00:24:19.990
+Pod to L2: price, then tombstone v9, then treat as miss.
+
+516
+00:24:20.270 --> 00:24:21.401
+Pod to DB:
+
+517
+00:24:21.681 --> 00:24:24.070
+SELECT price (v9, 1 rupees).
+
+518
+00:24:24.350 --> 00:24:25.523
+Pod to L2:
+
+519
+00:24:25.803 --> 00:24:29.985
+SET-IF-NEWER v9, 1 rupees. and so on, as shown on screen.
+
+520
+00:24:33.835 --> 00:24:38.037
+Sequence: failure path, a slow reader racing a price update (fixed).
+
+521
+00:24:38.317 --> 00:24:40.984
+The sequence diagram walks through it step by step.
+
+522
+00:24:41.264 --> 00:24:42.395
+R to L2:
+
+523
+00:24:42.675 --> 00:24:44.189
+GET price key, then miss.
+
+524
+00:24:44.469 --> 00:24:45.536
+R to DB:
+
+525
+00:24:45.816 --> 00:24:48.269
+SELECT, then 40, rupeesversion 8.
+
+526
+00:24:48.549 --> 00:24:53.051
+DB to DB: price updated, then 1, rupeesversion 9 (committed).
+
+527
+00:24:53.331 --> 00:24:55.763
+INV to L2: tombstone version 9.
+
+528
+00:24:56.043 --> 00:24:57.173
+R to L2:
+
+529
+00:24:57.453 --> 00:24:59.928
+SET-IF-NEWER version 8, 40 rupees.
+
+530
+00:25:00.208 --> 00:25:02.555
+L2 to R: rejected (8 9).
+
+531
+00:25:06.405 --> 00:25:07.151
+Note:
+
+532
+00:25:07.431 --> 00:25:10.205
+What the system guarantees after this failure path.
+
+533
+00:25:10.485 --> 00:25:26.101
+A stale value can never overwrite a newer one, and a delete can't be undone by a slow reader, because every write to L2 carries the SoR version and the Lua script accepts only versions ≥ the stored one (including tombstones).
+
+534
+00:25:26.381 --> 00:25:28.855
+The worst case is a transient extra miss.
+
+535
+00:25:29.135 --> 00:25:34.319
+L1 staleness is bounded by its 5 s TTL even if a broadcast is missed.
+
+536
+00:25:34.599 --> 00:25:37.159
+Checkout always re-prices from the SoR.
+
+537
+00:25:38.509 --> 00:25:41.475
+State: a cache entry with soft and hard TTLs.
+
+538
+00:25:41.755 --> 00:25:43.099
+Here is the diagram.
+
+539
+00:25:46.949 --> 00:25:47.866
+Part 4.
+
+540
+00:25:48.146 --> 00:25:49.767
+Design Document Excerpt:
+
+541
+00:25:50.047 --> 00:25:52.629
+Product Card and Price Caching for Sales.
+
+542
+00:25:53.879 --> 00:25:55.244
+Here is a quick table:
+
+543
+00:25:55.524 --> 00:25:56.825
+Field, and Value.
+
+544
+00:25:57.105 --> 00:25:58.449
+Author or Reviewers:
+
+545
+00:25:58.729 --> 00:26:01.908
+Catalog team or Pricing, SRE, Mobile, Web.
+
+546
+00:26:02.188 --> 00:26:03.084
+Status:
+
+547
+00:26:03.364 --> 00:26:04.239
+Approved.
+
+548
+00:26:04.519 --> 00:26:05.841
+Related ADRs:
+
+549
+00:26:06.121 --> 00:26:16.852
+ADR-029 Versioned cache writes and version tombstones; ADR-030 No cache flushes: invalidate by event, warm before events.
+
+550
+00:26:18.202 --> 00:26:18.842
+1.
+
+551
+00:26:19.122 --> 00:26:20.530
+Context and Problem.
+
+552
+00:26:20.810 --> 00:26:33.994
+A cache flush at sale start caused a stampede that took down the catalog database, L1 caches served stale prices across pods, and a read or write race pinned a stale price for hours (§1.1).
+
+553
+00:26:34.274 --> 00:26:34.978
+2.
+
+554
+00:26:35.258 --> 00:26:36.602
+Goals or Non-Goals.
+
+555
+00:26:36.882 --> 00:26:53.309
+Goals: ≥ 98 % hit ratio at 110 K req per second; price changes visible within 5 s p99; no stale-forever values; survive a cold or lost Redis without taking down PostgreSQL.
+
+556
+00:26:53.589 --> 00:27:00.565
+Non-goals: stock availability caching (a hint only, 10 s TTL); search results (Ch 22).
+
+557
+00:27:01.915 --> 00:27:02.661
+3.
+
+558
+00:27:02.941 --> 00:27:03.901
+Requirements.
+
+559
+00:27:05.251 --> 00:27:06.617
+Here is a quick table:
+
+560
+00:27:06.897 --> 00:27:08.369
+ID, and Requirement.
+
+561
+00:27:08.649 --> 00:27:09.587
+FR-1:
+
+562
+00:27:09.867 --> 00:27:13.579
+Serve product card (content) + store price for (store, SKU).
+
+563
+00:27:13.859 --> 00:27:24.782
+NFR-1: p99 at most 15 ms in-service at 110 K req per second (P90 190 K per second, Ch 02).
+
+564
+00:27:25.062 --> 00:27:26.107
+NFR-2:
+
+565
+00:27:26.387 --> 00:27:31.763
+Price change visible to readers at most 5 s p99 (L1 + L2).
+
+566
+00:27:32.043 --> 00:27:33.110
+NFR-3:
+
+567
+00:27:33.390 --> 00:27:37.059
+A newer value can never be overwritten by an older one in L2.
+
+568
+00:27:37.339 --> 00:27:38.427
+NFR-4:
+
+569
+00:27:38.707 --> 00:27:46.110
+With Redis unavailable, the DB sees at most 10 K req per second (single-flight per pod + L1 + shedding).
+
+570
+00:27:46.390 --> 00:27:47.435
+NFR-5:
+
+571
+00:27:47.715 --> 00:27:50.809
+Checkout prices always come from the pricing SoR.
+
+572
+00:27:52.159 --> 00:27:52.863
+4.
+
+573
+00:27:53.143 --> 00:27:54.423
+Capacity estimates.
+
+574
+00:27:55.773 --> 00:27:57.138
+Here is a quick table:
+
+575
+00:27:57.418 --> 00:27:59.722
+Item, and Calculation, and Result.
+
+576
+00:28:00.002 --> 00:28:02.306
+Card requests at sale start (P90).
+
+577
+00:28:02.586 --> 00:28:03.653
+Calculation:
+
+578
+00:28:03.933 --> 00:28:05.213
+Ch 02.
+
+579
+00:28:05.493 --> 00:28:08.266
+Result: ~190 K per second.
+
+580
+00:28:08.546 --> 00:28:11.597
+Distinct SKUs requested in the first 10 min.
+
+581
+00:28:11.877 --> 00:28:12.943
+Calculation:
+
+582
+00:28:13.223 --> 00:28:14.887
+Sale concentrates demand.
+
+583
+00:28:15.167 --> 00:28:20.074
+Result: ~20 K; the top 500 = 60 % of traffic.
+
+584
+00:28:20.354 --> 00:28:21.997
+L2 dataset: cards.
+
+585
+00:28:22.277 --> 00:28:23.343
+Calculation:
+
+586
+00:28:23.623 --> 00:28:27.165
+250 K SKUs times ~2 KB.
+
+587
+00:28:27.445 --> 00:28:29.578
+Result: ~500 MB.
+
+588
+00:28:29.858 --> 00:28:31.693
+L2 dataset: prices.
+
+589
+00:28:31.973 --> 00:28:33.039
+Calculation:
+
+590
+00:28:33.319 --> 00:28:37.735
+500 stores times 6 K SKUs times ~80 B.
+
+591
+00:28:38.015 --> 00:28:40.319
+Result: ~240 MB.
+
+592
+00:28:40.599 --> 00:28:41.815
+L1 per pod.
+
+593
+00:28:42.095 --> 00:28:43.162
+Calculation:
+
+594
+00:28:43.442 --> 00:28:47.026
+10 K hottest cards times 2 KB + prices.
+
+595
+00:28:47.306 --> 00:28:49.674
+Result: ~25 MB heap.
+
+596
+00:28:49.954 --> 00:28:53.154
+L1 hit ratio (5 s TTL, hot-skewed).
+
+597
+00:28:53.434 --> 00:28:54.501
+Calculation:
+
+598
+00:28:54.781 --> 00:28:57.831
+Hot keys re-read many times per 5 s per pod.
+
+599
+00:28:58.111 --> 00:28:59.925
+Result: ~80 %.
+
+600
+00:29:01.275 --> 00:29:02.256
+Redis load.
+
+601
+00:29:02.536 --> 00:29:03.603
+Calculation:
+
+602
+00:29:03.883 --> 00:29:10.432
+190 K times 20 % L1 misses times 2 keys (MGET = 1 op).
+
+603
+00:29:10.712 --> 00:29:14.616
+Result: ~38 K ops per second, then 3 shards.
+
+604
+00:29:14.896 --> 00:29:18.075
+DB load at 98 % overall hit ratio.
+
+605
+00:29:18.355 --> 00:29:19.421
+Calculation:
+
+606
+00:29:19.701 --> 00:29:22.091
+190 K times 2 %.
+
+607
+00:29:22.371 --> 00:29:27.683
+Result: ~3.8 K per second (DB sized for 10 K per second).
+
+608
+00:29:27.963 --> 00:29:29.520
+Redis cold (worst case).
+
+609
+00:29:29.800 --> 00:29:30.867
+Calculation:
+
+610
+00:29:31.147 --> 00:29:38.101
+96 pods times ~20 K distinct keys ÷ 60 s warm-up, single-flight per pod.
+
+611
+00:29:38.381 --> 00:29:47.192
+Result: ~32 K per second for the first minute, then too high: needs warming + L2 lock on miss for top keys + shedding.
+
+612
+00:29:48.542 --> 00:29:49.459
+Success:
+
+613
+00:29:49.739 --> 00:29:51.211
+What the estimate tells us.
+
+614
+00:29:51.491 --> 00:29:52.814
+Steady state is easy.
+
+615
+00:29:53.094 --> 00:29:56.891
+The dangerous moments are cold starts and invalidation storms.
+
+616
+00:29:57.171 --> 00:30:05.342
+That's why warming, cross-pod stampede control for the hottest keys, and the ban on flushes are requirements, not optimizations.
+
+617
+00:30:06.692 --> 00:30:07.460
+5.
+
+618
+00:30:07.740 --> 00:30:08.935
+Proposed design.
+
+619
+00:30:09.215 --> 00:30:10.388
+L1 Caffeine:
+
+620
+00:30:10.668 --> 00:30:19.585
+5 s TTL, W-TinyLFU, ~10 K entries, get(key, loader) single-flight, and eviction by per-pod Kafka broadcast.
+
+621
+00:30:19.865 --> 00:30:38.639
+L2 Redis: values stored as version, payload with a set-if-newer Lua script, invalidation via version tombstones written by an invalidator consuming outbox events, XFetch early refresh, TTL with jitter (cards 6 h, prices 10 min), and hot keys replicated times 8.
+
+622
+00:30:39.989 --> 00:30:55.669
+CDN: product images with immutable versioned URLs; anonymous category listings with s-maxage=30, stale-while-revalidate=60, tagged by surrogate keys (sku-id, category-id) and purged on change.
+
+623
+00:30:55.949 --> 00:31:02.754
+Warming: at Tminus 30 min, a job loads the sale SKU list times stores into L2 (throttled).
+
+624
+00:31:03.034 --> 00:31:04.527
+Flushing is prohibited.
+
+625
+00:31:04.807 --> 00:31:07.239
+Price reloads publish change events instead.
+
+626
+00:31:07.519 --> 00:31:10.143
+5.3 Cache key and value format.
+
+627
+00:31:11.493 --> 00:31:14.971
+On screen: key: v1:card:sku value: v:12,d:
+
+628
+00:31:15.251 --> 00:31:35.773
+TTL 6h ± 10%. key: v1:price:store:sku value: v:9,d:paise:100 TTL 10m ± 10%. tomb: v1:price:store:sku value: v:10,t:1 TTL 60s (only blocks older writes). hot: v1:card:sku0..
+
+629
+00:31:36.053 --> 00:31:39.957
+7 replicas for the top-500 SKUs during sales.
+
+630
+00:31:42.807 --> 00:31:53.858
+The v1: prefix is the cache schema version: changing the payload format means bumping it to v2:, with no flush and no deserialization errors during a rolling deploy.
+
+631
+00:31:54.138 --> 00:31:54.885
+7.
+
+632
+00:31:55.165 --> 00:31:56.679
+Alternatives considered.
+
+633
+00:31:58.029 --> 00:31:59.395
+Here is a quick table:
+
+634
+00:31:59.675 --> 00:32:02.235
+Option, and Pros, and Cons, and Verdict.
+
+635
+00:32:02.515 --> 00:32:05.032
+Spring @Cacheable + @CacheEvict only.
+
+636
+00:32:05.312 --> 00:32:06.165
+Pros:
+
+637
+00:32:06.445 --> 00:32:07.533
+Minimal code.
+
+638
+00:32:07.813 --> 00:32:08.624
+Cons:
+
+639
+00:32:08.904 --> 00:32:13.939
+Race (§2.8), no L1 invalidation, stampedes across pods.
+
+640
+00:32:14.219 --> 00:32:15.029
+Verdict:
+
+641
+00:32:15.309 --> 00:32:18.339
+Rejected for prices; fine for low-risk data.
+
+642
+00:32:18.619 --> 00:32:20.261
+Write-through prices to Redis.
+
+643
+00:32:20.541 --> 00:32:21.395
+Pros:
+
+644
+00:32:21.675 --> 00:32:22.741
+Always warm.
+
+645
+00:32:23.021 --> 00:32:23.832
+Cons:
+
+646
+00:32:24.112 --> 00:32:27.888
+Still races between writers; caches all 3 M prices.
+
+647
+00:32:28.168 --> 00:32:28.979
+Verdict:
+
+648
+00:32:29.259 --> 00:32:30.176
+Rejected.
+
+649
+00:32:30.456 --> 00:32:33.592
+CDC-only cache writes (app never writes the cache).
+
+650
+00:32:33.872 --> 00:32:34.725
+Pros:
+
+651
+00:32:35.005 --> 00:32:35.944
+Commit-ordered.
+
+652
+00:32:36.224 --> 00:32:37.035
+Cons:
+
+653
+00:32:37.315 --> 00:32:40.131
+Every miss must wait for CDC; complex.
+
+654
+00:32:40.411 --> 00:32:41.221
+Verdict:
+
+655
+00:32:41.501 --> 00:32:43.699
+Considered for 2027.
+
+656
+00:32:43.979 --> 00:32:50.699
+Cache-aside + versioned set-if-newer + tombstones + L1 broadcast + XFetch + warming.
+
+657
+00:32:50.979 --> 00:32:51.832
+Pros:
+
+658
+00:32:52.112 --> 00:32:55.099
+Race-free, bounded staleness, stampede-resistant.
+
+659
+00:32:55.379 --> 00:32:56.189
+Cons:
+
+660
+00:32:56.469 --> 00:32:58.816
+Lua scripts, events, more moving parts.
+
+661
+00:32:59.096 --> 00:32:59.907
+Verdict:
+
+662
+00:33:00.187 --> 00:33:01.019
+Chosen.
+
+663
+00:33:02.369 --> 00:33:03.371
+No L1.
+
+664
+00:33:03.651 --> 00:33:04.505
+Pros:
+
+665
+00:33:04.785 --> 00:33:06.235
+Simpler invalidation.
+
+666
+00:33:06.515 --> 00:33:07.326
+Cons:
+
+667
+00:33:07.606 --> 00:33:09.846
+Hot keys hammer single Redis shards.
+
+668
+00:33:10.126 --> 00:33:10.937
+Verdict:
+
+669
+00:33:11.217 --> 00:33:12.753
+Rejected (hot keys).
+
+670
+00:33:14.103 --> 00:33:14.785
+8.
+
+671
+00:33:15.065 --> 00:33:16.217
+Failure modes.
+
+672
+00:33:16.497 --> 00:33:17.500
+Redis down:
+
+673
+00:33:17.780 --> 00:33:32.159
+L1 continues (5 s TTL, then per-pod single-flight to the DB), a concurrency limiter caps DB loads per pod at 16, and excess requests get 503 with Retry-After for low-priority traffic.
+
+674
+00:33:32.439 --> 00:33:34.231
+Kafka lag on invalidation:
+
+675
+00:33:34.511 --> 00:33:37.668
+L1 staleness bounded at 5 s by TTL.
+
+676
+00:33:37.948 --> 00:33:41.276
+L2 bounded by TTL, but checkout re-prices.
+
+677
+00:33:41.556 --> 00:33:42.708
+Invalidator bug:
+
+678
+00:33:42.988 --> 00:33:47.425
+TTLs bound the damage, and a version tombstone replay tool exists.
+
+679
+00:33:47.705 --> 00:33:48.409
+10.
+
+680
+00:33:48.689 --> 00:33:49.777
+Observability.
+
+681
+00:33:50.057 --> 00:34:08.212
+Hit ratio per layer and cache name, load latency, loads per second to the DB, single-flight waiters, XFetch refreshes, rejected stale sets (Lua result), invalidation lag (event time, then tombstone), Redis ops per second per shard (hot-shard detection), and evictions.
+
+682
+00:34:09.562 --> 00:34:10.415
+14.
+
+683
+00:34:10.695 --> 00:34:14.834
+Decision (ADR-029 or 030 summary).
+
+684
+00:34:15.114 --> 00:34:19.125
+All L2 writes carry the SoR version and go through set-if-newer.
+
+685
+00:34:19.405 --> 00:34:22.007
+Invalidations write version tombstones.
+
+686
+00:34:22.287 --> 00:34:28.282
+L1 caches have TTLs at most 5 s for mutable data and subscribe to change events.
+
+687
+00:34:28.562 --> 00:34:30.397
+Caches are never flushed wholesale.
+
+688
+00:34:30.677 --> 00:34:34.410
+Change events drive invalidation, and known peaks are pre-warmed.
+
+689
+00:34:34.690 --> 00:34:36.290
+Displays may use caches.
+
+690
+00:34:36.570 --> 00:34:40.431
+Decisions (checkout price, stock, payment) use the system of record.
+
+691
+00:34:41.781 --> 00:34:42.741
+Part 5.
+
+692
+00:34:43.021 --> 00:34:45.005
+Hands-On Code, Level Ladder.
+
+693
+00:34:46.255 --> 00:34:49.647
+We build the product card + store price cache four times:
+
+694
+00:34:50.997 --> 00:34:52.363
+Here is a quick table:
+
+695
+00:34:52.643 --> 00:34:55.331
+Level, and New requirement that forces the step.
+
+696
+00:34:55.611 --> 00:34:56.443
+L1:
+
+697
+00:34:56.723 --> 00:34:59.987
+Show LRU, the stampede, and early refresh working.
+
+698
+00:35:00.267 --> 00:35:01.333
+(plain Java).
+
+699
+00:35:01.613 --> 00:35:02.424
+L2:
+
+700
+00:35:02.704 --> 00:35:06.395
+Cache reads in Redis with Spring's @Cacheable, and evict on writes.
+
+701
+00:35:06.675 --> 00:35:07.528
+L3:
+
+702
+00:35:07.808 --> 00:35:14.869
+Two levels (Caffeine + Redis), no stale-forever race, stampede-proof, DB protected when Redis is cold.
+
+703
+00:35:15.149 --> 00:35:16.024
+L4:
+
+704
+00:35:16.304 --> 00:35:24.795
+Invalidate every layer (L1 on all pods, L2, CDN) from change events, survive hot keys, and pre-warm before the sale.
+
+705
+00:35:26.145 --> 00:35:28.257
+L1, Concept (plain Java).
+
+706
+00:35:28.537 --> 00:35:30.073
+Here is the Java code.
+
+707
+00:35:30.353 --> 00:35:34.534
+It runs to 122 lines; the full listing is in the chapter.
+
+708
+00:35:34.814 --> 00:35:38.974
+CachingL1.java, run with: java CachingL1.java.
+
+709
+00:35:39.254 --> 00:35:41.430
+Three caching ideas in plain Java:
+
+710
+00:35:41.710 --> 00:35:42.329
+A.
+
+711
+00:35:42.609 --> 00:35:44.891
+LRU eviction with LinkedHashMap.
+
+712
+00:35:47.741 --> 00:35:49.533
+Actual output from running it:
+
+713
+00:35:50.883 --> 00:35:51.801
+On screen:
+
+714
+00:35:52.081 --> 00:35:52.699
+A.
+
+715
+00:35:52.979 --> 00:35:58.910
+LRU with capacity 3. keys after access(atta) + put(eggs): rice, atta, eggs.
+
+716
+00:35:59.190 --> 00:35:59.873
+B.
+
+717
+00:36:00.153 --> 00:36:06.830
+1,000 concurrent requests for a cold hot key (50 ms DB query). naive cache-aside:
+
+718
+00:36:07.110 --> 00:36:09.734
+1000 DB calls. single-flight:
+
+719
+00:36:10.014 --> 00:36:11.635
+1 DB call(s).
+
+720
+00:36:11.915 --> 00:36:12.598
+C.
+
+721
+00:36:12.878 --> 00:36:13.838
+XFetch:
+
+722
+00:36:14.118 --> 00:36:25.553
+10,000 requests per second during the last 10 s of a 300 s TTL (recompute takes 0.2. s). at t=290.0s:
+
+723
+00:36:25.833 --> 00:36:32.233
+0 of 10,000 callers would refresh early. at t=295.0s:
+
+724
+00:36:32.513 --> 00:36:38.742
+0 of 10,000 callers would refresh early. at t=298.0s:
+
+725
+00:36:39.022 --> 00:36:45.059
+1 of 10,000 callers would refresh early. at t=299.0s:
+
+726
+00:36:45.339 --> 00:36:51.718
+64 of 10,000 callers would refresh early. at t=299.8s:
+
+727
+00:36:51.998 --> 00:36:57.011
+3,667 of 10,000 callers would refresh early.
+
+728
+00:36:59.861 --> 00:37:01.013
+What L1 shows:
+
+729
+00:37:01.293 --> 00:37:06.285
+LinkedHashMap(accessOrder=true) is a correct LRU in 5 lines.
+
+730
+00:37:06.565 --> 00:37:12.624
+1,000 concurrent misses mean 1,000 DB calls, unless loads are coalesced (1 call).
+
+731
+00:37:12.904 --> 00:37:17.832
+XFetch makes an early refresh likely just before expiry, and rare before that.
+
+732
+00:37:18.112 --> 00:37:30.677
+What L1 can't do: it runs in one process, has no invalidation, no versions (so the §2.8 race is possible), and no memory bounds on the single-flight maps under key churn.
+
+733
+00:37:32.027 --> 00:37:34.054
+L2, Spring Cache + Redis.
+
+734
+00:37:34.334 --> 00:37:39.219
+Here is the Kotlin code. build.gradle.kts (module l2-spring).
+
+735
+00:37:42.069 --> 00:37:43.435
+Cache configuration.
+
+736
+00:37:43.715 --> 00:37:45.251
+Here is the Java code.
+
+737
+00:37:45.531 --> 00:37:49.157
+It runs to 21 lines; the full listing is in the chapter.
+
+738
+00:37:52.007 --> 00:37:53.543
+Service, Repository.
+
+739
+00:37:53.823 --> 00:37:55.359
+Here is the Java code.
+
+740
+00:37:58.209 --> 00:37:59.745
+Here is the Java code.
+
+741
+00:38:00.025 --> 00:38:03.737
+It runs to 25 lines; the full listing is in the chapter.
+
+742
+00:38:06.587 --> 00:38:08.123
+Here is the Java code.
+
+743
+00:38:08.403 --> 00:38:17.982
+It runs to 31 lines; the full listing is in the chapter. sync = true: concurrent misses for the same key IN THIS JVM share one load.
+
+744
+00:38:18.262 --> 00:38:19.905
+Other pods still stampede.
+
+745
+00:38:22.755 --> 00:38:24.291
+Here is the Java code.
+
+746
+00:38:27.141 --> 00:38:27.866
+Test.
+
+747
+00:38:28.146 --> 00:38:29.682
+Here is the Java code.
+
+748
+00:38:29.962 --> 00:38:33.695
+It runs to 36 lines; the full listing is in the chapter.
+
+749
+00:38:36.545 --> 00:38:37.804
+What L2 fixed:
+
+750
+00:38:38.084 --> 00:38:40.964
+90 % of the benefit with a few annotations:
+
+751
+00:38:41.244 --> 00:38:48.369
+TTL per cache, JSON values, versioned key prefix, and per-JVM single-flight (sync = true).
+
+752
+00:38:48.649 --> 00:38:50.313
+What L2 still gets wrong:
+
+753
+00:38:51.663 --> 00:38:53.029
+Here is a quick table:
+
+754
+00:38:53.309 --> 00:38:55.549
+Problem, and Consequence at sale scale.
+
+755
+00:38:55.829 --> 00:38:57.322
+Stampede across pods:
+
+756
+00:38:57.602 --> 00:39:02.530
+96 pods times 1 load each per hot key on expiry or cold start.
+
+757
+00:39:02.810 --> 00:39:05.669
+Evict before commit, and the read or write race:
+
+758
+00:39:05.949 --> 00:39:10.109
+Stale prices for up to the TTL (§1.1 bug 3).
+
+759
+00:39:10.389 --> 00:39:11.391
+No L1:
+
+760
+00:39:11.671 --> 00:39:13.591
+Hot keys hammer one Redis shard.
+
+761
+00:39:13.871 --> 00:39:18.373
+Writes that bypass the service (bulk SQL, other services) never evict:
+
+762
+00:39:18.653 --> 00:39:20.189
+Stale until TTL.
+
+763
+00:39:20.469 --> 00:39:25.525
+No protection for the DB when Redis is cold: §1.1 bug 1.
+
+764
+00:39:26.875 --> 00:39:31.696
+L3, Production-Grade: two-level cache, versioned writes, stampede control.
+
+765
+00:39:31.976 --> 00:39:35.091
+Here is the Kotlin code. l3-production adds.
+
+766
+00:39:37.941 --> 00:39:39.946
+Versioned L2 (Redis Lua).
+
+767
+00:39:40.226 --> 00:39:41.762
+Here is the Java code.
+
+768
+00:39:42.042 --> 00:39:45.370
+It runs to 80 lines; the full listing is in the chapter.
+
+769
+00:39:45.650 --> 00:39:55.101
+L2 entries are Redis HASHes: v (SoR version), d (payload) t=1 (tombstone), e (soft expiry ms), c (compute ms).
+
+770
+00:39:55.381 --> 00:40:01.290
+Writes go through SETIFNEWER, so an older version can never overwrite a newer value or tombstone.
+
+771
+00:40:01.570 --> 00:40:03.277
+KEYS1=key ARGV:
+
+772
+00:40:03.557 --> 00:40:15.482
+1=version 2=payload 3=ttlMs 4=isTombstone(0 or 1) 5=softExpiryMs 6=computeMs.
+
+773
+00:40:18.332 --> 00:40:22.599
+Two-level cache (Caffeine + Redis + XFetch + DB guard).
+
+774
+00:40:22.879 --> 00:40:24.415
+Here is the Java code.
+
+775
+00:40:24.695 --> 00:40:28.855
+It runs to 119 lines; the full listing is in the chapter.
+
+776
+00:40:29.135 --> 00:40:36.644
+L1 (Caffeine, per pod, 5 s), then L2 (versioned Redis), then loader (DB) guarded by a per-pod semaphore.
+
+777
+00:40:36.924 --> 00:40:41.767
+Caffeine.get(key, fn) is atomic per key, then single-flight within the pod.
+
+778
+00:40:42.047 --> 00:40:47.721
+XFetch on L2 soft expiry, then one early refresh before the key actually expires.
+
+779
+00:40:50.571 --> 00:40:51.318
+Note:
+
+780
+00:40:51.598 --> 00:40:53.859
+Why computeMs goes into the entry.
+
+781
+00:40:54.139 --> 00:40:56.870
+XFetch refreshes slower-to-compute keys earlier.
+
+782
+00:40:57.150 --> 00:41:04.553
+Storing the last compute time with the value lets every pod make the same probabilistic decision with no coordination.
+
+783
+00:41:05.903 --> 00:41:07.780
+Service, Delegate, Controller.
+
+784
+00:41:08.060 --> 00:41:09.596
+Here is the Java code.
+
+785
+00:41:09.876 --> 00:41:13.503
+It runs to 21 lines; the full listing is in the chapter.
+
+786
+00:41:13.783 --> 00:41:15.255
+Display price (cached).
+
+787
+00:41:15.535 --> 00:41:21.017
+Checkout must call PricingClient for the authoritative price (Ch 01 principle).
+
+788
+00:41:23.867 --> 00:41:25.403
+Here is the Java code.
+
+789
+00:41:25.683 --> 00:41:29.353
+It runs to 32 lines; the full listing is in the chapter.
+
+790
+00:41:32.203 --> 00:41:33.739
+Here is the Java code.
+
+791
+00:41:34.019 --> 00:41:37.688
+It runs to 24 lines; the full listing is in the chapter.
+
+792
+00:41:40.538 --> 00:41:42.799
+Integration tests (Testcontainers).
+
+793
+00:41:43.079 --> 00:41:44.615
+Here is the Java code.
+
+794
+00:41:44.895 --> 00:41:48.223
+It runs to 80 lines; the full listing is in the chapter.
+
+795
+00:41:51.073 --> 00:42:13.324
+What L3 guarantees: an older version can never overwrite a newer one (all five race cases are covered by tests and match the verified semantics), there's at most one DB load per key per pod at a time, early refresh keeps hot keys from expiring under load, and the DB is protected by a per-pod permit budget when Redis is cold or down.
+
+796
+00:42:13.604 --> 00:42:21.540
+What L3 still lacks: who writes the tombstones, and how do the other pods' L1 caches and the CDN find out about a change?
+
+797
+00:42:21.820 --> 00:42:26.641
+There's also no hot-key spreading across Redis shards and no warm-up before the sale.
+
+798
+00:42:27.991 --> 00:42:33.175
+L4, Enterprise: event-driven invalidation, hot keys, CDN, warming.
+
+799
+00:42:33.455 --> 00:42:34.799
+Here is the diagram.
+
+800
+00:42:38.649 --> 00:42:40.889
+Invalidator and L1 broadcast.
+
+801
+00:42:41.169 --> 00:42:42.705
+Here is the Java code.
+
+802
+00:42:45.555 --> 00:42:47.091
+Here is the Java code.
+
+803
+00:42:47.371 --> 00:42:51.019
+It runs to 28 lines; the full listing is in the chapter.
+
+804
+00:42:51.299 --> 00:42:57.785
+One consumer group for the whole fleet: writes version tombstones (idempotent) and purges the CDN.
+
+805
+00:43:00.635 --> 00:43:02.171
+Here is the Java code.
+
+806
+00:43:02.451 --> 00:43:06.120
+It runs to 17 lines; the full listing is in the chapter.
+
+807
+00:43:06.400 --> 00:43:11.840
+Unique group per pod, then every pod receives every change, then evicts its own L1.
+
+808
+00:43:12.120 --> 00:43:14.339
+(Same pattern as Ch 01.).
+
+809
+00:43:17.189 --> 00:43:17.935
+Warning:
+
+810
+00:43:18.215 --> 00:43:20.967
+Order of L1 and L2 invalidation.
+
+811
+00:43:21.247 --> 00:43:31.551
+If a pod evicts L1 before the invalidator has written the L2 tombstone, the next L1 miss can re-read the old L2 value and cache it for up to 5 s.
+
+812
+00:43:31.831 --> 00:43:35.095
+That's acceptable here (it's the L1 TTL bound).
+
+813
+00:43:35.375 --> 00:43:44.058
+To tighten it, have the invalidator publish a secondary cache.invalidated event after writing L2, and drive L1 eviction from that.
+
+814
+00:43:45.408 --> 00:43:46.347
+Hot keys.
+
+815
+00:43:46.627 --> 00:43:48.163
+Here is the Java code.
+
+816
+00:43:48.443 --> 00:43:52.240
+It runs to 27 lines; the full listing is in the chapter.
+
+817
+00:43:52.520 --> 00:43:59.475
+Hot keys (sale SKUs) get N replicas with different names, then different hash slots, then different Redis shards.
+
+818
+00:43:59.755 --> 00:44:04.213
+Reads pick a random replica; invalidations tombstone all replicas.
+
+819
+00:44:07.063 --> 00:44:17.751
+The two-level cache uses hotKeys.readKey(key) for L2 reads and writes all replicas on a fill (each with setIfNewer, so replicas can't go backwards either).
+
+820
+00:44:18.031 --> 00:44:28.485
+With L1 in front, each pod reads a hot key from Redis at most about once per 5 s, so replication matters most when L1 is cold (deploys, scale-out).
+
+821
+00:44:29.835 --> 00:44:31.563
+CDN caching and purge.
+
+822
+00:44:31.843 --> 00:44:33.379
+Here is the Java code.
+
+823
+00:44:33.659 --> 00:44:37.371
+It runs to 25 lines; the full listing is in the chapter.
+
+824
+00:44:37.651 --> 00:44:45.352
+Anonymous, store-cluster-level listing: cacheable at the edge for 30 s, served stale up to 60 s while revalidating.
+
+825
+00:44:48.202 --> 00:44:49.738
+Here is the Java code.
+
+826
+00:44:50.018 --> 00:44:56.461
+Thin adapter over the CDN's purge API (provider-specific: surrogate keys or cache tags).
+
+827
+00:44:56.741 --> 00:45:02.074
+VERIFY: exact endpoint, auth and soft-purge option for your CDN provider.
+
+828
+00:45:04.924 --> 00:45:05.564
+Tip:
+
+829
+00:45:05.844 --> 00:45:08.361
+Surrogate keys beat URL purges.
+
+830
+00:45:08.641 --> 00:45:16.343
+One price change affects hundreds of listing URLs (every category page and search result containing the SKU).
+
+831
+00:45:16.623 --> 00:45:22.468
+Tag responses with sku-... keys and purge the tag once, instead of enumerating URLs.
+
+832
+00:45:23.818 --> 00:45:24.970
+Pre-sale warming.
+
+833
+00:45:25.250 --> 00:45:26.786
+Here is the Java code.
+
+834
+00:45:27.066 --> 00:45:30.821
+It runs to 35 lines; the full listing is in the chapter.
+
+835
+00:45:31.101 --> 00:45:39.207
+Loads sale SKUs times stores into L2 at Tminus 30 min, throttled so warming itself can't overload the DB.
+
+836
+00:45:39.487 --> 00:45:44.799
+Run as a one-off job (Kubernetes Job) from the event plan (Ch 02).
+
+837
+00:45:47.649 --> 00:45:49.015
+Here is a quick table:
+
+838
+00:45:49.295 --> 00:45:50.255
+Warming math.
+
+839
+00:45:50.535 --> 00:45:51.345
+Targets:
+
+840
+00:45:51.625 --> 00:45:59.732
+500 sale SKUs times 500 stores = 250 K price keys + 500 cards.
+
+841
+00:46:00.012 --> 00:46:00.759
+Rate:
+
+842
+00:46:01.039 --> 00:46:07.140
+2,000 per second (well below the DB budget of 10 K per second), then ~2 minutes.
+
+843
+00:46:07.420 --> 00:46:17.404
+TTL jitter: ± 10 % on a 10 min soft TTL, plus XFetch, so there's no synchronized expiry at 20:00.
+
+844
+00:46:18.754 --> 00:46:19.565
+Tests.
+
+845
+00:46:19.845 --> 00:46:21.381
+Here is the Java code.
+
+846
+00:46:21.661 --> 00:46:25.330
+It runs to 17 lines; the full listing is in the chapter.
+
+847
+00:46:28.180 --> 00:46:38.249
+An end-to-end test (Testcontainers Kafka + Redis + two app contexts as pods) publishes pricing.price.changed.v1 with version 9.
+
+848
+00:46:38.529 --> 00:46:49.601
+It asserts that L2 holds a v9 tombstone within 1 s, both pods' L1 no longer return v8, and the next read on each pod returns the new price from the DB.
+
+849
+00:46:50.951 --> 00:46:51.698
+Note:
+
+850
+00:46:51.978 --> 00:46:54.559
+ADR-029 or 030:
+
+851
+00:46:54.839 --> 00:46:58.829
+Versioned cache writes; event-driven invalidation; no flushes.
+
+852
+00:46:59.109 --> 00:47:00.026
+Context.
+
+853
+00:47:00.306 --> 00:47:11.954
+A cache flush at sale start caused a DB meltdown, L1 caches served stale prices across pods, and a read or write race pinned a stale price for hours (§1.1).
+
+854
+00:47:13.304 --> 00:47:14.179
+Decision.
+
+855
+00:47:14.459 --> 00:47:19.621
+(1) Every L2 value carries the SoR version, and writes use set-if-newer (Lua).
+
+856
+00:47:19.901 --> 00:47:22.504
+Invalidations write version tombstones.
+
+857
+00:47:22.784 --> 00:47:26.112
+(2) The SoR publishes change events via outbox.
+
+858
+00:47:26.392 --> 00:47:36.547
+A fleet-wide invalidator writes the tombstones (including hot-key replicas) and purges the CDN by surrogate key, and per-pod consumers evict L1.
+
+859
+00:47:36.827 --> 00:47:40.901
+(3) L1 TTL is at most 5 s for mutable data.
+
+860
+00:47:41.181 --> 00:47:48.989
+L2 soft TTLs have ± 10 % jitter, with XFetch early refresh and serve-stale on refresh failure.
+
+861
+00:47:49.269 --> 00:47:56.267
+(4) DB loads per pod are capped by a semaphore, and excess is shed with 503 + Retry-After.
+
+862
+00:47:56.547 --> 00:47:59.533
+(5) Known events are pre-warmed from the event plan.
+
+863
+00:47:59.813 --> 00:48:03.995
+FLUSHALL or FLUSHDB are prohibited in production (Redis ACL).
+
+864
+00:48:04.275 --> 00:48:06.365
+(6) Caches serve displays only.
+
+865
+00:48:06.645 --> 00:48:09.141
+Checkout, stock and payment read the SoR.
+
+866
+00:48:10.491 --> 00:48:11.515
+Consequences.
+
+867
+00:48:11.795 --> 00:48:17.598
+(+) Staleness at most ~1 to 5 s after a change, with no stale-forever values.
+
+868
+00:48:17.878 --> 00:48:21.206
+(+) Cold or lost Redis doesn't take down the DB.
+
+869
+00:48:21.486 --> 00:48:26.371
+(minus ) Lua scripts, invalidation events and per-pod consumers to operate.
+
+870
+00:48:26.651 --> 00:48:37.553
+(minus ) Invalidation depends on outbox events: bulk SQL that bypasses the outbox must publish events too, and that's enforced by pricing owning all writes.
+
+871
+00:48:37.833 --> 00:48:49.097
+Revisit when: invalidation lag or volume grows (consider CDC-driven cache population), or client-side caching with Redis tracking becomes attractive for L1.
+
+872
+00:48:50.447 --> 00:48:52.580
+What changed from L1 to L4.
+
+873
+00:48:52.860 --> 00:48:54.225
+Here is a quick table:
+
+874
+00:48:54.505 --> 00:48:57.961
+Concern, and L1, and L2, and L3, and L4.
+
+875
+00:48:58.241 --> 00:48:59.073
+Layers.
+
+876
+00:48:59.353 --> 00:49:00.185
+L1:
+
+877
+00:49:00.465 --> 00:49:01.511
+In-memory map.
+
+878
+00:49:01.791 --> 00:49:02.601
+L2:
+
+879
+00:49:02.881 --> 00:49:04.311
+Redis via @Cacheable.
+
+880
+00:49:04.591 --> 00:49:05.444
+L3:
+
+881
+00:49:05.724 --> 00:49:08.327
+Caffeine L1 + versioned Redis L2.
+
+882
+00:49:08.607 --> 00:49:10.228
+L4: + CDN.
+
+883
+00:49:10.508 --> 00:49:11.404
+Stampede.
+
+884
+00:49:11.684 --> 00:49:12.516
+L1:
+
+885
+00:49:12.796 --> 00:49:14.097
+Single-flight demo.
+
+886
+00:49:14.377 --> 00:49:15.188
+L2:
+
+887
+00:49:15.468 --> 00:49:17.431
+Per-JVM sync = true.
+
+888
+00:49:17.711 --> 00:49:18.564
+L3:
+
+889
+00:49:18.844 --> 00:49:22.193
+Per-pod single-flight + XFetch + DB permits.
+
+890
+00:49:22.473 --> 00:49:24.991
+L4: + warming, TTL jitter.
+
+891
+00:49:25.271 --> 00:49:26.636
+Read or write race.
+
+892
+00:49:26.916 --> 00:49:27.727
+L2:
+
+893
+00:49:28.007 --> 00:49:28.775
+Present.
+
+894
+00:49:29.055 --> 00:49:29.908
+L3:
+
+895
+00:49:30.188 --> 00:49:32.471
+Fixed: set-if-newer + tombstones.
+
+896
+00:49:32.751 --> 00:49:33.988
+L4: same.
+
+897
+00:49:34.268 --> 00:49:35.377
+Invalidation.
+
+898
+00:49:35.657 --> 00:49:38.985
+L2: @CacheEvict (pre-commit, local path only).
+
+899
+00:49:39.265 --> 00:49:40.119
+L3:
+
+900
+00:49:40.399 --> 00:49:41.743
+Tombstone API.
+
+901
+00:49:42.023 --> 00:49:42.897
+L4:
+
+902
+00:49:43.177 --> 00:49:48.340
+Outbox events, then invalidator (L2, CDN) + per-pod L1 eviction.
+
+903
+00:49:48.620 --> 00:49:49.559
+Hot keys.
+
+904
+00:49:49.839 --> 00:49:50.649
+L2:
+
+905
+00:49:50.929 --> 00:49:51.868
+One shard.
+
+906
+00:49:52.148 --> 00:49:53.001
+L3:
+
+907
+00:49:53.281 --> 00:49:54.476
+L1 absorbs.
+
+908
+00:49:54.756 --> 00:49:57.295
+L4: + replica keys across shards.
+
+909
+00:49:58.645 --> 00:49:59.626
+Redis outage.
+
+910
+00:49:59.906 --> 00:50:00.717
+L2:
+
+911
+00:50:00.997 --> 00:50:01.850
+Errors.
+
+912
+00:50:02.130 --> 00:50:02.983
+L3:
+
+913
+00:50:03.263 --> 00:50:05.887
+DB fallback within permits, shedding beyond.
+
+914
+00:50:06.167 --> 00:50:07.405
+L4: same.
+
+915
+00:50:07.685 --> 00:50:08.837
+Staleness bound.
+
+916
+00:50:09.117 --> 00:50:09.927
+L2:
+
+917
+00:50:10.207 --> 00:50:11.509
+TTL (hours).
+
+918
+00:50:11.789 --> 00:50:12.642
+L3:
+
+919
+00:50:12.922 --> 00:50:14.586
+TTL + tombstones.
+
+920
+00:50:14.866 --> 00:50:19.431
+L4: ~1 to 5 s event-driven, TTL as safety net.
+
+921
+00:50:20.781 --> 00:50:21.720
+Part 6.
+
+922
+00:50:22.000 --> 00:50:23.280
+Production Concerns.
+
+923
+00:50:24.530 --> 00:50:25.682
+Failure modes.
+
+924
+00:50:25.962 --> 00:50:27.327
+Here is a quick table:
+
+925
+00:50:27.607 --> 00:50:31.447
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+926
+00:50:31.727 --> 00:50:34.821
+Stampede (hot key expiry, flush, cold start).
+
+927
+00:50:35.101 --> 00:50:36.295
+Detection signal:
+
+928
+00:50:36.575 --> 00:50:42.293
+Origin QPS spike; cache.l2result=miss spike; DB CPU.
+
+929
+00:50:42.573 --> 00:50:43.789
+Blast radius:
+
+930
+00:50:44.069 --> 00:50:46.479
+Origin DB and everything sharing it.
+
+931
+00:50:46.759 --> 00:50:47.762
+Mitigation:
+
+932
+00:50:48.042 --> 00:50:53.610
+Single-flight, XFetch, TTL jitter, warming, DB permits + shedding, no flushes.
+
+933
+00:50:53.890 --> 00:50:56.237
+Avalanche (many keys expire together).
+
+934
+00:50:56.517 --> 00:50:57.711
+Detection signal:
+
+935
+00:50:57.991 --> 00:51:00.701
+Periodic miss spikes aligned to TTL.
+
+936
+00:51:00.981 --> 00:51:02.197
+Blast radius:
+
+937
+00:51:02.477 --> 00:51:03.394
+Origin.
+
+938
+00:51:03.674 --> 00:51:04.677
+Mitigation:
+
+939
+00:51:04.957 --> 00:51:07.133
+TTL jitter; staggered warming.
+
+940
+00:51:07.413 --> 00:51:10.250
+Penetration (requests for keys that don't exist).
+
+941
+00:51:10.530 --> 00:51:11.725
+Detection signal:
+
+942
+00:51:12.005 --> 00:51:15.034
+Misses that never become hits; high not found loads.
+
+943
+00:51:15.314 --> 00:51:16.530
+Blast radius:
+
+944
+00:51:16.810 --> 00:51:17.727
+Origin.
+
+945
+00:51:18.007 --> 00:51:19.010
+Mitigation:
+
+946
+00:51:19.290 --> 00:51:25.775
+Negative caching (short TTL), Bloom filter of valid ids, input validation, rate limits.
+
+947
+00:51:26.055 --> 00:51:28.637
+Stale-forever value (read or write race).
+
+948
+00:51:28.917 --> 00:51:30.111
+Detection signal:
+
+949
+00:51:30.391 --> 00:51:32.930
+Customer reports; version mismatch checks.
+
+950
+00:51:33.210 --> 00:51:34.426
+Blast radius:
+
+951
+00:51:34.706 --> 00:51:36.007
+Wrong prices shown.
+
+952
+00:51:36.287 --> 00:51:37.290
+Mitigation:
+
+953
+00:51:37.570 --> 00:51:39.767
+Versioned set-if-newer + tombstones.
+
+954
+00:51:41.117 --> 00:51:43.827
+Missed invalidation (event lost or lagging).
+
+955
+00:51:44.107 --> 00:51:45.301
+Detection signal:
+
+956
+00:51:45.581 --> 00:51:48.717
+Invalidation lag metric; version drift sampling.
+
+957
+00:51:48.997 --> 00:51:50.213
+Blast radius:
+
+958
+00:51:50.493 --> 00:51:51.987
+Stale within TTL.
+
+959
+00:51:52.267 --> 00:51:53.269
+Mitigation:
+
+960
+00:51:53.549 --> 00:51:57.645
+Outbox (no lost events), TTL safety net, lag alerts.
+
+961
+00:51:57.925 --> 00:51:59.461
+Hot key or hot shard.
+
+962
+00:51:59.741 --> 00:52:00.936
+Detection signal:
+
+963
+00:52:01.216 --> 00:52:05.333
+One Redis shard at 100 % CPU; slot-level metrics.
+
+964
+00:52:05.613 --> 00:52:06.829
+Blast radius:
+
+965
+00:52:07.109 --> 00:52:08.560
+All keys on that shard.
+
+966
+00:52:08.840 --> 00:52:09.843
+Mitigation:
+
+967
+00:52:10.123 --> 00:52:13.173
+L1, key replication, spread sale SKUs.
+
+968
+00:52:13.453 --> 00:52:15.565
+Big keys (MB-sized values).
+
+969
+00:52:15.845 --> 00:52:17.040
+Detection signal:
+
+970
+00:52:17.320 --> 00:52:20.221
+Redis latency spikes; network saturation.
+
+971
+00:52:20.501 --> 00:52:21.717
+Blast radius:
+
+972
+00:52:21.997 --> 00:52:23.107
+Shard stalls.
+
+973
+00:52:23.387 --> 00:52:24.389
+Mitigation:
+
+974
+00:52:24.669 --> 00:52:27.144
+Size limits, compression, split values.
+
+975
+00:52:27.424 --> 00:52:28.704
+Redis memory full.
+
+976
+00:52:28.984 --> 00:52:30.179
+Detection signal:
+
+977
+00:52:30.459 --> 00:52:33.445
+Evictions ↑, or write errors with noeviction.
+
+978
+00:52:33.725 --> 00:52:34.941
+Blast radius:
+
+979
+00:52:35.221 --> 00:52:37.461
+Hit ratio collapse or write failures.
+
+980
+00:52:37.741 --> 00:52:38.744
+Mitigation:
+
+981
+00:52:39.024 --> 00:52:42.736
+Sizing, eviction policy per purpose, TTLs everywhere.
+
+982
+00:52:43.016 --> 00:52:44.125
+Redis failover.
+
+983
+00:52:44.405 --> 00:52:45.600
+Detection signal:
+
+984
+00:52:45.880 --> 00:52:47.949
+Brief errors, possible lost writes.
+
+985
+00:52:48.229 --> 00:52:49.445
+Blast radius:
+
+986
+00:52:49.725 --> 00:52:50.813
+Short miss spike.
+
+987
+00:52:51.093 --> 00:52:52.096
+Mitigation:
+
+988
+00:52:52.376 --> 00:52:55.747
+Treat L2 as rebuildable; DB permits absorb.
+
+989
+00:52:57.097 --> 00:52:59.273
+Serialization change on deploy.
+
+990
+00:52:59.553 --> 00:53:00.747
+Detection signal:
+
+991
+00:53:01.027 --> 00:53:03.374
+Deserialization errors after rollout.
+
+992
+00:53:03.654 --> 00:53:04.870
+Blast radius:
+
+993
+00:53:05.150 --> 00:53:06.686
+Every read of old entries.
+
+994
+00:53:06.966 --> 00:53:07.969
+Mitigation:
+
+995
+00:53:08.249 --> 00:53:11.961
+Cache schema version in the key prefix (v1:, then v2:).
+
+996
+00:53:12.241 --> 00:53:14.694
+Cache poisoning (bad data cached widely).
+
+997
+00:53:14.974 --> 00:53:16.169
+Detection signal:
+
+998
+00:53:16.449 --> 00:53:18.817
+Error reports concentrated on one version.
+
+999
+00:53:19.097 --> 00:53:20.313
+Blast radius:
+
+1000
+00:53:20.593 --> 00:53:22.086
+Everyone reading that key.
+
+1001
+00:53:22.366 --> 00:53:23.369
+Mitigation:
+
+1002
+00:53:23.649 --> 00:53:29.345
+Version tombstone to purge; validate before caching; short TTLs for new data paths.
+
+1003
+00:53:30.695 --> 00:53:31.783
+Observability.
+
+1004
+00:53:32.063 --> 00:53:33.428
+Here is a quick table:
+
+1005
+00:53:33.708 --> 00:53:34.839
+Signal, and Why.
+
+1006
+00:53:35.119 --> 00:53:38.937
+Hit ratio per cache and layer (L1, L2, CDN):
+
+1007
+00:53:39.217 --> 00:53:40.561
+The core health metric.
+
+1008
+00:53:40.841 --> 00:53:43.551
+Track request-weighted hit ratio, not key-count.
+
+1009
+00:53:43.831 --> 00:53:46.369
+Origin loads per second from cache misses:
+
+1010
+00:53:46.649 --> 00:53:48.783
+What the DB actually experiences.
+
+1011
+00:53:49.063 --> 00:53:51.943
+Load latency (p50 or p99):
+
+1012
+00:53:52.223 --> 00:53:54.463
+Slow loads enlarge stampede windows.
+
+1013
+00:53:54.743 --> 00:53:58.860
+Single-flight waiters or permits exhausted (cache.load.rejected):
+
+1014
+00:53:59.140 --> 00:54:03.684
+Stampede pressure; shedding in effect. cache.l2.setrejectedstale:
+
+1015
+00:54:03.964 --> 00:54:05.564
+Races caught by versioning.
+
+1016
+00:54:05.844 --> 00:54:09.620
+A non-zero count is expected; a spike means slow readers.
+
+1017
+00:54:09.900 --> 00:54:14.764
+Invalidation lag (change committed, then tombstone written, then L1 evicted):
+
+1018
+00:54:15.044 --> 00:54:16.303
+Freshness SLO.
+
+1019
+00:54:17.653 --> 00:54:19.807
+Evictions, memory, keyspace size:
+
+1020
+00:54:20.087 --> 00:54:21.047
+Capacity.
+
+1021
+00:54:21.327 --> 00:54:23.503
+Per-shard ops per second and latency:
+
+1022
+00:54:23.783 --> 00:54:24.722
+Hot keys.
+
+1023
+00:54:25.002 --> 00:54:29.226
+CDN hit ratio, purge count and latency, origin fetches:
+
+1024
+00:54:29.506 --> 00:54:30.658
+Edge effectiveness.
+
+1025
+00:54:30.938 --> 00:54:34.799
+Sampled consistency check (cached version versus SoR version):
+
+1026
+00:54:35.079 --> 00:54:36.637
+Detects silent staleness.
+
+1027
+00:54:37.987 --> 00:54:38.925
+Security.
+
+1028
+00:54:39.205 --> 00:54:48.827
+Never cache personalized responses at shared layers (CDN or gateway) unless the cache key includes the user or the response is truly public.
+
+1029
+00:54:49.107 --> 00:54:54.056
+Cache-Control: private or no-store is the default for authenticated responses.
+
+1030
+00:54:54.336 --> 00:54:59.499
+A single misconfigured public header can serve one user's cart or address to others.
+
+1031
+00:54:59.779 --> 00:55:09.507
+Cache keys must include every input that changes the response (store, language, app version, experiment bucket) or users see each other's variants.
+
+1032
+00:55:10.857 --> 00:55:16.617
+Web cache poisoning: unkeyed headers (X-Forwarded-Host) reflected into cached responses.
+
+1033
+00:55:16.897 --> 00:55:19.009
+Normalize and validate at the edge.
+
+1034
+00:55:19.289 --> 00:55:27.353
+Sensitive data in Redis: avoid PII where possible, use TLS and ACLs, and set TTLs on everything.
+
+1035
+00:55:27.633 --> 00:55:31.217
+Remember that Redis snapshots and replicas copy data too.
+
+1036
+00:55:31.497 --> 00:55:38.750
+Prohibit dangerous commands (FLUSHALL, FLUSHDB, KEYS, CONFIG) for application users via Redis ACLs.
+
+1037
+00:55:40.100 --> 00:55:41.764
+Performance and tuning knobs.
+
+1038
+00:55:42.044 --> 00:55:43.409
+Here is a quick table:
+
+1039
+00:55:43.689 --> 00:55:45.929
+Knob, and Starting point, and Guidance.
+
+1040
+00:55:46.209 --> 00:55:48.556
+L1 TTL (mutable data).
+
+1041
+00:55:48.836 --> 00:55:49.903
+Starting point:
+
+1042
+00:55:50.183 --> 00:55:51.377
+1 to 5 s.
+
+1043
+00:55:51.657 --> 00:55:52.553
+Guidance:
+
+1044
+00:55:52.833 --> 00:55:55.841
+Bounds cross-pod staleness if broadcasts are missed.
+
+1045
+00:55:56.121 --> 00:55:57.252
+L1 size.
+
+1046
+00:55:57.532 --> 00:55:58.599
+Starting point:
+
+1047
+00:55:58.879 --> 00:56:01.609
+Working set of hot keys (10 to 50 K).
+
+1048
+00:56:01.889 --> 00:56:02.785
+Guidance:
+
+1049
+00:56:03.065 --> 00:56:06.479
+Watch heap and GC; Caffeine W-TinyLFU.
+
+1050
+00:56:06.759 --> 00:56:08.231
+L2 soft TTL.
+
+1051
+00:56:08.511 --> 00:56:09.577
+Starting point:
+
+1052
+00:56:09.857 --> 00:56:12.951
+Minutes to hours, ± 10 % jitter.
+
+1053
+00:56:13.231 --> 00:56:14.127
+Guidance:
+
+1054
+00:56:14.407 --> 00:56:16.668
+Safety net; events do the freshness.
+
+1055
+00:56:16.948 --> 00:56:18.399
+L2 hard TTL.
+
+1056
+00:56:18.679 --> 00:56:19.745
+Starting point:
+
+1057
+00:56:20.025 --> 00:56:21.369
+Soft + margin.
+
+1058
+00:56:21.649 --> 00:56:22.545
+Guidance:
+
+1059
+00:56:22.825 --> 00:56:25.172
+Allows serve-stale during refresh failures.
+
+1060
+00:56:25.452 --> 00:56:26.647
+XFetch β.
+
+1061
+00:56:26.927 --> 00:56:27.993
+Starting point:
+
+1062
+00:56:28.273 --> 00:56:29.383
+1.0.
+
+1063
+00:56:29.663 --> 00:56:30.559
+Guidance:
+
+1064
+00:56:30.839 --> 00:56:32.652
+Higher means earlier refreshes.
+
+1065
+00:56:32.932 --> 00:56:34.489
+DB permits per pod.
+
+1066
+00:56:34.769 --> 00:56:35.836
+Starting point:
+
+1067
+00:56:36.116 --> 00:56:38.313
+DB budget ÷ pods.
+
+1068
+00:56:38.593 --> 00:56:39.489
+Guidance:
+
+1069
+00:56:39.769 --> 00:56:41.732
+Little's Law (Ch 02).
+
+1070
+00:56:43.082 --> 00:56:44.682
+Negative-cache TTL.
+
+1071
+00:56:44.962 --> 00:56:46.029
+Starting point:
+
+1072
+00:56:46.309 --> 00:56:47.631
+30 to 60 s.
+
+1073
+00:56:47.911 --> 00:56:48.807
+Guidance:
+
+1074
+00:56:49.087 --> 00:56:52.330
+Long enough to absorb abuse, short enough for new products.
+
+1075
+00:56:52.610 --> 00:56:53.890
+Hot-key replicas.
+
+1076
+00:56:54.170 --> 00:56:55.237
+Starting point:
+
+1077
+00:56:55.517 --> 00:56:56.711
+4 to 16.
+
+1078
+00:56:56.991 --> 00:56:57.887
+Guidance:
+
+1079
+00:56:58.167 --> 00:57:00.002
+Number of shards to spread over.
+
+1080
+00:57:00.282 --> 00:57:01.562
+Tombstone TTL.
+
+1081
+00:57:01.842 --> 00:57:07.197
+Starting point: ≥ the longest plausible slow-reader delay (60 s).
+
+1082
+00:57:07.477 --> 00:57:08.373
+Guidance:
+
+1083
+00:57:08.653 --> 00:57:10.359
+Too short brings back the race.
+
+1084
+00:57:10.639 --> 00:57:11.578
+CDN.
+
+1085
+00:57:11.858 --> 00:57:16.722
+Starting point: s-maxage 30 to 300 s + stale-while-revalidate.
+
+1086
+00:57:17.002 --> 00:57:17.898
+Guidance:
+
+1087
+00:57:18.178 --> 00:57:19.842
+Surrogate keys for purges.
+
+1088
+00:57:21.192 --> 00:57:21.917
+Cost.
+
+1089
+00:57:22.197 --> 00:57:26.037
+A cache is memory traded for origin capacity and latency.
+
+1090
+00:57:26.317 --> 00:57:38.947
+At 98 % hit ratio, the catalog DB serves ~4 K per second instead of 190 K per second, which is the difference between one modest cluster and a heavily sharded one.
+
+1091
+00:57:39.227 --> 00:57:42.363
+Right-size by the working set, not the whole dataset.
+
+1092
+00:57:42.643 --> 00:57:51.219
+A 500 MB card set plus 240 MB of prices in Redis costs far less than the DB capacity it replaces.
+
+1093
+00:57:51.499 --> 00:57:54.613
+CDN egress is often the largest line item.
+
+1094
+00:57:54.893 --> 00:58:01.293
+Cache images aggressively, with versioned immutable URLs and modern formats (WebP or AVIF).
+
+1095
+00:58:02.643 --> 00:58:07.891
+Every cache layer adds operational cost: invalidation paths, metrics, runbooks.
+
+1096
+00:58:08.171 --> 00:58:12.310
+Add a layer only when the estimate shows it's needed (Ch 02).
+
+1097
+00:58:13.660 --> 00:58:14.599
+Part 7.
+
+1098
+00:58:14.879 --> 00:58:16.585
+Anti-Patterns and Pitfalls.
+
+1099
+00:58:17.835 --> 00:58:18.475
+1.
+
+1100
+00:58:18.755 --> 00:58:20.633
+Flushing the cache to refresh data.
+
+1101
+00:58:20.913 --> 00:58:21.723
+Symptom:
+
+1102
+00:58:22.003 --> 00:58:25.651
+A stampede at the worst possible moment (§1.1).
+
+1103
+00:58:25.931 --> 00:58:26.657
+Fix:
+
+1104
+00:58:26.937 --> 00:58:31.353
+Event-driven invalidation of the changed keys, and warming before events.
+
+1105
+00:58:31.633 --> 00:58:33.147
+Block FLUSH via ACLs.
+
+1106
+00:58:33.427 --> 00:58:34.131
+2.
+
+1107
+00:58:34.411 --> 00:58:37.782
+Updating the cache on write instead of deleting (or versioning).
+
+1108
+00:58:39.132 --> 00:58:49.116
+Here is the Java code. before: two concurrent writers can leave the OLDER value in the cache. after: version tombstone; readers repopulate with set-if-newer.
+
+1109
+00:58:51.966 --> 00:58:52.713
+3.
+
+1110
+00:58:52.993 --> 00:58:54.465
+Evicting before commit.
+
+1111
+00:58:54.745 --> 00:58:55.555
+Symptom:
+
+1112
+00:58:55.835 --> 00:58:59.718
+A reader re-caches the old value between the evict and the commit.
+
+1113
+00:58:59.998 --> 00:59:00.723
+Fix:
+
+1114
+00:59:01.003 --> 00:59:08.278
+Invalidate after commit, via an outbox event or a TransactionSynchronization.afterCommit hook, plus versioning.
+
+1115
+00:59:08.558 --> 00:59:09.262
+4.
+
+1116
+00:59:09.542 --> 00:59:11.078
+No stampede protection.
+
+1117
+00:59:12.428 --> 00:59:22.241
+Here is the Java code. before: every concurrent miss hits the DB. after: per-pod single-flight + early refresh + DB permits (L3).
+
+1118
+00:59:25.091 --> 00:59:25.859
+5.
+
+1119
+00:59:26.139 --> 00:59:29.019
+Same TTL for everything, with no jitter.
+
+1120
+00:59:29.299 --> 00:59:31.795
+Synchronized expiry means an avalanche.
+
+1121
+00:59:32.075 --> 00:59:32.822
+6.
+
+1122
+00:59:33.102 --> 00:59:35.619
+Caching negative results forever, or never.
+
+1123
+00:59:35.899 --> 00:59:36.710
+Symptom:
+
+1124
+00:59:36.990 --> 00:59:43.411
+A product added later doesn't exist for hours, or bots probing random SKUs hammer the DB.
+
+1125
+00:59:43.691 --> 00:59:44.417
+Fix:
+
+1126
+00:59:44.697 --> 00:59:49.731
+Negative cache with a short TTL, plus an id validation or Bloom filter.
+
+1127
+00:59:50.011 --> 00:59:50.758
+7.
+
+1128
+00:59:51.038 --> 00:59:53.086
+Caching decisions, not displays.
+
+1129
+00:59:53.366 --> 00:59:54.177
+Symptom:
+
+1130
+00:59:54.457 --> 00:59:59.833
+Checkout charges a cached price, or allows a reservation based on a cached stock badge.
+
+1131
+01:00:00.113 --> 01:00:00.838
+Fix:
+
+1132
+01:00:01.118 --> 01:00:05.513
+Caches for display, the SoR for decisions (§2.12).
+
+1133
+01:00:05.793 --> 01:00:06.475
+8.
+
+1134
+01:00:06.755 --> 01:00:09.401
+Shared-edge caching of personalized responses.
+
+1135
+01:00:10.751 --> 01:00:17.193
+Here is the HTTP code. before: public caching of a response that contains the user's address.
+
+1136
+01:00:20.043 --> 01:00:20.790
+9.
+
+1137
+01:00:21.070 --> 01:00:23.267
+Unversioned cache keys across deploys.
+
+1138
+01:00:23.547 --> 01:00:24.358
+Symptom:
+
+1139
+01:00:24.638 --> 01:00:30.291
+Deserialization errors or wrong fields after a payload change during a rolling deploy.
+
+1140
+01:00:30.571 --> 01:00:31.297
+Fix:
+
+1141
+01:00:31.577 --> 01:00:36.761
+A cache schema prefix (v1:, then v2:), with old keys expiring naturally.
+
+1142
+01:00:37.041 --> 01:00:37.745
+10.
+
+1143
+01:00:38.025 --> 01:00:40.073
+Just add a cache to hide a slow query.
+
+1144
+01:00:40.353 --> 01:00:41.163
+Symptom:
+
+1145
+01:00:41.443 --> 01:00:47.374
+The cache hides an N+1 or a missing index until the first cold start takes the DB down.
+
+1146
+01:00:47.654 --> 01:00:48.379
+Fix:
+
+1147
+01:00:48.659 --> 01:00:52.222
+Make the origin query fast (Ch 05) first.
+
+1148
+01:00:52.502 --> 01:00:55.510
+The cache is for scale, not for fixing bad queries.
+
+1149
+01:00:56.860 --> 01:00:57.735
+Part 8.
+
+1150
+01:00:58.015 --> 01:00:59.359
+Interview Q and A.
+
+1151
+01:01:00.609 --> 01:01:01.441
+Beginner.
+
+1152
+01:01:01.721 --> 01:01:02.745
+Question 1.
+
+1153
+01:01:03.025 --> 01:01:05.777
+What is caching, and how do you measure whether it's working?
+
+1154
+01:01:06.057 --> 01:01:07.422
+Thirty-second answer:
+
+1155
+01:01:07.702 --> 01:01:14.571
+Keeping copies of frequently read data in faster storage closer to the reader, to cut latency and origin load.
+
+1156
+01:01:14.851 --> 01:01:23.257
+Measure it by hit ratio (request-weighted), origin load from misses, latency per layer, and freshness (how stale served data can be).
+
+1157
+01:01:24.607 --> 01:01:25.609
+Question 2.
+
+1158
+01:01:25.889 --> 01:01:27.639
+Where can you cache in a web system?
+
+1159
+01:01:27.919 --> 01:01:29.284
+Thirty-second answer:
+
+1160
+01:01:29.564 --> 01:01:40.636
+Client (browser or app), CDN edge, gateway or BFF, in-process in the service (L1), distributed cache (L2, Redis), and the database's own buffer cache.
+
+1161
+01:01:40.916 --> 01:01:43.967
+Closer layers are faster but harder to invalidate.
+
+1162
+01:01:45.317 --> 01:01:46.362
+Question 3.
+
+1163
+01:01:46.642 --> 01:01:49.095
+LRU versus LFU: which and when?
+
+1164
+01:01:49.375 --> 01:01:50.741
+Thirty-second answer:
+
+1165
+01:01:51.021 --> 01:01:58.445
+LRU evicts the least recently used item, which suits recency-driven access but is vulnerable to one-off scans.
+
+1166
+01:01:58.725 --> 01:02:04.250
+LFU evicts the least frequently used, which suits stable popularity but adapts slowly.
+
+1167
+01:02:04.530 --> 01:02:10.077
+Caffeine's W-TinyLFU combines both and is the best default on the JVM.
+
+1168
+01:02:11.427 --> 01:02:12.493
+Question 4.
+
+1169
+01:02:12.773 --> 01:02:14.416
+How do you choose a TTL?
+
+1170
+01:02:14.696 --> 01:02:16.061
+Thirty-second answer:
+
+1171
+01:02:16.341 --> 01:02:22.891
+From the staleness contract, meaning how stale this data may be for its readers, and whether events invalidate it.
+
+1172
+01:02:23.171 --> 01:02:27.565
+With event-driven invalidation, the TTL is a safety net (longer).
+
+1173
+01:02:27.845 --> 01:02:31.003
+Without it, the TTL is the freshness bound (shorter).
+
+1174
+01:02:31.283 --> 01:02:32.499
+Always add jitter.
+
+1175
+01:02:33.849 --> 01:02:34.851
+Intermediate.
+
+1176
+01:02:35.131 --> 01:02:36.241
+Question 5.
+
+1177
+01:02:36.521 --> 01:02:40.937
+Cache-aside versus read-through versus write-through versus write-behind?
+
+1178
+01:02:41.217 --> 01:02:42.582
+Thirty-second answer:
+
+1179
+01:02:42.862 --> 01:02:46.211
+Cache-aside: the app loads on a miss and deletes on write.
+
+1180
+01:02:46.491 --> 01:02:47.899
+It's simple and common.
+
+1181
+01:02:48.179 --> 01:02:52.297
+Read-through: the cache library loads on a miss (enables single-flight).
+
+1182
+01:02:52.577 --> 01:02:55.051
+Write-through: write the cache and DB together.
+
+1183
+01:02:55.331 --> 01:02:59.363
+Reads are always warm, but writes are slower and cache unread data.
+
+1184
+01:02:59.643 --> 01:03:02.843
+Write-behind: write the cache, flush to the DB later.
+
+1185
+01:03:03.123 --> 01:03:06.259
+Very fast, but risks data loss, so never for money.
+
+1186
+01:03:07.609 --> 01:03:08.719
+Question 6.
+
+1187
+01:03:08.999 --> 01:03:11.708
+What is a cache stampede, and how do you prevent it?
+
+1188
+01:03:11.988 --> 01:03:13.353
+Thirty-second answer:
+
+1189
+01:03:13.633 --> 01:03:20.033
+Many concurrent misses on the same key (expiry, flush, cold start) all hit the origin at once.
+
+1190
+01:03:20.313 --> 01:03:33.924
+Prevent it with single-flight (coalescing), probabilistic early refresh (XFetch), stale-while-revalidate, TTL jitter, warming, distributed locks for the hottest keys, and origin protection (permits and shedding).
+
+1191
+01:03:35.274 --> 01:03:36.362
+Question 7.
+
+1192
+01:03:36.642 --> 01:03:40.162
+How do you keep a cache consistent with the database on updates?
+
+1193
+01:03:40.442 --> 01:03:41.807
+Thirty-second answer:
+
+1194
+01:03:42.087 --> 01:03:51.389
+Write the DB (the SoR), then invalidate the cache after commit, ideally from a change event (outbox or CDC) so no update is missed.
+
+1195
+01:03:51.669 --> 01:03:53.503
+Readers repopulate on a miss.
+
+1196
+01:03:53.783 --> 01:03:58.839
+Protect against the reader or writer race with versioned conditional sets or leases.
+
+1197
+01:03:59.119 --> 01:04:03.087
+Bound the worst case with TTLs, and don't use caches for decisions.
+
+1198
+01:04:04.437 --> 01:04:05.461
+Question 8.
+
+1199
+01:04:05.741 --> 01:04:07.896
+What are the pitfalls of Spring's @Cacheable?
+
+1200
+01:04:08.176 --> 01:04:09.541
+Thirty-second answer:
+
+1201
+01:04:09.821 --> 01:04:15.965
+Self-invocation bypasses the proxy. @CacheEvict may run before the transaction commits.
+
+1202
+01:04:16.245 --> 01:04:22.368
+There's no versioning, so the race remains. sync = true only coalesces within one JVM.
+
+1203
+01:04:22.648 --> 01:04:24.675
+Default serialization is fragile.
+
+1204
+01:04:24.955 --> 01:04:27.003
+Null handling needs to be deliberate.
+
+1205
+01:04:27.283 --> 01:04:31.976
+Keys need namespacing and versioning, and there's no multi-level coordination.
+
+1206
+01:04:33.326 --> 01:04:34.393
+Question 9.
+
+1207
+01:04:34.673 --> 01:04:38.705
+How do HTTP caching and CDNs work for APIs?
+
+1208
+01:04:38.985 --> 01:04:40.350
+Thirty-second answer:
+
+1209
+01:04:40.630 --> 01:04:58.337
+Cache-Control (max-age for browsers, s-maxage for shared caches, stale-while-revalidate, private or no-store), validators (ETag or If-None-Match, then 304), Vary for request-dependent variants, and CDN purges by URL or surrogate key.
+
+1210
+01:04:59.687 --> 01:05:00.455
+Senior.
+
+1211
+01:05:00.735 --> 01:05:01.780
+Question 10.
+
+1212
+01:05:02.060 --> 01:05:05.495
+Explain the cache-aside race condition and how you'd fix it.
+
+1213
+01:05:05.775 --> 01:05:07.140
+Thirty-second answer:
+
+1214
+01:05:07.420 --> 01:05:10.727
+A reader misses and loads the old value from the DB.
+
+1215
+01:05:11.007 --> 01:05:13.993
+A writer updates the DB and deletes the cache key.
+
+1216
+01:05:14.273 --> 01:05:18.945
+The reader then writes the old value into the cache, where it stays until the TTL.
+
+1217
+01:05:19.225 --> 01:05:31.065
+Fix it with versioned conditional writes: store the SoR version and accept a set only if its version ≥ the stored one, with invalidation writing a tombstone at the new version.
+
+1218
+01:05:31.345 --> 01:05:37.553
+Alternatives are leases, CDC-only cache population, or short TTLs as mitigation.
+
+1219
+01:05:38.903 --> 01:05:40.034
+Question 11.
+
+1220
+01:05:40.314 --> 01:05:42.298
+How do you handle a hot key in Redis?
+
+1221
+01:05:42.578 --> 01:05:43.943
+Thirty-second answer:
+
+1222
+01:05:44.223 --> 01:05:47.850
+Detect it (per-shard metrics, --hotkeys, client-side sampling).
+
+1223
+01:05:48.130 --> 01:05:51.437
+Absorb repeated reads with an in-process L1 cache.
+
+1224
+01:05:51.717 --> 01:05:56.261
+Replicate the key under several names on different shards and read a random replica.
+
+1225
+01:05:56.541 --> 01:05:59.079
+For writes, shard counters or batch updates.
+
+1226
+01:05:59.359 --> 01:06:01.855
+Pre-identify hot keys for known events.
+
+1227
+01:06:03.205 --> 01:06:04.293
+Question 12.
+
+1228
+01:06:04.573 --> 01:06:09.139
+How do you keep in-process (L1) caches consistent across 50 pods?
+
+1229
+01:06:09.419 --> 01:06:10.784
+Thirty-second answer:
+
+1230
+01:06:11.064 --> 01:06:12.899
+Short TTLs bound staleness.
+
+1231
+01:06:13.179 --> 01:06:24.315
+Broadcast invalidation reaches every pod (Kafka with a unique group per pod, or Redis Pub or Sub), and the L2-first ordering makes L1 refills read fresh data.
+
+1232
+01:06:24.595 --> 01:06:29.139
+Or use Redis client-side caching (tracking), which pushes invalidations.
+
+1233
+01:06:30.489 --> 01:06:31.769
+Question 13.
+
+1234
+01:06:32.049 --> 01:06:36.315
+What are cache penetration and cache avalanche, and how do you defend against them?
+
+1235
+01:06:36.595 --> 01:06:37.961
+Thirty-second answer:
+
+1236
+01:06:38.241 --> 01:06:44.811
+Penetration: requests for keys that don't exist always miss and hit the origin (bots, bad ids).
+
+1237
+01:06:45.091 --> 01:06:52.281
+Defend with negative caching (short TTL), Bloom filters of valid ids, validation and rate limits.
+
+1238
+01:06:52.561 --> 01:06:55.953
+Avalanche: many keys expire or the cache fails at once.
+
+1239
+01:06:56.233 --> 01:07:02.675
+Defend with TTL jitter, warming, multi-level caches, origin protection, and staggered restarts.
+
+1240
+01:07:04.025 --> 01:07:05.220
+Question 14.
+
+1241
+01:07:05.500 --> 01:07:07.185
+Redis goes down during peak.
+
+1242
+01:07:07.465 --> 01:07:08.937
+What happens in your design?
+
+1243
+01:07:09.217 --> 01:07:10.583
+Thirty-second answer:
+
+1244
+01:07:10.863 --> 01:07:13.551
+L1 keeps serving hot keys for its TTL.
+
+1245
+01:07:13.831 --> 01:07:27.079
+Misses go to the DB through per-pod single-flight, capped by a permit budget, and excess requests get a fast 503 with Retry-After (low-priority traffic first) rather than piling onto the DB.
+
+1246
+01:07:27.359 --> 01:07:29.961
+Once Redis recovers, it warms gradually.
+
+1247
+01:07:30.241 --> 01:07:33.079
+Decisions (checkout) never depended on Redis.
+
+1248
+01:07:34.429 --> 01:07:35.325
+Architect.
+
+1249
+01:07:35.605 --> 01:07:36.799
+Question 15.
+
+1250
+01:07:37.079 --> 01:07:43.287
+Design caching for a product catalog serving 190 K req per second at sale start.
+
+1251
+01:07:43.567 --> 01:07:44.933
+Thirty-second answer:
+
+1252
+01:07:45.213 --> 01:07:48.967
+CDN for images and anonymous listings (surrogate keys).
+
+1253
+01:07:49.247 --> 01:07:54.986
+A Caffeine L1 per pod (hot 10 to 50 K keys, 5 s TTL, single-flight).
+
+1254
+01:07:55.266 --> 01:08:01.837
+Redis L2 with versioned values, XFetch, TTL jitter, and hot-key replicas for sale SKUs.
+
+1255
+01:08:02.117 --> 01:08:07.663
+Outbox-driven invalidation (L2 tombstones, L1 broadcast, CDN purge).
+
+1256
+01:08:07.943 --> 01:08:09.095
+Pre-sale warming.
+
+1257
+01:08:09.375 --> 01:08:10.975
+DB permits and shedding.
+
+1258
+01:08:11.255 --> 01:08:13.389
+Checkout re-prices from the SoR.
+
+1259
+01:08:14.739 --> 01:08:15.933
+Question 16.
+
+1260
+01:08:16.213 --> 01:08:20.160
+How do you define what may be cached and for how long across a platform?
+
+1261
+01:08:20.440 --> 01:08:21.805
+Thirty-second answer:
+
+1262
+01:08:22.085 --> 01:08:37.595
+Publish staleness contracts per data class: display data (content, prices, badges) may be cached with bounded staleness and event invalidation, while decision data (checkout price, stock, payment, authorization) always reads the SoR.
+
+1263
+01:08:37.875 --> 01:08:47.304
+Standardize libraries (a two-level cache component with versioning and metrics), key conventions, and security rules (no personalized public caching).
+
+1264
+01:08:48.654 --> 01:08:49.998
+Question 17.
+
+1265
+01:08:50.278 --> 01:08:52.902
+Your cache is now critical to availability.
+
+1266
+01:08:53.182 --> 01:08:54.867
+How do you reason about that risk?
+
+1267
+01:08:55.147 --> 01:08:56.513
+Thirty-second answer:
+
+1268
+01:08:56.793 --> 01:09:04.622
+If the origin can't serve the uncached load, the cache is a hard dependency, and its availability multiplies with the service's.
+
+1269
+01:09:04.902 --> 01:09:19.025
+Mitigate with a highly available cache (replicas, multi-AZ), L1 as a second layer, origin protection (permits, shedding) so cache loss degrades rather than fails, capacity to rebuild (warming), and game days.
+
+1270
+01:09:20.375 --> 01:09:21.548
+Question 18.
+
+1271
+01:09:21.828 --> 01:09:23.705
+When is adding a cache the wrong answer?
+
+1272
+01:09:23.985 --> 01:09:25.351
+Thirty-second answer:
+
+1273
+01:09:25.631 --> 01:09:47.241
+When the origin query is slow because of a fixable problem (missing index, N+1), when the data changes faster than it's read (low hit ratio), when correctness requires the latest value (decisions), when the working set is too large or too uniformly accessed to get good hits, or when the invalidation complexity outweighs the gains.
+
+1274
+01:09:48.591 --> 01:09:49.829
+Question 19.
+
+1275
+01:09:50.109 --> 01:09:55.869
+How do deploys, scale-outs and cache node replacements affect caching, and how do you plan for them?
+
+1276
+01:09:56.149 --> 01:09:57.514
+Thirty-second answer:
+
+1277
+01:09:57.794 --> 01:10:01.890
+Deploys and scale-outs create cold L1s (a miss spike to L2).
+
+1278
+01:10:02.170 --> 01:10:07.759
+Cache node replacement or reshard creates cold L2 slots (a miss spike to the DB).
+
+1279
+01:10:08.039 --> 01:10:10.109
+Payload changes need versioned keys.
+
+1280
+01:10:10.389 --> 01:10:23.530
+Plan with rolling deploys (few pods cold at once), L2 warm for L1, pre-warming for known events, key-prefix versioning, and slot migrations that preserve data (Redis Cluster resharding moves keys).
+
+1281
+01:10:24.880 --> 01:10:25.989
+Question 20.
+
+1282
+01:10:26.269 --> 01:10:31.219
+App-managed caching versus CDC-driven cache population: which would you choose?
+
+1283
+01:10:31.499 --> 01:10:32.864
+Thirty-second answer:
+
+1284
+01:10:33.144 --> 01:10:41.272
+App-managed (cache-aside + events) is simpler, caches only what's read, and handles misses immediately, but needs race protection.
+
+1285
+01:10:41.552 --> 01:10:56.336
+CDC-driven (a consumer applies DB changes to the cache in commit order) removes app write paths and races, but must populate everything (or on demand), adds pipeline dependency and lag, and complicates misses.
+
+1286
+01:10:57.686 --> 01:10:58.582
+Part 9.
+
+1287
+01:10:58.862 --> 01:11:00.270
+Summary and Practice.
+
+1288
+01:11:01.520 --> 01:11:02.608
+Key takeaways.
+
+1289
+01:11:02.888 --> 01:11:06.365
+A cache is a copy with a lifetime and a staleness contract.
+
+1290
+01:11:06.645 --> 01:11:08.629
+Define the contract per data type.
+
+1291
+01:11:08.909 --> 01:11:13.219
+The origin is sized for misses: losing the cache multiplies the load.
+
+1292
+01:11:13.499 --> 01:11:14.821
+Design for that case.
+
+1293
+01:11:15.101 --> 01:11:22.760
+Cache-aside with delete on write is the default, but add versioned set-if-newer + tombstones to kill the read or write race.
+
+1294
+01:11:23.040 --> 01:11:30.592
+Stampedes need layered defences: single-flight, XFetch, TTL jitter, warming, and origin permits with shedding.
+
+1295
+01:11:31.942 --> 01:11:39.643
+Invalidate inside-out (L2, then L1 on all pods, then CDN), driven by outbox or CDC events.
+
+1296
+01:11:39.923 --> 01:11:41.737
+TTLs are the safety net.
+
+1297
+01:11:42.017 --> 01:11:45.558
+L1 in-process caches absorb hot keys and save hops.
+
+1298
+01:11:45.838 --> 01:11:49.358
+Keep them small, with short TTLs and broadcast eviction.
+
+1299
+01:11:49.638 --> 01:11:50.577
+Hot keys:
+
+1300
+01:11:50.857 --> 01:11:54.163
+L1 + replicas across shards + event planning.
+
+1301
+01:11:54.443 --> 01:12:00.182
+Protect against penetration (negative caching, Bloom filters) and avalanche (jitter, warming).
+
+1302
+01:12:00.462 --> 01:12:03.619
+Display from caches, decide from the system of record.
+
+1303
+01:12:04.969 --> 01:12:06.313
+Never flush wholesale.
+
+1304
+01:12:06.593 --> 01:12:08.343
+Version cache keys by schema.
+
+1305
+01:12:08.623 --> 01:12:11.652
+Never cache personalized responses at shared layers.
+
+1306
+01:12:13.002 --> 01:12:14.325
+Decision cheat sheet.
+
+1307
+01:12:14.605 --> 01:12:15.970
+Here is a quick table:
+
+1308
+01:12:16.250 --> 01:12:17.722
+Situation, and Choose.
+
+1309
+01:12:18.002 --> 01:12:20.413
+Read-heavy, tolerates seconds of staleness:
+
+1310
+01:12:20.693 --> 01:12:24.767
+Cache-aside + event invalidation + TTL safety net.
+
+1311
+01:12:25.047 --> 01:12:26.775
+Hot keys, low latency:
+
+1312
+01:12:27.055 --> 01:12:30.319
+Caffeine L1 (short TTL) + Redis L2.
+
+1313
+01:12:30.599 --> 01:12:32.562
+Concurrent updates and slow readers:
+
+1314
+01:12:32.842 --> 01:12:35.594
+Versioned set-if-newer + version tombstones.
+
+1315
+01:12:35.874 --> 01:12:37.218
+Known traffic spike:
+
+1316
+01:12:37.498 --> 01:12:40.058
+Pre-warm + TTL jitter + XFetch.
+
+1317
+01:12:40.338 --> 01:12:41.789
+Cache miss storms possible:
+
+1318
+01:12:42.069 --> 01:12:45.290
+Per-pod single-flight + DB permits + shedding.
+
+1319
+01:12:45.570 --> 01:12:47.426
+Anonymous listings, images:
+
+1320
+01:12:47.706 --> 01:12:52.677
+CDN with s-maxage + surrogate keys (images: immutable URLs).
+
+1321
+01:12:52.957 --> 01:12:58.759
+Personalized responses: private or no-store at the edge; L2 keyed per user if needed.
+
+1322
+01:13:00.109 --> 01:13:02.755
+Decisions (price at checkout, stock, payment):
+
+1323
+01:13:03.035 --> 01:13:04.784
+System of record, not cache.
+
+1324
+01:13:06.134 --> 01:13:07.265
+Exercises.
+
+1325
+01:13:07.545 --> 01:13:08.910
+Here is a quick table:
+
+1326
+01:13:09.190 --> 01:13:11.046
+Band, and Exercise, and Hint.
+
+1327
+01:13:11.326 --> 01:13:12.158
+B1.
+
+1328
+01:13:12.438 --> 01:13:13.505
+Exercise:
+
+1329
+01:13:13.785 --> 01:13:17.283
+Run L1 with 10 and 10,000 concurrent requests.
+
+1330
+01:13:17.563 --> 01:13:19.697
+Does single-flight still make 1 call?
+
+1331
+01:13:19.977 --> 01:13:20.659
+Hint:
+
+1332
+01:13:20.939 --> 01:13:22.070
+The in-flight map.
+
+1333
+01:13:22.350 --> 01:13:23.182
+B1.
+
+1334
+01:13:23.462 --> 01:13:24.529
+Exercise:
+
+1335
+01:13:24.809 --> 01:13:30.270
+Write Cache-Control headers for product images, category listings and the cart API.
+
+1336
+01:13:30.550 --> 01:13:33.302
+Hint: immutable or s-maxage or no-store.
+
+1337
+01:13:33.582 --> 01:13:34.457
+B2.
+
+1338
+01:13:34.737 --> 01:13:35.803
+Exercise:
+
+1339
+01:13:36.083 --> 01:13:45.129
+Add negative caching (30 s) to L3 for unknown SKUs, and test that a newly created SKU appears after invalidation.
+
+1340
+01:13:45.409 --> 01:13:46.091
+Hint:
+
+1341
+01:13:46.371 --> 01:13:47.715
+Tombstone on create.
+
+1342
+01:13:47.995 --> 01:13:48.870
+B2.
+
+1343
+01:13:49.150 --> 01:13:50.217
+Exercise:
+
+1344
+01:13:50.497 --> 01:13:56.278
+Replace L2's @CacheEvict with an after-commit event listener and demonstrate the difference.
+
+1345
+01:13:56.558 --> 01:13:58.755
+Hint: @TransactionalEventListener.
+
+1346
+01:13:59.035 --> 01:13:59.910
+B3.
+
+1347
+01:14:00.190 --> 01:14:01.257
+Exercise:
+
+1348
+01:14:01.537 --> 01:14:08.299
+Write a test that reproduces the §2.8 race against plain SET and passes with setIfNewer.
+
+1349
+01:14:08.579 --> 01:14:09.262
+Hint:
+
+1350
+01:14:09.542 --> 01:14:10.886
+Two threads with a latch.
+
+1351
+01:14:12.236 --> 01:14:13.111
+B3.
+
+1352
+01:14:13.391 --> 01:14:14.457
+Exercise:
+
+1353
+01:14:14.737 --> 01:14:20.860
+Load test L3 with Redis killed mid-run and chart DB QPS versus the permit budget.
+
+1354
+01:14:21.140 --> 01:14:21.823
+Hint:
+
+1355
+01:14:22.103 --> 01:14:23.468
+Testcontainers stop().
+
+1356
+01:14:23.748 --> 01:14:24.623
+B4.
+
+1357
+01:14:24.903 --> 01:14:25.969
+Exercise:
+
+1358
+01:14:26.249 --> 01:14:35.828
+Design versioned price lists (a new list id per sale, atomic switch) and compare with per-key invalidation for 250 K price changes.
+
+1359
+01:14:36.108 --> 01:14:36.791
+Hint:
+
+1360
+01:14:37.071 --> 01:14:40.335
+One pointer flip versus 250 K events.
+
+1361
+01:14:40.615 --> 01:14:41.489
+B4.
+
+1362
+01:14:41.769 --> 01:14:42.836
+Exercise:
+
+1363
+01:14:43.116 --> 01:14:46.273
+Write the platform's What may be cached standard (one page).
+
+1364
+01:14:46.553 --> 01:14:49.903
+Hint: §2.6, §2.12.
+
+1365
+01:14:51.253 --> 01:14:52.255
+Further reading.
+
+1366
+01:14:52.535 --> 01:14:53.709
+Nishtala et al.
+
+1367
+01:14:53.989 --> 01:15:00.175
+Scaling Memcache at Facebook (NSDI 2013): leases, regional invalidation.
+
+1368
+01:15:00.455 --> 01:15:08.391
+Vattani, Chierichetti, Lowenstein, Optimal Probabilistic Cache Stampede Prevention (VLDB 2015).
+
+1369
+01:15:08.671 --> 01:15:11.402
+Einziger, Friedman, Manes, TinyLFU:
+
+1370
+01:15:11.682 --> 01:15:18.381
+A Highly Efficient Cache Admission Policy (ACM ToS 2017), and the Caffeine wiki.
+
+1371
+01:15:18.661 --> 01:15:27.599
+RFC 9111 (HTTP Caching), RFC 5861 (stale-while-revalidate).
+
+1372
+01:15:27.879 --> 01:15:32.999
+Redis documentation: eviction policies, client-side caching, Lua scripting.
+
+1373
+01:15:34.349 --> 01:15:35.864
+Spring Framework reference:
+
+1374
+01:15:36.144 --> 01:15:37.317
+Cache Abstraction.
+
+1375
+01:15:38.667 --> 01:15:39.905
+Related chapters.
+
+1376
+01:15:40.185 --> 01:15:59.214
+01, What System Design Is, 02, Estimation, 05, Relational Databases, 06, NoSQL, 08, Load Balancing and Gateways, 13, Distributed Transactions or Outbox, 18, Resilience Patterns, 44, Distributed Cache (design Redis-like).
+
+1377
+01:16:00.564 --> 01:16:02.164
+That's the end of this chapter.
+
+1378
+01:16:02.444 --> 01:16:08.567
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1379
+01:16:08.847 --> 01:16:10.297
+See you in the next chapter.
+

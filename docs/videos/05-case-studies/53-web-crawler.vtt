@@ -1,0 +1,3234 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:04.022
+Web Crawler (Competitor Price Monitoring).
+
+3
+00:00:04.302 --> 00:00:08.547
+Chapter 53, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:10.297 --> 00:00:11.257
+At a glance:
+
+5
+00:00:11.537 --> 00:00:12.711
+Chapter at a glance.
+
+6
+00:00:12.991 --> 00:00:13.993
+Reader bands:
+
+7
+00:00:14.273 --> 00:00:16.556
+B2, then B4, Prerequisites:
+
+8
+00:00:16.836 --> 00:00:34.713
+Ch 11 (partitioning), Ch 14 (queues), Ch 39 (rate limiting), Ch 50 (scheduling), What you will build: a crawler that keeps our view of public competitor prices, product availability and catalogue changes fresh, politely, legally and within a budget.
+
+9
+00:00:34.993 --> 00:00:38.449
+This is the classic design a web crawler interview question.
+
+10
+00:00:38.729 --> 00:00:46.111
+We answer it for a job with sharper requirements than a search engine's: every product matters, and prices go stale in hours.
+
+11
+00:00:46.391 --> 00:00:47.457
+Lab results:
+
+12
+00:00:47.737 --> 00:00:49.060
+L1, the frontier.
+
+13
+00:00:49.340 --> 00:00:56.892
+A real HTTP server simulated 100 sites, each allowing one request every 500 ms:
+
+14
+00:00:58.242 --> 00:01:08.845
+A global FIFO that fetched immediately got 307 HTTP 429 responses, was banned by 4 sites, and fetched 49 pages.
+
+15
+00:01:09.125 --> 00:01:13.263
+Waiting politely in place fetched only 625 pages.
+
+16
+00:01:13.543 --> 00:01:23.314
+Per-host queues with a ready-host scheduler fetched 3,826 of a 4,000-page ceiling, with zero 429s.
+
+17
+00:01:23.594 --> 00:01:24.661
+L2, dedup.
+
+18
+00:01:24.941 --> 00:01:27.735
+12M links pointed to 2M real pages:
+
+19
+00:01:28.015 --> 00:01:33.114
+Without canonicalisation the crawler made 8.77M duplicate fetches.
+
+20
+00:01:34.464 --> 00:01:44.021
+A set of canonical 64-bit hashes gave exact dedup in 64 MB, against 1.47 GB for raw URL strings.
+
+21
+00:01:44.301 --> 00:01:51.299
+A Bloom filter used 2.3 MB, but silently never fetched 3,380 real pages.
+
+22
+00:01:51.579 --> 00:01:53.477
+L3, re-crawl scheduling.
+
+23
+00:01:53.757 --> 00:01:58.557
+A whole-page hash learns nothing, because every page looks changed on every fetch.
+
+24
+00:01:58.837 --> 00:02:08.736
+Price-based proportional allocation lifted flash-deal freshness from 34% to 86%, but lowered overall freshness below uniform.
+
+25
+00:02:10.086 --> 00:02:14.246
+Optimal allocation beats uniform only with good rate estimates:
+
+26
+00:02:14.526 --> 00:02:20.563
+94.9% with true rates against 92.5% for uniform.
+
+27
+00:02:20.843 --> 00:02:21.995
+L4, traps.
+
+28
+00:02:22.275 --> 00:02:42.691
+Breadth-first crawling spent 17,449 of 20,000 fetches on facets, calendars and session-id duplicates, and found 2,823 of 5,000 products. robots.txt plus sitemap.xml found all 5,000 products in 5,301 fetches.
+
+29
+00:02:42.971 --> 00:02:43.953
+Reading time:
+
+30
+00:02:44.233 --> 00:02:45.854
+100 min + code.
+
+31
+00:02:47.204 --> 00:02:47.951
+Warning:
+
+32
+00:02:48.231 --> 00:02:51.260
+Legal and ethical scope (VERIFY with counsel).
+
+33
+00:02:51.540 --> 00:03:05.471
+Collecting competitors' public prices is common, but terms of service, copyright and database rights, anti-circumvention and computer-misuse laws, and data-protection rules vary by jurisdiction and change over time.
+
+34
+00:03:05.751 --> 00:03:17.996
+This chapter assumes: public pages only;. robots.txt honoured;. identified user agents;. conservative rate limits;. no login, CAPTCHA or anti-bot circumvention;.
+
+35
+00:03:19.346 --> 00:03:20.626
+no personal data.
+
+36
+00:03:20.906 --> 00:03:25.450
+Where available, prefer official feeds, affiliate APIs or partnerships.
+
+37
+00:03:25.730 --> 00:03:27.565
+Nothing here is legal advice.
+
+38
+00:03:28.915 --> 00:03:29.768
+Part 1.
+
+39
+00:03:30.048 --> 00:03:31.968
+Introduction and Why It Matters.
+
+40
+00:03:33.218 --> 00:03:35.543
+A story: the crawler that got us blocked.
+
+41
+00:03:35.823 --> 00:03:39.429
+The first price monitor was a Python script on a cron job.
+
+42
+00:03:39.709 --> 00:03:50.759
+For each of 40,000 tracked products on six competitor sites, it fetched the page every hour with 50 threads, parsed the price with a CSS selector, and wrote it to a table.
+
+43
+00:03:51.039 --> 00:03:52.362
+Four things went wrong:
+
+44
+00:03:52.642 --> 00:03:55.586
+Two sites blocked the office IP range within a week.
+
+45
+00:03:55.866 --> 00:03:58.639
+Fifty threads had been hitting the same site at once.
+
+46
+00:03:58.919 --> 00:04:04.253
+The platform's own marketing team, on the same IPs, lost access to those sites too.
+
+47
+00:04:05.603 --> 00:04:07.331
+Half the fetches were duplicates.
+
+48
+00:04:07.611 --> 00:04:09.915
+Links carried utm and session parameters.
+
+49
+00:04:10.195 --> 00:04:15.123
+The same product was fetched under six spellings, and each spelling had a different last price.
+
+50
+00:04:15.403 --> 00:04:17.195
+Prices were stale where it mattered.
+
+51
+00:04:17.475 --> 00:04:21.037
+Flash deals changed hourly and were checked hourly at best.
+
+52
+00:04:21.317 --> 00:04:26.309
+Staple products that changed monthly were also checked hourly, using up the budget.
+
+53
+00:04:26.589 --> 00:04:28.360
+A redesign broke everything.
+
+54
+00:04:28.640 --> 00:04:30.795
+One site redesigned its product page.
+
+55
+00:04:31.075 --> 00:04:40.184
+The selector returned nothing, the pipeline stored null prices as 0, and the pricing engine (Ch 49) nearly matched 0 rupees.
+
+56
+00:04:41.534 --> 00:04:59.155
+A crawler is a distributed scheduler with manners: a frontier that respects every site's limits, dedup at URL and content level, re-crawl policies that spend a budget where freshness pays, robust extraction with validation, and trap avoidance, all under legal constraints.
+
+57
+00:05:00.505 --> 00:05:01.188
+Quote:
+
+58
+00:05:01.468 --> 00:05:03.132
+The thesis of this chapter.
+
+59
+00:05:03.412 --> 00:05:04.863
+The frontier is per host.
+
+60
+00:05:05.143 --> 00:05:12.460
+Separate queues per site, scheduled by when each site may next be contacted, maximise throughput and politeness (L1).
+
+61
+00:05:12.740 --> 00:05:16.367
+Dedup canonical URLs with compact exact structures.
+
+62
+00:05:16.647 --> 00:05:21.297
+A probabilistic structure's false positives are pages you never see (L2).
+
+63
+00:05:21.577 --> 00:05:28.553
+Re-crawl on the signal you care about: extract the price, estimate its change rate, and weight by business value.
+
+64
+00:05:28.833 --> 00:05:32.097
+A uniform schedule is a strong baseline (L3).
+
+65
+00:05:32.377 --> 00:05:38.713
+Use what sites publish: sitemaps and robots.txt beat heuristics against traps (L4).
+
+66
+00:05:40.063 --> 00:05:40.981
+What we crawl.
+
+67
+00:05:41.261 --> 00:05:42.605
+Here is a quick table:
+
+68
+00:05:42.885 --> 00:05:46.383
+Target, and Pages, and What we extract, and Freshness need.
+
+69
+00:05:46.663 --> 00:05:49.479
+Competitor product pages (tracked SKUs).
+
+70
+00:05:49.759 --> 00:05:51.701
+Pages: ~100k.
+
+71
+00:05:51.981 --> 00:05:53.090
+What we extract:
+
+72
+00:05:53.370 --> 00:05:56.037
+Price, MRP, availability, pack size.
+
+73
+00:05:56.317 --> 00:05:57.383
+Freshness need:
+
+74
+00:05:57.663 --> 00:05:59.541
+Hours; minutes for flash deals.
+
+75
+00:05:59.821 --> 00:06:02.231
+Competitor category or listing pages.
+
+76
+00:06:02.511 --> 00:06:04.239
+Pages: ~20k.
+
+77
+00:06:04.519 --> 00:06:05.629
+What we extract:
+
+78
+00:06:05.909 --> 00:06:07.295
+New products, ranking.
+
+79
+00:06:07.575 --> 00:06:08.642
+Freshness need:
+
+80
+00:06:08.922 --> 00:06:09.669
+Daily.
+
+81
+00:06:09.949 --> 00:06:12.061
+Brand sites and official catalogues.
+
+82
+00:06:12.341 --> 00:06:14.090
+Pages: ~5k.
+
+83
+00:06:14.370 --> 00:06:15.479
+What we extract:
+
+84
+00:06:15.759 --> 00:06:18.063
+MRP, pack changes, images.
+
+85
+00:06:18.343 --> 00:06:19.410
+Freshness need:
+
+86
+00:06:19.690 --> 00:06:20.479
+Weekly.
+
+87
+00:06:20.759 --> 00:06:22.082
+Sitemaps and feeds.
+
+88
+00:06:22.362 --> 00:06:23.279
+Pages:
+
+89
+00:06:23.559 --> 00:06:24.391
+Hundreds.
+
+90
+00:06:24.671 --> 00:06:25.781
+What we extract:
+
+91
+00:06:26.061 --> 00:06:28.045
+URL discovery, lastmod.
+
+92
+00:06:28.325 --> 00:06:29.391
+Freshness need:
+
+93
+00:06:29.671 --> 00:06:30.418
+Daily.
+
+94
+00:06:31.768 --> 00:06:33.091
+Learning objectives.
+
+95
+00:06:33.371 --> 00:06:35.269
+By the end you will be able to:
+
+96
+00:06:35.549 --> 00:06:38.429
+Design a polite, high-throughput frontier (L1).
+
+97
+00:06:38.709 --> 00:06:41.931
+Deduplicate URLs and content at scale (L2).
+
+98
+00:06:42.211 --> 00:06:46.307
+Schedule re-crawls to maximise the freshness that matters (L3).
+
+99
+00:06:46.587 --> 00:06:50.555
+Avoid traps and use sitemaps and robots.txt (L4).
+
+100
+00:06:50.835 --> 00:06:56.723
+Build robust extraction, change detection and validation, and scale a crawler horizontally.
+
+101
+00:06:58.073 --> 00:06:58.947
+Part 2.
+
+102
+00:06:59.227 --> 00:07:01.105
+Core Concepts, Beginner to Deep.
+
+103
+00:07:02.355 --> 00:07:04.765
+Intuition: a courteous mystery shopper.
+
+104
+00:07:05.045 --> 00:07:07.264
+A mystery shopper visits many shops.
+
+105
+00:07:07.544 --> 00:07:10.168
+They don't send fifty people into one shop at once.
+
+106
+00:07:10.448 --> 00:07:15.333
+They don't visit the same shop's aisle twice because the aisle sign was spelled differently.
+
+107
+00:07:15.613 --> 00:07:18.856
+They visit the flash-sale shelf more often than the rice aisle.
+
+108
+00:07:19.136 --> 00:07:23.595
+They ignore staff only signs never, and they don't wander into the infinite storeroom.
+
+109
+00:07:23.875 --> 00:07:28.717
+When a shop publishes a price list at the door, they read it instead of walking every aisle.
+
+110
+00:07:30.067 --> 00:07:31.027
+Requirements.
+
+111
+00:07:31.307 --> 00:07:32.161
+Functional.
+
+112
+00:07:32.441 --> 00:07:35.726
+Discover and track product URLs on configured sites.
+
+113
+00:07:36.006 --> 00:07:42.086
+Fetch, extract structured fields (price, MRP, availability, pack size), and store the history.
+
+114
+00:07:42.366 --> 00:07:49.662
+Re-crawl on schedules driven by change rate and business value; detect changes; publish events for price changes.
+
+115
+00:07:49.942 --> 00:07:58.369
+Respect robots.txt, crawl-delay and site-specific limits; identify ourselves (user agent, contact URL).
+
+116
+00:07:58.649 --> 00:08:03.726
+Match competitor products to our SKUs (brand, pack size, barcode where present).
+
+117
+00:08:04.006 --> 00:08:05.649
+This matching feeds pricing.
+
+118
+00:08:06.999 --> 00:08:08.108
+Non-functional.
+
+119
+00:08:08.388 --> 00:08:10.905
+Politeness: never exceed per-site limits.
+
+120
+00:08:11.185 --> 00:08:14.513
+Back off on 429 or 503.
+
+121
+00:08:14.793 --> 00:08:16.201
+Circuit-break on errors.
+
+122
+00:08:16.481 --> 00:08:21.260
+Scale: millions of fetches a day across hundreds of sites; horizontal scaling.
+
+123
+00:08:21.540 --> 00:08:25.593
+Freshness targets per class (flash deals 1 h, staples 1 day).
+
+124
+00:08:25.873 --> 00:08:30.183
+Robustness: extraction failures are detected, not silently stored.
+
+125
+00:08:31.533 --> 00:08:32.578
+Estimation.
+
+126
+00:08:32.858 --> 00:08:34.202
+Here is a quick table:
+
+127
+00:08:34.482 --> 00:08:35.911
+Quantity, and Estimate.
+
+128
+00:08:36.191 --> 00:08:39.050
+Tracked pages: ~125k.
+
+129
+00:08:39.330 --> 00:08:44.365
+Fetch budget: ~400k per day (L3), limited by politeness:
+
+130
+00:08:44.645 --> 00:08:51.386
+200 sites times 1 req per second about 17M per day theoretical, far below in practice.
+
+131
+00:08:51.666 --> 00:09:03.719
+Page size: ~150 KB HTML, then 60 GB per day raw; store extracted fields, keep raw HTML for 7 days (debugging and re-extraction).
+
+132
+00:09:03.999 --> 00:09:05.343
+URL seen-set:
+
+133
+00:09:05.623 --> 00:09:13.410
+2M canonical URLs times 8 B hashes about 16 MB of hashes (64 MB table, L2).
+
+134
+00:09:13.690 --> 00:09:14.927
+Extracted rows:
+
+135
+00:09:15.207 --> 00:09:20.477
+400k per day, then price history of ~150M rows per year.
+
+136
+00:09:21.827 --> 00:09:22.744
+The frontier.
+
+137
+00:09:23.024 --> 00:09:33.968
+L1 ran against a real HTTP server simulating 100 sites, each allowing 1 request per 500 ms, with 64 threads for 20 s:
+
+138
+00:09:35.318 --> 00:09:36.662
+Here is a quick table:
+
+139
+00:09:36.942 --> 00:09:42.979
+Frontier, and Pages OK, and 429s, and Sites that banned us, and Sites crawled.
+
+140
+00:09:43.259 --> 00:09:45.307
+Global FIFO, fetch immediately.
+
+141
+00:09:45.587 --> 00:09:46.697
+Pages OK:
+
+142
+00:09:46.977 --> 00:09:47.937
+49.
+
+143
+00:09:48.217 --> 00:09:49.710
+429s:
+
+144
+00:09:49.990 --> 00:09:51.270
+307.
+
+145
+00:09:51.550 --> 00:09:52.787
+Sites that banned us:
+
+146
+00:09:53.067 --> 00:09:53.771
+4.
+
+147
+00:09:54.051 --> 00:09:55.139
+Sites crawled:
+
+148
+00:09:55.419 --> 00:09:56.379
+49.
+
+149
+00:09:56.659 --> 00:09:59.006
+Global FIFO, wait for the host's turn.
+
+150
+00:09:59.286 --> 00:10:00.395
+Pages OK:
+
+151
+00:10:00.675 --> 00:10:02.169
+625.
+
+152
+00:10:02.449 --> 00:10:03.942
+429s:
+
+153
+00:10:04.222 --> 00:10:05.075
+15.
+
+154
+00:10:05.355 --> 00:10:06.593
+Sites that banned us:
+
+155
+00:10:06.873 --> 00:10:07.619
+0.
+
+156
+00:10:07.899 --> 00:10:08.987
+Sites crawled:
+
+157
+00:10:09.267 --> 00:10:10.270
+55.
+
+158
+00:10:10.550 --> 00:10:12.875
+Per-host queues + ready-host scheduler.
+
+159
+00:10:13.155 --> 00:10:14.265
+Pages OK:
+
+160
+00:10:14.545 --> 00:10:16.678
+3,826.
+
+161
+00:10:16.958 --> 00:10:18.451
+429s:
+
+162
+00:10:18.731 --> 00:10:19.478
+0.
+
+163
+00:10:19.758 --> 00:10:20.995
+Sites that banned us:
+
+164
+00:10:21.275 --> 00:10:22.022
+0.
+
+165
+00:10:22.302 --> 00:10:23.390
+Sites crawled:
+
+166
+00:10:23.670 --> 00:10:24.609
+100.
+
+167
+00:10:25.959 --> 00:10:27.111
+Links are skewed.
+
+168
+00:10:27.391 --> 00:10:32.041
+A few sites hold most links, so a global FIFO is dominated by a few hosts.
+
+169
+00:10:32.321 --> 00:10:36.247
+The Mercator design (Heydon and Najork) splits the frontier in two:
+
+170
+00:10:36.527 --> 00:10:39.065
+Front queues order URLs by priority.
+
+171
+00:10:39.345 --> 00:10:41.415
+Back queues hold URLs per host.
+
+172
+00:10:41.695 --> 00:10:46.665
+A heap of hosts, keyed by their next-allowed time, hands workers only ready hosts.
+
+173
+00:10:48.015 --> 00:11:02.650
+Politeness state per host: crawl-delay from robots.txt, adaptive backoff on 429 or 503 (honour Retry-After), concurrent-connection limits, and error-rate circuit breakers (Ch 18).
+
+174
+00:11:02.930 --> 00:11:08.007
+Distribution: partition hosts across crawler nodes (consistent hashing by host).
+
+175
+00:11:08.287 --> 00:11:14.474
+Each node owns its hosts' back queues and politeness state, so there is no cross-node coordination per fetch.
+
+176
+00:11:14.754 --> 00:11:16.461
+DNS caching is per node.
+
+177
+00:11:17.811 --> 00:11:19.517
+URL and content dedup.
+
+178
+00:11:19.797 --> 00:11:23.488
+L2 used 12M links pointing to 2M real pages:
+
+179
+00:11:24.838 --> 00:11:26.182
+Here is a quick table:
+
+180
+00:11:26.462 --> 00:11:31.347
+Seen-set, and Fetches, and Duplicate fetches, and Pages never fetched, and Memory.
+
+181
+00:11:31.627 --> 00:11:33.718
+Exact URL strings as written.
+
+182
+00:11:33.998 --> 00:11:34.830
+Fetches:
+
+183
+00:11:35.110 --> 00:11:39.291
+10,767,117.
+
+184
+00:11:39.571 --> 00:11:40.830
+Duplicate fetches:
+
+185
+00:11:41.110 --> 00:11:45.249
+8,767,117.
+
+186
+00:11:45.529 --> 00:11:46.915
+Pages never fetched:
+
+187
+00:11:47.195 --> 00:11:47.942
+0.
+
+188
+00:11:48.222 --> 00:11:49.011
+Memory:
+
+189
+00:11:49.291 --> 00:11:52.534
+1,474.5 MB.
+
+190
+00:11:52.814 --> 00:11:54.777
+Canonicalised, exact strings.
+
+191
+00:11:55.057 --> 00:11:55.889
+Fetches:
+
+192
+00:11:56.169 --> 00:11:57.022
+2,000,000.
+
+193
+00:11:57.302 --> 00:11:58.561
+Duplicate fetches:
+
+194
+00:11:58.841 --> 00:11:59.587
+0.
+
+195
+00:11:59.867 --> 00:12:01.254
+Pages never fetched:
+
+196
+00:12:01.534 --> 00:12:02.281
+0.
+
+197
+00:12:02.561 --> 00:12:03.350
+Memory:
+
+198
+00:12:03.630 --> 00:12:05.870
+258.7 MB.
+
+199
+00:12:06.150 --> 00:12:08.710
+Canonicalised, 64-bit hash set.
+
+200
+00:12:08.990 --> 00:12:09.822
+Fetches:
+
+201
+00:12:10.102 --> 00:12:10.955
+2,000,000.
+
+202
+00:12:11.235 --> 00:12:12.494
+Duplicate fetches:
+
+203
+00:12:12.774 --> 00:12:13.521
+0.
+
+204
+00:12:13.801 --> 00:12:15.187
+Pages never fetched:
+
+205
+00:12:15.467 --> 00:12:16.214
+0.
+
+206
+00:12:16.494 --> 00:12:17.283
+Memory:
+
+207
+00:12:17.563 --> 00:12:19.441
+64.0 MB.
+
+208
+00:12:19.721 --> 00:12:22.878
+Canonicalised, Bloom filter (1% FP).
+
+209
+00:12:23.158 --> 00:12:23.990
+Fetches:
+
+210
+00:12:24.270 --> 00:12:27.939
+1,996,620.
+
+211
+00:12:28.219 --> 00:12:29.478
+Duplicate fetches:
+
+212
+00:12:29.758 --> 00:12:30.505
+0.
+
+213
+00:12:30.785 --> 00:12:32.171
+Pages never fetched:
+
+214
+00:12:32.451 --> 00:12:34.307
+3,380.
+
+215
+00:12:34.587 --> 00:12:35.377
+Memory:
+
+216
+00:12:35.657 --> 00:12:36.915
+2.3 MB.
+
+217
+00:12:38.265 --> 00:12:39.545
+Canonicalisation:
+
+218
+00:12:39.825 --> 00:12:43.644
+Lower-case the scheme and host, and drop default ports and fragments.
+
+219
+00:12:43.924 --> 00:12:50.324
+Remove tracking and session parameters (utm, gclid, fbclid, sid), and sort query parameters.
+
+220
+00:12:50.604 --> 00:12:52.289
+Normalise trailing slashes.
+
+221
+00:12:52.569 --> 00:12:55.897
+Prefer the page's link rel=canonical once fetched.
+
+222
+00:12:57.247 --> 00:13:01.813
+Keep site-specific rules (which parameters matter: size does, ref doesn't).
+
+223
+00:13:02.093 --> 00:13:11.501
+Hash sets of 64-bit fingerprints are exact for practical purposes at millions of URLs (collision probability ~n² or 2⁶⁵).
+
+224
+00:13:11.781 --> 00:13:17.327
+Bloom filters are right for web-scale discovery, where missing 0.2% is fine.
+
+225
+00:13:17.607 --> 00:13:23.965
+They are wrong for a price monitor that must see every product: a false positive is a product we never fetch.
+
+226
+00:13:24.245 --> 00:13:25.269
+Content dedup:
+
+227
+00:13:25.549 --> 00:13:28.770
+Exact duplicates: hash of the extracted content.
+
+228
+00:13:30.120 --> 00:13:33.043
+Near-duplicates (mirror pages, printer versions):
+
+229
+00:13:33.323 --> 00:13:34.773
+SimHash or MinHash.
+
+230
+00:13:35.053 --> 00:13:40.707
+Hash the extracted fields, not the raw HTML, because of timestamps and ads (L3).
+
+231
+00:13:42.057 --> 00:13:43.379
+Re-crawl scheduling.
+
+232
+00:13:43.659 --> 00:13:50.273
+L3 simulated 100k price pages with a budget of 400k fetches per day:
+
+233
+00:13:51.623 --> 00:13:52.967
+Here is a quick table:
+
+234
+00:13:53.247 --> 00:13:58.857
+Policy, and Prices current, and Mean age of a wrong price, and Flash-deal pages current.
+
+235
+00:13:59.137 --> 00:14:00.865
+Uniform, every 6 h.
+
+236
+00:14:01.145 --> 00:14:02.255
+Prices current:
+
+237
+00:14:02.535 --> 00:14:04.348
+92.5%.
+
+238
+00:14:04.628 --> 00:14:06.207
+Mean age of a wrong price:
+
+239
+00:14:06.487 --> 00:14:07.788
+1.6 h.
+
+240
+00:14:08.068 --> 00:14:09.753
+Flash-deal pages current:
+
+241
+00:14:10.033 --> 00:14:11.740
+33.5%.
+
+242
+00:14:12.020 --> 00:14:14.025
+Proportional, from whole-page hash.
+
+243
+00:14:14.305 --> 00:14:15.415
+Prices current:
+
+244
+00:14:15.695 --> 00:14:17.508
+92.5%.
+
+245
+00:14:17.788 --> 00:14:19.367
+Mean age of a wrong price:
+
+246
+00:14:19.647 --> 00:14:20.948
+1.6 h.
+
+247
+00:14:21.228 --> 00:14:22.913
+Flash-deal pages current:
+
+248
+00:14:23.193 --> 00:14:24.900
+33.5%.
+
+249
+00:14:25.180 --> 00:14:27.335
+Proportional, from extracted price.
+
+250
+00:14:27.615 --> 00:14:28.724
+Prices current:
+
+251
+00:14:29.004 --> 00:14:30.839
+89.0%.
+
+252
+00:14:31.119 --> 00:14:32.697
+Mean age of a wrong price:
+
+253
+00:14:32.977 --> 00:14:34.556
+13.0 h.
+
+254
+00:14:34.836 --> 00:14:36.521
+Flash-deal pages current:
+
+255
+00:14:36.801 --> 00:14:38.636
+85.7%.
+
+256
+00:14:38.916 --> 00:14:40.900
+Optimal, price-based estimates.
+
+257
+00:14:41.180 --> 00:14:42.289
+Prices current:
+
+258
+00:14:42.569 --> 00:14:44.233
+89.9%.
+
+259
+00:14:44.513 --> 00:14:46.092
+Mean age of a wrong price:
+
+260
+00:14:46.372 --> 00:14:47.844
+13.6 h.
+
+261
+00:14:48.124 --> 00:14:49.809
+Flash-deal pages current:
+
+262
+00:14:50.089 --> 00:14:51.796
+74.3%.
+
+263
+00:14:52.076 --> 00:14:53.825
+Optimal, true rates (ceiling).
+
+264
+00:14:54.105 --> 00:14:55.215
+Prices current:
+
+265
+00:14:55.495 --> 00:14:57.180
+94.9%.
+
+266
+00:14:57.460 --> 00:14:59.039
+Mean age of a wrong price:
+
+267
+00:14:59.319 --> 00:15:00.705
+1.7 h.
+
+268
+00:15:00.985 --> 00:15:02.671
+Flash-deal pages current:
+
+269
+00:15:02.951 --> 00:15:04.465
+70.8%.
+
+270
+00:15:05.815 --> 00:15:08.653
+Change detection must use the field you care about.
+
+271
+00:15:08.933 --> 00:15:15.717
+Whole-page hashes change on every fetch (timestamps, counters, ads), so learning from them is learning nothing.
+
+272
+00:15:15.997 --> 00:15:19.346
+Estimating change rates from few observations is noisy.
+
+273
+00:15:19.626 --> 00:15:26.879
+Cho and Garcia-Molina's estimator corrects for missed changes, but three days can't tell weekly pages from monthly ones.
+
+274
+00:15:27.159 --> 00:15:32.045
+Proportional allocation chases fast-changing pages, and starves the rest.
+
+275
+00:15:33.395 --> 00:15:41.779
+The freshness-optimal allocation (equalising marginal freshness per fetch) is the right objective, but only with good estimates.
+
+276
+00:15:42.059 --> 00:15:51.637
+Keep estimating continuously, use priors from similar pages (category, site), and weight by business value (top sellers, flash deals) explicitly.
+
+277
+00:15:51.917 --> 00:15:52.920
+Cheap checks:
+
+278
+00:15:53.200 --> 00:15:57.701
+Conditional GETs (If-None-Match or If-Modified-Since, then 304).
+
+279
+00:15:57.981 --> 00:15:59.283
+Sitemap lastmod.
+
+280
+00:15:59.563 --> 00:16:05.152
+Listing pages that show prices for many products at once (one fetch updates 40 prices).
+
+281
+00:16:06.502 --> 00:16:10.854
+Push beats pull: official feeds or partner APIs, where they exist.
+
+282
+00:16:12.204 --> 00:16:13.633
+Traps and site signals.
+
+283
+00:16:13.913 --> 00:16:18.521
+L4 used one generated site with a budget of 20,000 fetches:
+
+284
+00:16:19.871 --> 00:16:21.215
+Here is a quick table:
+
+285
+00:16:21.495 --> 00:16:25.869
+Crawl policy, and Products found, and Fetches on traps, and Fetches used.
+
+286
+00:16:26.149 --> 00:16:28.175
+Breadth-first, every new URL.
+
+287
+00:16:28.455 --> 00:16:29.607
+Products found:
+
+288
+00:16:29.887 --> 00:16:31.829
+2,823.
+
+289
+00:16:32.109 --> 00:16:33.346
+Fetches on traps:
+
+290
+00:16:33.626 --> 00:16:36.165
+17,449.
+
+291
+00:16:36.445 --> 00:16:37.511
+Fetches used:
+
+292
+00:16:37.791 --> 00:16:40.159
+20,000. + depth limit 4.
+
+293
+00:16:40.439 --> 00:16:41.591
+Products found:
+
+294
+00:16:41.871 --> 00:16:43.813
+2,823.
+
+295
+00:16:44.093 --> 00:16:45.330
+Fetches on traps:
+
+296
+00:16:45.610 --> 00:16:48.149
+17,449.
+
+297
+00:16:48.429 --> 00:16:49.495
+Fetches used:
+
+298
+00:16:49.775 --> 00:16:50.863
+20,000.
+
+299
+00:16:51.143 --> 00:16:53.149
+Canonicalise + per-template cap.
+
+300
+00:16:53.429 --> 00:16:54.581
+Products found:
+
+301
+00:16:54.861 --> 00:16:56.802
+4,307.
+
+302
+00:16:57.082 --> 00:16:58.319
+Fetches on traps:
+
+303
+00:16:58.599 --> 00:17:00.839
+15,492.
+
+304
+00:17:01.119 --> 00:17:02.186
+Fetches used:
+
+305
+00:17:02.466 --> 00:17:06.562
+20,000. + robots.txt + sitemap.xml.
+
+306
+00:17:06.842 --> 00:17:07.994
+Products found:
+
+307
+00:17:08.274 --> 00:17:09.405
+5,000.
+
+308
+00:17:09.685 --> 00:17:10.922
+Fetches on traps:
+
+309
+00:17:11.202 --> 00:17:11.949
+0.
+
+310
+00:17:12.229 --> 00:17:13.295
+Fetches used:
+
+311
+00:17:13.575 --> 00:17:15.410
+5,301.
+
+312
+00:17:16.760 --> 00:17:17.549
+Traps:
+
+313
+00:17:17.829 --> 00:17:20.773
+Faceted navigation (combinatorial filters).
+
+314
+00:17:21.053 --> 00:17:21.971
+Calendars.
+
+315
+00:17:22.251 --> 00:17:23.000
+Session ids in URLs.
+
+316
+00:17:24.280 --> 00:17:25.688
+Infinite pagination.
+
+317
+00:17:25.968 --> 00:17:29.851
+Soft 404s (a not found page with status 200).
+
+318
+00:17:30.131 --> 00:17:31.965
+Spider traps that are deliberate.
+
+319
+00:17:33.315 --> 00:17:34.126
+Guards:
+
+320
+00:17:34.406 --> 00:17:35.665
+Canonicalisation.
+
+321
+00:17:35.945 --> 00:17:41.833
+URL-template detection with budgets that continue only while a template yields new content.
+
+322
+00:17:42.113 --> 00:17:43.606
+Per-host page budgets.
+
+323
+00:17:43.886 --> 00:17:45.721
+Soft-404 detection.
+
+324
+00:17:46.001 --> 00:17:49.051
+Depth limits (which did nothing here: the traps are shallow).
+
+325
+00:17:50.401 --> 00:18:01.879
+Site signals: robots.txt (Disallow, Crawl-delay), sitemaps with lastmod, canonical links, and structured data (JSON-LD Product or Offer) for extraction.
+
+326
+00:18:03.229 --> 00:18:04.935
+Extraction and validation.
+
+327
+00:18:05.215 --> 00:18:12.319
+Prefer structured data (JSON-LD schema.org or Product with offers.price) over CSS selectors.
+
+328
+00:18:12.599 --> 00:18:15.693
+It is designed for machines and changes less often.
+
+329
+00:18:15.973 --> 00:18:17.701
+Validate every extraction:
+
+330
+00:18:17.981 --> 00:18:22.098
+The price is positive and within a plausible range of the last price.
+
+331
+00:18:22.378 --> 00:18:25.258
+The currency is present, and pack size is parsed.
+
+332
+00:18:25.538 --> 00:18:28.269
+Availability is one of a known set of values.
+
+333
+00:18:28.549 --> 00:18:31.770
+Quarantine suspicious values instead of publishing them.
+
+334
+00:18:32.050 --> 00:18:34.482
+A redesign should produce extraction failed:
+
+335
+00:18:34.762 --> 00:18:37.941
+100% of site X, not price = 0.
+
+336
+00:18:39.291 --> 00:18:48.400
+Per-site extractors are versioned, with synthetic monitoring on known pages (canary products) and alerts on the extraction success rate per site.
+
+337
+00:18:48.680 --> 00:18:51.603
+Rendering: some sites need JavaScript rendering.
+
+338
+00:18:51.883 --> 00:18:59.520
+Headless browsers cost 10 to 50 times more than plain fetches, so use them only where needed, and cache static resources.
+
+339
+00:19:00.870 --> 00:19:02.001
+Product matching.
+
+340
+00:19:02.281 --> 00:19:06.270
+A competitor price is useful only if it is linked to our SKU.
+
+341
+00:19:06.550 --> 00:19:07.510
+Match by:
+
+342
+00:19:07.790 --> 00:19:10.329
+Barcode (EAN or GTIN) when exposed.
+
+343
+00:19:10.609 --> 00:19:13.318
+Brand + normalised name + pack size.
+
+344
+00:19:13.598 --> 00:19:16.990
+ML similarity with human review for low confidence.
+
+345
+00:19:17.270 --> 00:19:23.222
+Store the match confidence, and let pricing (Ch 49) use only high-confidence matches.
+
+346
+00:19:24.572 --> 00:19:25.703
+Interview framing.
+
+347
+00:19:25.983 --> 00:19:27.327
+Design a web crawler.
+
+348
+00:19:27.607 --> 00:19:34.881
+Clarify scope (a search-engine crawl versus a focused crawl like price monitoring), scale, freshness and politeness.
+
+349
+00:19:35.161 --> 00:19:39.279
+Then cover: a frontier with per-host queues;. distribution by host;.
+
+350
+00:19:39.559 --> 00:19:47.367
+DNS caching;. robots.txt;. dedup (URL canonicalisation, fingerprints, content hashes);. storage;.
+
+351
+00:19:48.717 --> 00:19:53.538
+re-crawl scheduling;. traps;. extraction and validation;. monitoring.
+
+352
+00:19:53.818 --> 00:20:02.885
+Staff-level signals: the Mercator frontier, the Bloom-filter trade-off for focused crawls, change-rate estimation, and legal or ethical constraints.
+
+353
+00:20:04.235 --> 00:20:05.131
+Part 3.
+
+354
+00:20:05.411 --> 00:20:07.139
+Architecture and Diagrams.
+
+355
+00:20:08.389 --> 00:20:09.434
+Component view.
+
+356
+00:20:09.714 --> 00:20:11.058
+Here is the diagram.
+
+357
+00:20:14.908 --> 00:20:18.044
+Sequence: happy path, re-crawl a flash-deal page.
+
+358
+00:20:18.324 --> 00:20:21.119
+The sequence diagram walks through it step by step.
+
+359
+00:20:21.399 --> 00:20:26.860
+S to H: page 7712 on site X due now, priority high.
+
+360
+00:20:27.140 --> 00:20:33.263
+H to W: site X ready at 10:02:00.500.
+
+361
+00:20:33.543 --> 00:20:34.716
+W to X:
+
+362
+00:20:34.996 --> 00:20:37.385
+GET with If-None-Match etag 91ab.
+
+363
+00:20:37.665 --> 00:20:38.796
+X to W:
+
+364
+00:20:39.076 --> 00:20:41.572
+200, new etag 9c02.
+
+365
+00:20:41.852 --> 00:20:43.751
+W to E: html.
+
+366
+00:20:44.031 --> 00:20:44.905
+E to E:
+
+367
+00:20:45.185 --> 00:20:49.751
+JSON-LD offer price 249, was 279.
+
+368
+00:20:50.031 --> 00:20:53.017
+E to E: validate range and currency ok.
+
+369
+00:20:53.297 --> 00:20:59.548
+E to K: price changed site X page 7712 249.
+
+370
+00:20:59.828 --> 00:21:06.356
+W to H: site X next allowed at 10:02:01.000.
+
+371
+00:21:06.636 --> 00:21:11.713
+S to S: update change-rate estimate for page 7712.
+
+372
+00:21:15.563 --> 00:21:19.254
+Sequence: failure path, a site redesign and rate limiting.
+
+373
+00:21:19.534 --> 00:21:22.329
+The sequence diagram walks through it step by step.
+
+374
+00:21:22.609 --> 00:21:23.782
+W to X:
+
+375
+00:21:24.062 --> 00:21:25.278
+GET product page.
+
+376
+00:21:25.558 --> 00:21:26.689
+X to W:
+
+377
+00:21:26.969 --> 00:21:30.233
+429 Retry-After 120.
+
+378
+00:21:30.513 --> 00:21:34.822
+W to W: site X backoff 120 s, lower rate.
+
+379
+00:21:35.102 --> 00:21:36.275
+W to X:
+
+380
+00:21:36.555 --> 00:21:38.390
+GET product page after backoff.
+
+381
+00:21:38.670 --> 00:21:39.801
+X to W:
+
+382
+00:21:40.081 --> 00:21:41.446
+200 new layout.
+
+383
+00:21:41.726 --> 00:21:42.601
+E to E:
+
+384
+00:21:42.881 --> 00:21:45.825
+JSON-LD missing, selector returns nothing.
+
+385
+00:21:46.105 --> 00:21:49.177
+E to Q: extraction failed, no price published.
+
+386
+00:21:49.457 --> 00:21:53.297
+Q to M: site X extraction success fell to 3 percent.
+
+387
+00:21:53.577 --> 00:21:57.566
+M to M: page on-call, pause site X extractor v7.
+
+388
+00:22:01.416 --> 00:22:02.888
+State: a tracked page.
+
+389
+00:22:03.168 --> 00:22:04.512
+Here is the diagram.
+
+390
+00:22:08.362 --> 00:22:09.279
+Part 4.
+
+391
+00:22:09.559 --> 00:22:11.181
+Design Document Excerpt:
+
+392
+00:22:11.461 --> 00:22:13.445
+Price Intelligence Crawler v2.
+
+393
+00:22:14.695 --> 00:22:15.441
+Note:
+
+394
+00:22:15.721 --> 00:22:19.604
+Design Document (excerpt), Price Intelligence Crawler v2.
+
+395
+00:22:19.884 --> 00:22:20.780
+Status:
+
+396
+00:22:21.060 --> 00:22:22.340
+Accepted, Authors:
+
+397
+00:22:22.620 --> 00:22:24.369
+Pricing data team, Reviewers:
+
+398
+00:22:24.649 --> 00:22:27.209
+Legal, Pricing, SRE, Security.
+
+399
+00:22:27.489 --> 00:22:30.945
+Context, Hourly scripts with 50 threads got us blocked.
+
+400
+00:22:31.225 --> 00:22:33.956
+Duplicate URLs wasted half the fetches.
+
+401
+00:22:34.236 --> 00:22:36.689
+The re-crawl policy ignored change rates.
+
+402
+00:22:36.969 --> 00:22:39.508
+A redesign published 0 rupeesprices.
+
+403
+00:22:40.858 --> 00:22:46.021
+Decision, Mercator-style frontier with per-host back queues and adaptive politeness.
+
+404
+00:22:46.301 --> 00:22:48.327
+Hosts are partitioned across nodes.
+
+405
+00:22:48.607 --> 00:22:54.133
+URLs are canonicalised with site rules and stored as a 64-bit fingerprint set.
+
+406
+00:22:54.413 --> 00:23:00.535
+Re-crawl uses price-based change-rate estimates with priors and value weights, plus a uniform floor.
+
+407
+00:23:00.815 --> 00:23:03.802
+Sitemaps and robots.txt are first-class.
+
+408
+00:23:04.082 --> 00:23:08.967
+Extraction prefers JSON-LD, with validation, quarantine and canaries.
+
+409
+00:23:09.247 --> 00:23:10.698
+Legal review per site.
+
+410
+00:23:12.048 --> 00:23:25.360
+Related ADRs, ADR-390 Frontier: per-host queues, ready-host heap, default 1 request or 2 s per site, Retry-After honoured, circuit breaker at 5% errors (L1).
+
+411
+00:23:25.640 --> 00:23:36.200
+ADR-391 Dedup: canonical URL rules per site, exact 64-bit fingerprints (no Bloom filters for tracked pages) (L2).
+
+412
+00:23:36.480 --> 00:23:52.373
+ADR-392 Re-crawl: every page at least every 72 h; the remaining budget uses optimal allocation on continuously updated estimates with category priors; flash-deal list weighted times 5 (L3).
+
+413
+00:23:52.653 --> 00:24:02.019
+ADR-393 Discovery: sitemaps + robots.txt; template budgets; soft-404 detection (L4).
+
+414
+00:24:02.299 --> 00:24:11.003
+ADR-394 Legal: public pages only, identified UA, no circumvention, per-site approval recorded.
+
+415
+00:24:11.283 --> 00:24:12.243
+Requirements.
+
+416
+00:24:13.593 --> 00:24:14.425
+R1:
+
+417
+00:24:14.705 --> 00:24:17.329
+Zero requests above a site's configured rate.
+
+418
+00:24:17.609 --> 00:24:21.555
+429s below 0.1% of fetches.
+
+419
+00:24:21.835 --> 00:24:30.603
+R2: ≥ 90% of tracked prices current (time-averaged); flash-deal pages ≥ 80%.
+
+420
+00:24:30.883 --> 00:24:31.737
+R3:
+
+421
+00:24:32.017 --> 00:24:34.214
+No invalid price is ever published.
+
+422
+00:24:34.494 --> 00:24:37.417
+An extraction failure alerts within 15 minutes.
+
+423
+00:24:37.697 --> 00:24:38.593
+R4:
+
+424
+00:24:38.873 --> 00:24:42.585
+New products on sitemaps are discovered within 24 hours.
+
+425
+00:24:42.865 --> 00:24:43.739
+R5:
+
+426
+00:24:44.019 --> 00:24:46.878
+A per-site kill switch takes effect in under a minute.
+
+427
+00:24:47.158 --> 00:24:48.566
+Decisions in detail.
+
+428
+00:24:49.916 --> 00:24:54.972
+Frontier (ADR-390): hosts are consistent-hashed to 8 nodes.
+
+429
+00:24:55.252 --> 00:25:00.799
+Each node keeps back queues in memory, persisted to RocksDB, and the host heap in memory.
+
+430
+00:25:01.079 --> 00:25:03.532
+Dedup (ADR-391):
+
+431
+00:25:03.812 --> 00:25:11.257
+64-bit xxHash of the canonical URL, kept in a partitioned hash set with a Redis-backed snapshot.
+
+432
+00:25:11.537 --> 00:25:19.495
+Scheduling (ADR-392): change events update the estimates, and a nightly job recomputes allocations.
+
+433
+00:25:19.775 --> 00:25:24.191
+The job scheduler (Ch 50) fires due fetches through the frontier.
+
+434
+00:25:24.471 --> 00:25:31.063
+Discovery (ADR-393): a daily sitemap diff feeds new URLs to the frontier.
+
+435
+00:25:32.413 --> 00:25:38.813
+Legal (ADR-394): a site config can't be enabled without a recorded approval.
+
+436
+00:25:39.093 --> 00:25:40.117
+Consequences.
+
+437
+00:25:40.397 --> 00:25:47.031
+Costs: per-site configuration and extractor maintenance, legal reviews, and estimation infrastructure.
+
+438
+00:25:47.311 --> 00:25:54.757
+Benefits: no blocks, no wasted duplicate fetches, fresher prices where they matter, and no 0 rupeesincidents.
+
+439
+00:25:56.107 --> 00:25:57.067
+Part 5.
+
+440
+00:25:57.347 --> 00:25:59.331
+Hands-On Code, Level Ladder.
+
+441
+00:26:00.581 --> 00:26:01.349
+Info:
+
+442
+00:26:01.629 --> 00:26:02.717
+What's real here.
+
+443
+00:26:02.997 --> 00:26:10.399
+L1 crawls a real local HTTP server with per-site rate limiting and bans, using 64 real threads.
+
+444
+00:26:10.679 --> 00:26:17.101
+L2 runs real canonicalisation, hash sets and a Bloom filter over 12M synthetic links.
+
+445
+00:26:17.381 --> 00:26:20.645
+L3 and L4 are deterministic simulations.
+
+446
+00:26:20.925 --> 00:26:24.679
+Change rates, budgets and site structures are stated assumptions.
+
+447
+00:26:24.959 --> 00:26:26.815
+None of the labs touch the internet.
+
+448
+00:26:28.165 --> 00:26:32.069
+All four labs are single-file JDK 21 programs.
+
+449
+00:26:32.349 --> 00:26:39.453
+Run L1 with -Dsun.net.httpserver.nodelay=true, and L2 with -Xmx4g.
+
+450
+00:26:40.803 --> 00:26:42.531
+L1, A polite frontier.
+
+451
+00:26:42.811 --> 00:26:43.750
+Requirement:
+
+452
+00:26:44.030 --> 00:26:47.017
+Crawl as fast as the sites allow, and never faster.
+
+453
+00:26:47.297 --> 00:26:51.457
+A real local HTTP server stands in for 100 sites.
+
+454
+00:26:51.737 --> 00:27:01.550
+Each site allows one request per 500 ms, answers faster requests with 429, and bans us after ten 429s.
+
+455
+00:27:02.900 --> 00:27:05.801
+Here is the Java code, FrontierL1.java.
+
+456
+00:27:06.081 --> 00:27:10.540
+It runs to 165 lines; the full listing is in the chapter.
+
+457
+00:27:10.820 --> 00:27:21.807
+FrontierL1.java, run with: java -Dsun.net.httpserver.nodelay=true FrontierL1.java (JDK 21, no dependencies).
+
+458
+00:27:22.087 --> 00:27:24.284
+A POLITE CRAWLER'S URL FRONTIER.
+
+459
+00:27:24.564 --> 00:27:42.420
+A REAL local HTTP server plays 100 websites (/hhost/ppage); each host has 300. pages; every page links to 8 others (70% same host, 30% other hosts, host popularity Zipf, a few big sites get most.
+
+460
+00:27:45.270 --> 00:27:46.187
+On screen:
+
+461
+00:27:46.467 --> 00:27:55.534
+100 sites times 300 pages, 1 request or 500 ms per site allowed (429 otherwise, ban after.
+
+462
+00:27:55.814 --> 00:28:03.857
+10); 64 threads, 20 s. frontier pages ok 429s sites that sites. banned. us. crawled.
+
+463
+00:28:04.137 --> 00:28:09.662
+C1) global FIFO, fetch immediately 49 307 4 49.
+
+464
+00:28:09.942 --> 00:28:17.089
+C2) global FIFO, wait for the host's turn before fetching 625 15 0 55.
+
+465
+00:28:17.369 --> 00:28:33.667
+C3) per-host queues + ready-host scheduler (back queues) 3,826 0 0 100. then the web is lopsided: a few sites hold most links, so a global FIFO is mostly URLs. of the same few sites.
+
+466
+00:28:33.947 --> 00:28:35.462
+The rest is in the chapter.
+
+467
+00:28:38.312 --> 00:28:39.165
+Reading it:
+
+468
+00:28:39.445 --> 00:28:42.517
+C1 is banned by the busiest sites within seconds.
+
+469
+00:28:42.797 --> 00:28:47.021
+Banned sites return no links, so its crawl dies at 49 pages.
+
+470
+00:28:47.301 --> 00:28:55.280
+C2 is polite, apart from a few timing-jitter 429s, but slow: most threads sleep on the same hot sites.
+
+471
+00:28:55.560 --> 00:29:01.981
+C3 reaches 96% of the politeness ceiling, with every site crawled and no violations.
+
+472
+00:29:03.331 --> 00:29:05.422
+L2, URL dedup at scale.
+
+473
+00:29:05.702 --> 00:29:06.641
+Requirement:
+
+474
+00:29:06.921 --> 00:29:12.531
+Fetch every product page exactly once, whatever spelling the link used, in bounded memory.
+
+475
+00:29:12.811 --> 00:29:17.121
+12M links to 2M pages, with realistic URL variants.
+
+476
+00:29:18.471 --> 00:29:21.223
+Here is the Java code, DedupL2.java.
+
+477
+00:29:21.503 --> 00:29:25.876
+It runs to 141 lines; the full listing is in the chapter.
+
+478
+00:29:26.156 --> 00:29:34.369
+DedupL2.java, run with: java -Xmx3g DedupL2.java (JDK 21, no dependencies).
+
+479
+00:29:34.649 --> 00:29:36.569
+HAVE WE ALREADY FETCHED THIS URL?
+
+480
+00:29:36.849 --> 00:29:42.545
+2,000,000 real pages across 5,000 competitor or catalogue sites, discovered through.
+
+481
+00:29:42.825 --> 00:29:44.745
+12,000,000 links (fixed seed).
+
+482
+00:29:45.025 --> 00:29:51.745
+Links to the same page come in many spellings: http versus https, upper-case host.
+
+483
+00:29:54.595 --> 00:29:55.513
+On screen:
+
+484
+00:29:55.793 --> 00:30:35.040
+2,000,000 pages, 12,000,000 links; for example. http://shop1834.example.in or c or 28 or product or 1432233?size=4 and variant=3 and utmmedium=cpc. then. https://shop1834.example.in or c or 28 or product or 1432233?size=4 and variant=3. seen-set fetches duplicate pages never memory. fetches. fetched.
+
+485
+00:30:35.320 --> 00:30:51.320
+D1) exact URL strings as written 10,767,117 8,767,117 0 1474.5 MB.
+
+486
+00:30:51.600 --> 00:30:59.323
+D2) canonicalised URLs, exact string set 2,000,000 0 0 258.7 MB.
+
+487
+00:30:59.603 --> 00:31:06.429
+D3) canonicalised, 64-bit hash set 2,000,000 0 0 64.0 MB.
+
+488
+00:31:06.709 --> 00:31:18.421
+D4) canonicalised, Bloom filter (1% FP) 1,996,620 0 3,380 2.3 MB.
+
+489
+00:31:18.701 --> 00:31:20.216
+The rest is in the chapter.
+
+490
+00:31:23.066 --> 00:31:23.919
+Reading it:
+
+491
+00:31:24.199 --> 00:31:28.317
+Without canonicalisation, four of every five fetches are duplicates.
+
+492
+00:31:28.597 --> 00:31:35.573
+Canonical fingerprints are exact at 64 MB, against about 1.5 GB for raw strings.
+
+493
+00:31:35.853 --> 00:31:38.007
+The string memory figures are estimates.
+
+494
+00:31:38.287 --> 00:31:44.922
+The Bloom filter is about 28 times smaller again, but 3,380 products are never fetched.
+
+495
+00:31:45.202 --> 00:31:49.682
+That is below its 1% design rate, because the filter fills gradually.
+
+496
+00:31:51.032 --> 00:31:52.931
+L3, Re-crawl scheduling.
+
+497
+00:31:53.211 --> 00:31:54.149
+Requirement:
+
+498
+00:31:54.429 --> 00:32:01.683
+With 400,000 fetches a day, keep as many competitor prices current as possible, especially flash deals.
+
+499
+00:32:01.963 --> 00:32:05.013
+100k pages with different price-change rates.
+
+500
+00:32:05.293 --> 00:32:09.197
+Days 1 to 3 are for learning; days 4 to 10 are evaluated.
+
+501
+00:32:10.547 --> 00:32:13.470
+Here is the Java code, RecrawlL3.java.
+
+502
+00:32:13.750 --> 00:32:18.017
+It runs to 124 lines; the full listing is in the chapter.
+
+503
+00:32:18.297 --> 00:32:25.465
+RecrawlL3.java, run with: java RecrawlL3.java (JDK 21, no dependencies).
+
+504
+00:32:25.745 --> 00:32:28.689
+HOW OFTEN TO RE-FETCH EACH COMPETITOR PRICE PAGE?
+
+505
+00:32:28.969 --> 00:32:36.329
+100,000 product pages; each page's PRICE changes as a Poisson. process with its own rate (fixed seed):
+
+506
+00:32:36.609 --> 00:32:45.675
+5% flash-deal pages ~every 2 h, 25% ~daily, 50% ~weekly, 20% ~monthly.
+
+507
+00:32:45.955 --> 00:32:46.681
+Every.
+
+508
+00:32:49.531 --> 00:32:50.448
+On screen:
+
+509
+00:32:50.728 --> 00:33:03.741
+100,000 price pages, 400,000 fetches per day; learn rates on days 1 to 3, evaluate days 4 to 10. re-crawl policy prices current mean age of a flash-deal pages.
+
+510
+00:33:04.021 --> 00:33:06.453
+(time-avg) wrong. price. current.
+
+511
+00:33:06.733 --> 00:33:15.096
+R1) uniform: every page every 6 h 92.5% 1.6 h 33.5%.
+
+512
+00:33:15.376 --> 00:33:24.144
+R2) proportional to change rate from whole-page hash 92.5% 1.6 h 33.5%.
+
+513
+00:33:24.424 --> 00:33:33.896
+R3) proportional to change rate from the extracted price 89.0% 13.0 h 85.7%.
+
+514
+00:33:34.176 --> 00:33:43.605
+R4) freshness-optimal allocation (price-based estimates) 89.9% 13.6 h 74.3%.
+
+515
+00:33:43.885 --> 00:33:59.181
+R5) freshness-optimal allocation with the TRUE rates (oracle) 94.9% 1.7 h 70.8%. then a whole-page hash says every page changes on every visit (timestamps, counters.
+
+516
+00:33:59.461 --> 00:34:00.976
+The rest is in the chapter.
+
+517
+00:34:03.826 --> 00:34:04.679
+Reading it:
+
+518
+00:34:04.959 --> 00:34:10.186
+The whole-page hash gives exactly the uniform result: it contains no information.
+
+519
+00:34:10.466 --> 00:34:18.765
+Price-based estimates move the budget toward flash deals, which go from 34% to 74 to 86% current.
+
+520
+00:34:19.045 --> 00:34:23.717
+Overall freshness drops, though, because three days can't estimate slow pages.
+
+521
+00:34:23.997 --> 00:34:30.333
+The optimal allocation with true rates (R5) shows the ceiling: better estimates are worth pursuing.
+
+522
+00:34:31.683 --> 00:34:32.941
+A development note.
+
+523
+00:34:33.221 --> 00:34:38.064
+The first version gave pages with zero observed changes zero fetches.
+
+524
+00:34:38.344 --> 00:34:44.296
+Freshness collapsed to 44%, and that is why every policy now has a 72-hour floor.
+
+525
+00:34:45.646 --> 00:34:48.803
+L4, Traps, robots.txt and sitemaps.
+
+526
+00:34:49.083 --> 00:34:50.022
+Requirement:
+
+527
+00:34:50.302 --> 00:34:54.718
+Find every product on a competitor's site within a 20,000-fetch budget.
+
+528
+00:34:54.998 --> 00:34:58.838
+A generated site with facets, a calendar and session ids.
+
+529
+00:35:00.188 --> 00:35:02.961
+Here is the Java code, TrapsL4.java.
+
+530
+00:35:03.241 --> 00:35:07.487
+It runs to 131 lines; the full listing is in the chapter.
+
+531
+00:35:07.767 --> 00:35:14.807
+TrapsL4.java, run with: java TrapsL4.java (JDK 21, no dependencies).
+
+532
+00:35:15.087 --> 00:35:16.175
+CRAWLER TRAPS.
+
+533
+00:35:16.455 --> 00:35:26.225
+A competitor's site (generated, fixed seed) has 5,000 product pages in 50 categories; each category is. paginated 10 pages deep.
+
+534
+00:35:26.505 --> 00:35:32.436
+It also has what real sites have: faceted navigation (every filter combination is a new.
+
+535
+00:35:35.286 --> 00:35:36.203
+On screen:
+
+536
+00:35:36.483 --> 00:35:43.225
+5,000 products in 50 paginated categories + facets, calendar, session ids; budget.
+
+537
+00:35:43.505 --> 00:35:48.177
+20,000 fetches. crawl policy products found fetches on traps fetches.
+
+538
+00:35:48.457 --> 00:35:57.438
+T1) breadth-first, every new URL 2,823 17,449 20,000.
+
+539
+00:35:57.718 --> 00:36:06.166
+T2) T1 + depth limit 4 2,823 17,449 20,000.
+
+540
+00:36:06.446 --> 00:36:16.217
+T3) canonicalise + per-template cap (300) unless it yields products 4,307 15,492.
+
+541
+00:36:16.497 --> 00:36:17.585
+20,000.
+
+542
+00:36:17.865 --> 00:36:38.345
+T4) T3 + robots.txt + sitemap.xml seeding 5,000 0 5,301. then breadth-first crawling of a real site is mostly spent in its infinite corners: every filter combination. every calendar day and every session-id spelling is a new URL.
+
+543
+00:36:38.625 --> 00:36:39.670
+A depth limit.
+
+544
+00:36:39.950 --> 00:36:41.465
+The rest is in the chapter.
+
+545
+00:36:44.315 --> 00:36:45.168
+Reading it:
+
+546
+00:36:45.448 --> 00:36:49.395
+Breadth-first crawling spends 87% of the budget in traps.
+
+547
+00:36:49.675 --> 00:36:52.811
+The depth limit changes nothing, because the traps are shallow.
+
+548
+00:36:53.091 --> 00:36:56.589
+Template caps recover 1,500 more products.
+
+549
+00:36:56.869 --> 00:37:02.651
+The site's own robots.txt and sitemap give every product in about a quarter of the budget.
+
+550
+00:37:04.001 --> 00:37:04.939
+Part 6.
+
+551
+00:37:05.219 --> 00:37:06.499
+Production Concerns.
+
+552
+00:37:07.749 --> 00:37:08.901
+Failure modes.
+
+553
+00:37:09.181 --> 00:37:10.525
+Here is a quick table:
+
+554
+00:37:10.805 --> 00:37:13.088
+Failure, and Symptom, and Mitigation.
+
+555
+00:37:13.368 --> 00:37:15.437
+Global queue, no per-host limits.
+
+556
+00:37:15.717 --> 00:37:16.528
+Symptom:
+
+557
+00:37:16.808 --> 00:37:19.304
+429s, bans (L1).
+
+558
+00:37:19.584 --> 00:37:20.587
+Mitigation:
+
+559
+00:37:20.867 --> 00:37:23.491
+Per-host back queues, adaptive politeness.
+
+560
+00:37:23.771 --> 00:37:25.179
+Polite waiting in place.
+
+561
+00:37:25.459 --> 00:37:26.269
+Symptom:
+
+562
+00:37:26.549 --> 00:37:28.043
+Low throughput (L1).
+
+563
+00:37:28.323 --> 00:37:29.325
+Mitigation:
+
+564
+00:37:29.605 --> 00:37:30.971
+Ready-host scheduling.
+
+565
+00:37:31.251 --> 00:37:32.765
+No canonicalisation.
+
+566
+00:37:33.045 --> 00:37:33.856
+Symptom:
+
+567
+00:37:34.136 --> 00:37:36.056
+Duplicate fetches (L2).
+
+568
+00:37:36.336 --> 00:37:37.339
+Mitigation:
+
+569
+00:37:37.619 --> 00:37:39.453
+Site rules, canonical links.
+
+570
+00:37:39.733 --> 00:37:41.632
+Bloom filter for tracked pages.
+
+571
+00:37:41.912 --> 00:37:42.723
+Symptom:
+
+572
+00:37:43.003 --> 00:37:44.816
+Products never fetched (L2).
+
+573
+00:37:45.096 --> 00:37:46.099
+Mitigation:
+
+574
+00:37:46.379 --> 00:37:47.808
+Exact fingerprint sets.
+
+575
+00:37:48.088 --> 00:37:49.688
+Whole-page change detection.
+
+576
+00:37:49.968 --> 00:37:50.779
+Symptom:
+
+577
+00:37:51.059 --> 00:37:52.787
+Wasted budget (L3).
+
+578
+00:37:53.067 --> 00:37:54.069
+Mitigation:
+
+579
+00:37:54.349 --> 00:37:55.864
+Hash extracted fields.
+
+580
+00:37:56.144 --> 00:37:57.531
+Proportional re-crawl.
+
+581
+00:37:57.811 --> 00:37:58.621
+Symptom:
+
+582
+00:37:58.901 --> 00:38:00.949
+Starved slow pages (L3).
+
+583
+00:38:01.229 --> 00:38:02.232
+Mitigation:
+
+584
+00:38:02.512 --> 00:38:04.837
+Optimal allocation, floors, weights.
+
+585
+00:38:05.117 --> 00:38:05.928
+Traps.
+
+586
+00:38:06.208 --> 00:38:07.019
+Symptom:
+
+587
+00:38:07.299 --> 00:38:09.112
+Budget exhausted (L4).
+
+588
+00:38:09.392 --> 00:38:10.395
+Mitigation:
+
+589
+00:38:10.675 --> 00:38:12.424
+Templates, robots, sitemaps.
+
+590
+00:38:13.774 --> 00:38:14.905
+Site redesign.
+
+591
+00:38:15.185 --> 00:38:15.995
+Symptom:
+
+592
+00:38:16.275 --> 00:38:17.833
+Wrong or empty prices.
+
+593
+00:38:18.113 --> 00:38:19.115
+Mitigation:
+
+594
+00:38:19.395 --> 00:38:21.721
+Validation, quarantine, canaries.
+
+595
+00:38:22.001 --> 00:38:23.707
+JavaScript-only pages.
+
+596
+00:38:23.987 --> 00:38:24.798
+Symptom:
+
+597
+00:38:25.078 --> 00:38:26.315
+Empty extraction.
+
+598
+00:38:26.595 --> 00:38:27.598
+Mitigation:
+
+599
+00:38:27.878 --> 00:38:29.585
+Selective headless rendering.
+
+600
+00:38:30.935 --> 00:38:32.023
+Observability.
+
+601
+00:38:32.303 --> 00:38:42.116
+Per site: request rate versus limit, 429 or 503 rates, bans (sudden 403s), latency, error circuit state.
+
+602
+00:38:42.396 --> 00:38:47.857
+Extraction success per site and extractor version; quarantine volume; canary results.
+
+603
+00:38:48.137 --> 00:38:53.023
+Freshness per class; mean age of wrong prices (estimated from change detection).
+
+604
+00:38:53.303 --> 00:38:56.524
+Frontier depth per host; throughput; DNS errors.
+
+605
+00:38:57.874 --> 00:38:59.794
+Security, legal and ethics.
+
+606
+00:39:00.074 --> 00:39:03.274
+Identified user agent with a contact URL.
+
+607
+00:39:03.554 --> 00:39:05.986
+Honour robots.txt and opt-outs.
+
+608
+00:39:06.266 --> 00:39:09.061
+Public pages only, and no personal data.
+
+609
+00:39:09.341 --> 00:39:13.479
+No circumvention of access controls, CAPTCHAs or bot defences.
+
+610
+00:39:13.759 --> 00:39:18.261
+If a site blocks us, stop and escalate to legal or business, don't evade.
+
+611
+00:39:18.541 --> 00:39:28.397
+Crawlers fetch untrusted content: sandbox parsers and headless browsers, and protect against SSRF (resolve and block internal IP ranges).
+
+612
+00:39:29.747 --> 00:39:30.643
+Performance.
+
+613
+00:39:30.923 --> 00:39:36.021
+Async I or O fetchers (thousands of concurrent connections per node across hosts).
+
+614
+00:39:36.301 --> 00:39:40.099
+Connection reuse per host within politeness limits, and compression.
+
+615
+00:39:40.379 --> 00:39:44.219
+Listing pages as a cheap way to update many prices per fetch.
+
+616
+00:39:45.569 --> 00:39:46.294
+Cost.
+
+617
+00:39:46.574 --> 00:39:48.963
+Headless rendering is the expensive tier.
+
+618
+00:39:49.243 --> 00:39:50.246
+Minimise it.
+
+619
+00:39:50.526 --> 00:39:55.091
+Store raw HTML briefly, and keep only extracted fields long-term.
+
+620
+00:39:55.371 --> 00:39:58.486
+The re-crawl budget is the main cost lever (L3).
+
+621
+00:39:59.836 --> 00:40:00.775
+Part 7.
+
+622
+00:40:01.055 --> 00:40:02.761
+Anti-Patterns and Pitfalls.
+
+623
+00:40:04.011 --> 00:40:04.929
+Watch out:
+
+624
+00:40:05.209 --> 00:40:05.849
+1.
+
+625
+00:40:06.129 --> 00:40:07.878
+Many threads against one site.
+
+626
+00:40:08.158 --> 00:40:10.249
+Bans and harm to the site (L1).
+
+627
+00:40:11.599 --> 00:40:12.516
+Watch out:
+
+628
+00:40:12.796 --> 00:40:13.500
+2.
+
+629
+00:40:13.780 --> 00:40:15.615
+Sleeping in place for politeness.
+
+630
+00:40:15.895 --> 00:40:17.687
+Head-of-line blocking (L1).
+
+631
+00:40:19.037 --> 00:40:19.954
+Watch out:
+
+632
+00:40:20.234 --> 00:40:20.981
+3.
+
+633
+00:40:21.261 --> 00:40:23.394
+Deduplicating raw URL strings.
+
+634
+00:40:23.674 --> 00:40:26.426
+8.8M duplicate fetches (L2).
+
+635
+00:40:27.776 --> 00:40:28.693
+Watch out:
+
+636
+00:40:28.973 --> 00:40:29.677
+4.
+
+637
+00:40:29.957 --> 00:40:32.240
+Bloom filters where completeness matters.
+
+638
+00:40:32.520 --> 00:40:34.120
+Silent misses (L2).
+
+639
+00:40:35.470 --> 00:40:36.387
+Watch out:
+
+640
+00:40:36.667 --> 00:40:37.435
+5.
+
+641
+00:40:37.715 --> 00:40:39.891
+Whole-page hashes for change detection.
+
+642
+00:40:40.171 --> 00:40:42.539
+Everything always changes (L3).
+
+643
+00:40:43.889 --> 00:40:44.807
+Watch out:
+
+644
+00:40:45.087 --> 00:40:45.833
+6.
+
+645
+00:40:46.113 --> 00:40:48.631
+Re-crawling in proportion to change rate.
+
+646
+00:40:48.911 --> 00:40:50.895
+Starves most pages (L3).
+
+647
+00:40:52.245 --> 00:40:53.162
+Watch out:
+
+648
+00:40:53.442 --> 00:40:54.189
+7.
+
+649
+00:40:54.469 --> 00:40:56.303
+Breadth-first on faceted sites.
+
+650
+00:40:56.583 --> 00:40:58.674
+The budget goes to traps (L4).
+
+651
+00:41:00.024 --> 00:41:00.941
+Watch out:
+
+652
+00:41:01.221 --> 00:41:01.904
+8.
+
+653
+00:41:02.184 --> 00:41:03.720
+Relying on depth limits.
+
+654
+00:41:04.000 --> 00:41:05.728
+Traps are shallow (L4).
+
+655
+00:41:07.078 --> 00:41:07.995
+Watch out:
+
+656
+00:41:08.275 --> 00:41:09.022
+9.
+
+657
+00:41:09.302 --> 00:41:12.033
+Ignoring robots.txt and sitemaps.
+
+658
+00:41:12.313 --> 00:41:13.849
+Unethical and inefficient.
+
+659
+00:41:15.199 --> 00:41:16.116
+Watch out:
+
+660
+00:41:16.396 --> 00:41:17.100
+10.
+
+661
+00:41:17.380 --> 00:41:19.620
+Publishing unvalidated extractions.
+
+662
+00:41:19.900 --> 00:41:21.415
+0 rupeesprices.
+
+663
+00:41:22.765 --> 00:41:23.682
+Watch out:
+
+664
+00:41:23.962 --> 00:41:24.794
+11.
+
+665
+00:41:25.074 --> 00:41:26.397
+Circumventing blocks.
+
+666
+00:41:26.677 --> 00:41:27.743
+Legal risk.
+
+667
+00:41:28.023 --> 00:41:29.090
+Stop instead.
+
+668
+00:41:30.440 --> 00:41:31.357
+Watch out:
+
+669
+00:41:31.637 --> 00:41:32.427
+12.
+
+670
+00:41:32.707 --> 00:41:34.669
+No product matching confidence.
+
+671
+00:41:34.949 --> 00:41:36.741
+Pricing against the wrong product.
+
+672
+00:41:38.091 --> 00:41:38.966
+Part 8.
+
+673
+00:41:39.246 --> 00:41:40.590
+Interview Q and A.
+
+674
+00:41:41.840 --> 00:41:42.672
+Beginner.
+
+675
+00:41:42.952 --> 00:41:43.976
+Question 1.
+
+676
+00:41:44.256 --> 00:41:46.496
+Design a web crawler, main components?
+
+677
+00:41:46.776 --> 00:41:48.141
+Thirty-second answer:
+
+678
+00:41:48.421 --> 00:42:09.925
+Seed URLs and sitemaps; a frontier (priority + per-host queues with politeness); fetchers with DNS caching and robots.txt handling; parsers and link extraction; URL canonicalisation and dedup; content storage and extraction; re-crawl scheduler; monitoring; all partitioned by host across nodes.
+
+679
+00:42:11.275 --> 00:42:12.278
+Question 2.
+
+680
+00:42:12.558 --> 00:42:14.265
+How do you make a crawler polite?
+
+681
+00:42:14.545 --> 00:42:15.910
+Thirty-second answer:
+
+682
+00:42:16.190 --> 00:42:36.179
+Per-host queues and rate limits (crawl-delay, conservative defaults), a scheduler that only hands out hosts whose next-allowed time has come, backoff on 429 or 503 with Retry-After, connection limits, robots.txt compliance, an identifying user agent, and circuit breakers.
+
+683
+00:42:37.529 --> 00:42:38.575
+Question 3.
+
+684
+00:42:38.855 --> 00:42:40.625
+Why canonicalise URLs?
+
+685
+00:42:40.905 --> 00:42:42.271
+Thirty-second answer:
+
+686
+00:42:42.551 --> 00:42:55.223
+The same page appears under many spellings (tracking params, session ids, case, ports, fragments, parameter order); without canonicalisation you fetch it repeatedly and store conflicting data.
+
+687
+00:42:56.573 --> 00:42:57.639
+Question 4.
+
+688
+00:42:57.919 --> 00:43:01.311
+What is robots.txt and what does it mean for design?
+
+689
+00:43:01.591 --> 00:43:02.957
+Thirty-second answer:
+
+690
+00:43:03.237 --> 00:43:10.575
+A per-site file listing paths crawlers may not fetch (by user agent), sometimes a crawl-delay and sitemap locations.
+
+691
+00:43:10.855 --> 00:43:17.618
+Fetch and cache it per host, check every URL against it, re-fetch periodically, and treat it as a hard rule.
+
+692
+00:43:18.968 --> 00:43:19.971
+Intermediate.
+
+693
+00:43:20.251 --> 00:43:21.360
+Question 5.
+
+694
+00:43:21.640 --> 00:43:24.477
+How do you know if you've seen a URL before, at scale?
+
+695
+00:43:24.757 --> 00:43:26.123
+Thirty-second answer:
+
+696
+00:43:26.403 --> 00:43:43.917
+Canonicalise, then store 64-bit fingerprints in a partitioned hash set (exact for practical purposes, ~8 B each); Bloom filters are smaller but their false positives are URLs never fetched, fine for web-scale discovery, wrong for must-see pages.
+
+697
+00:43:45.267 --> 00:43:46.377
+Question 6.
+
+698
+00:43:46.657 --> 00:43:48.662
+How do you detect that a page changed?
+
+699
+00:43:48.942 --> 00:43:50.307
+Thirty-second answer:
+
+700
+00:43:50.587 --> 00:44:06.523
+Conditional GETs (ETag or Last-Modified), sitemap lastmod, and hashing the extracted fields you care about, not the whole HTML, which changes every visit due to timestamps and ads; near-duplicate detection with SimHash for content.
+
+701
+00:44:07.873 --> 00:44:08.961
+Question 7.
+
+702
+00:44:09.241 --> 00:44:10.948
+How do you avoid crawler traps?
+
+703
+00:44:11.228 --> 00:44:12.593
+Thirty-second answer:
+
+704
+00:44:12.873 --> 00:44:28.383
+Canonicalisation, URL-template detection with budgets that continue only while templates yield new content, per-host page budgets, soft-404 detection, robots.txt, sitemap seeding; depth limits alone are weak.
+
+705
+00:44:29.733 --> 00:44:30.757
+Question 8.
+
+706
+00:44:31.037 --> 00:44:33.234
+How do you extract prices robustly?
+
+707
+00:44:33.514 --> 00:44:34.879
+Thirty-second answer:
+
+708
+00:44:35.159 --> 00:44:51.245
+Prefer structured data (JSON-LD Product or Offer), fall back to versioned per-site selectors; validate values (range versus last price, currency, pack size); quarantine failures; monitor extraction success and canary pages per site.
+
+709
+00:44:52.595 --> 00:44:53.661
+Question 9.
+
+710
+00:44:53.941 --> 00:44:55.563
+How do you distribute a crawler?
+
+711
+00:44:55.843 --> 00:44:57.208
+Thirty-second answer:
+
+712
+00:44:57.488 --> 00:45:12.741
+Partition by host (consistent hashing) so each node owns a host's queue and politeness state; URLs discovered for other hosts are routed to their owners; shared dedup via partitioned fingerprint sets; node failures reassign hosts.
+
+713
+00:45:14.091 --> 00:45:14.859
+Senior.
+
+714
+00:45:15.139 --> 00:45:16.185
+Question 10.
+
+715
+00:45:16.465 --> 00:45:18.790
+How should re-crawl frequency be decided?
+
+716
+00:45:19.070 --> 00:45:20.435
+Thirty-second answer:
+
+717
+00:45:20.715 --> 00:45:38.379
+Estimate each page's change rate for the extracted fields (correcting for missed changes), allocate the budget to maximise freshness (optimal allocation, not proportional), add floors so no page starves, weight by business value, use priors for new pages, keep re-estimating.
+
+718
+00:45:39.729 --> 00:45:40.860
+Question 11.
+
+719
+00:45:41.140 --> 00:45:42.761
+Design the Mercator frontier.
+
+720
+00:45:43.041 --> 00:45:44.407
+Thirty-second answer:
+
+721
+00:45:44.687 --> 00:46:02.756
+Front queues by priority feed back queues, one per host (bounded number, mapped to hosts); a heap of back queues keyed by next-allowed time; workers pop the earliest ready host, fetch one URL, and reinsert the host with its next time; empty back queues get refilled from front queues.
+
+722
+00:46:04.106 --> 00:46:05.194
+Question 12.
+
+723
+00:46:05.474 --> 00:46:07.842
+How do you handle JavaScript-heavy sites?
+
+724
+00:46:08.122 --> 00:46:09.487
+Thirty-second answer:
+
+725
+00:46:09.767 --> 00:46:25.917
+First look for structured data or APIs the page calls (publicly, within terms); otherwise render with headless browsers in a separate, sandboxed, rate-limited pool, caching static resources; decide per site; it's 10 to 50 times costlier.
+
+726
+00:46:27.267 --> 00:46:28.547
+Question 13.
+
+727
+00:46:28.827 --> 00:46:31.536
+How do you match competitor products to your SKUs?
+
+728
+00:46:31.816 --> 00:46:33.181
+Thirty-second answer:
+
+729
+00:46:33.461 --> 00:46:46.837
+Barcodes when present; otherwise brand + normalised name + pack size with fuzzy matching and ML similarity; confidence scores; human review queue; pricing uses only high-confidence matches.
+
+730
+00:46:48.187 --> 00:46:49.382
+Question 14.
+
+731
+00:46:49.662 --> 00:46:51.326
+What should you monitor on a crawler?
+
+732
+00:46:51.606 --> 00:46:52.971
+Thirty-second answer:
+
+733
+00:46:53.251 --> 00:47:09.209
+Per-site request rates versus limits, 429 or 403 or 503 rates, bans, extraction success and quarantine rates, canary pages, freshness per class, frontier depth, throughput, DNS errors, cost per fetch.
+
+734
+00:47:10.559 --> 00:47:11.455
+Architect.
+
+735
+00:47:11.735 --> 00:47:12.929
+Question 15.
+
+736
+00:47:13.209 --> 00:47:15.769
+Design a price-monitoring crawler end to end.
+
+737
+00:47:16.049 --> 00:47:17.415
+Thirty-second answer:
+
+738
+00:47:17.695 --> 00:47:37.791
+Site configs with legal approval; sitemap or robots ingestion; Mercator frontier partitioned by host; canonical fingerprint dedup; fetchers with conditional GETs; JSON-LD-first extraction with validation and quarantine; price history and change events; product matching; re-crawl scheduling with
+
+739
+00:47:38.071 --> 00:47:42.700
+change-rate estimates, floors and business weights; monitoring and kill switches.
+
+740
+00:47:44.050 --> 00:47:45.245
+Question 16.
+
+741
+00:47:45.525 --> 00:47:48.597
+How does a search-engine crawler differ from a focused crawler?
+
+742
+00:47:48.877 --> 00:47:50.242
+Thirty-second answer:
+
+743
+00:47:50.522 --> 00:48:09.061
+Search engines optimise coverage and importance over billions of pages (Bloom filters, PageRank-like priorities, massive distribution); focused crawlers target known sites and fields with completeness and freshness requirements (exact dedup, per-page schedules, extraction quality).
+
+744
+00:48:10.411 --> 00:48:11.755
+Question 17.
+
+745
+00:48:12.035 --> 00:48:14.424
+What are the legal and ethical guardrails?
+
+746
+00:48:14.704 --> 00:48:16.069
+Thirty-second answer:
+
+747
+00:48:16.349 --> 00:48:31.261
+Public pages only, robots.txt honoured, identified user agent, conservative rates, no circumvention of blocks or logins, no personal data, per-site legal review, prefer feeds or partnerships; stop when asked.
+
+748
+00:48:31.541 --> 00:48:34.293
+Laws and terms vary, verify with counsel.
+
+749
+00:48:35.643 --> 00:48:36.817
+Question 18.
+
+750
+00:48:37.097 --> 00:48:40.446
+How do you make crawler output trustworthy for pricing decisions?
+
+751
+00:48:40.726 --> 00:48:42.091
+Thirty-second answer:
+
+752
+00:48:42.371 --> 00:48:57.305
+Validation and quarantine, match confidence, freshness timestamps on every price, outlier detection, human review for large moves, and the pricing engine only reacting to fresh, confident, validated data within guardrails.
+
+753
+00:48:58.655 --> 00:48:59.892
+Question 19.
+
+754
+00:49:00.172 --> 00:49:02.860
+How would you scale to 100 million pages?
+
+755
+00:49:03.140 --> 00:49:04.505
+Thirty-second answer:
+
+756
+00:49:04.785 --> 00:49:22.236
+Many fetch nodes partitioned by host; disk-backed frontier queues; fingerprint sets partitioned and on disk with Bloom front filters; async fetchers; DNS resolvers; content stored in object storage (Ch 52); extraction as a stream; scheduling sharded.
+
+757
+00:49:23.586 --> 00:49:24.695
+Question 20.
+
+758
+00:49:24.975 --> 00:49:27.727
+What makes a crawler a good citizen and a good system?
+
+759
+00:49:28.007 --> 00:49:29.373
+Thirty-second answer:
+
+760
+00:49:29.653 --> 00:49:42.154
+Measurably polite (zero violations, fast backoff), efficient (no duplicate or trap fetches), fresh where it matters, correct (validated, matched), observable, legal, and easy to stop per site.
+
+761
+00:49:43.504 --> 00:49:44.400
+Part 9.
+
+762
+00:49:44.680 --> 00:49:46.088
+Summary and Practice.
+
+763
+00:49:47.338 --> 00:49:48.426
+Key takeaways.
+
+764
+00:49:48.706 --> 00:49:52.845
+The frontier is per host, scheduled by next-allowed time (L1).
+
+765
+00:49:53.125 --> 00:49:54.938
+Canonicalise and fingerprint.
+
+766
+00:49:55.218 --> 00:49:58.866
+Use Bloom filters only where misses are acceptable (L2).
+
+767
+00:49:59.146 --> 00:50:04.031
+Re-crawl on the extracted field, with good estimates, floors and value weights.
+
+768
+00:50:04.311 --> 00:50:06.807
+Uniform is a strong baseline (L3).
+
+769
+00:50:07.087 --> 00:50:11.077
+Sitemaps and robots.txt beat trap heuristics (L4).
+
+770
+00:50:11.357 --> 00:50:15.047
+Validate extractions, match products carefully, and stay legal.
+
+771
+00:50:16.397 --> 00:50:17.720
+Decision cheat sheet.
+
+772
+00:50:18.000 --> 00:50:19.344
+Here is a quick table:
+
+773
+00:50:19.624 --> 00:50:20.797
+Need, and Choice.
+
+774
+00:50:21.077 --> 00:50:22.592
+Politeness + throughput:
+
+775
+00:50:22.872 --> 00:50:25.283
+Per-host back queues + ready-host heap.
+
+776
+00:50:25.563 --> 00:50:26.736
+URL dedup:
+
+777
+00:50:27.016 --> 00:50:30.771
+Site-aware canonicalisation + 64-bit fingerprints.
+
+778
+00:50:31.051 --> 00:50:32.181
+Change detection:
+
+779
+00:50:32.461 --> 00:50:35.128
+Conditional GET + hash of extracted fields.
+
+780
+00:50:35.408 --> 00:50:36.283
+Re-crawl:
+
+781
+00:50:36.563 --> 00:50:41.512
+Optimal allocation on continuously estimated rates + floors + weights.
+
+782
+00:50:41.792 --> 00:50:42.688
+Discovery:
+
+783
+00:50:42.968 --> 00:50:46.040
+Sitemaps, robots.txt, template budgets.
+
+784
+00:50:46.320 --> 00:50:47.323
+Extraction:
+
+785
+00:50:47.603 --> 00:50:51.123
+JSON-LD first, validation, quarantine, canaries.
+
+786
+00:50:52.473 --> 00:50:53.603
+Exercises.
+
+787
+00:50:53.883 --> 00:50:57.105
+(B2) In L1, give one site a 2-second limit.
+
+788
+00:50:57.385 --> 00:50:58.835
+How does each frontier cope?
+
+789
+00:50:59.115 --> 00:51:03.297
+(B3) In L2, add a rule that wrongly drops the size parameter.
+
+790
+00:51:03.577 --> 00:51:05.411
+How many distinct pages merge?
+
+791
+00:51:05.691 --> 00:51:11.771
+(B3) In L3, add category priors to the estimator and see if R4 beats uniform.
+
+792
+00:51:12.051 --> 00:51:17.001
+(B4) In L4, add soft-404 pages that return 200.
+
+793
+00:51:17.281 --> 00:51:18.582
+Design their detection.
+
+794
+00:51:18.862 --> 00:51:23.833
+(B4) Design the product-matching service with confidence scores and a review loop.
+
+795
+00:51:25.183 --> 00:51:26.185
+Further reading.
+
+796
+00:51:26.465 --> 00:51:28.321
+Heydon and Najork, Mercator:
+
+797
+00:51:28.601 --> 00:51:32.292
+A Scalable, Extensible Web Crawler (1999).
+
+798
+00:51:32.572 --> 00:51:42.044
+Cho and Garcia-Molina, Effective Page Refresh Policies for Web Crawlers (2003) and Estimating Frequency of Change (2003).
+
+799
+00:51:42.324 --> 00:51:48.895
+Manku, Jain and Das Sarma, Detecting Near-Duplicates for Web Crawling (SimHash, 2007).
+
+800
+00:51:49.175 --> 00:51:57.132
+RFC 9309, Robots Exclusion Protocol. schema.org Product and Offer documentation.
+
+801
+00:51:58.482 --> 00:51:59.719
+Related chapters.
+
+802
+00:51:59.999 --> 00:52:03.882
+Ch 39, Distributed Rate Limiter: politeness limits.
+
+803
+00:52:04.162 --> 00:52:09.815
+Ch 49, Pricing, Promotions and Coupons: consumer of competitor prices.
+
+804
+00:52:10.095 --> 00:52:14.021
+Ch 50, Distributed Job Scheduler: re-crawl timing.
+
+805
+00:52:14.301 --> 00:52:19.207
+Ch 52, Object Storage and Media Pipeline: raw page storage.
+
+806
+00:52:20.557 --> 00:52:22.157
+That's the end of this chapter.
+
+807
+00:52:22.437 --> 00:52:28.475
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+808
+00:52:28.755 --> 00:52:30.205
+See you in the next chapter.
+

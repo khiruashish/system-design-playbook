@@ -1,0 +1,5006 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.481
+Data at Scale.
+
+2
+00:00:01.761 --> 00:00:05.921
+Chapter 21, from the Production part of the System Design Playbook.
+
+3
+00:00:07.671 --> 00:00:08.631
+At a glance:
+
+4
+00:00:08.911 --> 00:00:10.084
+Chapter at a glance.
+
+5
+00:00:10.364 --> 00:00:11.367
+Reader bands:
+
+6
+00:00:11.647 --> 00:00:13.929
+B2, then B4, Prerequisites:
+
+7
+00:00:14.209 --> 00:00:21.313
+Ch 05, Ch 06, Ch 07, Ch 13, Ch 14, What you will build:
+
+8
+00:00:21.593 --> 00:00:37.060
+Where the grocery platform's big data lives, and how it moves: blobs in object storage, static bytes through a CDN, analytics off the OLTP path in a columnar lake, and batch and streaming pipelines that stay correct through crashes and late data.
+
+9
+00:00:37.340 --> 00:00:38.961
+Four labs on real tools:
+
+10
+00:00:39.241 --> 00:00:48.436
+SeaweedFS (S3 API), JDK HTTP servers, PostgreSQL 16, DuckDB 1.1 and Parquet.
+
+11
+00:00:48.716 --> 00:00:54.049
+L1: object storage over the S3 API with hand-written SigV4.
+
+12
+00:00:54.329 --> 00:01:03.993
+Presigned upload or download, expiry and tampering (403), multipart upload with a single part retried, and content-addressed dedup.
+
+13
+00:01:05.343 --> 00:01:07.370
+L2: a pull-through CDN node.
+
+14
+00:01:07.650 --> 00:01:18.423
+Normalising the cache key raised the hit ratio from 57 % to 97.5 % (origin egress 953, then 23 MB).
+
+15
+00:01:18.703 --> 00:01:22.607
+Request coalescing cut 400 origin requests to 1.
+
+16
+00:01:22.887 --> 00:01:32.274
+Purge or versioned URLs removed 93 stale price responses, and stale-if-error served 50 of 50 requests during an origin outage.
+
+17
+00:01:32.554 --> 00:01:33.407
+L3:
+
+18
+00:01:33.687 --> 00:01:36.269
+OLTP versus OLAP on 10M order lines.
+
+19
+00:01:36.549 --> 00:01:43.226
+An ELT step turned 754 MB of CSV into 58 MB of Parquet.
+
+20
+00:01:43.506 --> 00:01:59.186
+DuckDB answered most analytical queries 3.5 to 4x faster than PostgreSQL on 2 vCPUs, with identical results, while PostgreSQL won the point lookup (0.9 ms versus 11 ms).
+
+21
+00:01:59.466 --> 00:02:04.266
+Precomputing the local date during ELT made one query 7x faster.
+
+22
+00:02:05.616 --> 00:02:07.280
+L4: batch and stream.
+
+23
+00:02:07.560 --> 00:02:16.691
+A restartable chunked batch job was off by 5.4 crore rupees when its checkpoint was committed separately from its output, and exact otherwise.
+
+24
+00:02:16.971 --> 00:02:30.453
+For streaming windows over out-of-order events, processing-time windows were 30 % exact, a 5 s watermark 43 %, and a 5 s watermark with 30 min allowed lateness 100 %.
+
+25
+00:02:30.733 --> 00:02:31.715
+Reading time:
+
+26
+00:02:31.995 --> 00:02:33.787
+110 min + code.
+
+27
+00:02:35.137 --> 00:02:35.990
+Part 1.
+
+28
+00:02:36.270 --> 00:02:38.190
+Introduction and Why It Matters.
+
+29
+00:02:39.440 --> 00:02:41.595
+A story: the Monday morning report.
+
+30
+00:02:41.875 --> 00:02:49.597
+At 9:30 on the Monday after the Diwali weekend, checkout p99 jumped from 300 ms to 4 s.
+
+31
+00:02:49.877 --> 00:03:00.672
+The cause was a BI dashboard: the finance team's weekly GMV report ran fifty count(distinct orderid)... group by week queries against the orders primary.
+
+32
+00:03:00.952 --> 00:03:03.469
+Each one scanned 10 million rows (L3:
+
+33
+00:03:03.749 --> 00:03:10.619
+5.4 s on PostgreSQL), and together they took the buffer cache and the CPUs away from checkout.
+
+34
+00:03:10.899 --> 00:03:12.883
+The review found four more problems:
+
+35
+00:03:14.233 --> 00:03:17.561
+Product images were served by catalog-service itself.
+
+36
+00:03:17.841 --> 00:03:27.355
+They were stored as bytea rows and streamed through the JVM, so 40 % of the service's CPU and most of its egress went to bytes that never change.
+
+37
+00:03:27.635 --> 00:03:32.670
+The CDN had been added the previous month, but its hit ratio was 55 %.
+
+38
+00:03:32.950 --> 00:03:42.870
+Marketing push notifications appended utmsource, utmcampaign and fbclid to image URLs, and the CDN used the full URL as the cache key.
+
+39
+00:03:43.150 --> 00:03:43.961
+L2:
+
+40
+00:03:44.241 --> 00:03:50.278
+57.4 %, then 97.5 % once the key was normalised.
+
+41
+00:03:51.628 --> 00:04:04.257
+A price cut went live at 00:00, but some customers saw the old price until 00:05, because product JSON was cached for 5 minutes and there was no purge.
+
+42
+00:04:04.537 --> 00:04:06.841
+L2 reproduces it at a smaller scale:
+
+43
+00:04:07.121 --> 00:04:14.951
+93 of 138 responses stale with a TTL alone, and 0 with purge or versioned URLs.
+
+44
+00:04:15.231 --> 00:04:19.924
+The dark-store demand board undercounted evening orders by up to 30 %.
+
+45
+00:04:20.204 --> 00:04:28.993
+It counted orders by the minute they arrived at the stream processor, not the minute they were placed, and riders' phones in basements delivered events minutes late.
+
+46
+00:04:29.273 --> 00:04:34.713
+L4: processing-time windows were exact for 29.8 % of store-minutes.
+
+47
+00:04:36.063 --> 00:04:37.045
+The fixes:
+
+48
+00:04:37.325 --> 00:04:39.245
+Analytics moved off the OLTP path:
+
+49
+00:04:39.525 --> 00:04:44.858
+CDC and nightly ELT into a Parquet lake, queried by a columnar engine.
+
+50
+00:04:45.138 --> 00:04:48.359
+Blobs moved to object storage with presigned uploads.
+
+51
+00:04:48.639 --> 00:04:57.215
+The CDN got normalised keys and coalescing, plus versioned URLs for static assets, purge for prices, and stale-if-error.
+
+52
+00:04:57.495 --> 00:05:02.167
+The demand board moved to event-time windows with a watermark and allowed lateness.
+
+53
+00:05:03.517 --> 00:05:04.200
+Quote:
+
+54
+00:05:04.480 --> 00:05:06.144
+The thesis of this chapter.
+
+55
+00:05:06.424 --> 00:05:08.408
+Different data has different physics.
+
+56
+00:05:08.688 --> 00:05:11.547
+Transactions want rows, indexes and locks.
+
+57
+00:05:11.827 --> 00:05:14.749
+Analytics want columns, compression and full scans.
+
+58
+00:05:15.029 --> 00:05:17.888
+Blobs want cheap, durable, flat namespaces.
+
+59
+00:05:18.168 --> 00:05:20.301
+Static bytes want to live near users.
+
+60
+00:05:20.581 --> 00:05:31.461
+Scaling the data layer is mostly about putting each kind of data in the store built for it, and moving it between stores with pipelines that are replayable, idempotent and honest about time.
+
+61
+00:05:32.811 --> 00:05:35.115
+Where this lives in the grocery platform.
+
+62
+00:05:35.395 --> 00:05:36.739
+Here is a quick table:
+
+63
+00:05:37.019 --> 00:05:39.110
+Data, and Store or path, and Why.
+
+64
+00:05:39.390 --> 00:05:44.041
+Product images, invoices (PDF), proof-of-delivery photos, exports.
+
+65
+00:05:44.321 --> 00:05:45.366
+Store or path:
+
+66
+00:05:45.646 --> 00:05:50.254
+Object storage (S3 API), private buckets, presigned URLs.
+
+67
+00:05:50.534 --> 00:05:51.217
+Why:
+
+68
+00:05:51.497 --> 00:05:56.211
+Cheap, durable (11 nines on S3), no app servers in the byte path.
+
+69
+00:05:56.491 --> 00:05:59.222
+Images, JS or CSS, app bundles.
+
+70
+00:05:59.502 --> 00:06:00.547
+Store or path:
+
+71
+00:06:00.827 --> 00:06:03.430
+CDN, versioned URLs, immutable.
+
+72
+00:06:03.710 --> 00:06:04.393
+Why:
+
+73
+00:06:04.673 --> 00:06:07.830
+Hit ratio 95 %, origin offload.
+
+74
+00:06:08.110 --> 00:06:10.990
+Product or price JSON for anonymous browse.
+
+75
+00:06:11.270 --> 00:06:12.315
+Store or path:
+
+76
+00:06:12.595 --> 00:06:16.158
+CDN, short TTL, purge on change, stale-if-error.
+
+77
+00:06:16.438 --> 00:06:17.121
+Why:
+
+78
+00:06:17.401 --> 00:06:19.235
+Burst absorption, resilience.
+
+79
+00:06:19.515 --> 00:06:21.777
+Orders, payments, inventory (OLTP).
+
+80
+00:06:22.057 --> 00:06:23.102
+Store or path:
+
+81
+00:06:23.382 --> 00:06:26.518
+PostgreSQL per service (Ch 05).
+
+82
+00:06:26.798 --> 00:06:27.481
+Why:
+
+83
+00:06:27.761 --> 00:06:30.043
+Transactions, point reads or writes.
+
+84
+00:06:30.323 --> 00:06:33.182
+Order lines, events, clickstream for analytics.
+
+85
+00:06:33.462 --> 00:06:34.507
+Store or path:
+
+86
+00:06:34.787 --> 00:06:35.726
+Lakehouse:
+
+87
+00:06:36.006 --> 00:06:39.697
+Parquet or Iceberg on object storage, partitioned by date.
+
+88
+00:06:39.977 --> 00:06:40.659
+Why:
+
+89
+00:06:40.939 --> 00:06:43.841
+Columnar scans, cheap storage, many engines.
+
+90
+00:06:45.191 --> 00:06:47.516
+BI dashboards, finance reports.
+
+91
+00:06:47.796 --> 00:06:48.841
+Store or path:
+
+92
+00:06:49.121 --> 00:06:55.713
+Warehouse or lakehouse SQL engine (Trino, BigQuery, Snowflake, DuckDB for small data).
+
+93
+00:06:55.993 --> 00:06:56.676
+Why:
+
+94
+00:06:56.956 --> 00:06:58.599
+Never on OLTP primaries.
+
+95
+00:06:58.879 --> 00:07:02.313
+Daily settlement, invoices, loyalty reconciliation.
+
+96
+00:07:02.593 --> 00:07:03.639
+Store or path:
+
+97
+00:07:03.919 --> 00:07:06.649
+Batch (Spring Batch), restartable, idempotent.
+
+98
+00:07:06.929 --> 00:07:07.612
+Why:
+
+99
+00:07:07.892 --> 00:07:09.449
+Correct, auditable, cheap.
+
+100
+00:07:09.729 --> 00:07:11.991
+Demand board, surge, fraud signals.
+
+101
+00:07:12.271 --> 00:07:13.316
+Store or path:
+
+102
+00:07:13.596 --> 00:07:16.412
+Streaming (Kafka Streams or Flink) with event time.
+
+103
+00:07:16.692 --> 00:07:17.375
+Why:
+
+104
+00:07:17.655 --> 00:07:20.471
+Seconds-fresh, and correct despite late events.
+
+105
+00:07:21.821 --> 00:07:23.143
+Learning objectives.
+
+106
+00:07:23.423 --> 00:07:24.767
+Here is a quick table:
+
+107
+00:07:25.047 --> 00:07:27.245
+Band, and After this chapter you can....
+
+108
+00:07:27.525 --> 00:07:28.399
+B2:
+
+109
+00:07:28.679 --> 00:07:38.962
+Use object storage with presigned URLs and multipart uploads, set CDN cache headers, and explain OLTP versus OLAP and row versus column storage.
+
+110
+00:07:39.242 --> 00:07:40.138
+B3:
+
+111
+00:07:40.418 --> 00:07:52.685
+Design cache keys, invalidation and coalescing for a CDN; build an ELT pipeline into a partitioned lake; write restartable batch jobs; use event-time windows with watermarks.
+
+112
+00:07:52.965 --> 00:07:53.861
+B4:
+
+113
+00:07:54.141 --> 00:08:03.591
+Choose warehouse versus lake versus lakehouse, lambda versus kappa, and batch versus streaming for a use case, and define the platform's data architecture.
+
+114
+00:08:04.941 --> 00:08:05.816
+Part 2.
+
+115
+00:08:06.096 --> 00:08:07.973
+Core Concepts, Beginner to Deep.
+
+116
+00:08:09.223 --> 00:08:10.141
+Intuition.
+
+117
+00:08:10.421 --> 00:08:14.303
+Object storage is the warehouse's back room of labelled boxes.
+
+118
+00:08:14.583 --> 00:08:16.759
+You don't open a box to change one item.
+
+119
+00:08:17.039 --> 00:08:19.877
+You replace the whole box (immutable objects).
+
+120
+00:08:20.157 --> 00:08:27.965
+Boxes are addressed by label (key), anyone with a signed slip (presigned URL) can pick one up, and it's vast and cheap.
+
+121
+00:08:28.245 --> 00:08:37.269
+A CDN is a set of small shops near every neighbourhood, stocking copies of the most popular items from the central warehouse (the origin).
+
+122
+00:08:37.549 --> 00:08:48.301
+The trick is labelling: if Atta 5 kg and Atta 5 kg (from the Diwali leaflet) are shelved separately, the shop keeps running back to the warehouse (the cache key).
+
+123
+00:08:48.581 --> 00:08:52.762
+OLTP versus OLAP is the billing counter versus the monthly stock-take:
+
+124
+00:08:54.112 --> 00:08:57.995
+The counter needs one customer's cart, fast (rows, indexes).
+
+125
+00:08:58.275 --> 00:09:02.840
+The stock-take needs a total per category across every shelf (columns, scans).
+
+126
+00:09:03.120 --> 00:09:08.112
+Doing the stock-take at the billing counter during rush hour is the Monday morning incident.
+
+127
+00:09:08.392 --> 00:09:13.619
+Batch versus stream is counting the day's takings after closing versus a live tally:
+
+128
+00:09:13.899 --> 00:09:19.616
+The live tally is fast but must handle receipts that arrive late (event time and watermarks).
+
+129
+00:09:19.896 --> 00:09:26.168
+The after-closing count is exact, but only if you can restart it without counting a drawer twice (checkpoints).
+
+130
+00:09:27.518 --> 00:09:29.097
+Blob and object storage.
+
+131
+00:09:29.377 --> 00:09:30.721
+Here is a quick table:
+
+132
+00:09:31.001 --> 00:09:42.222
+Block storage (EBS), and File storage (EFS or NFS), and Object storage (S3, GCS, Azure Blob, MinIO, SeaweedFS, Ceph RGW).
+
+133
+00:09:42.502 --> 00:09:43.270
+Unit.
+
+134
+00:09:43.550 --> 00:09:45.257
+Block storage (EBS):
+
+135
+00:09:45.537 --> 00:09:46.795
+Block on a volume.
+
+136
+00:09:47.075 --> 00:09:49.614
+File storage (EFS or NFS):
+
+137
+00:09:49.894 --> 00:09:51.345
+File in a hierarchy.
+
+138
+00:09:51.625 --> 00:09:57.875
+Object storage (S3, GCS, Azure Blob, MinIO, SeaweedFS, Ceph RGW):
+
+139
+00:09:58.155 --> 00:10:01.547
+Immutable object in a flat bucket, key + metadata.
+
+140
+00:10:01.827 --> 00:10:02.702
+Access.
+
+141
+00:10:02.982 --> 00:10:04.689
+Block storage (EBS):
+
+142
+00:10:04.969 --> 00:10:06.398
+Mounted by one host.
+
+143
+00:10:06.678 --> 00:10:09.217
+File storage (EFS or NFS):
+
+144
+00:10:09.497 --> 00:10:10.670
+Mounted by many.
+
+145
+00:10:10.950 --> 00:10:17.201
+Object storage (S3, GCS, Azure Blob, MinIO, SeaweedFS, Ceph RGW):
+
+146
+00:10:17.481 --> 00:10:21.342
+HTTP API (S3 is the de facto standard).
+
+147
+00:10:21.622 --> 00:10:22.390
+Scale.
+
+148
+00:10:22.670 --> 00:10:24.377
+Block storage (EBS):
+
+149
+00:10:24.657 --> 00:10:26.022
+TBs per volume.
+
+150
+00:10:26.302 --> 00:10:28.841
+File storage (EFS or NFS):
+
+151
+00:10:29.121 --> 00:10:29.953
+Large.
+
+152
+00:10:30.233 --> 00:10:36.483
+Object storage (S3, GCS, Azure Blob, MinIO, SeaweedFS, Ceph RGW):
+
+153
+00:10:36.763 --> 00:10:39.131
+Effectively unlimited objects and bytes.
+
+154
+00:10:39.411 --> 00:10:40.371
+Durability.
+
+155
+00:10:40.651 --> 00:10:42.358
+Block storage (EBS):
+
+156
+00:10:42.638 --> 00:10:44.046
+Replicated in a zone.
+
+157
+00:10:44.326 --> 00:10:46.865
+File storage (EFS or NFS):
+
+158
+00:10:47.145 --> 00:10:48.041
+Regional.
+
+159
+00:10:48.321 --> 00:10:54.571
+Object storage (S3, GCS, Azure Blob, MinIO, SeaweedFS, Ceph RGW):
+
+160
+00:10:54.851 --> 00:10:58.969
+11 nines (S3 Standard), erasure-coded across zones.
+
+161
+00:10:59.249 --> 00:10:59.995
+Use.
+
+162
+00:11:00.275 --> 00:11:01.982
+Block storage (EBS):
+
+163
+00:11:02.262 --> 00:11:03.393
+Databases.
+
+164
+00:11:03.673 --> 00:11:06.211
+File storage (EFS or NFS):
+
+165
+00:11:06.491 --> 00:11:08.262
+Shared config, legacy apps.
+
+166
+00:11:08.542 --> 00:11:14.793
+Object storage (S3, GCS, Azure Blob, MinIO, SeaweedFS, Ceph RGW):
+
+167
+00:11:15.073 --> 00:11:17.441
+Media, backups, logs, data lakes.
+
+168
+00:11:18.791 --> 00:11:21.052
+The rules the grocery platform follows:
+
+169
+00:11:21.332 --> 00:11:23.465
+Don't put blobs in the OLTP database.
+
+170
+00:11:23.745 --> 00:11:26.668
+It bloats backups, replication and the buffer cache.
+
+171
+00:11:26.948 --> 00:11:31.769
+Store the object key and metadata in the DB and the bytes in object storage.
+
+172
+00:11:32.049 --> 00:11:34.097
+Don't proxy bytes through app servers.
+
+173
+00:11:34.377 --> 00:11:45.684
+Use presigned URLs: the service authorises the action and signs a URL scoped to one method, one key and a short expiry, and the client talks directly to storage.
+
+174
+00:11:45.964 --> 00:11:49.079
+L1: the presigned PUT and GET succeeded (200).
+
+175
+00:11:50.429 --> 00:11:57.746
+The same URL with the key changed (rider-78) got 403, because the signature covers the path.
+
+176
+00:11:58.026 --> 00:12:04.490
+An expired URL got 403, and an unsigned GET of a private object got 403.
+
+177
+00:12:04.770 --> 00:12:15.266
+Multipart upload for large objects (S3 recommends it above ~100 MB; parts are 5 MB, 5 GB, up to 10,000 of them):
+
+178
+00:12:15.546 --> 00:12:19.258
+Parts upload in parallel, and a failed part is retried alone.
+
+179
+00:12:19.538 --> 00:12:27.111
+L1 sent 44 MB for a 40 MB object with one failure, where a single PUT would have resent all 40.
+
+180
+00:12:28.461 --> 00:12:32.771
+Clean up incomplete uploads with a lifecycle rule, or they're billed forever.
+
+181
+00:12:33.051 --> 00:12:33.861
+Keys:
+
+182
+00:12:34.141 --> 00:12:41.565
+Design for listing (products/sku/... exports/date/...) and for lifecycle rules by prefix.
+
+183
+00:12:41.845 --> 00:12:49.973
+Content-addressed keys (blobs or sha256/hash) give deduplication and immutability for free (L1:
+
+184
+00:12:50.253 --> 00:12:51.896
+3 uploads, 1 object).
+
+185
+00:12:52.176 --> 00:13:01.243
+Old advice about random prefixes for throughput is obsolete on S3: each prefix scales to thousands of requests per second automatically.
+
+186
+00:13:02.593 --> 00:13:03.617
+Consistency:
+
+187
+00:13:03.897 --> 00:13:10.467
+S3 has been strongly consistent for reads after writes and for lists since December 2020.
+
+188
+00:13:10.747 --> 00:13:14.054
+Many S3-compatible stores are too, but check yours.
+
+189
+00:13:14.334 --> 00:13:29.822
+Lifecycle and storage classes: transition old invoices to infrequent-access or archive tiers, expire temporary uploads, version buckets that hold critical data, and use Object Lock (WORM) for compliance (Ch 36).
+
+190
+00:13:30.102 --> 00:13:35.371
+ETags of multipart objects aren't content MD5s (L1:...-10).
+
+191
+00:13:35.651 --> 00:13:39.619
+Verify integrity with your own checksum or the newer checksum headers.
+
+192
+00:13:40.969 --> 00:13:42.484
+CDN fundamentals.
+
+193
+00:13:42.764 --> 00:13:50.060
+A CDN is a network of edge caches (points of presence) that serve content close to users and shield the origin.
+
+194
+00:13:50.340 --> 00:13:51.556
+Pull versus push:
+
+195
+00:13:52.906 --> 00:13:54.250
+Here is a quick table:
+
+196
+00:13:54.530 --> 00:13:56.407
+Pull (origin pull), and Push.
+
+197
+00:13:56.687 --> 00:13:57.349
+How.
+
+198
+00:13:57.629 --> 00:13:59.015
+Pull (origin pull):
+
+199
+00:13:59.295 --> 00:14:03.114
+The edge fetches from the origin on a miss and caches per the headers.
+
+200
+00:14:03.394 --> 00:14:04.055
+Push:
+
+201
+00:14:04.335 --> 00:14:07.578
+You upload content to the CDN's storage ahead of time.
+
+202
+00:14:07.858 --> 00:14:08.690
+Good for.
+
+203
+00:14:08.970 --> 00:14:10.357
+Pull (origin pull):
+
+204
+00:14:10.637 --> 00:14:13.261
+Most web content, APIs, images.
+
+205
+00:14:13.541 --> 00:14:14.202
+Push:
+
+206
+00:14:14.482 --> 00:14:17.874
+Large, predictable releases (app bundles, videos).
+
+207
+00:14:18.154 --> 00:14:18.879
+Risk.
+
+208
+00:14:19.159 --> 00:14:20.546
+Pull (origin pull):
+
+209
+00:14:20.826 --> 00:14:24.197
+The first request per edge is a miss; herds on expiry.
+
+210
+00:14:24.477 --> 00:14:25.138
+Push:
+
+211
+00:14:25.418 --> 00:14:26.719
+You manage what's there.
+
+212
+00:14:28.069 --> 00:14:30.032
+Cache headers the origin controls:
+
+213
+00:14:30.312 --> 00:14:54.696
+Cache-Control: public, max-age=31536000, immutable for versioned assets. max-age=60, stale-while-revalidate=30, stale-if-error=86400 for semi-dynamic JSON. s-maxage sets the shared-cache TTL separately from browsers. private or no-store for personalised responses.
+
+214
+00:14:56.046 --> 00:14:59.395
+Vary for content negotiation (keep it minimal; Vary:
+
+215
+00:14:59.675 --> 00:15:01.915
+User-Agent destroys hit ratios).
+
+216
+00:15:02.195 --> 00:15:05.651
+Cache keys: by default, the full URL plus some headers.
+
+217
+00:15:05.931 --> 00:15:17.622
+Normalise them: drop tracking params (utm, fbclid, gclid);. sort query params;. lower-case where safe;. bucket device classes instead of varying on the raw User-Agent.
+
+218
+00:15:18.972 --> 00:15:19.783
+L2:
+
+219
+00:15:20.063 --> 00:15:24.436
+20,000 image requests with 40 % carrying tracking params.
+
+220
+00:15:24.716 --> 00:15:36.855
+A full-URL key gave 57.4 % hits and 406 MB of origin egress; a normalised key gave 97.5 % and 23 MB.
+
+221
+00:15:37.135 --> 00:15:45.988
+Request coalescing (collapsed forwarding): when many requests for the same key miss at once, send one to the origin and make the rest wait for it.
+
+222
+00:15:46.268 --> 00:15:47.079
+L2:
+
+223
+00:15:47.359 --> 00:15:51.497
+400, then 1 origin requests when a hot product expired.
+
+224
+00:15:51.777 --> 00:15:58.497
+Most CDNs do this per POP, and origin shield or tiered caching extends it across POPs.
+
+225
+00:15:59.847 --> 00:16:00.957
+Invalidation.
+
+226
+00:16:01.237 --> 00:16:04.117
+There are three strategies, and you usually combine them:
+
+227
+00:16:05.467 --> 00:16:06.811
+Here is a quick table:
+
+228
+00:16:07.091 --> 00:16:09.736
+Strategy, and How, and Staleness, and Cost.
+
+229
+00:16:10.016 --> 00:16:11.211
+TTL only.
+
+230
+00:16:11.491 --> 00:16:12.152
+How:
+
+231
+00:16:12.432 --> 00:16:13.712
+Wait for max-age.
+
+232
+00:16:13.992 --> 00:16:14.888
+Staleness:
+
+233
+00:16:15.168 --> 00:16:16.939
+Up to the TTL (L2:
+
+234
+00:16:17.219 --> 00:16:20.525
+93 of 138 stale over 2 s).
+
+235
+00:16:20.805 --> 00:16:21.531
+Cost:
+
+236
+00:16:21.811 --> 00:16:22.536
+Free.
+
+237
+00:16:22.816 --> 00:16:24.224
+Purge or invalidate.
+
+238
+00:16:24.504 --> 00:16:25.165
+How:
+
+239
+00:16:25.445 --> 00:16:30.843
+API call per URL, prefix or surrogate key or tag when the data changes.
+
+240
+00:16:31.123 --> 00:16:32.019
+Staleness:
+
+241
+00:16:32.299 --> 00:16:35.669
+Propagation time across POPs (seconds to minutes).
+
+242
+00:16:35.949 --> 00:16:36.675
+Cost:
+
+243
+00:16:36.955 --> 00:16:39.003
+API limits; purge storms.
+
+244
+00:16:39.283 --> 00:16:40.605
+Versioned URLs.
+
+245
+00:16:40.885 --> 00:16:41.547
+How:
+
+246
+00:16:41.827 --> 00:16:53.219
+The URL contains a content hash or version (/v or p39 or sku-7, app.3f9a1c.js); pages link to the new URL.
+
+247
+00:16:53.499 --> 00:16:54.395
+Staleness:
+
+248
+00:16:54.675 --> 00:16:57.043
+None: a new URL is a new object.
+
+249
+00:16:57.323 --> 00:16:58.048
+Cost:
+
+250
+00:16:58.328 --> 00:17:00.397
+Needs the referencing page to change.
+
+251
+00:17:01.747 --> 00:17:05.118
+Static assets: versioned + immutable, never purged.
+
+252
+00:17:05.398 --> 00:17:15.830
+Prices and stock on public pages: short TTL + surrogate-key purge (tag every response with sku-7, purge the tag on change) + stale-if-error.
+
+253
+00:17:16.110 --> 00:17:20.227
+Personalised data (cart, addresses): not cached at the CDN.
+
+254
+00:17:20.507 --> 00:17:23.814
+Stale-if-error turns the CDN into a resilience layer.
+
+255
+00:17:24.094 --> 00:17:31.731
+L2: origin down for 5 s, and the strict TTL returned 50 errors while stale-if-error served 50 of 50.
+
+256
+00:17:33.081 --> 00:17:34.404
+OLTP versus OLAP.
+
+257
+00:17:34.684 --> 00:17:36.028
+Here is a quick table:
+
+258
+00:17:36.308 --> 00:17:37.503
+OLTP, and OLAP.
+
+259
+00:17:37.783 --> 00:17:38.636
+Queries.
+
+260
+00:17:38.916 --> 00:17:39.620
+OLTP:
+
+261
+00:17:39.900 --> 00:17:41.969
+Many small reads or writes by key.
+
+262
+00:17:42.249 --> 00:17:42.975
+OLAP:
+
+263
+00:17:43.255 --> 00:17:45.388
+Few large scans and aggregations.
+
+264
+00:17:45.668 --> 00:17:46.543
+Storage.
+
+265
+00:17:46.823 --> 00:17:47.527
+OLTP:
+
+266
+00:17:47.807 --> 00:17:50.473
+Row-oriented pages + B-tree indexes.
+
+267
+00:17:50.753 --> 00:17:51.479
+OLAP:
+
+268
+00:17:51.759 --> 00:17:54.809
+Columnar, compressed, often sorted or partitioned.
+
+269
+00:17:55.089 --> 00:17:56.071
+Execution.
+
+270
+00:17:56.351 --> 00:17:57.055
+OLTP:
+
+271
+00:17:57.335 --> 00:17:59.361
+Tuple at a time, index lookups.
+
+272
+00:17:59.641 --> 00:18:00.367
+OLAP:
+
+273
+00:18:00.647 --> 00:18:03.057
+Vectorised, SIMD, parallel scans.
+
+274
+00:18:03.337 --> 00:18:04.340
+Concurrency.
+
+275
+00:18:04.620 --> 00:18:05.324
+OLTP:
+
+276
+00:18:05.604 --> 00:18:07.439
+Thousands of short transactions.
+
+277
+00:18:07.719 --> 00:18:08.444
+OLAP:
+
+278
+00:18:08.724 --> 00:18:10.047
+Tens of long queries.
+
+279
+00:18:10.327 --> 00:18:11.201
+Freshness.
+
+280
+00:18:11.481 --> 00:18:12.185
+OLTP:
+
+281
+00:18:12.465 --> 00:18:13.148
+Now.
+
+282
+00:18:13.428 --> 00:18:14.153
+OLAP:
+
+283
+00:18:14.433 --> 00:18:17.548
+Minutes to a day behind (CDC or ELT).
+
+284
+00:18:17.828 --> 00:18:18.788
+Examples.
+
+285
+00:18:19.068 --> 00:18:19.772
+OLTP:
+
+286
+00:18:20.052 --> 00:18:22.100
+PostgreSQL, MySQL.
+
+287
+00:18:22.380 --> 00:18:23.105
+OLAP:
+
+288
+00:18:23.385 --> 00:18:30.255
+BigQuery, Snowflake, Redshift, ClickHouse, Druid, Pinot, DuckDB, Trino over Parquet or Iceberg.
+
+289
+00:18:31.605 --> 00:18:38.047
+L3 on the same 10M order lines, 2 vCPUs, identical answers verified by hash:
+
+290
+00:18:39.397 --> 00:18:40.741
+Here is a quick table:
+
+291
+00:18:41.021 --> 00:18:45.139
+Query, and PostgreSQL 16, and DuckDB on Parquet.
+
+292
+00:18:45.419 --> 00:18:47.616
+One order's lines by primary key.
+
+293
+00:18:47.896 --> 00:18:49.539
+PostgreSQL 16:
+
+294
+00:18:49.819 --> 00:18:51.333
+0.9 ms.
+
+295
+00:18:51.613 --> 00:18:53.107
+DuckDB on Parquet:
+
+296
+00:18:53.387 --> 00:18:54.539
+11 ms.
+
+297
+00:18:54.819 --> 00:18:57.912
+Revenue by city times category, last 30 days.
+
+298
+00:18:58.192 --> 00:18:59.835
+PostgreSQL 16:
+
+299
+00:19:00.115 --> 00:19:01.736
+650 ms.
+
+300
+00:19:02.016 --> 00:19:03.509
+DuckDB on Parquet:
+
+301
+00:19:03.789 --> 00:19:05.581
+164 ms.
+
+302
+00:19:05.861 --> 00:19:08.485
+Top 10 SKUs in Bengaluru, quarter.
+
+303
+00:19:08.765 --> 00:19:10.408
+PostgreSQL 16:
+
+304
+00:19:10.688 --> 00:19:12.437
+628 ms.
+
+305
+00:19:12.717 --> 00:19:14.211
+DuckDB on Parquet:
+
+306
+00:19:14.491 --> 00:19:15.984
+180 ms.
+
+307
+00:19:16.264 --> 00:19:18.717
+Weekly distinct orders + GMV.
+
+308
+00:19:18.997 --> 00:19:20.640
+PostgreSQL 16:
+
+309
+00:19:20.920 --> 00:19:23.544
+5,449 ms.
+
+310
+00:19:23.824 --> 00:19:25.317
+DuckDB on Parquet:
+
+311
+00:19:25.597 --> 00:19:32.680
+3,331 ms; 463 ms with dt precomputed in ELT.
+
+312
+00:19:32.960 --> 00:19:34.432
+One day's GMV.
+
+313
+00:19:34.712 --> 00:19:36.355
+PostgreSQL 16:
+
+314
+00:19:36.635 --> 00:19:38.683
+17 ms (index range).
+
+315
+00:19:38.963 --> 00:19:40.456
+DuckDB on Parquet:
+
+316
+00:19:40.736 --> 00:19:43.787
+4 ms (reads 1 of 90 partition files).
+
+317
+00:19:45.137 --> 00:19:45.819
+Why:
+
+318
+00:19:46.099 --> 00:19:49.235
+Columnar storage reads only the needed columns.
+
+319
+00:19:49.515 --> 00:19:57.217
+Q3 needed 3 of 11 columns, 22 MB of 57 MB, while PostgreSQL reads whole rows.
+
+320
+00:19:57.497 --> 00:19:58.414
+Compression:
+
+321
+00:19:58.694 --> 00:20:08.742
+754 MB of CSV, 1.4 GB in PostgreSQL with indexes, and 58 MB as zstd Parquet.
+
+322
+00:20:09.022 --> 00:20:13.737
+Vectorised execution processes batches of values per operator call.
+
+323
+00:20:14.017 --> 00:20:21.910
+Partition pruning skips files whose partition value doesn't match, and min or max statistics skip row groups within files.
+
+324
+00:20:23.260 --> 00:20:26.076
+And the lesson from Q4: model for the query.
+
+325
+00:20:26.356 --> 00:20:34.335
+Computing the local date once during the transform (instead of time-zone math on every row, every query) was worth 7x.
+
+326
+00:20:35.685 --> 00:20:37.114
+Warehouse, lake, lakehouse.
+
+327
+00:20:37.394 --> 00:20:38.738
+Here is a quick table:
+
+328
+00:20:39.018 --> 00:20:41.514
+Data warehouse, and Data lake, and Lakehouse.
+
+329
+00:20:41.794 --> 00:20:42.669
+Storage.
+
+330
+00:20:42.949 --> 00:20:44.058
+Data warehouse:
+
+331
+00:20:44.338 --> 00:20:46.407
+Managed, proprietary columnar.
+
+332
+00:20:46.687 --> 00:20:47.626
+Data lake:
+
+333
+00:20:47.906 --> 00:20:51.938
+Files (Parquet or ORC or JSON) on object storage.
+
+334
+00:20:52.218 --> 00:20:53.157
+Lakehouse:
+
+335
+00:20:53.437 --> 00:20:59.175
+Open table format (Apache Iceberg, Delta Lake, Hudi) over Parquet on object storage.
+
+336
+00:20:59.455 --> 00:21:00.245
+Schema.
+
+337
+00:21:00.525 --> 00:21:01.634
+Data warehouse:
+
+338
+00:21:01.914 --> 00:21:03.898
+Schema-on-write, strongly modelled.
+
+339
+00:21:04.178 --> 00:21:05.117
+Data lake:
+
+340
+00:21:05.397 --> 00:21:07.551
+Schema-on-read, often messy (swamp).
+
+341
+00:21:07.831 --> 00:21:08.770
+Lakehouse:
+
+342
+00:21:09.050 --> 00:21:12.719
+Schema-on-write with evolution; ACID commits; time travel.
+
+343
+00:21:12.999 --> 00:21:13.831
+Engines.
+
+344
+00:21:14.111 --> 00:21:15.221
+Data warehouse:
+
+345
+00:21:15.501 --> 00:21:16.759
+The warehouse's own.
+
+346
+00:21:17.039 --> 00:21:17.978
+Data lake:
+
+347
+00:21:18.258 --> 00:21:19.773
+Anything that reads files.
+
+348
+00:21:20.053 --> 00:21:20.991
+Lakehouse:
+
+349
+00:21:21.271 --> 00:21:26.946
+Many engines (Spark, Trino, Flink, DuckDB, Snowflake, BigQuery) on the same tables.
+
+350
+00:21:27.226 --> 00:21:28.527
+Updates or deletes.
+
+351
+00:21:28.807 --> 00:21:29.917
+Data warehouse:
+
+352
+00:21:30.197 --> 00:21:30.922
+Yes.
+
+353
+00:21:31.202 --> 00:21:32.141
+Data lake:
+
+354
+00:21:32.421 --> 00:21:33.978
+Rewrite files by hand.
+
+355
+00:21:34.258 --> 00:21:35.197
+Lakehouse:
+
+356
+00:21:35.477 --> 00:21:41.365
+Yes (merge-on-read or copy-on-write), essential for GDPR or DPDP deletes.
+
+357
+00:21:42.715 --> 00:21:43.440
+Cost.
+
+358
+00:21:43.720 --> 00:21:44.829
+Data warehouse:
+
+359
+00:21:45.109 --> 00:21:47.520
+Compute + storage coupled (less so now).
+
+360
+00:21:47.800 --> 00:21:48.739
+Data lake:
+
+361
+00:21:49.019 --> 00:21:50.192
+Cheapest storage.
+
+362
+00:21:50.472 --> 00:21:51.411
+Lakehouse:
+
+363
+00:21:51.691 --> 00:21:53.845
+Cheap storage + choice of compute.
+
+364
+00:21:55.195 --> 00:22:01.041
+Table formats add a metadata layer (manifests, snapshots) over immutable Parquet files.
+
+365
+00:22:01.321 --> 00:22:12.563
+That gives atomic commits (a new snapshot pointer), concurrent writers, schema and partition evolution, time travel (revenue as of last Tuesday's snapshot) and efficient deletes.
+
+366
+00:22:12.843 --> 00:22:18.795
+L3's hive-style dt= directories are the pre-table-format version of partitioning.
+
+367
+00:22:19.075 --> 00:22:23.449
+They work, but renames aren't atomic and every reader must list directories.
+
+368
+00:22:23.729 --> 00:22:25.094
+The grocery platform:
+
+369
+00:22:25.374 --> 00:22:38.451
+Iceberg tables on object storage, written by CDC (Debezium, then Kafka, then Flink or Spark sink) and nightly ELT, and queried by Trino for BI and by Spark for ML features.
+
+370
+00:22:38.731 --> 00:22:44.171
+A star schema (fact orderline, dimensions store, sku, customer, date) in the gold layer.
+
+371
+00:22:45.521 --> 00:22:47.207
+ETL versus ELT.
+
+372
+00:22:47.487 --> 00:22:48.255
+ETL:
+
+373
+00:22:48.535 --> 00:22:52.929
+Extract, then Transform (in a separate engine), then Load the cleaned result.
+
+374
+00:22:53.209 --> 00:22:57.049
+Classic warehousing, where transformations happen before the warehouse.
+
+375
+00:22:57.329 --> 00:22:57.991
+ELT:
+
+376
+00:22:58.271 --> 00:23:04.927
+Extract, then Load raw data into the lake or warehouse, then Transform inside it with SQL (dbt).
+
+377
+00:23:05.207 --> 00:23:09.473
+Raw data is kept, so transforms can be re-run when logic changes.
+
+378
+00:23:09.753 --> 00:23:16.623
+Medallion layers: bronze: raw, append-only, as received;. silver: cleaned, deduplicated, conformed;.
+
+379
+00:23:17.973 --> 00:23:20.255
+gold: business aggregates and marts.
+
+380
+00:23:20.535 --> 00:23:38.946
+L3's pipeline is ELT in miniature: extract with COPY (754 MB CSV, 9.2 s), then load and transform in DuckDB into partitioned Parquet with a derived local-date column (58 MB, 7.0 s).
+
+381
+00:23:39.226 --> 00:23:40.570
+Extraction options:
+
+382
+00:23:40.850 --> 00:23:45.330
+Batch COPY/snapshot: simple, but loads the source; use a replica.
+
+383
+00:23:45.610 --> 00:23:49.429
+Incremental by updatedat: misses deletes and needs indexes.
+
+384
+00:23:50.779 --> 00:23:57.456
+CDC from the WAL (Debezium, Ch 13): complete, low latency, captures deletes.
+
+385
+00:23:57.736 --> 00:23:59.059
+The platform standard.
+
+386
+00:24:00.409 --> 00:24:01.603
+Batch processing.
+
+387
+00:24:01.883 --> 00:24:11.526
+Batch jobs process a bounded dataset: nightly settlement, invoice generation, loyalty expiry, reconciliation, ML feature backfills.
+
+388
+00:24:11.806 --> 00:24:13.193
+Spring Batch's model:
+
+389
+00:24:13.473 --> 00:24:14.646
+Job, then Steps.
+
+390
+00:24:14.926 --> 00:24:22.542
+A step is either chunk-oriented (ItemReader, then ItemProcessor, then ItemWriter with a commit interval) or a tasklet.
+
+391
+00:24:22.822 --> 00:24:30.630
+A JobRepository stores execution state and the ExecutionContext (the checkpoint, for example, the last key read).
+
+392
+00:24:30.910 --> 00:24:33.811
+A failed job restarts from the last committed chunk.
+
+393
+00:24:34.091 --> 00:24:39.915
+Skip or retry policies handle bad records, and partitioning or remote chunking scale out.
+
+394
+00:24:41.265 --> 00:24:49.372
+The correctness rule, from L4 Part A: the checkpoint and the chunk's output must commit atomically, or the output must be idempotent.
+
+395
+00:24:50.722 --> 00:24:52.066
+Here is a quick table:
+
+396
+00:24:52.346 --> 00:24:55.183
+Restart strategy, and Result after one crash.
+
+397
+00:24:55.463 --> 00:24:57.917
+Output committed, crash before the checkpoint:
+
+398
+00:24:58.197 --> 00:25:05.322
+Chunk 60 re-processed, 200 (day, store) rows wrong, 5.37 crore rupees overcounted.
+
+399
+00:25:05.602 --> 00:25:08.461
+Checkpoint in the same transaction as the output:
+
+400
+00:25:08.741 --> 00:25:09.594
+Exact.
+
+401
+00:25:09.874 --> 00:25:13.949
+Recompute and overwrite the output partition in one transaction:
+
+402
+00:25:14.229 --> 00:25:15.487
+Exact, simplest.
+
+403
+00:25:15.767 --> 00:25:20.141
+Re-read everything (20M rows for 10M), still fastest here.
+
+404
+00:25:21.491 --> 00:25:29.363
+In lakehouse terms, overwrite means INSERT OVERWRITE partition dt=... or an Iceberg replacePartitions commit.
+
+405
+00:25:29.643 --> 00:25:34.656
+Recomputing a day and atomically replacing it is the most robust batch pattern.
+
+406
+00:25:36.006 --> 00:25:37.243
+Stream processing.
+
+407
+00:25:37.523 --> 00:25:40.745
+Streaming processes an unbounded log continuously:
+
+408
+00:25:41.025 --> 00:25:47.233
+Kafka Streams (a library inside your service), Apache Flink (a cluster), Spark Structured Streaming.
+
+409
+00:25:47.513 --> 00:25:48.643
+The core concepts:
+
+410
+00:25:48.923 --> 00:25:51.035
+Event time versus processing time:
+
+411
+00:25:51.315 --> 00:25:53.982
+Event time is when it happened on the rider's phone.
+
+412
+00:25:54.262 --> 00:25:56.886
+Processing time is when the processor saw it.
+
+413
+00:25:57.166 --> 00:25:59.705
+They differ by seconds to minutes (L4:
+
+414
+00:25:59.985 --> 00:26:04.102
+10 % of events more than 5 s late, 2 % more than 2 min).
+
+415
+00:26:05.452 --> 00:26:11.383
+Windows: tumbling (fixed, non-overlapping: orders per minute);. hopping or sliding (overlapping:
+
+416
+00:26:11.663 --> 00:26:16.783
+5-min demand every minute);. session (gap-based: a customer's browsing session).
+
+417
+00:26:17.063 --> 00:26:22.119
+Watermark: the processor's assertion that no events older than t are still expected.
+
+418
+00:26:22.399 --> 00:26:25.620
+Commonly max event time seen minus bounded delay.
+
+419
+00:26:25.900 --> 00:26:29.441
+A window's result is emitted when the watermark passes its end.
+
+420
+00:26:30.791 --> 00:26:37.319
+Allowed lateness: keep window state after firing, and emit updated results for late events up to a limit.
+
+421
+00:26:37.599 --> 00:26:39.477
+Downstream must accept upserts.
+
+422
+00:26:39.757 --> 00:26:53.538
+State and checkpoints: window state lives in a local store (RocksDB), checkpointed together with input offsets (Flink snapshots, Kafka Streams changelog topics), which gives exactly-once state semantics.
+
+423
+00:26:53.818 --> 00:27:01.647
+L4 Part B: orders per store per minute over 1.08M out-of-order events, compared with the batch ground truth:
+
+424
+00:27:02.997 --> 00:27:04.341
+Here is a quick table:
+
+425
+00:27:04.621 --> 00:27:10.381
+Strategy, and Windows exact, and Dropped, and Result delay p50, and Updates per window.
+
+426
+00:27:10.661 --> 00:27:12.133
+Processing-time windows.
+
+427
+00:27:12.413 --> 00:27:13.544
+Windows exact:
+
+428
+00:27:13.824 --> 00:27:15.467
+29.8 %.
+
+429
+00:27:15.747 --> 00:27:16.493
+Dropped:
+
+430
+00:27:16.773 --> 00:27:18.139
+0 (misassigned).
+
+431
+00:27:18.419 --> 00:27:20.808
+Result delay p50: immediate.
+
+432
+00:27:21.088 --> 00:27:22.283
+Updates per window:
+
+433
+00:27:22.563 --> 00:27:23.309
+0.
+
+434
+00:27:23.589 --> 00:27:26.192
+Event time, watermark 5 s, drop late.
+
+435
+00:27:26.472 --> 00:27:27.603
+Windows exact:
+
+436
+00:27:27.883 --> 00:27:29.781
+43.0 %.
+
+437
+00:27:30.061 --> 00:27:30.808
+Dropped:
+
+438
+00:27:31.088 --> 00:27:33.499
+60,625.
+
+439
+00:27:33.779 --> 00:27:35.336
+Result delay p50:
+
+440
+00:27:35.616 --> 00:27:36.939
+5.1 s.
+
+441
+00:27:37.219 --> 00:27:38.413
+Updates per window:
+
+442
+00:27:38.693 --> 00:27:39.440
+0.
+
+443
+00:27:39.720 --> 00:27:42.387
+Event time, watermark 60 s, drop late.
+
+444
+00:27:42.667 --> 00:27:43.797
+Windows exact:
+
+445
+00:27:44.077 --> 00:27:45.784
+74.3 %.
+
+446
+00:27:46.064 --> 00:27:46.811
+Dropped:
+
+447
+00:27:47.091 --> 00:27:49.715
+21,343.
+
+448
+00:27:49.995 --> 00:27:51.552
+Result delay p50:
+
+449
+00:27:51.832 --> 00:27:53.219
+60.1 s.
+
+450
+00:27:53.499 --> 00:27:54.693
+Updates per window:
+
+451
+00:27:54.973 --> 00:27:55.720
+0.
+
+452
+00:27:55.000 --> 00:27:59.392
+Event time, watermark 5 s + 30 min lateness.
+
+453
+00:27:59.672 --> 00:28:00.803
+Windows exact:
+
+454
+00:28:01.083 --> 00:28:02.341
+100 %.
+
+455
+00:28:02.621 --> 00:28:03.368
+Dropped:
+
+456
+00:28:03.648 --> 00:28:04.395
+0.
+
+457
+00:28:04.675 --> 00:28:06.232
+Result delay p50:
+
+458
+00:28:06.512 --> 00:28:07.835
+5.1 s.
+
+459
+00:28:08.115 --> 00:28:09.309
+Updates per window:
+
+460
+00:28:09.589 --> 00:28:10.955
+0.84.
+
+461
+00:28:12.305 --> 00:28:17.489
+The trade-off is between latency, completeness and cost (state kept, updates emitted).
+
+462
+00:28:17.769 --> 00:28:20.670
+A longer watermark buys completeness with latency.
+
+463
+00:28:20.950 --> 00:28:25.046
+Allowed lateness buys completeness with state and downstream updates.
+
+464
+00:28:25.326 --> 00:28:30.574
+The demand board takes the last row: fast first results, corrected as stragglers arrive.
+
+465
+00:28:31.924 --> 00:28:33.311
+Lambda versus Kappa.
+
+466
+00:28:33.591 --> 00:28:42.636
+Lambda runs a batch layer (complete, recomputed from the master dataset) and a speed layer (streaming, approximate, recent), merged at query time.
+
+467
+00:28:42.916 --> 00:28:45.199
+It's robust: batch corrects the stream.
+
+468
+00:28:45.479 --> 00:28:49.084
+But it has two codebases for the same logic that drift apart.
+
+469
+00:28:49.364 --> 00:28:51.263
+Kappa has one streaming codebase.
+
+470
+00:28:51.543 --> 00:29:03.553
+Reprocessing means replaying the log (Kafka with long retention or tiered storage, or the lake's bronze layer) through a new version of the job, into a new output, and then switching readers over.
+
+471
+00:29:04.903 --> 00:29:08.573
+It needs a replayable log and a job that can catch up fast.
+
+472
+00:29:08.853 --> 00:29:20.202
+L4's toy job replayed the evening at ~4.5M events per second on one core; real jobs with state and I or O are much slower, so plan catch-up capacity.
+
+473
+00:29:20.482 --> 00:29:33.325
+In practice, 2026: most platforms run kappa-style streaming for fresh metrics, plus a lakehouse whose tables are the durable history and can be recomputed by batch (a lakehouse lambda).
+
+474
+00:29:33.605 --> 00:29:40.559
+Unified engines (Flink, Spark) share code between batch and streaming, which removes the classic lambda drift.
+
+475
+00:29:40.839 --> 00:29:42.205
+The grocery platform:
+
+476
+00:29:43.555 --> 00:29:48.653
+Streaming: the demand board, surge, fraud and live ETAs (Flink or Kafka Streams).
+
+477
+00:29:48.933 --> 00:29:54.032
+Batch: finance, settlement and ML training (Spark or Spring Batch on Iceberg).
+
+478
+00:29:54.312 --> 00:30:00.093
+Where both exist, the batch figure is the source of truth, and the streaming figure is labelled provisional.
+
+479
+00:30:01.443 --> 00:30:02.894
+Choosing batch or stream.
+
+480
+00:30:03.174 --> 00:30:04.518
+Here is a quick table:
+
+481
+00:30:04.798 --> 00:30:06.611
+Question, and Batch, and Stream.
+
+482
+00:30:06.891 --> 00:30:08.619
+How fresh must the answer be?
+
+483
+00:30:08.899 --> 00:30:09.667
+Batch:
+
+484
+00:30:09.947 --> 00:30:11.398
+Hours per day is fine.
+
+485
+00:30:11.678 --> 00:30:12.446
+Stream:
+
+486
+00:30:12.726 --> 00:30:13.963
+Seconds or minutes.
+
+487
+00:30:14.243 --> 00:30:16.014
+Must it be exact and auditable?
+
+488
+00:30:16.294 --> 00:30:17.062
+Batch:
+
+489
+00:30:17.342 --> 00:30:18.345
+Yes (money).
+
+490
+00:30:18.625 --> 00:30:19.393
+Stream:
+
+491
+00:30:19.673 --> 00:30:22.147
+Provisional, corrected later, is acceptable.
+
+492
+00:30:22.427 --> 00:30:26.907
+Does it need the whole dataset (joins across days, dedup over all history)?
+
+493
+00:30:27.187 --> 00:30:27.955
+Batch:
+
+494
+00:30:28.235 --> 00:30:29.089
+Natural.
+
+495
+00:30:29.369 --> 00:30:30.137
+Stream:
+
+496
+00:30:30.417 --> 00:30:31.675
+Hard (state size).
+
+497
+00:30:31.955 --> 00:30:35.134
+Does the action happen in the moment (surge, fraud block)?
+
+498
+00:30:35.414 --> 00:30:36.182
+Batch:
+
+499
+00:30:36.462 --> 00:30:37.315
+Too late.
+
+500
+00:30:37.595 --> 00:30:38.363
+Stream:
+
+501
+00:30:38.643 --> 00:30:39.539
+Required.
+
+502
+00:30:39.819 --> 00:30:41.163
+Operational cost.
+
+503
+00:30:41.443 --> 00:30:42.211
+Batch:
+
+504
+00:30:42.491 --> 00:30:43.686
+Cheap, scheduled.
+
+505
+00:30:43.966 --> 00:30:44.734
+Stream:
+
+506
+00:30:45.014 --> 00:30:47.531
+Always-on, state, checkpoints, on-call.
+
+507
+00:30:48.881 --> 00:30:49.777
+Part 3.
+
+508
+00:30:50.057 --> 00:30:51.785
+Architecture and Diagrams.
+
+509
+00:30:53.035 --> 00:30:56.150
+Component view: the grocery platform's data paths.
+
+510
+00:30:56.430 --> 00:30:57.774
+Here is the diagram.
+
+511
+00:31:01.624 --> 00:31:06.019
+Sequence: happy path, a presigned upload of a proof-of-delivery photo.
+
+512
+00:31:06.299 --> 00:31:09.093
+The sequence diagram walks through it step by step.
+
+513
+00:31:09.373 --> 00:31:10.269
+R to D:
+
+514
+00:31:10.549 --> 00:31:14.048
+POST or deliveries or 88 per pod-upload-url.
+
+515
+00:31:14.328 --> 00:31:17.549
+D to D: authorise rider for delivery 88.
+
+516
+00:31:17.829 --> 00:31:25.189
+D to R: presigned PUT URL, key pod or 88 or uuid.jpg, expires in 5 min.
+
+517
+00:31:25.469 --> 00:31:26.408
+R to S:
+
+518
+00:31:26.688 --> 00:31:28.800
+PUT photo with the presigned URL.
+
+519
+00:31:29.080 --> 00:31:30.019
+S to R:
+
+520
+00:31:30.299 --> 00:31:31.621
+200 ETag.
+
+521
+00:31:31.901 --> 00:31:32.797
+R to D:
+
+522
+00:31:33.077 --> 00:31:37.045
+POST or deliveries or 88 or complete with the object key.
+
+523
+00:31:37.325 --> 00:31:38.264
+D to S:
+
+524
+00:31:38.544 --> 00:31:41.104
+HEAD object, check size and content type.
+
+525
+00:31:41.384 --> 00:31:45.949
+D to K: delivery.delivery.completed.v1 with the object key.
+
+526
+00:31:49.799 --> 00:31:54.343
+Sequence: failure path, a hot price expires while the origin is down.
+
+527
+00:31:54.623 --> 00:31:57.418
+The sequence diagram walks through it step by step.
+
+528
+00:31:57.698 --> 00:31:58.701
+C1 to E:
+
+529
+00:31:58.981 --> 00:32:03.098
+GET or api or products or sku-1, cached copy expired.
+
+530
+00:32:03.378 --> 00:32:05.746
+E to E: coalesce, one fetch per key.
+
+531
+00:32:06.026 --> 00:32:07.690
+E to O: single request.
+
+532
+00:32:07.970 --> 00:32:08.866
+O to E:
+
+533
+00:32:09.146 --> 00:32:11.514
+503 origin unavailable.
+
+534
+00:32:11.794 --> 00:32:14.973
+E to E: stale copy within stale-if-error window.
+
+535
+00:32:15.253 --> 00:32:16.277
+E to C1:
+
+536
+00:32:16.557 --> 00:32:19.991
+200 stale product JSON for all 400.
+
+537
+00:32:23.841 --> 00:32:26.743
+State: an event-time window with allowed lateness.
+
+538
+00:32:27.023 --> 00:32:28.367
+Here is the diagram.
+
+539
+00:32:32.217 --> 00:32:33.134
+Part 4.
+
+540
+00:32:33.414 --> 00:32:35.035
+Design Document Excerpt:
+
+541
+00:32:35.315 --> 00:32:37.193
+Grocery Data Platform v1.
+
+542
+00:32:38.443 --> 00:32:39.787
+Here is a quick table:
+
+543
+00:32:40.067 --> 00:32:41.368
+Field, and Value.
+
+544
+00:32:41.648 --> 00:32:42.992
+Author or Reviewers:
+
+545
+00:32:43.272 --> 00:32:48.029
+Data platform team or catalog, orders, finance, SRE, security.
+
+546
+00:32:48.309 --> 00:32:49.205
+Status:
+
+547
+00:32:49.485 --> 00:32:50.360
+Approved.
+
+548
+00:32:50.640 --> 00:32:51.963
+Related ADRs:
+
+549
+00:32:52.243 --> 00:33:04.424
+ADR-088 Object storage + presigned URLs for all blobs; ADR-089 CDN key normalisation, versioned assets, surrogate-key purge,
+
+550
+00:33:04.704 --> 00:33:26.485
+stale-if-error; ADR-090 No analytics on OLTP primaries; Iceberg lakehouse via CDC; ADR-091 Batch outputs idempotent (partition overwrite) or checkpointed atomically; ADR-092 Streaming in event time with watermarks and allowed lateness; batch is the source of truth for money.
+
+551
+00:33:27.835 --> 00:33:28.475
+1.
+
+552
+00:33:28.755 --> 00:33:30.163
+Context and Problem.
+
+553
+00:33:30.443 --> 00:33:32.961
+The Monday incident (§1.1):
+
+554
+00:33:33.241 --> 00:33:44.825
+BI on the OLTP primary, blobs in PostgreSQL behind the JVM, a 55 % CDN hit ratio, stale prices, and processing-time demand counts.
+
+555
+00:33:45.105 --> 00:33:45.809
+2.
+
+556
+00:33:46.089 --> 00:33:47.433
+Goals or Non-Goals.
+
+557
+00:33:47.713 --> 00:34:03.201
+Goals: no analytical load on OLTP primaries; a CDN hit ratio 95 % for media; price changes visible within 10 s; demand metrics exact within the lateness bound; finance numbers reproducible from raw data.
+
+558
+00:34:03.481 --> 00:34:08.601
+Non-goals: real-time finance (T+1 is fine); a self-built CDN.
+
+559
+00:34:08.881 --> 00:34:09.627
+3.
+
+560
+00:34:09.907 --> 00:34:10.867
+Requirements.
+
+561
+00:34:12.217 --> 00:34:13.561
+Here is a quick table:
+
+562
+00:34:13.841 --> 00:34:15.313
+ID, and Requirement.
+
+563
+00:34:15.593 --> 00:34:16.532
+FR-1:
+
+564
+00:34:16.812 --> 00:34:25.047
+Uploads go directly to object storage with presigned URLs ( at most 5 min expiry, one key, content type fixed).
+
+565
+00:34:25.327 --> 00:34:26.265
+FR-2:
+
+566
+00:34:26.545 --> 00:34:34.887
+Every static asset URL is content-versioned; product or price JSON is tagged with surrogate keys and purged on change.
+
+567
+00:34:35.167 --> 00:34:36.148
+FR-3:
+
+568
+00:34:36.428 --> 00:34:42.124
+BI and finance query only the lakehouse; OLTP read access for analysts is revoked.
+
+569
+00:34:42.404 --> 00:34:43.449
+NFR-1:
+
+570
+00:34:43.729 --> 00:34:50.833
+Media hit ratio ≥ 95 %; origin egress at most 10 % of edge egress.
+
+571
+00:34:51.113 --> 00:34:52.159
+NFR-2:
+
+572
+00:34:52.439 --> 00:35:00.161
+Lakehouse freshness: silver at most 15 min behind OLTP (CDC); gold daily by 03:00.
+
+573
+00:35:00.441 --> 00:35:01.508
+NFR-3:
+
+574
+00:35:01.788 --> 00:35:06.460
+Batch jobs restartable with exact results (tested with injected crashes).
+
+575
+00:35:06.740 --> 00:35:07.828
+NFR-4:
+
+576
+00:35:08.108 --> 00:35:13.463
+Demand board first result at most 10 s after the minute ends; exact after 30 min.
+
+577
+00:35:14.813 --> 00:35:15.517
+4.
+
+578
+00:35:15.797 --> 00:35:17.077
+Capacity estimates.
+
+579
+00:35:18.427 --> 00:35:19.771
+Here is a quick table:
+
+580
+00:35:20.051 --> 00:35:22.355
+Item, and Calculation, and Result.
+
+581
+00:35:22.635 --> 00:35:23.467
+Media.
+
+582
+00:35:23.747 --> 00:35:24.813
+Calculation:
+
+583
+00:35:25.093 --> 00:35:31.323
+400K SKUs times 6 images times 3 sizes times 150 KB.
+
+584
+00:35:31.603 --> 00:35:40.435
+Result: ~1.1 TB, plus PoD photos 60K per day times 300 KB about 18 GB per day.
+
+585
+00:35:40.715 --> 00:35:41.973
+CDN egress.
+
+586
+00:35:42.253 --> 00:35:43.320
+Calculation:
+
+587
+00:35:43.600 --> 00:35:47.867
+10M app sessions per day times 40 images times 60 KB.
+
+588
+00:35:48.147 --> 00:35:56.000
+Result: ~24 TB per day at the edge; at most 1.2 TB per day at the origin with a 95 % hit ratio.
+
+589
+00:35:57.280 --> 00:35:58.240
+Order lines.
+
+590
+00:35:58.520 --> 00:35:59.587
+Calculation:
+
+591
+00:35:59.867 --> 00:36:02.811
+1.2M orders per day times 5 lines.
+
+592
+00:36:03.091 --> 00:36:03.901
+Result:
+
+593
+00:36:04.181 --> 00:36:08.917
+6M rows per day, ~35 MB per day as Parquet (L3:
+
+594
+00:36:09.197 --> 00:36:11.395
+58 MB per 10M rows).
+
+595
+00:36:11.675 --> 00:36:13.189
+3 years of order lines.
+
+596
+00:36:13.469 --> 00:36:14.536
+Calculation:
+
+597
+00:36:14.816 --> 00:36:16.352
+6.6B rows.
+
+598
+00:36:16.632 --> 00:36:24.312
+Result: ~40 GB Parquet, trivial for a lakehouse; would be ~900 GB in PostgreSQL.
+
+599
+00:36:24.592 --> 00:36:25.637
+Stream state.
+
+600
+00:36:25.917 --> 00:36:26.984
+Calculation:
+
+601
+00:36:27.264 --> 00:36:32.811
+900 stores times 31 open minutes (30 min lateness) times a few counters.
+
+602
+00:36:33.091 --> 00:36:33.901
+Result:
+
+603
+00:36:34.181 --> 00:36:36.123
+Kilobytes per store: tiny.
+
+604
+00:36:37.473 --> 00:36:38.241
+5.
+
+605
+00:36:38.521 --> 00:36:39.715
+Proposed design.
+
+606
+00:36:39.995 --> 00:36:58.897
+Object storage: private buckets per data class (media, documents, exports), SSE-KMS encryption, lifecycle rules (temp uploads 1 day, incomplete multipart 7 days, invoices, then IA after 90 days), versioning on documents, Object Lock for tax invoices.
+
+607
+00:36:59.177 --> 00:37:00.115
+CDN:
+
+608
+00:37:00.395 --> 00:37:15.265
+Cache policy per path: /img/ gets a normalised key and 1 year immutable. /api or catalog/ gets 60 s + SWR 30 s + SIE 24 h + surrogate keys.
+
+609
+00:37:16.615 --> 00:37:22.759
+Origin shield. catalog-service purges by SKU tag on price or stock-status change.
+
+610
+00:37:23.039 --> 00:37:23.977
+Lakehouse:
+
+611
+00:37:24.257 --> 00:37:29.505
+Debezium CDC, then Kafka, then a Flink sink writes bronze Iceberg tables.
+
+612
+00:37:29.785 --> 00:37:36.569
+Flink or Spark jobs build silver (dedup by event id, Ch 20) and gold (star schema) tables.
+
+613
+00:37:36.849 --> 00:37:38.513
+Partitioned by local date.
+
+614
+00:37:38.793 --> 00:37:43.508
+Trino for BI, with DuckDB allowed for local analysis of extracts.
+
+615
+00:37:44.858 --> 00:37:45.626
+Batch:
+
+616
+00:37:45.906 --> 00:37:52.391
+Spring Batch jobs for settlement and invoices, with chunk checkpoints in the job's own DB transaction.
+
+617
+00:37:52.671 --> 00:37:56.042
+Spark jobs for gold tables use partition overwrite.
+
+618
+00:37:56.322 --> 00:37:57.154
+Streaming:
+
+619
+00:37:57.434 --> 00:38:07.909
+Kafka Streams for the demand board (per-store tumbling 1-min windows, grace 30 min, suppress-until-final for the finance-facing view), and Flink for surge and fraud.
+
+620
+00:38:08.189 --> 00:38:08.935
+7.
+
+621
+00:38:09.215 --> 00:38:10.730
+Alternatives considered.
+
+622
+00:38:12.080 --> 00:38:13.424
+Here is a quick table:
+
+623
+00:38:13.704 --> 00:38:16.243
+Option, and Pros, and Cons, and Verdict.
+
+624
+00:38:16.523 --> 00:38:18.101
+Read replica for BI.
+
+625
+00:38:18.381 --> 00:38:19.235
+Pros:
+
+626
+00:38:19.515 --> 00:38:20.197
+Quick.
+
+627
+00:38:20.477 --> 00:38:21.288
+Cons:
+
+628
+00:38:21.568 --> 00:38:25.813
+Still row storage (L3), replica lag and conflicts, no history.
+
+629
+00:38:26.093 --> 00:38:26.904
+Verdict:
+
+630
+00:38:27.184 --> 00:38:28.400
+Stop-gap only.
+
+631
+00:38:28.680 --> 00:38:30.728
+Lakehouse (Iceberg + Trino).
+
+632
+00:38:31.008 --> 00:38:31.861
+Pros:
+
+633
+00:38:32.141 --> 00:38:35.832
+Open, cheap storage, many engines, deletes and time travel.
+
+634
+00:38:36.112 --> 00:38:36.923
+Cons:
+
+635
+00:38:37.203 --> 00:38:38.397
+More moving parts.
+
+636
+00:38:38.677 --> 00:38:39.488
+Verdict:
+
+637
+00:38:39.768 --> 00:38:40.600
+Chosen.
+
+638
+00:38:40.880 --> 00:38:43.739
+Managed warehouse (BigQuery or Snowflake).
+
+639
+00:38:44.019 --> 00:38:44.872
+Pros:
+
+640
+00:38:45.152 --> 00:38:46.133
+Least ops.
+
+641
+00:38:46.413 --> 00:38:47.224
+Cons:
+
+642
+00:38:47.504 --> 00:38:48.955
+Cost at scale, lock-in.
+
+643
+00:38:49.235 --> 00:38:50.045
+Verdict:
+
+644
+00:38:50.325 --> 00:38:53.739
+Acceptable alternative; Iceberg keeps the option open.
+
+645
+00:38:54.019 --> 00:38:56.195
+Lambda with separate batch or speed code.
+
+646
+00:38:56.475 --> 00:38:57.328
+Pros:
+
+647
+00:38:57.608 --> 00:38:58.483
+Robust.
+
+648
+00:38:58.763 --> 00:38:59.573
+Cons:
+
+649
+00:38:59.853 --> 00:39:01.027
+Two codebases.
+
+650
+00:39:01.307 --> 00:39:02.117
+Verdict:
+
+651
+00:39:02.397 --> 00:39:05.213
+Replaced by unified engines + batch truth.
+
+652
+00:39:06.563 --> 00:39:08.057
+Processing-time streaming.
+
+653
+00:39:08.337 --> 00:39:09.190
+Pros:
+
+654
+00:39:09.470 --> 00:39:10.238
+Simple.
+
+655
+00:39:10.518 --> 00:39:11.329
+Cons:
+
+656
+00:39:11.609 --> 00:39:13.635
+Wrong under late data (L4:
+
+657
+00:39:13.915 --> 00:39:15.345
+30 % exact).
+
+658
+00:39:15.625 --> 00:39:16.435
+Verdict:
+
+659
+00:39:16.715 --> 00:39:17.633
+Rejected.
+
+660
+00:39:18.983 --> 00:39:19.665
+8.
+
+661
+00:39:19.945 --> 00:39:21.097
+Failure modes.
+
+662
+00:39:21.377 --> 00:39:26.967
+CDC lag, then the silver freshness SLO alerts, and dashboards show data as of.
+
+663
+00:39:27.247 --> 00:39:32.495
+Purge API failure, then retry with backoff, and the TTL bounds staleness.
+
+664
+00:39:32.775 --> 00:39:37.959
+Presigned URL leak, then short expiry, one key, and authorisation at signing.
+
+665
+00:39:38.239 --> 00:39:45.428
+Stream job restart, then restored from the checkpoint; the lateness bound covers the downtime or a reprocess runs.
+
+666
+00:39:45.708 --> 00:39:46.412
+10.
+
+667
+00:39:46.692 --> 00:39:47.780
+Observability.
+
+668
+00:39:49.130 --> 00:39:53.375
+CDN: hit ratio by path, origin egress, purge latency.
+
+669
+00:39:53.655 --> 00:39:54.871
+Object storage:
+
+670
+00:39:55.151 --> 00:39:59.055
+4xx or 5xx rates, incomplete multipart bytes.
+
+671
+00:39:59.335 --> 00:40:03.837
+Lake: freshness per table, file counts and small-file compaction backlog.
+
+672
+00:40:04.117 --> 00:40:06.506
+Batch: duration, rows, restarts.
+
+673
+00:40:06.786 --> 00:40:12.333
+Stream: watermark lag, late-event and dropped counts, updates emitted, checkpoint duration.
+
+674
+00:40:13.683 --> 00:40:14.536
+14.
+
+675
+00:40:14.816 --> 00:40:19.104
+Decision (ADR-088 to 092 summary).
+
+676
+00:40:19.384 --> 00:40:22.755
+Blobs in object storage behind presigned URLs.
+
+677
+00:40:23.035 --> 00:40:27.280
+A CDN with normalised keys, versioned assets and stale-if-error.
+
+678
+00:40:27.560 --> 00:40:31.208
+Analytics only on an Iceberg lakehouse fed by CDC.
+
+679
+00:40:31.488 --> 00:40:34.475
+Batch that is idempotent or atomically checkpointed.
+
+680
+00:40:34.755 --> 00:40:40.685
+Streaming in event time with watermarks and allowed lateness, and batch as the source of truth for money.
+
+681
+00:40:42.035 --> 00:40:42.995
+Part 5.
+
+682
+00:40:43.275 --> 00:40:45.259
+Hands-On Code, Level Ladder.
+
+683
+00:40:46.509 --> 00:40:47.853
+Here is a quick table:
+
+684
+00:40:48.133 --> 00:40:50.821
+Level, and New requirement that forces the step.
+
+685
+00:40:51.101 --> 00:40:51.933
+L1:
+
+686
+00:40:52.213 --> 00:40:55.968
+Get media and documents out of the database and off our servers.
+
+687
+00:40:56.248 --> 00:41:01.837
+(S3 API on SeaweedFS, SigV4, presigned URLs, multipart).
+
+688
+00:41:02.117 --> 00:41:02.928
+L2:
+
+689
+00:41:03.208 --> 00:41:08.221
+Make the CDN actually offload the origin and stay correct on price changes.
+
+690
+00:41:08.501 --> 00:41:12.299
+(edge cache: keys, coalescing, invalidation, stale-if-error).
+
+691
+00:41:12.579 --> 00:41:13.432
+L3:
+
+692
+00:41:13.712 --> 00:41:16.101
+Stop running BI on the orders primary.
+
+693
+00:41:16.381 --> 00:41:21.181
+(ELT to Parquet, PostgreSQL versus DuckDB on 10M rows).
+
+694
+00:41:21.461 --> 00:41:22.336
+L4:
+
+695
+00:41:22.616 --> 00:41:27.928
+Nightly jobs must survive crashes; the demand board must be right despite late events.
+
+696
+00:41:28.208 --> 00:41:31.771
+(restartable batch on PostgreSQL, event-time windows).
+
+697
+00:41:33.121 --> 00:41:39.563
+All four levels ran on a 2 vCPU container, with the tools downloaded from their GitHub releases:
+
+698
+00:41:39.843 --> 00:41:46.073
+SeaweedFS 3.80 (S3 API on:8333).
+
+699
+00:41:46.353 --> 00:41:48.657
+DuckDB 1.1.3 CLI.
+
+700
+00:41:48.937 --> 00:41:54.910
+PostgreSQL 16 (:5543, sharedbuffers = 1GB).
+
+701
+00:41:55.190 --> 00:41:58.646
+Java 21 with the pgjdbc driver.
+
+702
+00:41:58.926 --> 00:42:00.803
+The outputs below are verbatim.
+
+703
+00:42:01.083 --> 00:42:05.009
+Lab files are in labs or ch21-data-at-scale/.
+
+704
+00:42:06.359 --> 00:42:11.969
+L1, Object storage over the S3 API, presigned URLs, multipart.
+
+705
+00:42:12.249 --> 00:42:13.188
+Requirement:
+
+706
+00:42:13.468 --> 00:42:23.324
+Store product images, invoices and proof-of-delivery photos outside the database, and let the apps upload and download without our servers carrying the bytes.
+
+707
+00:42:23.604 --> 00:42:35.231
+The program speaks the S3 REST API directly, with AWS Signature V4 written out (canonical request, then string to sign, then derived key, then HMAC).
+
+708
+00:42:35.511 --> 00:42:45.175
+SDKs hide this, and seeing it once explains why presigned URLs are safe: the signature covers the method, path, expiry and signed headers.
+
+709
+00:42:46.525 --> 00:42:49.746
+Here is the Java code, ObjectStoreL1.java.
+
+710
+00:42:50.026 --> 00:42:54.058
+It runs to 230 lines; the full listing is in the chapter.
+
+711
+00:42:54.338 --> 00:43:08.397
+ObjectStoreL1.java, run with: java ObjectStoreL1.java (needs an S3-compatible endpoint; the lab uses SeaweedFS 3.80 on:8333).
+
+712
+00:43:08.677 --> 00:43:27.877
+Product images and invoices in object storage, using the plain S3 REST API with AWS Signature V4 written out by hand: bucket + PUT or GET or HEAD, range reads, prefix listing, presigned upload or download URLs (direct from the app, bypassing our servers).
+
+713
+00:43:30.727 --> 00:43:31.644
+On screen:
+
+714
+00:43:31.924 --> 00:43:32.543
+A.
+
+715
+00:43:32.823 --> 00:43:38.412
+Basic object operations (SeaweedFS S3 API, SigV4 signed).
+
+716
+00:43:38.692 --> 00:43:46.372
+PUT products or sku-1001 or main.jpg (480,000 B), then 200, ETag.
+
+717
+00:43:46.652 --> 00:43:54.033
+929df4cadcea3fdff1ba15cacfdb132b.
+
+718
+00:43:54.313 --> 00:44:00.436
+HEAD, then 200, Content-Length 480000, Content-Type image or jpeg.
+
+719
+00:44:00.716 --> 00:44:10.039
+GET Range bytes=0 to 1023, then 206, 1,024 bytes (thumbnail header or resumable download).
+
+720
+00:44:10.319 --> 00:44:15.289
+LIST prefix products or sku-1002/, then 200, 3 keys.
+
+721
+00:44:15.569 --> 00:44:16.252
+B.
+
+722
+00:44:16.532 --> 00:44:33.556
+Presigned URLs: the app uploads straight to storage; our servers only sign. presigned PUT, valid 5 min, then 200. presigned GET, then 200. same URL, key changed to rider-78, then 403 (signature covers the path).
+
+723
+00:44:33.836 --> 00:44:42.689
+URL signed 10 min ago, valid 60 s, then 403 (expired). unsigned GET of a private object, then 403.
+
+724
+00:44:42.969 --> 00:44:43.652
+C.
+
+725
+00:44:43.932 --> 00:44:45.255
+Multipart upload:
+
+726
+00:44:45.535 --> 00:44:50.612
+40 MB invoice archive in 8 MB parts, part 3 fails once and is.
+
+727
+00:44:50.892 --> 00:44:52.407
+The rest is in the chapter.
+
+728
+00:44:55.257 --> 00:44:56.110
+Reading it:
+
+729
+00:44:56.390 --> 00:45:01.361
+Range reads (206) give resumable downloads and cheap header reads.
+
+730
+00:45:01.641 --> 00:45:06.483
+Prefix listing is how you enumerate all images of SKU 1002.
+
+731
+00:45:06.763 --> 00:45:10.305
+Design keys for the listings and lifecycle rules you'll need.
+
+732
+00:45:10.585 --> 00:45:11.886
+Presigned URLs:
+
+733
+00:45:12.166 --> 00:45:14.065
+The rider app uploads directly.
+
+734
+00:45:14.345 --> 00:45:17.225
+Our service only authorised the action and signed.
+
+735
+00:45:17.505 --> 00:45:23.115
+Changing the key in a signed URL, or using it after expiry, gives 403.
+
+736
+00:45:24.465 --> 00:45:33.916
+Keep expiries short and one key per URL, and fix the content type in the signature (content-type as a signed header) when uploads must be images.
+
+737
+00:45:34.196 --> 00:45:35.199
+Multipart:
+
+738
+00:45:35.479 --> 00:45:37.399
+A failed part is retried alone:
+
+739
+00:45:37.679 --> 00:45:43.055
+44 MB sent for a 40 MB object with one (simulated) interruption.
+
+740
+00:45:43.335 --> 00:45:51.356
+The ETag of a multipart object is not an MD5 of the content, so use your own checksum (verified identical here).
+
+741
+00:45:52.706 --> 00:45:56.354
+Content-addressed keys give deduplication and immutability:
+
+742
+00:45:56.634 --> 00:46:02.714
+3 sellers uploaded the same image, 1 object was stored, and its URL can be cached forever.
+
+743
+00:46:04.064 --> 00:46:09.120
+L2, A CDN edge: cache keys, coalescing, invalidation, stale-if-error.
+
+744
+00:46:09.400 --> 00:46:10.339
+Requirement:
+
+745
+00:46:10.619 --> 00:46:19.408
+The CDN must offload the origin, survive a hot key expiring, reflect price changes quickly, and keep serving during an origin outage.
+
+746
+00:46:19.688 --> 00:46:33.917
+A real origin (JDK HttpServer, 20 ms of work per request) sits behind a real edge cache (another HttpServer) that implements: cache keys (full URL versus normalised);.
+
+747
+00:46:34.197 --> 00:46:37.227
+TTL from Cache-Control;. request coalescing;.
+
+748
+00:46:37.507 --> 00:46:38.296
+PURGE;.
+
+749
+00:46:39.646 --> 00:46:40.670
+stale-if-error.
+
+750
+00:46:40.950 --> 00:46:49.249
+The workload is Zipf-distributed over 500 products, with 40 % of URLs carrying marketing parameters in random order.
+
+751
+00:46:50.599 --> 00:46:53.735
+Here is the Java code, CdnL2.java.
+
+752
+00:46:54.015 --> 00:46:58.047
+It runs to 240 lines; the full listing is in the chapter.
+
+753
+00:46:58.327 --> 00:47:06.455
+CdnL2.java, run with: java -Dsun.net.httpserver.nodelay=true CdnL2.java.
+
+754
+00:47:06.735 --> 00:47:15.481
+A pull-through edge cache (a tiny CDN node) in front of a real origin, both JDK HttpServers on virtual threads.
+
+755
+00:47:15.761 --> 00:47:23.057
+A. cache keys: full URL versus normalised (tracking params dropped, params sorted) under a Zipf workload.
+
+756
+00:47:25.907 --> 00:47:26.825
+On screen:
+
+757
+00:47:27.105 --> 00:47:27.723
+A.
+
+758
+00:47:28.003 --> 00:47:45.497
+20,000 image requests, 500 products (Zipf), 40 % of URLs carry tracking params in. random order. setup origin hits hit ratio origin egress. no CDN 20,000 0.0 % 953 MB.
+
+759
+00:47:45.777 --> 00:47:54.075
+CDN, key = full URL 8,520 57.4 % 406 MB.
+
+760
+00:47:54.355 --> 00:48:00.649
+CDN, normalised key 499 97.5 % 23 MB.
+
+761
+00:48:00.929 --> 00:48:01.611
+B.
+
+762
+00:48:01.891 --> 00:48:10.254
+The hottest product's JSON expires while 400 requests arrive at once. without coalescing origin requests for one key:
+
+763
+00:48:10.534 --> 00:48:14.545
+400. with request coalescing origin requests for one key:
+
+764
+00:48:14.825 --> 00:48:15.465
+1.
+
+765
+00:48:15.745 --> 00:48:22.273
+C. sku-7 price changes from 47 to 39 while 50 req per second read it for 3 s.
+
+766
+00:48:22.553 --> 00:48:31.086
+TTL only (max-age=2) stale responses 93 of 138, last stale at 2,003 ms.
+
+767
+00:48:31.366 --> 00:48:45.126
+TTL + purge on change stale responses 0 of 139, last stale at 0 ms. versioned URL stale responses 0 of 141, last stale at 0 ms.
+
+768
+00:48:45.406 --> 00:48:46.921
+The rest is in the chapter.
+
+769
+00:48:49.771 --> 00:48:50.624
+Reading it:
+
+770
+00:48:50.904 --> 00:48:51.885
+Cache keys:
+
+771
+00:48:52.165 --> 00:48:55.792
+Tracking parameters split one image into many cache entries.
+
+772
+00:48:56.072 --> 00:49:11.389
+A full-URL key hit 57.4 %, and a normalised key 97.5 %: origin egress fell from 953 MB (no CDN) to 406 MB, then to 23 MB.
+
+773
+00:49:11.669 --> 00:49:15.509
+Most the CDN isn't helping problems are cache-key problems.
+
+774
+00:49:15.789 --> 00:49:24.771
+Coalescing: with a hot key expired and 400 simultaneous requests, 400 origin requests without coalescing, 1 with it.
+
+775
+00:49:25.051 --> 00:49:28.741
+This is the thundering herd from Ch 07, at the edge.
+
+776
+00:49:30.091 --> 00:49:31.179
+Invalidation:
+
+777
+00:49:31.459 --> 00:49:40.057
+With the TTL alone, 93 of 138 reads over 3 s showed the old price, until the 2 s TTL ran out.
+
+778
+00:49:40.337 --> 00:49:42.065
+Purge fixed it on this single node.
+
+779
+00:49:42.345 --> 00:49:47.209
+A real CDN adds propagation time across POPs, typically seconds.
+
+780
+00:49:47.489 --> 00:49:51.563
+A versioned URL can't be stale: the new price has a new URL.
+
+781
+00:49:51.843 --> 00:50:00.099
+Stale-if-error: during a 5 s origin outage, a strict TTL returned 50 errors and stale-if-error served 50 of 50.
+
+782
+00:50:00.379 --> 00:50:02.683
+Stale beats down for catalog browsing.
+
+783
+00:50:02.963 --> 00:50:05.395
+It doesn't for checkout, which is never cached.
+
+784
+00:50:06.745 --> 00:50:08.495
+Latency isn't measured here.
+
+785
+00:50:08.775 --> 00:50:15.943
+Client, edge and origin share one 2-CPU machine, so the benefit of an edge being near users can't be shown.
+
+786
+00:50:16.223 --> 00:50:19.039
+Origin hits and egress are the honest metrics.
+
+787
+00:50:20.389 --> 00:50:22.351
+L3, OLTP versus OLAP:
+
+788
+00:50:22.631 --> 00:50:26.834
+ELT into a Parquet lake, PostgreSQL versus DuckDB.
+
+789
+00:50:27.114 --> 00:50:28.053
+Requirement:
+
+790
+00:50:28.333 --> 00:50:33.367
+Finance's GMV reports must stop hitting the orders primary, and should be faster.
+
+791
+00:50:33.647 --> 00:50:34.565
+The script:
+
+792
+00:50:34.845 --> 00:50:43.250
+Generates 10,000,000 order lines (90 days, 200 stores, 8 cities, 20,000 SKUs) in PostgreSQL.
+
+793
+00:50:43.530 --> 00:50:45.045
+Runs an ELT step:
+
+794
+00:50:45.325 --> 00:50:57.271
+COPY to CSV, then DuckDB transforms it into zstd Parquet partitioned by local date (hive-style dt= directories), adding the derived dt column.
+
+795
+00:50:58.621 --> 00:51:06.024
+Runs the same queries on both engines (best of 3), checking that the answers are identical (hash of sorted results).
+
+796
+00:51:07.374 --> 00:51:10.019
+Here is the shell code, exp-olap.sh.
+
+797
+00:51:10.299 --> 00:51:14.545
+It runs to 131 lines; the full listing is in the chapter.
+
+798
+00:51:14.825 --> 00:51:17.747
+OLTP versus OLAP on the same 10M order lines:
+
+799
+00:51:18.027 --> 00:51:25.537
+PostgreSQL 16 (row store, B-tree) versus DuckDB 1.1 (columnar, vectorised) on a.
+
+800
+00:51:25.817 --> 00:51:35.865
+Parquet lake produced by an ELT step (extract CSV from Postgres, then load + transform in DuckDB, then Parquet partitioned by day).
+
+801
+00:51:38.715 --> 00:51:40.827
+On screen: == 1.
+
+802
+00:51:41.107 --> 00:51:42.131
+OLTP source:
+
+803
+00:51:42.411 --> 00:51:47.851
+10,000,000 order lines, 90 days, 200 stores, 8 cities, 20,000 SKUs.
+
+804
+00:51:48.131 --> 00:51:51.331
+30 categories. postgres table + indexes:
+
+805
+00:51:51.611 --> 00:51:55.451
+1384 MB. == 2.
+
+806
+00:51:55.731 --> 00:52:02.984
+ELT: extract, then load, then transform into a Parquet lake partitioned by day. extract (COPY to CSV):
+
+807
+00:52:03.264 --> 00:52:09.579
+9190 ms, 754 MB transform + write Parquet:
+
+808
+00:52:09.859 --> 00:52:16.301
+6988 ms, 58 MB. in 90 files. == 3.
+
+809
+00:52:16.581 --> 00:52:22.896
+Queries (best of 3; PostgreSQL uses up to 2 parallel workers, DuckDB 2 threads;.
+
+810
+00:52:23.176 --> 00:52:27.507
+2 vCPU). query PostgreSQL DuckDB or Parquet.
+
+811
+00:52:27.787 --> 00:52:34.443
+Q1 OLTP: one order's lines by primary key 0.894 ms 11 ms.
+
+812
+00:52:34.723 --> 00:52:44.003
+Q2 OLAP: revenue by city x category, last 30 days 650.089 ms 164 ms.
+
+813
+00:52:44.283 --> 00:52:53.541
+Q3 OLAP: top 10 SKUs in Bengaluru, whole quarter 627.849 ms 180 ms.
+
+814
+00:52:53.821 --> 00:53:05.981
+Q4 OLAP: weekly distinct orders + GMV (tz math per row) 5448.943 ms 3331 ms.
+
+815
+00:53:06.261 --> 00:53:07.776
+The rest is in the chapter.
+
+816
+00:53:10.626 --> 00:53:11.479
+Reading it:
+
+817
+00:53:11.759 --> 00:53:12.634
+Sizes:
+
+818
+00:53:12.914 --> 00:53:24.327
+1,384 MB in PostgreSQL (heap + PK + index), 754 MB as CSV, 58 MB as Parquet.
+
+819
+00:53:24.607 --> 00:53:32.906
+Columnar layout plus dictionary encoding plus zstd compresses repetitive business data 13 to 24x.
+
+820
+00:53:33.186 --> 00:53:34.615
+Point lookup (Q1):
+
+821
+00:53:34.895 --> 00:53:43.450
+PostgreSQL 0.9 ms via the primary key versus DuckDB 11 ms (open files, read row groups).
+
+822
+00:53:43.730 --> 00:53:45.629
+OLTP stays in the OLTP database.
+
+823
+00:53:45.909 --> 00:53:48.106
+Aggregations (Q2, Q3):
+
+824
+00:53:48.386 --> 00:53:52.823
+DuckDB is 3.5 to 4x faster on the same 2 cores.
+
+825
+00:53:53.103 --> 00:53:55.663
+It reads only the columns it needs (Q3:
+
+826
+00:53:55.943 --> 00:53:59.485
+22 of 57 MB) in vectorised batches.
+
+827
+00:54:00.835 --> 00:54:04.483
+PostgreSQL reads every page of the heap, all columns.
+
+828
+00:54:04.763 --> 00:54:14.085
+The gap widens with more cores, wider tables and more data, and a distributed engine (Trino, BigQuery) adds parallelism across machines.
+
+829
+00:54:14.365 --> 00:54:30.088
+Q4 is the modelling lesson: count(distinct) with a time-zone-aware datetrunc over 10M rows is slow on both engines (5.4 s versus 3.3 s), because the time-zone conversion runs per row, per query.
+
+830
+00:54:31.438 --> 00:54:40.569
+Using the dt column computed once during the transform makes the same query 463 ms, with the same answer (verified).
+
+831
+00:54:40.849 --> 00:54:48.721
+A HyperLogLog approxcountdistinct cuts it to 295 ms, if ~5 % error is acceptable.
+
+832
+00:54:49.001 --> 00:54:51.091
+Pre-compute what every query needs.
+
+833
+00:54:51.371 --> 00:54:53.398
+That's what the T in ELT is for.
+
+834
+00:54:53.678 --> 00:54:58.542
+Partition pruning (Q5): one day's GMV reads 1 file of 90.
+
+835
+00:54:58.822 --> 00:55:03.771
+PostgreSQL's index range scan is also good at this (17 ms).
+
+836
+00:55:04.051 --> 00:55:07.934
+Partitioning pays off most when data is far larger than memory.
+
+837
+00:55:09.284 --> 00:55:14.532
+Same answers: all four queries hash-matched, and so did the dt variant of Q4.
+
+838
+00:55:14.812 --> 00:55:18.545
+A migration to a new engine must prove equivalence the same way.
+
+839
+00:55:19.895 --> 00:55:22.946
+L4, Restartable batch and event-time streaming.
+
+840
+00:55:23.226 --> 00:55:24.165
+Requirement:
+
+841
+00:55:24.445 --> 00:55:29.586
+The nightly revenue job must produce exact numbers even if the pod dies halfway.
+
+842
+00:55:29.866 --> 00:55:35.647
+The demand board must count orders in the minute they were placed, even when phones deliver events minutes late.
+
+843
+00:55:35.927 --> 00:55:47.191
+Part A is a real chunk-oriented job over the 10M rows in PostgreSQL: keyset pagination, 100,000 rows per chunk, and an upsert into dailystorerevenue.
+
+844
+00:55:47.471 --> 00:55:50.031
+It crashes once at chunk 60 and restarts.
+
+845
+00:55:50.311 --> 00:55:54.215
+Three restart strategies are compared with the SQL ground truth.
+
+846
+00:55:55.565 --> 00:56:02.264
+Part B is a deterministic simulation of 1.08M order events over a 6-hour evening.
+
+847
+00:56:02.544 --> 00:56:10.608
+90 % arrive in ~0.5 s, 8 % in 5 to 60 s, and 2 % in 2 to 20 min.
+
+848
+00:56:10.888 --> 00:56:17.416
+It computes orders per store per minute with four streaming strategies and compares every window with the batch answer.
+
+849
+00:56:18.766 --> 00:56:21.923
+Here is the Java code, BatchStreamL4.java.
+
+850
+00:56:22.203 --> 00:56:26.491
+It runs to 262 lines; the full listing is in the chapter.
+
+851
+00:56:26.771 --> 00:56:36.990
+BatchStreamL4.java, run with: java -Duser.timezone=UTC -cp pgjdbc.jar BatchStreamL4.java.
+
+852
+00:56:37.270 --> 00:56:48.022
+Part A (real PostgreSQL:5543, the 10M order lines from exp-olap.sh): a chunk-oriented, restartable batch job.
+
+853
+00:56:48.302 --> 00:56:53.657
+(the Spring Batch model) computing daily revenue per store, crashing once at 60 %.
+
+854
+00:56:53.937 --> 00:56:55.558
+Checkpoint committed separately.
+
+855
+00:56:58.408 --> 00:56:59.325
+On screen:
+
+856
+00:56:59.605 --> 00:57:00.224
+A.
+
+857
+00:57:00.504 --> 00:57:39.453
+Nightly batch over 10,000,000 order lines in chunks of 100,000 (PostgreSQL); the. pod crashes once at chunk 60. restart strategy rows read chunks (day, store) revenue off time. redone rows wrong by (₹). checkpoint committed later 10,100,000 1 200 53,673,670 11,867 ms. checkpoint in same tx 10,100,000 1 0 0 11,239 ms. overwrite 20,000,000 to 0 0 9,074 ms.
+
+858
+00:57:39.733 --> 00:57:40.415
+B.
+
+859
+00:57:40.695 --> 00:58:23.207
+Orders per store per 1-minute window, 1,080,000 events over 6 h; 90 % arrive in. ~0.5 s, 8 % in 5 to 60 s, 2 % in 2 to 20 min. streaming strategy windows events result delay result delay updates. exact dropped p50 p99 or window. processing-time windows 29.8% 0 0.0 s 0.0 s 0.00. event time, watermark 5 s, late events dropped 43.0% 60,625 5.1 s 5.4 s 0.00.
+
+860
+00:58:23.487 --> 00:58:25.001
+The rest is in the chapter.
+
+861
+00:58:27.851 --> 00:58:28.705
+Reading it:
+
+862
+00:58:28.985 --> 00:58:29.753
+Batch:
+
+863
+00:58:30.033 --> 00:58:42.193
+Committing the output and the checkpoint separately means the crash (between them) replays chunk 60, and 200 day times store rows end up overcounted by 5.37 crore rupees.
+
+864
+00:58:42.473 --> 00:58:45.225
+The job reports success, and nothing crashes.
+
+865
+00:58:45.505 --> 00:58:48.129
+Only a reconciliation against source finds it.
+
+866
+00:58:48.409 --> 00:58:55.875
+Putting the checkpoint in the same transaction (Spring Batch's ExecutionContext update commits with the chunk) is exact.
+
+867
+00:58:57.225 --> 00:59:02.111
+Overwrite (recompute and replace in one transaction) is exact and simplest.
+
+868
+00:59:02.391 --> 00:59:11.585
+It re-read all 10M rows after the crash (20M total) and was still the fastest here, because set-based SQL beats row-by-row Java.
+
+869
+00:59:11.865 --> 00:59:12.697
+Streaming:
+
+870
+00:59:12.977 --> 00:59:19.356
+Processing-time windows are immediate but wrong: only 29.8 % of store-minutes were exact.
+
+871
+00:59:19.636 --> 00:59:31.433
+Event time with a 5 s watermark gives results 5 s after each minute, but drops the 5.6 % of events that arrive later, so only 43 % of windows are exact.
+
+872
+00:59:32.783 --> 00:59:40.741
+A 60 s watermark raises that to 74 %, costs a minute of latency, and still drops the offline-phone stragglers.
+
+873
+00:59:41.021 --> 00:59:57.383
+A 5 s watermark + 30 min allowed lateness gives fast first results and 100 % exact final values, at the cost of 0.84 updates per window that downstream must upsert, and state held for 31 minutes per window.
+
+874
+00:59:57.663 --> 01:00:02.762
+Replay: this in-memory toy job reprocesses the evening in 0.2 s.
+
+875
+01:00:03.042 --> 01:00:08.717
+A real job with state, serialization and I or O is orders of magnitude slower.
+
+876
+01:00:08.997 --> 01:00:12.858
+Measure your catch-up rate before relying on kappa-style reprocessing.
+
+877
+01:00:14.208 --> 01:00:14.848
+Tip:
+
+878
+01:00:15.128 --> 01:00:34.605
+Spring shapes (VERIFY: libraries not downloadable here). // Spring Batch 5 or 6: chunk step; checkpoint (ExecutionContext) commits in the same transaction as each chunk. @Bean Step dailyRevenueStep(JobRepository repo, PlatformTransactionManager tx,
+
+879
+01:00:34.885 --> 01:00:49.776
+DataSource ds). return new StepBuilder(dailyRevenue, repo). .OrderLine, OrderLinechunk(10000, tx). .reader(new JdbcPagingItemReaderBuilderOrderLine().name(lines).dataSource(ds).
+
+880
+01:00:51.126 --> 01:01:02.369
+.selectClause(select orderid, lineno, storeid, qty, pricepaise, orderedat).fromClause(from orderline). .sortKeys(Map.of(orderid, Order.ASCENDING, lineno,
+
+881
+01:01:02.649 --> 01:01:19.779
+Order.ASCENDING)).rowMapper(OrderLine.MAPPER).pageSize(10000).build()). .writer(revenueUpsertWriter) // or: aggregate per partition and overwrite the day. .faultTolerant().skipLimit(100).skip(ValidationException.class). .build();.
+
+882
+01:01:21.129 --> 01:01:40.863
+// Kafka Streams: event-time tumbling windows with grace (allowed lateness). builder.stream(order.order.placed.v1, Consumed.with(Serdes.String(), orderSerde). .withTimestampExtractor((rec, prev) - ((OrderPlaced) rec.value()).placedAtEpochMs())). .groupBy((k, o) - o.storeId()).
+
+883
+01:01:42.213 --> 01:02:02.138
+.windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofMinutes(1), Duration.ofMinutes(30))). .count(Materialized.as(orders-per-store-minute)). .toStream() // emits updates; add.suppress(untilWindowCloses(...)) for final-only. .to(analytics.store.demand-per-minute.v1);.
+
+884
+01:02:03.488 --> 01:02:04.427
+Part 6.
+
+885
+01:02:04.707 --> 01:02:05.987
+Production Concerns.
+
+886
+01:02:07.237 --> 01:02:08.389
+Failure modes.
+
+887
+01:02:08.669 --> 01:02:10.013
+Here is a quick table:
+
+888
+01:02:10.293 --> 01:02:13.279
+Failure, and Symptom, and Cause, and Mitigation.
+
+889
+01:02:13.559 --> 01:02:15.373
+OLTP degraded by analytics.
+
+890
+01:02:15.653 --> 01:02:16.463
+Symptom:
+
+891
+01:02:16.743 --> 01:02:19.943
+Checkout p99 spikes during report runs.
+
+892
+01:02:20.223 --> 01:02:20.991
+Cause:
+
+893
+01:02:21.271 --> 01:02:24.066
+BI on primaries (§1.1).
+
+894
+01:02:24.346 --> 01:02:25.349
+Mitigation:
+
+895
+01:02:25.629 --> 01:02:32.285
+Lakehouse via CDC; revoke analyst access to primaries; statementtimeout for reporting roles.
+
+896
+01:02:32.565 --> 01:02:34.143
+Low CDN hit ratio.
+
+897
+01:02:34.423 --> 01:02:35.234
+Symptom:
+
+898
+01:02:35.514 --> 01:02:38.522
+Origin egress high, origin CPU high.
+
+899
+01:02:38.802 --> 01:02:39.570
+Cause:
+
+900
+01:02:39.850 --> 01:02:42.047
+Cache key includes tracking params, Vary:
+
+901
+01:02:42.327 --> 01:02:43.757
+User-Agent, cookies.
+
+902
+01:02:44.037 --> 01:02:45.039
+Mitigation:
+
+903
+01:02:45.319 --> 01:02:49.650
+Normalise keys (L2), strip cookies on static paths, minimal Vary.
+
+904
+01:02:49.930 --> 01:02:51.018
+Origin herd.
+
+905
+01:02:51.298 --> 01:02:52.109
+Symptom:
+
+906
+01:02:52.389 --> 01:02:54.799
+Origin spikes when hot content expires.
+
+907
+01:02:55.079 --> 01:02:55.847
+Cause:
+
+908
+01:02:56.127 --> 01:02:57.706
+No coalescing or shield.
+
+909
+01:02:57.986 --> 01:02:58.989
+Mitigation:
+
+910
+01:02:59.269 --> 01:03:00.613
+Coalescing (L2:
+
+911
+01:03:00.893 --> 01:03:04.285
+400, then 1), origin shield, SWR.
+
+912
+01:03:04.565 --> 01:03:06.079
+Stale prices at the edge.
+
+913
+01:03:06.359 --> 01:03:07.170
+Symptom:
+
+914
+01:03:07.450 --> 01:03:09.093
+Customers see old prices.
+
+915
+01:03:09.373 --> 01:03:10.141
+Cause:
+
+916
+01:03:10.421 --> 01:03:11.850
+TTL-only caching.
+
+917
+01:03:12.130 --> 01:03:13.133
+Mitigation:
+
+918
+01:03:13.413 --> 01:03:18.234
+Surrogate-key purge, versioned URLs, short TTL for price JSON.
+
+919
+01:03:19.584 --> 01:03:21.099
+Leaked presigned URL.
+
+920
+01:03:21.379 --> 01:03:22.189
+Symptom:
+
+921
+01:03:22.469 --> 01:03:23.920
+Unexpected downloads.
+
+922
+01:03:24.200 --> 01:03:24.968
+Cause:
+
+923
+01:03:25.248 --> 01:03:27.872
+Long expiry, URLs logged or shared.
+
+924
+01:03:28.152 --> 01:03:35.384
+Mitigation: at most 5 min expiry, never log URLs, one key per URL, re-authorise to re-sign.
+
+925
+01:03:35.664 --> 01:03:36.816
+Orphaned uploads.
+
+926
+01:03:37.096 --> 01:03:37.907
+Symptom:
+
+927
+01:03:38.187 --> 01:03:39.573
+Storage bill grows.
+
+928
+01:03:39.853 --> 01:03:40.621
+Cause:
+
+929
+01:03:40.901 --> 01:03:43.717
+Abandoned multipart uploads, temp objects.
+
+930
+01:03:43.997 --> 01:03:45.000
+Mitigation:
+
+931
+01:03:45.280 --> 01:03:49.397
+Lifecycle rules (abort incomplete multipart after N days).
+
+932
+01:03:49.677 --> 01:03:51.128
+Small files in the lake.
+
+933
+01:03:51.408 --> 01:03:52.219
+Symptom:
+
+934
+01:03:52.499 --> 01:03:54.205
+Queries slow, listing slow.
+
+935
+01:03:54.485 --> 01:03:55.253
+Cause:
+
+936
+01:03:55.533 --> 01:03:57.603
+Streaming sinks writing tiny files.
+
+937
+01:03:57.883 --> 01:03:58.885
+Mitigation:
+
+938
+01:03:59.165 --> 01:04:05.096
+Compaction jobs, table-format maintenance (Iceberg rewritedatafiles, snapshot expiry).
+
+939
+01:04:05.376 --> 01:04:07.061
+Silent batch double-counting.
+
+940
+01:04:07.341 --> 01:04:08.152
+Symptom:
+
+941
+01:04:08.432 --> 01:04:10.459
+Numbers wrong, job succeeded.
+
+942
+01:04:10.739 --> 01:04:11.507
+Cause:
+
+943
+01:04:11.787 --> 01:04:14.411
+Checkpoint not atomic with output (L4).
+
+944
+01:04:14.691 --> 01:04:15.693
+Mitigation:
+
+945
+01:04:15.973 --> 01:04:20.624
+Same-transaction checkpoint or partition overwrite; reconciliation checks.
+
+946
+01:04:21.974 --> 01:04:23.147
+Stream undercounts.
+
+947
+01:04:23.427 --> 01:04:24.238
+Symptom:
+
+948
+01:04:24.518 --> 01:04:25.883
+Metrics low at peak.
+
+949
+01:04:26.163 --> 01:04:26.931
+Cause:
+
+950
+01:04:27.211 --> 01:04:30.433
+Processing-time windows, watermark too tight (L4).
+
+951
+01:04:30.713 --> 01:04:31.715
+Mitigation:
+
+952
+01:04:31.995 --> 01:04:34.747
+Event time, lateness, dropped-event metrics.
+
+953
+01:04:35.027 --> 01:04:36.670
+Schema drift in pipelines.
+
+954
+01:04:36.950 --> 01:04:37.761
+Symptom:
+
+955
+01:04:38.041 --> 01:04:40.494
+Jobs fail or silently null columns.
+
+956
+01:04:40.774 --> 01:04:41.542
+Cause:
+
+957
+01:04:41.822 --> 01:04:43.315
+Upstream changed a field.
+
+958
+01:04:43.595 --> 01:04:44.598
+Mitigation:
+
+959
+01:04:44.878 --> 01:04:50.894
+Schema registry, contracts (Ch 28), fail-fast validation in bronze, then silver.
+
+960
+01:04:52.244 --> 01:04:53.332
+Observability.
+
+961
+01:04:53.612 --> 01:05:06.711
+CDN: hit ratio by path and POP, origin requests and egress, 5xx at the edge versus the origin, purge latency, stale responses served (SIE or SWR).
+
+962
+01:05:06.991 --> 01:05:19.748
+Object storage: request rates, 4xx (bad signatures, expiries), 5xx or throttling (503 SlowDown), bytes by bucket and class, incomplete multipart bytes.
+
+963
+01:05:20.028 --> 01:05:32.423
+Lakehouse: per-table freshness (data as of), rows per partition versus expected;. file count and average file size;. query queue time and bytes scanned per query (the main cost driver).
+
+964
+01:05:33.773 --> 01:05:40.877
+Batch: duration trend, rows read or written, restarts and chunks redone, reconciliation diffs versus source.
+
+965
+01:05:41.157 --> 01:05:50.095
+Streaming: consumer lag (in time), watermark lag, late and dropped events, updates emitted, checkpoint duration and size, state store size.
+
+966
+01:05:51.445 --> 01:05:52.384
+Security.
+
+967
+01:05:52.664 --> 01:05:54.413
+Buckets are private by default.
+
+968
+01:05:54.693 --> 01:05:57.061
+Block public access at the account level.
+
+969
+01:05:57.341 --> 01:06:02.717
+The CDN reads through an origin access identity or signed origin requests.
+
+970
+01:06:02.997 --> 01:06:04.811
+Presigned URLs for users.
+
+971
+01:06:05.091 --> 01:06:07.843
+Scope IAM per service and per prefix.
+
+972
+01:06:08.123 --> 01:06:09.019
+Encryption:
+
+973
+01:06:09.299 --> 01:06:17.896
+SSE-KMS at rest, TLS in transit, and per-tenant keys where contracts require it (Ch 23, Ch 36).
+
+974
+01:06:18.176 --> 01:06:19.477
+PII in the lake:
+
+975
+01:06:20.827 --> 01:06:26.822
+Pseudonymise customer identifiers in silver or gold, and keep the mapping in a restricted table.
+
+976
+01:06:27.102 --> 01:06:29.555
+Column-level access in the query engine.
+
+977
+01:06:29.835 --> 01:06:39.777
+Deletes for DPDP or GDPR require a table format that supports row deletes (Iceberg or Delta), which plain Parquet directories don't.
+
+978
+01:06:40.057 --> 01:06:45.390
+CDN: never cache personalised responses (the cache key doesn't include the user).
+
+979
+01:06:45.670 --> 01:06:53.542
+Mark them private, no-store at the origin, because a single misconfigured public header can leak one customer's cart to another.
+
+980
+01:06:54.892 --> 01:07:03.489
+Presigned upload validation: after upload, verify size and content type, and scan for malware, before the object is referenced.
+
+981
+01:07:04.839 --> 01:07:06.503
+Performance and tuning knobs.
+
+982
+01:07:06.783 --> 01:07:08.127
+Here is a quick table:
+
+983
+01:07:08.407 --> 01:07:09.623
+Knob, and Guidance.
+
+984
+01:07:09.903 --> 01:07:11.418
+Multipart part size:
+
+985
+01:07:11.698 --> 01:07:16.541
+8 to 64 MB; parallelism 4 to 16; retries per part.
+
+986
+01:07:16.821 --> 01:07:17.887
+Cache-Control:
+
+987
+01:07:18.167 --> 01:07:19.277
+Versioned assets:
+
+988
+01:07:19.557 --> 01:07:25.402
+1 year immutable; JSON: short max-age + stale-while-revalidate + stale-if-error.
+
+989
+01:07:25.682 --> 01:07:26.578
+Cache key:
+
+990
+01:07:26.858 --> 01:07:31.701
+Allow-list of query params; ignore tracking params and cookies on static paths.
+
+991
+01:07:31.981 --> 01:07:39.959
+Parquet row group size: ~128 MB (fewer, larger row groups scan faster; smaller ones prune better).
+
+992
+01:07:40.239 --> 01:07:41.199
+Partitioning:
+
+993
+01:07:41.479 --> 01:07:49.501
+By date (the most common filter), not by high-cardinality columns; target files of 128 MB, 1 GB.
+
+994
+01:07:49.781 --> 01:07:51.338
+Sort order or clustering:
+
+995
+01:07:51.618 --> 01:07:57.271
+Sort within partitions by common filters (storeid) to make min or max pruning effective.
+
+996
+01:07:58.621 --> 01:07:59.880
+Batch chunk size:
+
+997
+01:08:00.160 --> 01:08:05.963
+1,000 to 100,000; larger = fewer commits, more redo on restart.
+
+998
+01:08:06.243 --> 01:08:07.565
+Watermark or grace:
+
+999
+01:08:07.845 --> 01:08:14.864
+From the measured delay distribution (p99 or p99.9 of arrival delay), not a guess.
+
+1000
+01:08:15.144 --> 01:08:16.189
+Stream state:
+
+1001
+01:08:16.469 --> 01:08:20.672
+TTL on state; RocksDB tuning; incremental checkpoints.
+
+1002
+01:08:22.022 --> 01:08:22.747
+Cost.
+
+1003
+01:08:23.027 --> 01:08:25.289
+Egress is often the biggest line item.
+
+1004
+01:08:25.569 --> 01:08:37.217
+CDN egress is cheaper than origin egress, and a hit ratio from 57 % to 97.5 % cut origin egress by 94 % in L2.
+
+1005
+01:08:37.497 --> 01:08:44.345
+Storage classes: infrequent-access and archive tiers cost a fraction of standard, but charge for retrieval.
+
+1006
+01:08:44.625 --> 01:08:46.481
+Model the access pattern first.
+
+1007
+01:08:46.761 --> 01:08:53.310
+Lakehouse compute: engines like BigQuery, Athena and Trino on cloud storage bill by bytes scanned.
+
+1008
+01:08:53.590 --> 01:09:02.017
+Columnar formats, partition pruning and precomputed columns (L3's dt) are cost controls as much as performance ones.
+
+1009
+01:09:03.367 --> 01:09:04.881
+Streaming is always-on.
+
+1010
+01:09:05.161 --> 01:09:07.273
+Only stream what needs seconds-freshness.
+
+1011
+01:09:07.553 --> 01:09:10.220
+Most reports are fine T+1 in batch.
+
+1012
+01:09:11.570 --> 01:09:12.509
+Part 7.
+
+1013
+01:09:12.789 --> 01:09:14.495
+Anti-Patterns and Pitfalls.
+
+1014
+01:09:15.745 --> 01:09:16.385
+1.
+
+1015
+01:09:16.665 --> 01:09:19.673
+Blobs in the OLTP database, streamed through the service.
+
+1016
+01:09:21.023 --> 01:09:23.029
+Here is the Java code. before:
+
+1017
+01:09:23.309 --> 01:09:36.237
+2 MB images in bytea, every download through the JVM. after: bytes in object storage behind the CDN; the service only returns URLs (or signs them for private objects).
+
+1018
+01:09:39.087 --> 01:09:39.791
+2.
+
+1019
+01:09:40.071 --> 01:09:41.777
+Uploads proxied through the app.
+
+1020
+01:09:43.127 --> 01:09:56.653
+Here is the Java code. before: multipart or form-data into the service, then the service uploads to S3 (twice the bytes, and it ties up a thread). after: sign, let the client upload directly, then verify.
+
+1021
+01:09:59.503 --> 01:10:00.249
+3.
+
+1022
+01:10:00.529 --> 01:10:03.473
+Cache keys that include tracking parameters (L2:
+
+1023
+01:10:03.753 --> 01:10:07.423
+57 % versus 97.5 %).
+
+1024
+01:10:07.703 --> 01:10:15.468
+Configure the CDN's cache policy to include only the query params that change the response (w, h, format).
+
+1025
+01:10:15.748 --> 01:10:16.452
+4.
+
+1026
+01:10:16.732 --> 01:10:19.207
+Purging instead of versioning static assets.
+
+1027
+01:10:20.557 --> 01:10:22.263
+Here is the HTML code.
+
+1028
+01:10:25.113 --> 01:10:25.881
+5.
+
+1029
+01:10:26.161 --> 01:10:28.615
+Caching personalised responses publicly.
+
+1030
+01:10:29.965 --> 01:10:31.735
+Here is the HTTP code.
+
+1031
+01:10:34.585 --> 01:10:35.332
+6.
+
+1032
+01:10:35.612 --> 01:10:39.537
+Analytics on the OLTP primary (§1.1, L3:
+
+1033
+01:10:39.817 --> 01:10:41.460
+5.4 s scans).
+
+1034
+01:10:41.740 --> 01:10:43.383
+Move BI to the lakehouse.
+
+1035
+01:10:43.663 --> 01:10:52.345
+If a replica is a temporary stop-gap, give it its own resource limits and statementtimeout, and expect replication conflicts (Ch 10).
+
+1036
+01:10:52.625 --> 01:10:53.372
+7.
+
+1037
+01:10:53.652 --> 01:10:57.108
+A lake of JSON and CSV with no table format.
+
+1038
+01:10:57.388 --> 01:11:03.660
+Schema-on-read everywhere, no deletes, no atomic commits, thousands of tiny files: a data swamp.
+
+1039
+01:11:03.940 --> 01:11:08.420
+Use Parquet + Iceberg or Delta, partitioned by date, with compaction.
+
+1040
+01:11:08.700 --> 01:11:09.383
+8.
+
+1041
+01:11:09.663 --> 01:11:14.079
+Transforming in every query what could be computed once (L3 Q4:
+
+1042
+01:11:14.359 --> 01:11:19.116
+3,331 ms, then 463 ms).
+
+1043
+01:11:19.396 --> 01:11:24.687
+Put derived columns (local date, fiscal week, city from store) in silver or gold.
+
+1044
+01:11:26.037 --> 01:11:26.783
+9.
+
+1045
+01:11:27.063 --> 01:11:30.562
+A batch checkpoint committed separately from the output (L4:
+
+1046
+01:11:30.842 --> 01:11:33.935
+5.37 crore rupees overcounted).
+
+1047
+01:11:35.285 --> 01:11:44.672
+Here is the Java code. after: one transaction (Spring Batch does this for its ExecutionContext), or overwrite the partition idempotently.
+
+1048
+01:11:47.522 --> 01:11:48.226
+10.
+
+1049
+01:11:48.506 --> 01:11:51.749
+Processing-time windows for business metrics (L4:
+
+1050
+01:11:52.029 --> 01:11:54.162
+29.8 % exact).
+
+1051
+01:11:55.512 --> 01:12:05.155
+Here is the Java code. before: bucket by when the processor saw the event. after: bucket by when it happened; watermark + grace for late events.
+
+1052
+01:12:08.005 --> 01:12:08.837
+11.
+
+1053
+01:12:09.117 --> 01:12:10.866
+Dropping late events silently.
+
+1054
+01:12:11.146 --> 01:12:16.309
+Count them, expose them as a metric, and send them to a side output for batch correction.
+
+1055
+01:12:16.589 --> 01:12:17.378
+12.
+
+1056
+01:12:17.658 --> 01:12:19.898
+Lambda with two hand-written codebases.
+
+1057
+01:12:20.178 --> 01:12:21.991
+The batch and speed layers drift.
+
+1058
+01:12:22.271 --> 01:12:30.762
+Prefer a unified engine, or define the batch result as the truth and the streaming result as provisional, and reconcile them automatically.
+
+1059
+01:12:32.112 --> 01:12:32.987
+Part 8.
+
+1060
+01:12:33.267 --> 01:12:34.611
+Interview Q and A.
+
+1061
+01:12:35.861 --> 01:12:36.693
+Beginner.
+
+1062
+01:12:36.973 --> 01:12:37.997
+Question 1.
+
+1063
+01:12:38.277 --> 01:12:41.861
+Why store images in object storage instead of the database?
+
+1064
+01:12:42.141 --> 01:12:43.506
+Thirty-second answer:
+
+1065
+01:12:43.786 --> 01:12:56.479
+Object storage is built for large, immutable blobs: it's cheap per GB, extremely durable, scales without limits, and serves bytes over HTTP, directly or through a CDN.
+
+1066
+01:12:56.759 --> 01:13:04.269
+Blobs in the database bloat backups, replication and the buffer cache, and every download goes through your application servers.
+
+1067
+01:13:04.549 --> 01:13:08.858
+Store the key and metadata in the DB and the bytes in object storage.
+
+1068
+01:13:10.208 --> 01:13:11.211
+Question 2.
+
+1069
+01:13:11.491 --> 01:13:13.667
+What is a CDN and when does it help?
+
+1070
+01:13:13.947 --> 01:13:15.312
+Thirty-second answer:
+
+1071
+01:13:15.592 --> 01:13:26.280
+A network of caches close to users that serve copies of content (images, scripts, videos, cacheable API responses) so requests don't travel to the origin.
+
+1072
+01:13:26.560 --> 01:13:33.131
+It helps with latency (nearby), origin load (offload) and resilience (stale content during outages).
+
+1073
+01:13:33.411 --> 01:13:37.827
+It helps most for content that many users request and that changes rarely.
+
+1074
+01:13:39.177 --> 01:13:40.222
+Question 3.
+
+1075
+01:13:40.502 --> 01:13:42.913
+What is the difference between OLTP and OLAP?
+
+1076
+01:13:43.193 --> 01:13:44.558
+Thirty-second answer:
+
+1077
+01:13:44.838 --> 01:13:52.049
+OLTP (online transaction processing) serves many small reads and writes by key: placing an order, updating stock.
+
+1078
+01:13:52.329 --> 01:13:54.462
+It uses row storage and indexes.
+
+1079
+01:13:54.742 --> 01:14:02.422
+OLAP (online analytical processing) runs large scans and aggregations over history: revenue by category by week.
+
+1080
+01:14:02.702 --> 01:14:06.073
+It uses columnar, compressed storage and parallel scans.
+
+1081
+01:14:07.423 --> 01:14:08.489
+Question 4.
+
+1082
+01:14:08.769 --> 01:14:11.585
+What is the difference between batch and stream processing?
+
+1083
+01:14:11.865 --> 01:14:13.231
+Thirty-second answer:
+
+1084
+01:14:13.511 --> 01:14:19.249
+Batch processes a bounded dataset on a schedule: last night's orders, all at once, exactly.
+
+1085
+01:14:19.529 --> 01:14:25.823
+Stream processing handles an unbounded flow of events continuously, producing results within seconds.
+
+1086
+01:14:26.103 --> 01:14:27.724
+Batch is simpler and exact.
+
+1087
+01:14:28.004 --> 01:14:31.716
+Streaming is fresh, but must handle late and out-of-order events.
+
+1088
+01:14:33.066 --> 01:14:34.069
+Intermediate.
+
+1089
+01:14:34.349 --> 01:14:35.458
+Question 5.
+
+1090
+01:14:35.738 --> 01:14:39.962
+How do presigned URLs work, and what are the security considerations?
+
+1091
+01:14:40.242 --> 01:14:41.607
+Thirty-second answer:
+
+1092
+01:14:41.887 --> 01:14:53.386
+The server signs a URL with its credentials (for S3, Signature V4): the method, bucket per key, expiry and selected headers go into an HMAC-signed string.
+
+1093
+01:14:53.666 --> 01:15:00.002
+Anyone with the URL can perform exactly that operation until it expires, without credentials.
+
+1094
+01:15:00.282 --> 01:15:08.218
+Keep expiries short, scope to one key, fix the content type, never log the URLs, and authorise the user before signing.
+
+1095
+01:15:09.568 --> 01:15:10.677
+Question 6.
+
+1096
+01:15:10.957 --> 01:15:15.011
+What goes into a CDN cache key, and how do you get a high hit ratio?
+
+1097
+01:15:15.291 --> 01:15:16.656
+Thirty-second answer:
+
+1098
+01:15:16.936 --> 01:15:24.509
+The key identifies which cached copy answers a request: typically the host, path and query string, plus any Vary headers.
+
+1099
+01:15:24.789 --> 01:15:26.197
+For a high hit ratio:
+
+1100
+01:15:27.547 --> 01:15:28.635
+Question 7.
+
+1101
+01:15:28.915 --> 01:15:32.286
+How do you invalidate CDN content when a price changes?
+
+1102
+01:15:32.566 --> 01:15:33.931
+Thirty-second answer:
+
+1103
+01:15:34.211 --> 01:15:46.329
+Combine short TTLs with active purging by surrogate key (tag responses with sku-7 and purge the tag when sku-7 changes), and use stale-while-revalidate for smooth refreshes.
+
+1104
+01:15:46.609 --> 01:15:52.027
+For static assets, never purge: version the URLs (content hash) and cache them forever.
+
+1105
+01:15:53.377 --> 01:15:54.401
+Question 8.
+
+1106
+01:15:54.681 --> 01:15:59.119
+Explain row versus columnar storage and why Parquet is so much smaller.
+
+1107
+01:15:59.399 --> 01:16:00.764
+Thirty-second answer:
+
+1108
+01:16:01.044 --> 01:16:07.785
+Row storage keeps all columns of a row together, which is ideal for reading or writing whole records by key.
+
+1109
+01:16:08.065 --> 01:16:15.233
+Columnar storage keeps each column's values together, which is ideal for scanning a few columns across many rows.
+
+1110
+01:16:15.513 --> 01:16:24.260
+Similar values sit next to each other, so encodings (dictionary, run-length, delta) and compression (zstd, snappy) work very well.
+
+1111
+01:16:25.610 --> 01:16:26.677
+Question 9.
+
+1112
+01:16:26.957 --> 01:16:29.730
+How do you make a batch job restartable and correct?
+
+1113
+01:16:30.010 --> 01:16:31.375
+Thirty-second answer:
+
+1114
+01:16:31.655 --> 01:16:43.239
+Process in chunks, and commit each chunk's output together with a checkpoint (the last key processed) in the same transaction, so a restart resumes exactly after the last committed chunk.
+
+1115
+01:16:43.519 --> 01:16:50.090
+Alternatively, make the output idempotent: recompute a whole partition (a day) and replace it atomically.
+
+1116
+01:16:50.370 --> 01:16:55.063
+Also make the reader deterministic (keyset pagination on a unique sort key).
+
+1117
+01:16:56.413 --> 01:16:57.181
+Senior.
+
+1118
+01:16:57.461 --> 01:16:58.507
+Question 10.
+
+1119
+01:16:58.787 --> 01:17:01.432
+Warehouse, lake or lakehouse: how do you choose?
+
+1120
+01:17:02.782 --> 01:17:03.913
+Question 11.
+
+1121
+01:17:04.193 --> 01:17:09.761
+Event time versus processing time, watermarks and late data: explain with an example.
+
+1122
+01:17:10.041 --> 01:17:11.406
+Thirty-second answer:
+
+1123
+01:17:11.686 --> 01:17:16.742
+Event time is when something happened (the order was placed at 19:42:10).
+
+1124
+01:17:17.022 --> 01:17:24.126
+Processing time is when the stream processor saw it (19:44:30, because the phone was in a basement).
+
+1125
+01:17:24.406 --> 01:17:27.009
+Windows must use event time to be correct.
+
+1126
+01:17:27.289 --> 01:17:39.235
+A watermark estimates how far event time has progressed (no events before 19:42:05 are still expected), and a window fires when the watermark passes its end.
+
+1127
+01:17:39.515 --> 01:17:43.270
+Late events are dropped or, with allowed lateness, update the result.
+
+1128
+01:17:44.620 --> 01:17:45.708
+Question 12.
+
+1129
+01:17:45.988 --> 01:17:51.919
+Design an ELT pipeline from the order service's PostgreSQL to the analytics layer.
+
+1130
+01:17:53.269 --> 01:17:54.549
+Question 13.
+
+1131
+01:17:54.829 --> 01:17:58.647
+What causes a thundering herd at a CDN and how is it mitigated?
+
+1132
+01:17:58.927 --> 01:18:00.293
+Thirty-second answer:
+
+1133
+01:18:00.573 --> 01:18:10.493
+When a popular object expires or is purged, every edge that receives requests at that moment misses simultaneously and forwards them all to the origin.
+
+1134
+01:18:10.773 --> 01:18:11.818
+Mitigations:
+
+1135
+01:18:13.168 --> 01:18:14.363
+Question 14.
+
+1136
+01:18:14.643 --> 01:18:19.848
+How do you handle GDPR or DPDP deletion requests in a data lake?
+
+1137
+01:18:20.128 --> 01:18:21.493
+Thirty-second answer:
+
+1138
+01:18:21.773 --> 01:18:28.365
+Plain Parquet files are immutable, so deleting a customer means rewriting every file that contains them.
+
+1139
+01:18:28.645 --> 01:18:45.883
+Use a table format with row-level deletes (Iceberg or Delta: position or equality delete files or copy-on-write), partition and cluster so a customer's data is localised, and run compaction plus snapshot expiry so deleted data is physically removed.
+
+1140
+01:18:46.163 --> 01:18:52.563
+Also pseudonymise identifiers in analytical layers so most tables contain no direct PII.
+
+1141
+01:18:53.913 --> 01:18:54.809
+Architect.
+
+1142
+01:18:55.089 --> 01:18:56.283
+Question 15.
+
+1143
+01:18:56.563 --> 01:19:00.723
+Lambda versus Kappa: which would you use for the grocery platform and why?
+
+1144
+01:19:02.073 --> 01:19:03.268
+Question 16.
+
+1145
+01:19:03.548 --> 01:19:09.436
+Design the image and media pipeline for 400K SKUs from 2,000 sellers.
+
+1146
+01:19:10.786 --> 01:19:12.130
+Question 17.
+
+1147
+01:19:12.410 --> 01:19:14.863
+The finance team wants real-time GMV.
+
+1148
+01:19:15.143 --> 01:19:16.359
+How do you respond?
+
+1149
+01:19:16.639 --> 01:19:18.005
+Thirty-second answer:
+
+1150
+01:19:18.285 --> 01:19:20.375
+Ask what decision needs real time.
+
+1151
+01:19:20.655 --> 01:19:28.655
+Operations (staffing, surge) benefit from minute-level GMV, which is a streaming, event-time metric labelled provisional.
+
+1152
+01:19:28.935 --> 01:19:35.805
+Finance reporting needs exact, auditable, reconciled numbers, which is T+1 batch from the lakehouse.
+
+1153
+01:19:36.085 --> 01:19:44.149
+Provide both, clearly labelled, with a daily reconciliation between them, rather than making finance depend on a streaming pipeline.
+
+1154
+01:19:45.499 --> 01:19:46.672
+Question 18.
+
+1155
+01:19:46.952 --> 01:19:51.987
+How would you stop analytics workloads from hurting OLTP permanently, not just this quarter?
+
+1156
+01:19:53.337 --> 01:19:54.574
+Question 19.
+
+1157
+01:19:54.854 --> 01:20:00.081
+How do you design a streaming job so that restarts and redeployments don't corrupt results?
+
+1158
+01:20:01.431 --> 01:20:02.540
+Question 20.
+
+1159
+01:20:02.820 --> 01:20:08.217
+Summarise the data architecture you'd present to the CTO for the grocery platform.
+
+1160
+01:20:09.567 --> 01:20:10.463
+Part 9.
+
+1161
+01:20:10.743 --> 01:20:12.151
+Summary and Practice.
+
+1162
+01:20:13.401 --> 01:20:14.489
+Key takeaways.
+
+1163
+01:20:14.769 --> 01:20:23.068
+Put each kind of data in the store built for it: rows for transactions, objects for blobs, columns for analytics, logs for events.
+
+1164
+01:20:23.348 --> 01:20:30.836
+Blobs go to object storage behind presigned URLs, never through app servers or into OLTP tables (L1).
+
+1165
+01:20:31.116 --> 01:20:36.300
+CDN success is mostly cache-key design: normalise and allow-list (L2:
+
+1166
+01:20:36.580 --> 01:20:39.972
+57 %, then 97.5 %).
+
+1167
+01:20:40.252 --> 01:20:43.964
+Add request coalescing (400, then 1) and stale-if-error.
+
+1168
+01:20:44.244 --> 01:20:51.135
+Version static assets, purge dynamic ones by tag, and never publicly cache personalised responses.
+
+1169
+01:20:52.485 --> 01:20:56.474
+Columnar + compression + pruning wins analytics (L3:
+
+1170
+01:20:56.754 --> 01:21:08.039
+58 MB versus 1.4 GB; 3.5 to 4x faster), while row stores win point lookups (0.9 ms versus 11 ms).
+
+1171
+01:21:08.319 --> 01:21:14.549
+ELT: keep the raw data, transform once, and precompute what every query needs (L3 Q4:
+
+1172
+01:21:14.829 --> 01:21:15.874
+7x).
+
+1173
+01:21:16.154 --> 01:21:21.786
+A lakehouse (Iceberg or Delta) gives open storage with ACID, deletes and time travel.
+
+1174
+01:21:22.066 --> 01:21:23.922
+Plain file lakes become swamps.
+
+1175
+01:21:24.202 --> 01:21:30.879
+Batch jobs: the checkpoint must be atomic with the output, or overwrite partitions idempotently (L4:
+
+1176
+01:21:31.159 --> 01:21:34.829
+5.37 crore rupees silent error otherwise).
+
+1177
+01:21:36.179 --> 01:21:42.536
+Streaming: use event time, set watermarks from measured delays, and allow lateness with updates (L4:
+
+1178
+01:21:42.816 --> 01:21:46.421
+29.8 %, then 100 % exact).
+
+1179
+01:21:46.701 --> 01:21:53.485
+Lambda versus kappa is less important than batch is the truth for money, streaming is provisional and reconciled.
+
+1180
+01:21:54.835 --> 01:21:56.158
+Decision cheat sheet.
+
+1181
+01:21:56.438 --> 01:21:57.782
+Here is a quick table:
+
+1182
+01:21:58.062 --> 01:21:59.235
+Need, and Choice.
+
+1183
+01:21:59.515 --> 01:22:01.649
+Store media, documents, exports:
+
+1184
+01:22:01.929 --> 01:22:06.302
+Object storage, private buckets, presigned URLs, lifecycle rules.
+
+1185
+01:22:06.582 --> 01:22:07.926
+Serve static assets:
+
+1186
+01:22:08.206 --> 01:22:11.107
+CDN, content-hashed URLs, immutable.
+
+1187
+01:22:11.387 --> 01:22:13.393
+Cache public API responses:
+
+1188
+01:22:13.673 --> 01:22:18.473
+Short TTL + SWR + SIE + surrogate-key purge.
+
+1189
+01:22:18.753 --> 01:22:20.054
+Reporting and BI:
+
+1190
+01:22:20.334 --> 01:22:24.921
+Lakehouse (Iceberg + Trino) or managed warehouse, fed by CDC.
+
+1191
+01:22:25.201 --> 01:22:27.121
+Small-data ad-hoc analytics:
+
+1192
+01:22:27.401 --> 01:22:29.406
+DuckDB on Parquet extracts.
+
+1193
+01:22:29.686 --> 01:22:31.457
+Seller dashboards, sub-second:
+
+1194
+01:22:31.737 --> 01:22:36.089
+Real-time OLAP (ClickHouse or Pinot or Druid) fed by streams.
+
+1195
+01:22:36.369 --> 01:22:37.457
+Nightly jobs:
+
+1196
+01:22:37.737 --> 01:22:41.875
+Spring Batch or Spark with atomic checkpoints or partition overwrite.
+
+1197
+01:22:42.155 --> 01:22:43.563
+Seconds-fresh metrics:
+
+1198
+01:22:43.843 --> 01:22:47.449
+Kafka Streams or Flink, event time, watermark + grace.
+
+1199
+01:22:48.799 --> 01:22:49.929
+Exercises.
+
+1200
+01:22:50.209 --> 01:22:51.553
+Here is a quick table:
+
+1201
+01:22:51.833 --> 01:22:53.689
+Band, and Exercise, and Hint.
+
+1202
+01:22:53.969 --> 01:22:54.844
+B2.
+
+1203
+01:22:55.124 --> 01:22:56.191
+Exercise:
+
+1204
+01:22:56.471 --> 01:23:04.535
+Add content-type as a signed header to L1's presigned PUT and show that uploading a PDF to an image URL fails.
+
+1205
+01:23:04.815 --> 01:23:05.497
+Hint:
+
+1206
+01:23:05.777 --> 01:23:06.801
+Signed headers.
+
+1207
+01:23:07.081 --> 01:23:07.956
+B2.
+
+1208
+01:23:08.236 --> 01:23:09.303
+Exercise:
+
+1209
+01:23:09.583 --> 01:23:10.991
+In L2, add Vary:
+
+1210
+01:23:11.271 --> 01:23:15.239
+User-Agent with 50 distinct UAs and measure the hit ratio.
+
+1211
+01:23:15.519 --> 01:23:16.201
+Hint:
+
+1212
+01:23:16.481 --> 01:23:17.612
+Key explosion.
+
+1213
+01:23:17.892 --> 01:23:18.767
+B3.
+
+1214
+01:23:19.047 --> 01:23:20.113
+Exercise:
+
+1215
+01:23:20.393 --> 01:23:26.793
+In L3, sort each Parquet partition by storeid and measure a single-store query before and after.
+
+1216
+01:23:27.073 --> 01:23:27.756
+Hint:
+
+1217
+01:23:28.036 --> 01:23:29.871
+Row-group min or max pruning.
+
+1218
+01:23:30.151 --> 01:23:31.025
+B3.
+
+1219
+01:23:31.305 --> 01:23:32.372
+Exercise:
+
+1220
+01:23:32.652 --> 01:23:40.439
+Add a stale-while-revalidate mode to L2: serve stale and refresh in the background; measure latency and origin requests.
+
+1221
+01:23:40.719 --> 01:23:41.401
+Hint:
+
+1222
+01:23:41.681 --> 01:23:42.769
+Async refresh.
+
+1223
+01:23:43.049 --> 01:23:43.924
+B4.
+
+1224
+01:23:44.204 --> 01:23:45.271
+Exercise:
+
+1225
+01:23:45.551 --> 01:23:53.721
+Extend L4 Part B with cancellations that retract an order from its window; compare update versus final only outputs.
+
+1226
+01:23:54.001 --> 01:23:54.684
+Hint:
+
+1227
+01:23:54.964 --> 01:23:55.988
+Retractions.
+
+1228
+01:23:57.338 --> 01:23:58.213
+B4.
+
+1229
+01:23:58.493 --> 01:23:59.559
+Exercise:
+
+1230
+01:23:59.839 --> 01:24:07.221
+Turn L4 Part A's overwrite into per-day partitions and rerun only the days that changed (late-arriving rows).
+
+1231
+01:24:07.501 --> 01:24:08.183
+Hint:
+
+1232
+01:24:08.463 --> 01:24:09.957
+Incremental recompute.
+
+1233
+01:24:11.307 --> 01:24:12.309
+Further reading.
+
+1234
+01:24:12.589 --> 01:24:23.533
+AWS S3 User Guide: presigned URLs, multipart upload, consistency model, lifecycle; AWS Signature Version 4 documentation.
+
+1235
+01:24:23.813 --> 01:24:33.691
+RFC 9111 (HTTP Caching), RFC 5861 (stale-while-revalidate, stale-if-error).
+
+1236
+01:24:33.971 --> 01:24:41.053
+Cloudflare or Fastly docs: cache keys, tiered cache or origin shield, surrogate keys, request collapsing.
+
+1237
+01:24:41.333 --> 01:24:45.323
+Martin Kleppmann, Designing Data-Intensive Applications, ch.
+
+1238
+01:24:45.603 --> 01:24:48.760
+3 (column storage), 10 (batch), 11 (stream).
+
+1239
+01:24:49.040 --> 01:24:50.469
+Tyler Akidau et al.
+
+1240
+01:24:50.749 --> 01:24:57.725
+Streaming Systems and The Dataflow Model (VLDB 2015): event time, watermarks, triggers.
+
+1241
+01:24:59.075 --> 01:25:03.001
+Apache Iceberg and Delta Lake documentation; Armbrust et al.
+
+1242
+01:25:03.281 --> 01:25:05.670
+Lakehouse (CIDR 2021).
+
+1243
+01:25:05.950 --> 01:25:09.193
+Jay Kreps, Questioning the Lambda Architecture (kappa).
+
+1244
+01:25:09.473 --> 01:25:19.307
+Spring Batch reference (chunk processing, restartability); Kafka Streams docs (windowing, grace, suppress); Apache Flink docs (watermarks, checkpoints).
+
+1245
+01:25:19.587 --> 01:25:21.337
+DuckDB documentation:
+
+1246
+01:25:21.617 --> 01:25:23.323
+Parquet, hive partitioning.
+
+1247
+01:25:24.673 --> 01:25:25.911
+Related chapters.
+
+1248
+01:25:26.191 --> 01:25:49.295
+05, Relational Databases, 06, NoSQL and Polyglot Persistence, 07, Caching, 10, Replication, 13, Distributed Transactions or CDC, 14, Messaging and Event Streaming, 20, Idempotency, IDs and Locks, 22, Search Systems, 28, Schema and Data Evolution, 36, Compliance and Data Residency.
+
+1249
+01:25:50.645 --> 01:25:52.245
+That's the end of this chapter.
+
+1250
+01:25:52.525 --> 01:25:58.562
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1251
+01:25:58.842 --> 01:26:00.293
+See you in the next chapter.
+

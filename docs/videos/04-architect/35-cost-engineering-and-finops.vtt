@@ -1,0 +1,3158 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.142
+Cost Engineering and FinOps.
+
+2
+00:00:02.422 --> 00:00:06.561
+Chapter 35, from the Architect part of the System Design Playbook.
+
+3
+00:00:08.311 --> 00:00:09.271
+At a glance:
+
+4
+00:00:09.551 --> 00:00:10.724
+Chapter at a glance.
+
+5
+00:00:11.004 --> 00:00:12.007
+Reader bands:
+
+6
+00:00:12.287 --> 00:00:14.569
+B2, then B4, Prerequisites:
+
+7
+00:00:14.849 --> 00:00:20.524
+Ch 02, Ch 26, Ch 31, Ch 34, What you will build:
+
+8
+00:00:20.804 --> 00:00:35.097
+Cost as a first-class architecture quality: turning a cloud bill into unit economics, rightsizing and autoscaling, commitment strategy under uncertainty, and the storage and data-transfer decisions nobody makes on purpose.
+
+9
+00:00:35.377 --> 00:00:43.719
+Four runnable labs; every price in this chapter is an illustrative assumption, not a current vendor rate, substitute your contract's numbers.
+
+10
+00:00:45.069 --> 00:00:47.309
+L1: unit economics from a bill.
+
+11
+00:00:47.589 --> 00:01:10.522
+A 2.28 crore rupees per month bill (illustrative) became 0.76 rupeesper order; driver-based allocation moved up to 3.7 lakh rupees per month between teams compared with an even split; 4.5% of spend was untagged; the most expensive-looking service returned 8.5x its cost in measured uplift.
+
+12
+00:01:10.802 --> 00:01:13.127
+L2: rightsizing and autoscaling.
+
+13
+00:01:13.407 --> 00:01:33.994
+Over 14 days with a 5.3x festival spike, a static fleet sized for peak ran at 4% of needed capacity; reactive autoscaling cost a fraction but was overloaded for the first 5 minutes of the sale; adding a scheduled pre-scale reached 0 overloaded minutes at 7% of the static fleet's cost.
+
+14
+00:01:35.344 --> 00:01:37.008
+L3: how much to commit.
+
+15
+00:01:37.288 --> 00:01:48.147
+Against expected demand the optimum commitment is where the marginal pod is busy ≥ 60% of hours (37 pods, minus 23%).
+
+16
+00:01:48.427 --> 00:02:04.299
+Under uncertain demand, committing to the p90 was worst (35.7 lakh rupees p95 regret); the curve was flat from 0.85x to 1.2x of the optimum, and growth-skew favored the upper end.
+
+17
+00:02:04.579 --> 00:02:06.541
+L4: storage and transfer.
+
+18
+00:02:06.821 --> 00:02:15.803
+Measured on 50,000 real-shaped events: gzip 6.3x, binary + gzip 9.0x smaller than JSON.
+
+19
+00:02:16.083 --> 00:02:30.184
+Three-year retention: order events are a rounding error at any policy, but logs + clickstream cost 23.2 crore rupees kept hot and raw versus 29.3 lakh rupees compressed and tiered.
+
+20
+00:02:30.464 --> 00:02:31.445
+Reading time:
+
+21
+00:02:31.725 --> 00:02:33.517
+110 min + code.
+
+22
+00:02:34.867 --> 00:02:35.721
+Part 1.
+
+23
+00:02:36.001 --> 00:02:37.921
+Introduction and Why It Matters.
+
+24
+00:02:39.171 --> 00:02:42.584
+A story: the bill that doubled while traffic grew 20%.
+
+25
+00:02:42.864 --> 00:02:54.469
+In the year after the microservices migration and the first festival season, the grocery platform's cloud bill went from 1.1 crore rupees to 2.3 crore rupees a month.
+
+26
+00:02:54.749 --> 00:02:56.328
+Traffic grew 20%.
+
+27
+00:02:56.608 --> 00:03:04.736
+The CFO asked engineering a reasonable question, what did we get for the extra 1.2 crore rupees? and nobody could answer.
+
+28
+00:03:05.016 --> 00:03:15.747
+The investigation took three weeks, because the bill was organized by cloud product (EC2, RDS, data transfer) rather than by anything the business understood.
+
+29
+00:03:16.027 --> 00:03:16.944
+What it found:
+
+30
+00:03:18.294 --> 00:03:20.086
+Nobody owned most of the spend.
+
+31
+00:03:20.366 --> 00:03:34.382
+Shared clusters, observability and networking were a third of the bill and belonged to no team; 5% was attached to resources with no tags at all, including instances from a load test that had finished four months earlier.
+
+32
+00:03:34.662 --> 00:03:36.987
+The fleet was sized for Diwali, all year.
+
+33
+00:03:37.267 --> 00:03:44.499
+After a festival-season outage, the team had raised every service's replica count to survive peak and never lowered it.
+
+34
+00:03:44.779 --> 00:03:47.915
+Average utilisation was in single digits (L2).
+
+35
+00:03:49.265 --> 00:03:50.887
+Commitments were bought at the peak.
+
+36
+00:03:51.167 --> 00:04:01.983
+In a burst of cost-consciousness, someone had bought one-year reserved capacity equal to the festival fleet, which then sat idle eleven months a year, already paid for (L3).
+
+37
+00:04:02.263 --> 00:04:04.823
+Logs were kept forever in the hot search cluster.
+
+38
+00:04:05.103 --> 00:04:14.063
+Debug-level logs from every service, uncompressed, retained indefinitely in case we need them, the fastest-growing line on the bill (L4).
+
+39
+00:04:14.343 --> 00:04:16.689
+Nobody could say whether any spend was worth it.
+
+40
+00:04:16.969 --> 00:04:24.820
+The recommendations service was the obvious cut candidate by size, until someone looked at its A or B test results (L1).
+
+41
+00:04:26.170 --> 00:04:28.325
+None of these were technology failures.
+
+42
+00:04:28.605 --> 00:04:34.471
+They were decisions nobody knew they were making: defaults, one-way ratchets, and costs with no owner.
+
+43
+00:04:34.751 --> 00:04:47.253
+The fix wasn't a cost-cutting sprint; it was making cost visible per team and per order, giving it owners, and treating it as an architecture quality with the same rigor as latency and availability.
+
+44
+00:04:48.603 --> 00:04:49.285
+Quote:
+
+45
+00:04:49.565 --> 00:04:51.229
+The thesis of this chapter.
+
+46
+00:04:51.509 --> 00:05:01.472
+Cost is a quality attribute like latency or availability: it has a budget, it's shaped by architecture decisions, and it erodes unless someone owns it.
+
+47
+00:05:01.752 --> 00:05:18.563
+FinOps makes it manageable by (1) allocating every rupee to an owner and a unit of business value, cost per order, not the EC2 bill; (2) optimising the few big levers, capacity matched to demand, commitments sized to the floor you're confident of,
+
+48
+00:05:18.843 --> 00:05:29.488
+data kept in the cheapest tier that meets its access pattern; and (3) operating continuously, budgets, anomaly alerts, and engineers who see the cost of what they build.
+
+49
+00:05:29.768 --> 00:05:36.872
+The goal is not the lowest bill; it's the most value per rupee, with effort proportionate to where the money actually goes.
+
+50
+00:05:38.222 --> 00:05:40.526
+Where this lives in the grocery platform.
+
+51
+00:05:40.806 --> 00:05:42.171
+Here is a quick table:
+
+52
+00:05:42.451 --> 00:05:45.417
+FinOps practice, and Grocery platform, and Lab.
+
+53
+00:05:45.697 --> 00:05:46.827
+Cost allocation.
+
+54
+00:05:47.107 --> 00:05:48.387
+Grocery platform:
+
+55
+00:05:48.667 --> 00:05:55.259
+Tags on every resource; shared costs allocated by usage drivers; untagged spend reported daily.
+
+56
+00:05:55.539 --> 00:05:56.222
+Lab:
+
+57
+00:05:56.502 --> 00:05:57.334
+L1.
+
+58
+00:05:57.614 --> 00:05:58.873
+Unit economics.
+
+59
+00:05:59.153 --> 00:06:00.433
+Grocery platform:
+
+60
+00:06:00.713 --> 00:06:04.766
+Cost per order, per active customer, per dark store; tracked monthly.
+
+61
+00:06:05.046 --> 00:06:05.729
+Lab:
+
+62
+00:06:06.009 --> 00:06:06.841
+L1.
+
+63
+00:06:07.121 --> 00:06:08.294
+Value assessment.
+
+64
+00:06:08.574 --> 00:06:09.854
+Grocery platform:
+
+65
+00:06:10.134 --> 00:06:14.166
+Per-service cost versus measured business impact (A or B uplift).
+
+66
+00:06:14.446 --> 00:06:15.129
+Lab:
+
+67
+00:06:15.409 --> 00:06:16.241
+L1.
+
+68
+00:06:16.521 --> 00:06:18.313
+Rightsizing and autoscaling.
+
+69
+00:06:18.593 --> 00:06:19.873
+Grocery platform:
+
+70
+00:06:20.153 --> 00:06:25.337
+60% target utilisation; autoscaling + calendar pre-scale for sales.
+
+71
+00:06:25.617 --> 00:06:26.299
+Lab:
+
+72
+00:06:26.579 --> 00:06:28.371
+L2, Ch 26.
+
+73
+00:06:28.651 --> 00:06:29.526
+Commitments.
+
+74
+00:06:29.806 --> 00:06:31.086
+Grocery platform:
+
+75
+00:06:31.366 --> 00:06:35.334
+Savings plans sized to the confident floor, ratcheted quarterly.
+
+76
+00:06:35.614 --> 00:06:36.297
+Lab:
+
+77
+00:06:36.577 --> 00:06:37.430
+L3.
+
+78
+00:06:37.710 --> 00:06:38.947
+Data lifecycle.
+
+79
+00:06:39.227 --> 00:06:40.507
+Grocery platform:
+
+80
+00:06:40.787 --> 00:06:43.710
+Compression, tiering, retention by data class.
+
+81
+00:06:43.990 --> 00:06:44.673
+Lab:
+
+82
+00:06:44.953 --> 00:06:46.702
+L4, Ch 21.
+
+83
+00:06:48.052 --> 00:06:48.927
+Governance.
+
+84
+00:06:49.207 --> 00:06:50.487
+Grocery platform:
+
+85
+00:06:50.767 --> 00:06:55.481
+Budgets and anomaly alerts per team; cost in design docs and ADRs.
+
+86
+00:06:55.761 --> 00:06:58.684
+Lab: §2.9, Ch 32.
+
+87
+00:07:00.034 --> 00:07:01.357
+Learning objectives.
+
+88
+00:07:01.637 --> 00:07:03.514
+By the end you will be able to:
+
+89
+00:07:03.794 --> 00:07:10.002
+Turn a cloud bill into unit economics and choose a defensible allocation for shared costs (L1).
+
+90
+00:07:10.282 --> 00:07:15.722
+Rightsize capacity and cover demand your autoscaler can't react to in time (L2).
+
+91
+00:07:16.002 --> 00:07:20.866
+Size commitment discounts against a demand curve and under uncertainty (L3).
+
+92
+00:07:21.146 --> 00:07:27.119
+Estimate and cut storage and data-transfer costs by encoding, tiering and topology (L4).
+
+93
+00:07:28.469 --> 00:07:32.203
+Design for cost, know which architecture choices drive the bill.
+
+94
+00:07:32.483 --> 00:07:38.435
+Run FinOps as a practice: ownership, budgets, anomalies, and cost in every design review.
+
+95
+00:07:39.785 --> 00:07:40.659
+Part 2.
+
+96
+00:07:40.939 --> 00:07:42.838
+Core Concepts, Beginner to Deep.
+
+97
+00:07:44.088 --> 00:07:46.883
+Intuition: cost is an architecture quality.
+
+98
+00:07:47.163 --> 00:07:52.048
+In a data centre, cost was mostly a procurement decision made once every few years.
+
+99
+00:07:52.328 --> 00:08:03.613
+In the cloud, every engineer spends money every day: a replica count, a log level, an instance type, a retention setting, a cross-region call pattern, each is a recurring charge.
+
+100
+00:08:03.893 --> 00:08:07.541
+That makes cost an emergent property of design, like latency.
+
+101
+00:08:07.821 --> 00:08:10.083
+Three consequences shape this chapter:
+
+102
+00:08:10.363 --> 00:08:13.968
+Cost needs owners, just as services need on-call owners.
+
+103
+00:08:14.248 --> 00:08:17.427
+Spend nobody owns grows (L1's untagged line).
+
+104
+00:08:18.777 --> 00:08:22.147
+Cost must be measured in business units to be decided on.
+
+105
+00:08:22.427 --> 00:08:32.795
+2.3 crore rupees invites panic; 0.76 rupeesper order, 0.12% of order value invites proportionate action.
+
+106
+00:08:33.075 --> 00:08:35.273
+Cost trades off against other qualities.
+
+107
+00:08:35.553 --> 00:08:46.667
+Less headroom saves money and moves you toward the queueing cliff (Ch 31 L3); cells cost more infrastructure and buy blast-radius containment (Ch 34).
+
+108
+00:08:46.947 --> 00:08:49.870
+The goal is value per rupee, not minimum rupees.
+
+109
+00:08:51.220 --> 00:08:52.692
+What drives a cloud bill.
+
+110
+00:08:52.972 --> 00:08:56.961
+For most backend platforms, spend concentrates in a few categories:
+
+111
+00:08:58.311 --> 00:08:59.677
+Here is a quick table:
+
+112
+00:08:59.957 --> 00:09:02.495
+Driver, and Typical share, and Main levers.
+
+113
+00:09:02.775 --> 00:09:05.271
+Compute (VMs, containers, functions).
+
+114
+00:09:05.551 --> 00:09:06.597
+Typical share:
+
+115
+00:09:06.877 --> 00:09:08.391
+40 to 60%.
+
+116
+00:09:08.671 --> 00:09:09.695
+Main levers:
+
+117
+00:09:09.975 --> 00:09:15.138
+Rightsizing, autoscaling, commitments, spot for interruptible work, efficient code.
+
+118
+00:09:15.418 --> 00:09:17.594
+Databases and caches (managed).
+
+119
+00:09:17.874 --> 00:09:18.919
+Typical share:
+
+120
+00:09:19.199 --> 00:09:20.799
+15 to 30%.
+
+121
+00:09:21.079 --> 00:09:22.103
+Main levers:
+
+122
+00:09:22.383 --> 00:09:27.717
+Instance sizing, read replicas only where needed, storage tier, reserved capacity.
+
+123
+00:09:27.997 --> 00:09:30.535
+Storage (block, object, search clusters).
+
+124
+00:09:30.815 --> 00:09:31.861
+Typical share:
+
+125
+00:09:32.141 --> 00:09:33.613
+5 to 20%.
+
+126
+00:09:33.893 --> 00:09:34.917
+Main levers:
+
+127
+00:09:35.197 --> 00:09:39.442
+Compression, lifecycle tiering, retention policy, deleting orphans.
+
+128
+00:09:39.722 --> 00:09:42.879
+Data transfer (egress, cross-zone, cross-region).
+
+129
+00:09:43.159 --> 00:09:44.205
+Typical share:
+
+130
+00:09:44.485 --> 00:09:45.829
+2 to 15%.
+
+131
+00:09:46.109 --> 00:09:47.133
+Main levers:
+
+132
+00:09:47.413 --> 00:09:51.935
+Zone-aware routing, CDN, compression, avoiding cross-region chatter.
+
+133
+00:09:52.215 --> 00:09:54.839
+Observability (logs, metrics, traces).
+
+134
+00:09:55.119 --> 00:09:56.165
+Typical share:
+
+135
+00:09:56.445 --> 00:09:57.938
+5 to 15%.
+
+136
+00:09:58.218 --> 00:09:59.242
+Main levers:
+
+137
+00:09:59.522 --> 00:10:02.999
+Log levels, sampling, retention, cardinality control.
+
+138
+00:10:04.349 --> 00:10:05.949
+Non-production environments.
+
+139
+00:10:06.229 --> 00:10:07.275
+Typical share:
+
+140
+00:10:07.555 --> 00:10:09.197
+10 to 25%.
+
+141
+00:10:09.477 --> 00:10:10.501
+Main levers:
+
+142
+00:10:10.781 --> 00:10:14.387
+Shut down off-hours, smaller shapes, ephemeral environments.
+
+143
+00:10:15.737 --> 00:10:35.555
+Two practical observations: non-production is often a surprisingly large slice (L1: dev or staging was 11.5 lakh rupees per month, more than several production services), and observability grows faster than traffic because every new service and feature adds logs, metrics and cardinality.
+
+144
+00:10:36.905 --> 00:10:39.359
+Cost allocation and unit economics.
+
+145
+00:10:39.639 --> 00:10:42.156
+Allocation assigns every rupee to an owner:
+
+146
+00:10:42.436 --> 00:10:48.559
+Direct costs, resources tagged to one service or team (a service's node pool, its database).
+
+147
+00:10:48.839 --> 00:10:54.087
+Shared costs, clusters, networking, observability, data platform, CI, non-prod.
+
+148
+00:10:54.367 --> 00:10:56.393
+Allocate them by usage drivers:
+
+149
+00:10:56.673 --> 00:11:07.745
+Kafka by bytes produced, observability by log or metric volume, NAT or egress by gigabytes out, the cluster control plane by requests or resource requests.
+
+150
+00:11:08.025 --> 00:11:12.569
+Untagged costs, a governance failure to be driven to zero, not allocated.
+
+151
+00:11:13.919 --> 00:11:22.474
+L1 compares an even split with driver-based allocation: the method moved up to 3.7 lakh rupees per month between teams.
+
+152
+00:11:22.754 --> 00:11:31.287
+An even split is simple but distorts incentives, a low-traffic team pays for another team's logs and has no reason to reduce its own.
+
+153
+00:11:31.567 --> 00:11:35.301
+Unit economics divides allocated cost by a business unit:
+
+154
+00:11:35.581 --> 00:11:37.095
+Cost per order (L1:
+
+155
+00:11:37.375 --> 00:11:42.069
+0.76 rupees), the headline metric for a commerce platform.
+
+156
+00:11:42.349 --> 00:11:48.578
+Cost per active customer, per dark store, per tenant (Ch 30), depending on how the business grows.
+
+157
+00:11:48.858 --> 00:11:53.125
+Cost per feature or service per order, which enables value questions.
+
+158
+00:11:54.475 --> 00:12:06.997
+Unit cost is what makes growth legible: the bill doubling while cost per order stays flat is healthy; cost per order rising 60% (§1.1) is a problem regardless of the bill.
+
+159
+00:12:07.277 --> 00:12:13.955
+Showback versus chargeback: showback reports each team's cost to them; chargeback actually bills their budget.
+
+160
+00:12:14.235 --> 00:12:22.299
+Start with showback, it changes behavior once people can see their numbers, and move to chargeback only where budgets are genuinely owned.
+
+161
+00:12:23.649 --> 00:12:25.078
+Value, not just cost.
+
+162
+00:12:25.358 --> 00:12:28.451
+Cost numbers without value numbers lead to bad cuts.
+
+163
+00:12:28.731 --> 00:12:43.963
+L1's recommendations service was among the two largest lines, and its A or B-measured uplift (illustrative: +1.2% GMV at 18% contribution margin) returned about 8.5x its cost.
+
+164
+00:12:44.243 --> 00:12:50.345
+Cutting it would have saved 49 lakh rupees a month and lost 4.2 crore rupees of profit.
+
+165
+00:12:50.625 --> 00:12:52.395
+Ways to connect cost to value:
+
+166
+00:12:52.675 --> 00:13:00.014
+Experiments, A or B tests with and without a feature give incremental revenue; divide by the feature's allocated cost.
+
+167
+00:13:01.364 --> 00:13:06.185
+Unit margin, cloud cost per order relative to contribution margin per order.
+
+168
+00:13:06.465 --> 00:13:07.297
+L1:
+
+169
+00:13:07.577 --> 00:13:25.689
+0.76 rupeesagainst a 650 rupeesorder, for quick commerce, rider and dark-store costs dwarf cloud cost, so cloud optimisation effort should be proportionate (remove waste and bad incentives; don't micro-optimise at the expense of delivery speed).
+
+170
+00:13:25.969 --> 00:13:33.223
+Cost of downtime, the value side of reliability spend (Ch 34 cells, Ch 27 DR).
+
+171
+00:13:34.573 --> 00:13:36.365
+Rightsizing and autoscaling.
+
+172
+00:13:36.645 --> 00:13:39.802
+Rightsizing matches provisioned capacity to demand.
+
+173
+00:13:40.082 --> 00:13:41.575
+Two decisions dominate:
+
+174
+00:13:41.855 --> 00:13:43.242
+Target utilisation.
+
+175
+00:13:43.522 --> 00:14:04.130
+Higher utilisation is cheaper but moves you up the queueing curve: latency rises non-linearly as utilisation approaches 100% (Ch 31 L3). ~50 to 70% CPU for latency-sensitive services is a common compromise; batch and async consumers can run hotter.
+
+176
+00:14:04.410 --> 00:14:07.759
+How to cover demand the control loop can't react to in time.
+
+177
+00:14:08.039 --> 00:14:15.890
+Autoscalers act on observed metrics with a lag (metric window, scale-up decision, pod scheduling, JVM warm-up).
+
+178
+00:14:16.170 --> 00:14:20.927
+A demand step faster than that lag overloads you before new capacity arrives.
+
+179
+00:14:22.277 --> 00:14:29.957
+L2 shows the whole trade-off on 14 days of demand with a festival spike of 5.3x a normal peak:
+
+180
+00:14:31.307 --> 00:14:32.673
+Here is a quick table:
+
+181
+00:14:32.953 --> 00:14:35.193
+Policy, and Cost, and Overloaded.
+
+182
+00:14:35.473 --> 00:14:37.201
+Static for the all-time peak.
+
+183
+00:14:37.481 --> 00:14:38.206
+Cost:
+
+184
+00:14:38.486 --> 00:14:41.622
+100% (4% needed utilisation).
+
+185
+00:14:41.902 --> 00:14:42.841
+Overloaded:
+
+186
+00:14:43.121 --> 00:14:44.102
+0 min.
+
+187
+00:14:44.382 --> 00:14:45.961
+Static for a normal day.
+
+188
+00:14:46.241 --> 00:14:48.011
+Cost: ~20%.
+
+189
+00:14:48.291 --> 00:14:49.230
+Overloaded:
+
+190
+00:14:49.510 --> 00:14:51.729
+120 min, during the sale.
+
+191
+00:14:52.009 --> 00:14:54.846
+Reactive autoscaling (60% target).
+
+192
+00:14:55.126 --> 00:14:56.939
+Cost: ~7%.
+
+193
+00:14:57.219 --> 00:14:58.158
+Overloaded:
+
+194
+00:14:58.438 --> 00:15:00.721
+5 min, the first bucket of the sale.
+
+195
+00:15:01.001 --> 00:15:03.283
+Autoscaling + scheduled pre-scale.
+
+196
+00:15:03.563 --> 00:15:05.377
+Cost: ~7%.
+
+197
+00:15:05.657 --> 00:15:06.595
+Overloaded:
+
+198
+00:15:06.875 --> 00:15:07.857
+0 min.
+
+199
+00:15:09.207 --> 00:15:28.193
+The general pattern: autoscale for the daily curve; pre-scale for known events (sales, campaigns, festival days, they're on the calendar); keep a warm pool or fast-starting images for unknown spikes; and use load shedding (Ch 18) as the last line of defense rather than paying for peak all year.
+
+200
+00:15:28.473 --> 00:15:38.692
+Also rightsize the shape: memory-heavy JVM services on compute-optimised instances (or the reverse) waste money even at correct replica counts.
+
+201
+00:15:38.972 --> 00:15:48.295
+Profile requests versus actual usage; Kubernetes resource requests set far above real usage are one of the most common sources of waste.
+
+202
+00:15:49.645 --> 00:15:51.437
+Pricing models and commitments.
+
+203
+00:15:51.717 --> 00:15:54.405
+Cloud capacity is sold in three broad ways:
+
+204
+00:15:54.685 --> 00:15:57.735
+On-demand, pay per hour or second, no commitment.
+
+205
+00:15:58.015 --> 00:16:00.191
+The most flexible and most expensive.
+
+206
+00:16:00.471 --> 00:16:11.927
+Commitments (reserved instances, savings plans, committed-use discounts), commit to a spend or capacity level for 1 to 3 years for a discount (often 30 to 60%).
+
+207
+00:16:12.207 --> 00:16:13.701
+Paid whether used or not.
+
+208
+00:16:13.981 --> 00:16:20.338
+Spot or preemptible, spare capacity at a deep discount that the provider can reclaim with short notice.
+
+209
+00:16:20.618 --> 00:16:22.325
+Only for interruptible work.
+
+210
+00:16:23.675 --> 00:16:35.899
+The commitment rule (L3): a marginal committed unit pays off if it would be busy in at least commit price ÷ on-demand price of the hours, 60% at a 40% discount.
+
+211
+00:16:36.179 --> 00:16:41.533
+So commit to the floor, not the peak: the level your fleet stays at or above most of the time.
+
+212
+00:16:41.813 --> 00:16:55.893
+Against the expected demand curve, L3's optimum was 37 pods (busy 62% of hours), saving 23%; committing to the p90 (92 pods) was worse than no commitment at all.
+
+213
+00:16:56.173 --> 00:16:58.669
+Under uncertainty about next year's demand:
+
+214
+00:16:58.949 --> 00:17:10.384
+The cost curve is flat near the optimum (0.85x, 1.2x within ~2% expected cost), so precision matters less than avoiding the tails.
+
+215
+00:17:11.734 --> 00:17:13.569
+The right hedge follows the skew.
+
+216
+00:17:13.849 --> 00:17:23.107
+L3's demand was more likely to grow than shrink, so a slightly higher commitment did as well on average and better in the p95 regret.
+
+217
+00:17:23.387 --> 00:17:26.097
+If the risk were a shrinking market, you'd hedge lower.
+
+218
+00:17:26.377 --> 00:17:34.547
+Ratchet: commitments are easy to add and hard to exit, so commit to the confident floor and add quarterly as growth materialises.
+
+219
+00:17:34.827 --> 00:17:46.347
+Spot capacity fits stateless, interruptible, retry-safe work: batch jobs, image processing, async consumers with checkpoints, CI runners, ML training with checkpointing.
+
+220
+00:17:46.627 --> 00:17:49.123
+Never the checkout path or stateful primaries.
+
+221
+00:17:50.473 --> 00:17:53.225
+Storage, data lifecycle and data transfer.
+
+222
+00:17:53.505 --> 00:18:04.791
+Storage and transfer costs are mostly defaults nobody chose: default log levels, default retention (forever), default storage class, default load balancing across zones.
+
+223
+00:18:05.071 --> 00:18:09.423
+Encoding, measured in L4 on 50,000 real-shaped order events:
+
+224
+00:18:09.703 --> 00:18:21.777
+JSON 245 bytes or event; gzip 6.3x smaller; a schema'd binary encoding 6.3x; binary + gzip 9.0x.
+
+225
+00:18:22.057 --> 00:18:29.545
+Schema'd formats (Protobuf, Avro, Ch 28) and columnar formats (Parquet) for analytics compound this.
+
+226
+00:18:30.895 --> 00:18:34.287
+Placement and lifecycle usually matter more than encoding.
+
+227
+00:18:34.567 --> 00:18:41.522
+Data has an access pattern that decays with age: hot for days, occasionally read for months, rarely for years.
+
+228
+00:18:41.802 --> 00:18:42.975
+Match tiers to it:
+
+229
+00:18:44.325 --> 00:18:45.691
+Here is a quick table:
+
+230
+00:18:45.971 --> 00:18:50.045
+Tier, and Use, and Relative ₹/GB-month (illustrative).
+
+231
+00:18:50.325 --> 00:18:53.120
+Hot database or search cluster (SSD).
+
+232
+00:18:53.400 --> 00:18:54.104
+Use:
+
+233
+00:18:54.384 --> 00:18:56.603
+Queried constantly, low latency.
+
+234
+00:18:56.883 --> 00:18:59.805
+Relative ₹/GB-month (illustrative):
+
+235
+00:19:00.085 --> 00:19:01.237
+8.0.
+
+236
+00:19:01.517 --> 00:19:03.245
+Object storage, standard.
+
+237
+00:19:03.525 --> 00:19:04.229
+Use:
+
+238
+00:19:04.509 --> 00:19:06.280
+Frequent reads, analytics.
+
+239
+00:19:06.560 --> 00:19:09.483
+Relative ₹/GB-month (illustrative):
+
+240
+00:19:09.763 --> 00:19:10.808
+1.9.
+
+241
+00:19:11.088 --> 00:19:13.413
+Object storage, infrequent access.
+
+242
+00:19:13.693 --> 00:19:14.397
+Use:
+
+243
+00:19:14.677 --> 00:19:15.765
+Monthly reads.
+
+244
+00:19:16.045 --> 00:19:18.968
+Relative ₹/GB-month (illustrative):
+
+245
+00:19:19.248 --> 00:19:20.357
+1.0.
+
+246
+00:19:20.637 --> 00:19:21.491
+Archive.
+
+247
+00:19:21.771 --> 00:19:22.475
+Use:
+
+248
+00:19:22.755 --> 00:19:26.829
+Compliance retention, rare reads (retrieval fee, hours of delay).
+
+249
+00:19:27.109 --> 00:19:30.032
+Relative ₹/GB-month (illustrative):
+
+250
+00:19:30.312 --> 00:19:31.805
+0.08.
+
+251
+00:19:33.155 --> 00:19:53.699
+L4's three-year retention for three streams: order events cost almost nothing at any policy (2 lakh rupees kept hot and raw); application logs and clickstream, 1,000x and 200x larger, cost 23.2 crore rupees hot and raw versus 29.3 lakh rupees compressed and tiered.
+
+252
+00:19:53.979 --> 00:20:04.454
+The lesson is proportionality: rank data streams by size and optimise the big ones; the data engineers worry about (orders) is rarely the data that costs money.
+
+253
+00:20:04.734 --> 00:20:15.593
+Retention policy is the biggest single lever: decide per data class how long it's needed and at what access speed, then enforce it with lifecycle rules, not good intentions.
+
+254
+00:20:15.873 --> 00:20:26.646
+Regulatory retention (GST invoices, payment records, Ch 36) goes to archive tiers; debug logs rarely need more than 7 to 30 days.
+
+255
+00:20:27.996 --> 00:20:34.823
+Data transfer: egress to the internet, cross-region replication and cross-zone traffic are billed per GB.
+
+256
+00:20:35.103 --> 00:20:48.265
+L4 shows cross-zone transfer is small at this platform's scale (tens of thousands of rupees a month) but it becomes a top line for data-heavy systems (media, ML features, analytics replication).
+
+257
+00:20:48.545 --> 00:20:57.164
+Levers: zone-aware routing, follower-fetching Kafka consumers, CDNs for egress, compression, and avoiding chatty cross-region calls.
+
+258
+00:20:58.514 --> 00:20:59.794
+Designing for cost.
+
+259
+00:21:00.074 --> 00:21:04.490
+Architecture decisions set the cost curve long before any optimisation:
+
+260
+00:21:04.770 --> 00:21:12.813
+Statelessness and fast startup make autoscaling effective (a service that takes 3 minutes to warm up forces you to over-provision).
+
+261
+00:21:13.093 --> 00:21:21.669
+Caching trades memory for database capacity; read models trade storage for query compute (Ch 07, Ch 15).
+
+262
+00:21:21.949 --> 00:21:30.887
+Async processing flattens peaks: work that can wait (emails, invoices, recommendations refresh) runs off-peak on cheaper capacity.
+
+263
+00:21:31.167 --> 00:21:41.855
+Multi-tenancy amortises fixed costs (Ch 30); cells multiply them (Ch 34), both are cost decisions as much as isolation decisions.
+
+264
+00:21:43.205 --> 00:21:50.821
+Service granularity: each microservice carries a fixed floor (replicas for HA, pipelines, observability).
+
+265
+00:21:51.101 --> 00:21:56.819
+Twenty-six services at a 3-replica HA floor is 78 pods before any traffic.
+
+266
+00:21:57.099 --> 00:22:02.901
+Serverless versus containers is largely a cost-curve decision (Ch 31 L4).
+
+267
+00:22:03.181 --> 00:22:14.595
+Efficient code matters at scale: a 20% CPU reduction in the hottest service is a 20% cut of its compute line, profile before scaling (Ch 25).
+
+268
+00:22:14.875 --> 00:22:22.683
+Put cost in the design doc (Ch 32): estimated monthly cost, cost per unit, how it scales, and the biggest lever.
+
+269
+00:22:24.033 --> 00:22:25.547
+FinOps as a practice.
+
+270
+00:22:25.827 --> 00:22:30.371
+The FinOps Foundation describes a loop of three phases, run continuously:
+
+271
+00:22:30.651 --> 00:22:34.854
+Inform, allocation, tagging, showback, unit economics, forecasts.
+
+272
+00:22:35.134 --> 00:22:37.289
+Everyone can see what they spend and why.
+
+273
+00:22:37.569 --> 00:22:45.590
+Optimise, rightsizing, autoscaling, commitments, spot, storage lifecycle, waste removal (orphans, idle environments).
+
+274
+00:22:45.870 --> 00:22:58.819
+Operate, budgets per team, anomaly detection, governance (tag policies enforced at provisioning, approval for large commitments), cost reviews in design and ADRs, and continuous improvement.
+
+275
+00:22:59.099 --> 00:23:00.742
+Organisational ingredients:
+
+276
+00:23:02.092 --> 00:23:06.231
+Engineers own the cost of what they build, with visibility, not blame.
+
+277
+00:23:06.511 --> 00:23:11.076
+Put a cost panel next to latency and error rate on every service dashboard.
+
+278
+00:23:11.356 --> 00:23:19.591
+A small central FinOps function runs the tooling, buys commitments (centrally, because they're pooled across teams), and coaches teams.
+
+279
+00:23:19.871 --> 00:23:33.524
+Anomaly detection: alert on day-over-day or forecast deviation per team or service, a misconfigured autoscaler or a runaway log stream should page someone within hours, not appear on next month's invoice.
+
+280
+00:23:34.874 --> 00:23:47.205
+Policy as code: required tags, allowed instance families, maximum retention defaults, auto-shutdown for non-prod, enforced at provisioning (Terraform policy, admission controllers).
+
+281
+00:23:48.555 --> 00:23:51.264
+Proportionality: where FinOps effort pays.
+
+282
+00:23:51.544 --> 00:23:54.957
+The recurring lesson of all four labs is proportionality:
+
+283
+00:23:55.237 --> 00:24:05.243
+Cloud cost per order was 0.76 rupeesagainst a 650 rupeesorder (L1), meaningful, but not the business's biggest cost.
+
+284
+00:24:05.523 --> 00:24:07.955
+Don't slow feature delivery to shave pennies.
+
+285
+00:24:08.235 --> 00:24:20.480
+The big wins are structural and one-time: stop paying for peak all year (L2), stop committing to the peak (L3), stop keeping logs hot forever (L4), own the untagged spend (L1).
+
+286
+00:24:20.760 --> 00:24:29.059
+Tiny streams stay tiny whatever you do (order events in L4); optimise the streams and services at the top of the ranked list.
+
+287
+00:24:30.409 --> 00:24:38.067
+Rank, then act: sort spend by owner and driver, attack the top five lines, and put guardrails in place so they don't grow back.
+
+288
+00:24:39.417 --> 00:24:40.313
+Part 3.
+
+289
+00:24:40.593 --> 00:24:42.321
+Architecture and Diagrams.
+
+290
+00:24:43.571 --> 00:24:46.302
+Component view: the cost-visibility pipeline.
+
+291
+00:24:46.582 --> 00:24:47.926
+Here is the diagram.
+
+292
+00:24:51.776 --> 00:24:55.339
+Sequence: happy path, cost considered in a design review.
+
+293
+00:24:55.619 --> 00:24:58.285
+The sequence diagram walks through it step by step.
+
+294
+00:24:58.565 --> 00:25:03.280
+Eng to Est: estimate monthly cost and cost per order from assumptions.
+
+295
+00:25:03.560 --> 00:25:08.339
+Est to Doc: cost section - total, per order, biggest lever, how it scales.
+
+296
+00:25:08.619 --> 00:25:11.691
+Doc to Rev: review with a specific ask on cost.
+
+297
+00:25:11.971 --> 00:25:16.621
+Rev to Eng: use tiered retention for the new event log, pre-scale for sales.
+
+298
+00:25:16.901 --> 00:25:21.403
+Eng to Dash: after launch, compare actual cost per order with the estimate.
+
+299
+00:25:21.683 --> 00:25:25.480
+Dash to Eng: within 10 percent - estimate recorded as accurate.
+
+300
+00:25:29.330 --> 00:25:33.639
+Sequence: failure path, a runaway cost caught by anomaly detection.
+
+301
+00:25:33.919 --> 00:25:36.586
+The sequence diagram walks through it step by step.
+
+302
+00:25:36.866 --> 00:25:40.215
+Dev to Svc: release with DEBUG logging left on.
+
+303
+00:25:40.495 --> 00:25:43.653
+Svc to Logs: log volume 12x normal.
+
+304
+00:25:43.933 --> 00:25:48.669
+Cost to Anom: observability cost for search up 11x day over day.
+
+305
+00:25:48.949 --> 00:25:52.938
+Anom to Team: alert with the top driver - log GB from search.
+
+306
+00:25:53.218 --> 00:25:55.671
+Team to Svc: revert log level.
+
+307
+00:25:59.521 --> 00:26:02.060
+State: a cloud resource's cost lifecycle.
+
+308
+00:26:02.340 --> 00:26:03.684
+Here is the diagram.
+
+309
+00:26:07.534 --> 00:26:08.451
+Part 4.
+
+310
+00:26:08.731 --> 00:26:10.353
+Design Document Excerpt:
+
+311
+00:26:10.633 --> 00:26:12.809
+Grocery FinOps Operating Model.
+
+312
+00:26:14.059 --> 00:26:14.805
+Note:
+
+313
+00:26:15.085 --> 00:26:19.821
+Design Document (excerpt), Cost Management Standard v1.0.
+
+314
+00:26:20.101 --> 00:26:20.997
+Status:
+
+315
+00:26:21.277 --> 00:26:22.557
+Accepted, Authors:
+
+316
+00:26:22.837 --> 00:26:25.419
+Platform engineering + Finance, Reviewers:
+
+317
+00:26:25.699 --> 00:26:28.131
+CTO, CFO, all tech leads.
+
+318
+00:26:28.411 --> 00:26:46.736
+Context, Bill doubled (1.1 rupees, then 2.3 crore rupees per month) while traffic grew 20%; a third of spend unallocated; fleet sized for festival peak year-round; commitments bought at peak; logs retained hot indefinitely; no way to connect spend to value.
+
+319
+00:26:47.016 --> 00:27:07.453
+Decision, Cost becomes a tracked quality attribute with owners: allocate 100% of spend (drivers for shared costs, zero untagged), report unit economics monthly, autoscale with calendar pre-scaling, size commitments to the confident floor, enforce data retention by class, and alert on anomalies daily.
+
+320
+00:27:08.803 --> 00:27:34.958
+Related ADRs, ADR-210 Mandatory tags (owner, service, env, cost-centre) enforced at provisioning; ADR-211 Driver-based shared-cost allocation (L1); ADR-212 Cost per order as the headline metric; ADR-213 60% target utilisation + calendar pre-scale for sales (L2); ADR-214 Commitments at most
+
+321
+00:27:35.238 --> 00:27:56.251
+confident floor, quarterly ratchet, central purchasing (L3); ADR-215 Retention by data class: debug logs 14 d hot, app logs 30 d hot, then 1 y archive, clickstream 7 d hot, then Parquet in lake (L4); ADR-216 Cost section required in design docs.
+
+322
+00:27:56.531 --> 00:27:57.491
+Requirements.
+
+323
+00:27:58.841 --> 00:28:07.460
+R1, Owned. ≥ 99% of spend allocated to a team; untagged spend 1% and reported daily.
+
+324
+00:28:07.740 --> 00:28:09.767
+R2, Measured in business units.
+
+325
+00:28:10.047 --> 00:28:15.017
+Cost per order, per active customer and per dark store reported monthly with trend.
+
+326
+00:28:15.297 --> 00:28:17.495
+R3, No paying for peak all year.
+
+327
+00:28:17.775 --> 00:28:27.289
+Average utilisation of production compute ≥ 35% outside festival windows, with zero overload during planned sales.
+
+328
+00:28:27.569 --> 00:28:29.105
+R4, Commitments safe.
+
+329
+00:28:29.385 --> 00:28:34.655
+Committed spend at most the p20 of the next-12-month demand forecast; reviewed quarterly.
+
+330
+00:28:36.005 --> 00:28:37.946
+R5, Retention explicit.
+
+331
+00:28:38.226 --> 00:28:42.578
+Every data store has a retention and tiering policy; defaults are finite.
+
+332
+00:28:42.858 --> 00:28:44.565
+R6, Fast detection.
+
+333
+00:28:44.845 --> 00:28:50.455
+A 3x day-over-day cost anomaly for any team triggers an alert within 24 hours.
+
+334
+00:28:50.735 --> 00:28:52.143
+Decisions in detail.
+
+335
+00:28:52.423 --> 00:28:56.242
+Allocation (ADR-210 or 211).
+
+336
+00:28:56.522 --> 00:29:04.543
+Tag policy checked in Terraform CI and by an admission controller; shared costs allocated by usage drivers (L1).
+
+337
+00:29:05.893 --> 00:29:08.795
+Unit economics (ADR-212).
+
+338
+00:29:09.075 --> 00:29:13.405
+Cost per order on every team dashboard next to latency and error rate.
+
+339
+00:29:13.685 --> 00:29:16.139
+Capacity (ADR-213).
+
+340
+00:29:16.419 --> 00:29:24.461
+HPA at 60% CPU; sale calendar feeds scheduled minimum replicas 30 min before each event (L2).
+
+341
+00:29:24.741 --> 00:29:27.195
+Commitments (ADR-214).
+
+342
+00:29:27.475 --> 00:29:36.392
+Central FinOps buys savings plans covering the confident floor; spot only for batch, image processing and async consumers (L3).
+
+343
+00:29:36.672 --> 00:29:38.613
+Data (ADR-215).
+
+344
+00:29:38.893 --> 00:29:47.043
+Lifecycle rules in object storage; log levels defaulted to INFO in production; clickstream compacted to Parquet (L4).
+
+345
+00:29:48.393 --> 00:29:50.803
+Design (ADR-216).
+
+346
+00:29:51.083 --> 00:29:57.099
+Every design doc states monthly cost, cost per unit and its biggest lever (Ch 32).
+
+347
+00:29:57.379 --> 00:29:58.403
+Consequences.
+
+348
+00:29:58.683 --> 00:30:04.529
+Tagging discipline and a small FinOps function; slightly more complex capacity configuration.
+
+349
+00:30:04.809 --> 00:30:11.465
+Expected outcome: cost per order returns to its pre-migration trend, and spend growth tracks business growth.
+
+350
+00:30:12.815 --> 00:30:13.775
+Part 5.
+
+351
+00:30:14.055 --> 00:30:16.039
+Hands-On Code, Level Ladder.
+
+352
+00:30:17.289 --> 00:30:18.057
+Info:
+
+353
+00:30:18.337 --> 00:30:19.425
+What's real here.
+
+354
+00:30:19.705 --> 00:30:24.761
+All four labs are JDK 21 programs with deterministic output.
+
+355
+00:30:25.041 --> 00:30:36.241
+All prices are illustrative assumptions chosen to be internally consistent, the lessons are in the shapes and ratios, not the rupee amounts; substitute your own contract prices.
+
+356
+00:30:36.521 --> 00:30:50.985
+L1 reads a real bill-shaped CSV and usage CSV; L2 and L3 model demand curves explicitly; L4 measures real encodings with java.util.zip on 50,000 generated events.
+
+357
+00:30:52.335 --> 00:30:54.788
+L1, Unit economics from a cloud bill.
+
+358
+00:30:55.068 --> 00:30:56.007
+Requirement:
+
+359
+00:30:56.287 --> 00:31:00.212
+Finance wants to know what we get for 2.3 crore rupees a month.
+
+360
+00:31:00.492 --> 00:31:04.609
+Turn the bill into cost per service and per order, and tell us what's worth it.
+
+361
+00:31:04.889 --> 00:31:22.169
+A bill-shaped CSV (direct, shared and untagged line items) and a usage-driver CSV (Kafka bytes, log GB, egress GB, lake GB, requests per service) are allocated two ways, even split and by drivers, then divided by monthly orders.
+
+362
+00:31:23.519 --> 00:31:49.333
+On screen: monthly cloud bill (illustrative INR), one line per billed resource group: item,servicetag,category,costinr. eks-nodes-checkout,checkout,compute,1850000. eks-nodes-catalog,catalog,compute,1120000. eks-nodes-search,search,compute,1480000. eks-nodes-inventory,inventory,compute,960000.
+
+363
+00:31:49.613 --> 00:32:24.721
+eks-nodes-fulfilment,fulfilment,compute,1310000. eks-nodes-recommendations,recommendations,compute,2240000. rds-orders,checkout,database,1650000. rds-inventory,inventory,database,780000. rds-fulfilment,fulfilment,database,540000. opensearch-catalog,search,database,1390000. redis-cart,checkout,cache,420000.
+
+364
+00:32:25.001 --> 00:32:26.516
+The rest is in the chapter.
+
+365
+00:32:29.366 --> 00:32:32.395
+Here is the Java code, UnitCostL1.java.
+
+366
+00:32:32.675 --> 00:32:37.070
+It runs to 147 lines; the full listing is in the chapter.
+
+367
+00:32:37.350 --> 00:32:47.739
+UnitCostL1.java, run with: java UnitCostL1.java bill.csv usage.csv (JDK 21, no dependencies).
+
+368
+00:32:48.019 --> 00:32:49.982
+UNIT ECONOMICS FROM A CLOUD BILL.
+
+369
+00:32:50.262 --> 00:32:54.443
+The bill is 1.8 crore rupees a month tells nobody what to do.
+
+370
+00:32:54.723 --> 00:33:01.571
+FinOps turns it into numbers. teams and product owners can act on: cost PER SERVICE and cost PER ORDER.
+
+371
+00:33:01.851 --> 00:33:03.195
+That needs three steps:
+
+372
+00:33:06.045 --> 00:33:06.963
+On screen:
+
+373
+00:33:07.243 --> 00:33:12.661
+Monthly bill 2.28 crore rupees (illustrative) for 30,000,000 orders.
+
+374
+00:33:12.941 --> 00:33:16.013
+Direct 67%, shared 28%.
+
+375
+00:33:16.293 --> 00:34:02.517
+UNTAGGED 4.5%. service direct shared (even) shared (drivers) total (drivers) ₹ / order of bill. checkout 39.2 L 10.7 L 12.6 L 51.8 L 0.173 22.7%. catalog 15.0 L 10.7 L 11.0 L 26.0 L 0.087 11.4%. search 28.7 L 10.7 L 7.3 L 36.0 L 0.120 15.8%. inventory 17.4 L 10.7 L 8.4 L 25.8 L 0.086 11.3%.
+
+376
+00:34:02.797 --> 00:34:23.298
+fulfilment 18.5 L 10.7 L 10.4 L 28.9 L 0.096 12.7%. recommendations 35.0 L 10.7 L 14.4 L 49.4 L 0.165 21.7%.
+
+377
+00:34:23.578 --> 00:34:28.527
+UNTAGGED 10.2 L 0.034 4.5%.
+
+378
+00:34:28.807 --> 00:34:30.151
+Cloud cost per order:
+
+379
+00:34:30.431 --> 00:34:38.367
+0.76 rupees = 0.12% of 650 rupeesaverage order value.
+
+380
+00:34:38.647 --> 00:34:40.162
+The rest is in the chapter.
+
+381
+00:34:43.012 --> 00:34:43.865
+Reading it:
+
+382
+00:34:44.145 --> 00:34:51.868
+The bill becomes 0.76 rupeesper order, 0.12% of a 650 rupeesorder.
+
+383
+00:34:52.148 --> 00:34:57.076
+That single number sets the tone: worth managing, not worth slowing delivery for.
+
+384
+00:34:57.356 --> 00:35:06.252
+Allocation method matters: driver-based allocation moves up to 3.7 lakh rupees per month between teams versus an even split.
+
+385
+00:35:06.532 --> 00:35:15.705
+Search and inventory were subsidising others' logs and egress; recommendations and checkout drive more shared spend than an even split admits.
+
+386
+00:35:17.055 --> 00:35:25.183
+Untagged spend (4.5%) is four orphaned resources, two instances, forgotten volumes, unattached IPs.
+
+387
+00:35:25.463 --> 00:35:28.151
+Nobody owns them, so nobody turns them off.
+
+388
+00:35:28.431 --> 00:35:39.013
+Value, not size: recommendations is one of the two largest lines, yet its (illustrative) A or B-measured uplift returns ~8.5x its cost.
+
+389
+00:35:39.293 --> 00:35:42.301
+Cutting it by size would have been an expensive mistake.
+
+390
+00:35:43.651 --> 00:35:46.488
+L2, Rightsizing and autoscaling, costed.
+
+391
+00:35:46.768 --> 00:35:47.707
+Requirement:
+
+392
+00:35:47.987 --> 00:35:52.253
+After last Diwali we raised every replica count and never lowered it.
+
+393
+00:35:52.533 --> 00:35:54.837
+What does that cost, and what's safe instead?
+
+394
+00:35:55.117 --> 00:36:09.155
+Fourteen days of 5-minute demand buckets with daily peaks, weekends, noise and a festival flash sale; four capacity policies, each priced per pod-hour (illustrative) and scored on overloaded and degraded minutes.
+
+395
+00:36:10.505 --> 00:36:13.427
+Here is the Java code, ScalingL2.java.
+
+396
+00:36:13.707 --> 00:36:17.953
+It runs to 116 lines; the full listing is in the chapter.
+
+397
+00:36:18.233 --> 00:36:25.230
+ScalingL2.java, run with: java ScalingL2.java (JDK 21, no dependencies).
+
+398
+00:36:25.510 --> 00:36:27.878
+RIGHTSIZING AND AUTOSCALING, costed.
+
+399
+00:36:28.158 --> 00:36:43.219
+Fourteen days of checkout demand in 5-minute buckets: morning and evening peaks. busier weekends, noise, and one festival flash sale (day 11, 19:00 to 21:00) at ~6x normal.
+
+400
+00:36:43.499 --> 00:36:46.315
+Each pod serves 150 req per second at.
+
+401
+00:36:49.165 --> 00:36:50.083
+On screen:
+
+402
+00:36:50.363 --> 00:37:00.965
+14 days of checkout demand: normal daily peak 1,913 req per second, festival peak 10,178 req per second.
+
+403
+00:37:01.245 --> 00:37:02.632
+(5.3x).
+
+404
+00:37:02.912 --> 00:37:11.573
+Pod = 150 req per second at target. capacity policy peak pods pod-hours cost (₹) overloaded degraded.
+
+405
+00:37:11.853 --> 00:37:23.800
+A) static for all-time peak (+20%) 82 27,552 495,936 0 min 0 min.
+
+406
+00:37:24.080 --> 00:37:35.920
+B) static for a normal day's peak (+20%) 16 5,376 96,768 120 min 0 min.
+
+407
+00:37:36.200 --> 00:37:47.037
+C) reactive autoscaling (60% target, 5-min lag) 68 1,801 32,410 5 min 0 min.
+
+408
+00:37:47.317 --> 00:37:57.728
+D) C + scheduled pre-scale for the sale 75 1,905 34,296 0 min 0 min.
+
+409
+00:37:58.008 --> 00:38:06.989
+Static-for-peak fleet: pod-hours actually needed at target ÷ pod-hours provisioned. = 4% (the rest is idle headroom).
+
+410
+00:38:07.269 --> 00:38:11.749
+Autoscaling + pre-scale costs 7% of the static-for-peak fleet.
+
+411
+00:38:12.029 --> 00:38:13.544
+The rest is in the chapter.
+
+412
+00:38:16.394 --> 00:38:17.247
+Reading it:
+
+413
+00:38:17.527 --> 00:38:24.695
+Static for the festival peak never overloads, and only 4% of its pod-hours are needed at the target utilisation.
+
+414
+00:38:24.975 --> 00:38:28.431
+That's §1.1's sized for Diwali, all year.
+
+415
+00:38:28.711 --> 00:38:37.949
+Static for a normal day costs ~20% as much and is overloaded for the entire two-hour sale, the most valuable two hours of the fortnight.
+
+416
+00:38:38.229 --> 00:38:51.413
+Reactive autoscaling tracks the daily curve at ~7% of the static-peak cost but is overloaded for the first 5 minutes of the sale: a ~5x step is faster than a 5-minute control loop.
+
+417
+00:38:52.763 --> 00:38:59.120
+Adding a scheduled pre-scale for the known event removes that gap for ~100 extra pod-hours.
+
+418
+00:38:59.400 --> 00:39:03.773
+Known events belong on a calendar, not in the autoscaler's reaction time.
+
+419
+00:39:05.123 --> 00:39:07.491
+L3, How much capacity to commit to.
+
+420
+00:39:07.771 --> 00:39:08.710
+Requirement:
+
+421
+00:39:08.990 --> 00:39:13.449
+Finance can get a 40% discount if we commit to a year of capacity.
+
+422
+00:39:13.729 --> 00:39:16.929
+How much should we commit, given we don't know next year's demand?
+
+423
+00:39:17.209 --> 00:39:26.553
+A year of hourly demand for the whole platform (daily curve, weekends, festival evenings, steady background load, 24-pod HA floor).
+
+424
+00:39:26.833 --> 00:39:47.590
+Step 1 sweeps the commitment level against expected demand; step 2 runs 20,000 futures with demand scaled by a triangular(0.7, 1.0, 1.5) factor and compares expected cost, p95 cost, and p95 regret versus the hindsight-optimal commitment.
+
+425
+00:39:48.940 --> 00:39:51.671
+Here is the Java code, CommitL3.java.
+
+426
+00:39:51.951 --> 00:39:56.132
+It runs to 132 lines; the full listing is in the chapter.
+
+427
+00:39:56.412 --> 00:40:03.281
+CommitL3.java, run with: java CommitL3.java (JDK 21, no dependencies).
+
+428
+00:40:03.561 --> 00:40:05.396
+HOW MUCH CAPACITY TO COMMIT TO.
+
+429
+00:40:05.676 --> 00:40:19.201
+Cloud providers discount capacity you commit to for a year (reserved instances or savings. plans), but you pay for it every hour whether you use it or not; anything above the commitment runs on-demand.
+
+430
+00:40:22.051 --> 00:40:22.969
+On screen:
+
+431
+00:40:23.249 --> 00:40:31.249
+Expected demand next year: floor 29, median 44, p90 92, peak 435 pods.
+
+432
+00:40:31.529 --> 00:40:32.553
+All on-demand:
+
+433
+00:40:32.833 --> 00:40:41.345
+85.2 lakh rupees per year (illustrative). commit annual cost versus on-demand hours the marginal pod is busy.
+
+434
+00:40:41.625 --> 00:40:47.086
+0 pods 85.2 L +0.0% 100%.
+
+435
+00:40:47.366 --> 00:40:53.062
+24 pods 70.1 L -17.8% 100%.
+
+436
+00:40:53.342 --> 00:41:00.361
+37 pods ← 65.6 L -23.0% 62%.
+
+437
+00:41:00.641 --> 00:41:06.699
+40 pods 65.6 L -23.0% 58%.
+
+438
+00:41:06.979 --> 00:41:12.889
+60 pods 71.7 L -15.9% 28%.
+
+439
+00:41:13.169 --> 00:41:18.267
+100 pods 98.3 L +15.4% 8%.
+
+440
+00:41:18.547 --> 00:41:24.819
+140 pods 133.9 L +57.2% 1%.
+
+441
+00:41:25.099 --> 00:41:40.694
+435 pods 411.5 L +383.1% 0%. then optimum against EXPECTED demand: commit 37 pods (busy 62% of hours, just above.
+
+442
+00:41:40.974 --> 00:41:42.489
+The rest is in the chapter.
+
+443
+00:41:45.339 --> 00:41:46.192
+Reading it:
+
+444
+00:41:46.472 --> 00:41:59.955
+The break-even rule works exactly: the optimum (37 pods) is where the marginal pod is busy 62% of hours, just above the 60% break-even (10.80 or 18).
+
+445
+00:42:00.235 --> 00:42:03.136
+It saves 23% versus all on-demand.
+
+446
+00:42:03.416 --> 00:42:13.827
+Committing to the p90 is the expensive mistake: worse expected cost than everything else, and 35.7 lakh rupees of p95 regret.
+
+447
+00:42:14.107 --> 00:42:16.304
+Committing to the peak would be far worse still.
+
+448
+00:42:17.654 --> 00:42:30.625
+Under uncertainty the curve is flat between 0.85x and 1.2x of the optimum (expected cost within ~2%), so avoiding the tails matters more than precision.
+
+449
+00:42:30.905 --> 00:42:32.419
+The hedge follows the skew.
+
+450
+00:42:32.699 --> 00:42:46.139
+Demand here is more likely to grow than shrink (the triangle's mean is above its mode), so 1.2x the expected-demand optimum ties on expected cost and has the lowest p95 regret.
+
+451
+00:42:46.419 --> 00:42:49.171
+For a shrinking-market risk you'd hedge the other way.
+
+452
+00:42:50.521 --> 00:42:53.956
+L4, Storage and data transfer: measure, then rank.
+
+453
+00:42:54.236 --> 00:42:55.175
+Requirement:
+
+454
+00:42:55.455 --> 00:42:58.953
+Should we switch our event log to a binary format to save money?
+
+455
+00:42:59.233 --> 00:43:00.983
+And what about cross-zone traffic?
+
+456
+00:43:01.263 --> 00:43:07.684
+Part 1 measures four encodings of 50,000 real-shaped order events with java.util.zip.
+
+457
+00:43:07.964 --> 00:43:23.175
+Parts 2 and 3 apply the measured compression ratio to three real data streams, order events, application logs (volume from L1's usage data) and app clickstream, and price three years of retention and monthly cross-zone transfer.
+
+458
+00:43:24.525 --> 00:43:27.490
+Here is the Java code, StorageL4.java.
+
+459
+00:43:27.770 --> 00:43:31.951
+It runs to 182 lines; the full listing is in the chapter.
+
+460
+00:43:32.231 --> 00:43:39.527
+StorageL4.java, run with: java StorageL4.java (JDK 21, no dependencies).
+
+461
+00:43:39.807 --> 00:43:44.159
+STORAGE AND DATA-TRANSFER COSTS, the lines on the bill nobody designed.
+
+462
+00:43:44.439 --> 00:43:57.773
+Part 1 MEASURES real encodings of 50,000 order. events (JSON, gzip'd JSON, a compact binary encoding, gzip'd binary) with java.util.zip; Part 2 extrapolates to the.
+
+463
+00:44:00.623 --> 00:44:01.540
+On screen:
+
+464
+00:44:01.820 --> 00:44:08.263
+Part 1, measured encodings of 50,000 real-shaped order events (java.util.zip, level.
+
+465
+00:44:08.543 --> 00:44:11.977
+6): encoding total bytes or event versus JSON.
+
+466
+00:44:12.257 --> 00:44:19.511
+JSON 11,981 KB 245.4 1.0x.
+
+467
+00:44:19.791 --> 00:44:40.953
+JSON + gzip 1,912 KB 39.2 6.3x. compact binary (varints) 1,900 KB 38.9 6.3x. compact binary + gzip 1,332 KB 27.3 9.0x.
+
+468
+00:44:41.233 --> 00:44:43.985
+Part 2, three data streams kept for 3 years.
+
+469
+00:44:44.265 --> 00:44:56.959
+Illustrative ₹/GB-month: hot (DB /. search cluster) 8.0. object standard 1.9, infrequent 1.0, archive 0.08.
+
+470
+00:44:57.239 --> 00:44:58.860
+Compression ratio applied:
+
+471
+00:44:59.140 --> 00:45:00.484
+6.3x.
+
+472
+00:45:00.764 --> 00:45:01.788
+(measured above).
+
+473
+00:45:02.068 --> 00:45:03.583
+The rest is in the chapter.
+
+474
+00:45:06.433 --> 00:45:07.286
+Reading it:
+
+475
+00:45:07.566 --> 00:45:08.803
+Encoding (measured):
+
+476
+00:45:09.083 --> 00:45:20.305
+JSON 245 bytes or event; gzip 6.3x smaller; compact binary 6.3x; binary + gzip 9.0x.
+
+477
+00:45:20.585 --> 00:45:23.230
+Real, and worth doing for high-volume streams.
+
+478
+00:45:23.510 --> 00:45:25.942
+Proportionality decides everything else.
+
+479
+00:45:26.222 --> 00:45:33.091
+The order events engineers debate cost 2 lakh rupees over three years even kept hot and raw, a rounding error.
+
+480
+00:45:33.371 --> 00:45:40.326
+Application logs (~1,000x the volume) and clickstream (~200x) are where the money is:
+
+481
+00:45:40.606 --> 00:45:49.139
+23.2 crore rupees hot and raw versus 29.3 lakh rupees compressed and tiered (illustrative prices).
+
+482
+00:45:49.419 --> 00:45:52.171
+Retention policy is the lever, not encoding.
+
+483
+00:45:53.521 --> 00:46:01.735
+Cross-zone transfer is small at this scale (~22 thousand rupees per month) and zone-aware routing cuts it ~13x.
+
+484
+00:46:02.015 --> 00:46:07.284
+It becomes a major line only for data-heavy systems, check the size before investing.
+
+485
+00:46:07.564 --> 00:46:13.964
+The FinOps rule the lab demonstrates: rank the streams by size first, then optimise the big ones.
+
+486
+00:46:15.314 --> 00:46:16.253
+Part 6.
+
+487
+00:46:16.533 --> 00:46:17.813
+Production Concerns.
+
+488
+00:46:19.063 --> 00:46:20.215
+Failure modes.
+
+489
+00:46:20.495 --> 00:46:21.860
+Here is a quick table:
+
+490
+00:46:22.140 --> 00:46:24.423
+Failure, and Symptom, and Mitigation.
+
+491
+00:46:24.703 --> 00:46:25.748
+Unowned spend.
+
+492
+00:46:26.028 --> 00:46:26.839
+Symptom:
+
+493
+00:46:27.119 --> 00:46:30.447
+Shared or untagged lines grow with no one accountable.
+
+494
+00:46:30.727 --> 00:46:31.729
+Mitigation:
+
+495
+00:46:32.009 --> 00:46:35.977
+Tag policy at provisioning; driver-based allocation (L1).
+
+496
+00:46:36.257 --> 00:46:37.729
+Paying for peak all year.
+
+497
+00:46:38.009 --> 00:46:38.820
+Symptom:
+
+498
+00:46:39.100 --> 00:46:41.212
+Single-digit average utilisation.
+
+499
+00:46:41.492 --> 00:46:42.495
+Mitigation:
+
+500
+00:46:42.775 --> 00:46:45.612
+Autoscaling + calendar pre-scale (L2).
+
+501
+00:46:45.892 --> 00:46:47.684
+Under-provisioning to save money.
+
+502
+00:46:47.964 --> 00:46:48.775
+Symptom:
+
+503
+00:46:49.055 --> 00:46:52.020
+Overload during sales, the most valuable hours.
+
+504
+00:46:52.300 --> 00:46:53.303
+Mitigation:
+
+505
+00:46:53.583 --> 00:46:57.316
+Pre-scale known events; target utilisation below the queueing knee.
+
+506
+00:46:57.596 --> 00:46:58.791
+Committing to the peak.
+
+507
+00:46:59.071 --> 00:46:59.881
+Symptom:
+
+508
+00:47:00.161 --> 00:47:02.572
+Idle reserved capacity, already paid.
+
+509
+00:47:02.852 --> 00:47:03.855
+Mitigation:
+
+510
+00:47:04.135 --> 00:47:07.441
+Commit to the confident floor; ratchet quarterly (L3).
+
+511
+00:47:07.721 --> 00:47:09.449
+Runaway logs or metrics.
+
+512
+00:47:09.729 --> 00:47:10.540
+Symptom:
+
+513
+00:47:10.820 --> 00:47:13.487
+Observability cost growing faster than traffic.
+
+514
+00:47:13.767 --> 00:47:14.769
+Mitigation:
+
+515
+00:47:15.049 --> 00:47:18.975
+Log levels, sampling, cardinality limits, retention (L4).
+
+516
+00:47:20.325 --> 00:47:21.455
+Cut the wrong thing.
+
+517
+00:47:21.735 --> 00:47:22.546
+Symptom:
+
+518
+00:47:22.826 --> 00:47:25.770
+Removing an expensive service that drives revenue.
+
+519
+00:47:26.050 --> 00:47:27.053
+Mitigation:
+
+520
+00:47:27.333 --> 00:47:30.746
+Cost with value: experiments, unit margin (L1).
+
+521
+00:47:31.026 --> 00:47:32.242
+Surprise invoice.
+
+522
+00:47:32.522 --> 00:47:33.333
+Symptom:
+
+523
+00:47:33.613 --> 00:47:35.981
+Misconfiguration found a month later.
+
+524
+00:47:36.261 --> 00:47:37.263
+Mitigation:
+
+525
+00:47:37.543 --> 00:47:39.570
+Daily anomaly detection per team.
+
+526
+00:47:39.850 --> 00:47:41.045
+Non-prod sprawl.
+
+527
+00:47:41.325 --> 00:47:42.135
+Symptom:
+
+528
+00:47:42.415 --> 00:47:44.378
+Staging costs rival production.
+
+529
+00:47:44.658 --> 00:47:45.661
+Mitigation:
+
+530
+00:47:45.941 --> 00:47:49.397
+Off-hours shutdown, ephemeral environments, smaller shapes.
+
+531
+00:47:50.747 --> 00:47:52.219
+Observability of cost.
+
+532
+00:47:52.499 --> 00:48:01.523
+A cost panel on every service dashboard: daily cost, cost per request per order, trend, next to latency and errors (Ch 24).
+
+533
+00:48:01.803 --> 00:48:09.120
+Anomaly alerts on per-team and per-service cost deviations, with the top driver (resource, SKU) in the alert.
+
+534
+00:48:09.400 --> 00:48:18.787
+Utilisation dashboards: requested versus used CPU or memory per workload (the gap is waste), commitment utilisation and coverage.
+
+535
+00:48:19.067 --> 00:48:26.043
+Observability is itself a cost: sample traces, cap metric cardinality, and set per-team log budgets.
+
+536
+00:48:27.393 --> 00:48:28.331
+Security.
+
+537
+00:48:28.611 --> 00:48:36.121
+Cost anomalies are also security signals: cryptomining on a compromised account shows up as a compute spike first.
+
+538
+00:48:36.401 --> 00:48:44.251
+Enforce budgets and quotas per account or project so a leaked credential or a runaway loop can't create unbounded spend.
+
+539
+00:48:44.531 --> 00:48:53.641
+Deleting unused resources needs care: confirm ownership and check for backups and compliance retention before removal (Ch 36).
+
+540
+00:48:54.991 --> 00:48:56.313
+Performance trade-offs.
+
+541
+00:48:56.593 --> 00:49:05.020
+Target utilisation trades cost against tail latency (Ch 31 L3); set it per service by latency sensitivity.
+
+542
+00:49:05.300 --> 00:49:12.319
+Cheaper storage tiers are slower (archive retrieval takes hours), match tier to access pattern, not just price.
+
+543
+00:49:12.599 --> 00:49:18.209
+Spot interruptions add retries and tail latency; keep them off user-facing critical paths.
+
+544
+00:49:18.489 --> 00:49:29.604
+Compression costs CPU; for hot paths, measure CPU versus bytes saved (usually a good trade for storage and transfer, not always for latency-critical RPC).
+
+545
+00:49:30.954 --> 00:49:32.447
+Cost of FinOps itself.
+
+546
+00:49:32.727 --> 00:49:37.719
+Tagging, allocation pipelines and a small FinOps team cost money and attention.
+
+547
+00:49:37.999 --> 00:49:53.487
+Keep effort proportionate (§2.10): at 0.76 rupeesof cloud per 650 rupeesorder, the priority is removing waste and bad incentives, not squeezing every rupee at the expense of delivery.
+
+548
+00:49:54.837 --> 00:49:55.776
+Part 7.
+
+549
+00:49:56.056 --> 00:49:57.763
+Anti-Patterns and Pitfalls.
+
+550
+00:49:59.013 --> 00:49:59.930
+Watch out:
+
+551
+00:50:00.210 --> 00:50:00.850
+1.
+
+552
+00:50:01.130 --> 00:50:03.327
+Treating the bill as finance's problem.
+
+553
+00:50:03.607 --> 00:50:06.423
+Engineers make the spending decisions every day.
+
+554
+00:50:06.703 --> 00:50:11.503
+Without visibility and ownership, cost grows by default (§1.1).
+
+555
+00:50:12.853 --> 00:50:13.771
+Watch out:
+
+556
+00:50:14.051 --> 00:50:14.755
+2.
+
+557
+00:50:15.035 --> 00:50:17.083
+Reporting cost by cloud product.
+
+558
+00:50:17.363 --> 00:50:21.693
+EC2 ₹X, RDS ₹Y answers nobody's question.
+
+559
+00:50:21.973 --> 00:50:25.856
+Report by team, service and unit of business value (L1).
+
+560
+00:50:27.206 --> 00:50:28.123
+Watch out:
+
+561
+00:50:28.403 --> 00:50:29.150
+3.
+
+562
+00:50:29.430 --> 00:50:30.966
+Even-split shared costs.
+
+563
+00:50:31.246 --> 00:50:35.918
+Charges teams for others' usage and removes the incentive to reduce your own.
+
+564
+00:50:36.198 --> 00:50:38.097
+Allocate by drivers (L1).
+
+565
+00:50:39.447 --> 00:50:40.364
+Watch out:
+
+566
+00:50:40.644 --> 00:50:41.348
+4.
+
+567
+00:50:41.628 --> 00:50:43.697
+Cutting by size instead of value.
+
+568
+00:50:43.977 --> 00:50:46.751
+The biggest line may be the best investment (L1:
+
+569
+00:50:47.031 --> 00:50:48.801
+8.5x return).
+
+570
+00:50:49.081 --> 00:50:50.767
+Pair cost with measured value.
+
+571
+00:50:52.117 --> 00:50:53.034
+Watch out:
+
+572
+00:50:53.314 --> 00:50:54.082
+5.
+
+573
+00:50:54.362 --> 00:50:56.751
+Sizing the fleet for the festival, all year.
+
+574
+00:50:57.031 --> 00:51:00.871
+4% of provisioned capacity actually needed (L2).
+
+575
+00:51:01.151 --> 00:51:02.709
+Autoscale and pre-scale.
+
+576
+00:51:04.059 --> 00:51:04.976
+Watch out:
+
+577
+00:51:05.256 --> 00:51:06.003
+6.
+
+578
+00:51:06.283 --> 00:51:09.248
+Relying on reactive autoscaling for known spikes.
+
+579
+00:51:09.528 --> 00:51:14.221
+A step faster than the control loop overloads the first minutes of a sale (L2).
+
+580
+00:51:14.501 --> 00:51:16.059
+Pre-scale from the calendar.
+
+581
+00:51:17.409 --> 00:51:18.326
+Watch out:
+
+582
+00:51:18.606 --> 00:51:19.353
+7.
+
+583
+00:51:19.633 --> 00:51:21.745
+Committing to the peak (or p90).
+
+584
+00:51:22.025 --> 00:51:27.849
+Idle, prepaid capacity; in L3 committing to the p90 was worse than no commitment.
+
+585
+00:51:28.129 --> 00:51:29.793
+Commit to the confident floor.
+
+586
+00:51:31.143 --> 00:51:32.060
+Watch out:
+
+587
+00:51:32.340 --> 00:51:33.023
+8.
+
+588
+00:51:33.303 --> 00:51:35.116
+Infinite retention by default.
+
+589
+00:51:35.396 --> 00:51:40.665
+Keep everything hot, just in case turns logs into the fastest-growing line (L4:
+
+590
+00:51:40.945 --> 00:51:45.553
+23.2 crore rupees versus 29.3 lakh rupees).
+
+591
+00:51:45.833 --> 00:51:47.455
+Retention per data class.
+
+592
+00:51:48.805 --> 00:51:49.722
+Watch out:
+
+593
+00:51:50.002 --> 00:51:50.749
+9.
+
+594
+00:51:51.029 --> 00:51:52.629
+Optimising the small stuff.
+
+595
+00:51:52.909 --> 00:51:58.178
+Compressing order events that cost 2 lakh rupees over three years while logs cost crores.
+
+596
+00:51:58.458 --> 00:51:59.994
+Rank first (L4).
+
+597
+00:52:01.344 --> 00:52:02.261
+Watch out:
+
+598
+00:52:02.541 --> 00:52:03.245
+10.
+
+599
+00:52:03.525 --> 00:52:05.723
+Spot instances on the critical path.
+
+600
+00:52:06.003 --> 00:52:08.520
+Interruptions become customer-facing errors.
+
+601
+00:52:08.800 --> 00:52:11.531
+Spot is for interruptible, retry-safe work.
+
+602
+00:52:12.881 --> 00:52:13.798
+Watch out:
+
+603
+00:52:14.078 --> 00:52:14.910
+11.
+
+604
+00:52:15.190 --> 00:52:17.131
+Finding problems on the invoice.
+
+605
+00:52:17.411 --> 00:52:18.969
+A month is far too slow.
+
+606
+00:52:19.249 --> 00:52:21.275
+Daily anomaly detection per team.
+
+607
+00:52:22.625 --> 00:52:23.543
+Watch out:
+
+608
+00:52:23.823 --> 00:52:24.612
+12.
+
+609
+00:52:24.892 --> 00:52:27.047
+Cost cutting that erodes reliability.
+
+610
+00:52:27.327 --> 00:52:33.364
+Removing headroom, replicas or DR to hit a number, until the outage costs more than the savings.
+
+611
+00:52:33.644 --> 00:52:35.692
+Cost is one quality among several.
+
+612
+00:52:37.042 --> 00:52:37.917
+Part 8.
+
+613
+00:52:38.197 --> 00:52:39.541
+Interview Q and A.
+
+614
+00:52:40.791 --> 00:52:41.623
+Beginner.
+
+615
+00:52:41.903 --> 00:52:42.927
+Question 1.
+
+616
+00:52:43.207 --> 00:52:44.359
+What is FinOps?
+
+617
+00:52:44.639 --> 00:52:46.004
+Thirty-second answer:
+
+618
+00:52:46.284 --> 00:53:04.673
+The practice of managing cloud cost as a shared responsibility between engineering, finance and product: make spend visible and owned (inform), reduce waste and buy capacity smartly (optimise), and keep it that way with budgets, anomaly alerts and cost in design reviews (operate).
+
+619
+00:53:04.953 --> 00:53:08.815
+The goal is maximum business value per rupee, not the lowest bill.
+
+620
+00:53:10.165 --> 00:53:11.167
+Question 2.
+
+621
+00:53:11.447 --> 00:53:13.965
+What is unit economics and why does it matter?
+
+622
+00:53:14.245 --> 00:53:15.610
+Thirty-second answer:
+
+623
+00:53:15.890 --> 00:53:22.781
+Expressing cost per unit of business value, per order, per active customer, per tenant, instead of as a total.
+
+624
+00:53:23.061 --> 00:53:32.277
+It shows whether growth is efficient: a bill that doubles with cost per order flat is healthy; cost per order rising means efficiency is getting worse.
+
+625
+00:53:32.557 --> 00:53:36.247
+It also makes costs comparable to revenue and margin per unit.
+
+626
+00:53:37.597 --> 00:53:38.643
+Question 3.
+
+627
+00:53:38.923 --> 00:53:42.101
+On-demand versus reserved or committed versus spot?
+
+628
+00:53:42.381 --> 00:53:43.747
+Thirty-second answer:
+
+629
+00:53:44.027 --> 00:53:47.675
+On-demand: pay as you go, most flexible, most expensive.
+
+630
+00:53:47.955 --> 00:53:57.021
+Commitments (reserved instances, savings plans): commit to capacity or spend for 1 to 3 years for a big discount, paid whether used or not.
+
+631
+00:53:57.301 --> 00:54:05.195
+Spot or preemptible: deep discount on spare capacity that can be reclaimed at short notice, only for interruptible work.
+
+632
+00:54:06.545 --> 00:54:07.611
+Question 4.
+
+633
+00:54:07.891 --> 00:54:10.963
+Why do tags matter so much in cloud cost management?
+
+634
+00:54:11.243 --> 00:54:12.609
+Thirty-second answer:
+
+635
+00:54:12.889 --> 00:54:19.161
+Tags (owner, service, environment, cost centre) are how spend is attributed to teams and services.
+
+636
+00:54:19.441 --> 00:54:30.278
+Untagged resources have no owner, so nobody reviews or turns them off, they're where forgotten load-test instances, orphaned volumes and unattached IPs accumulate.
+
+637
+00:54:30.558 --> 00:54:33.459
+Enforce tags at provisioning, not after the fact.
+
+638
+00:54:34.809 --> 00:54:35.812
+Intermediate.
+
+639
+00:54:36.092 --> 00:54:37.201
+Question 5.
+
+640
+00:54:37.481 --> 00:54:41.876
+How do you allocate shared costs like Kafka, observability and networking?
+
+641
+00:54:42.156 --> 00:54:43.521
+Thirty-second answer:
+
+642
+00:54:43.801 --> 00:54:46.852
+By usage drivers that reflect who causes the cost:
+
+643
+00:54:47.132 --> 00:55:02.705
+Kafka by bytes produced (or partitions), observability by log or metric or trace volume, NAT and egress by gigabytes out, cluster overhead by resource requests or requests served, non-prod proportional to production footprint.
+
+644
+00:55:02.985 --> 00:55:08.276
+An even split is simple but shifts cost to low-usage teams and removes incentives.
+
+645
+00:55:09.626 --> 00:55:10.735
+Question 6.
+
+646
+00:55:11.015 --> 00:55:12.658
+How do you rightsize a service?
+
+647
+00:55:12.938 --> 00:55:14.303
+Thirty-second answer:
+
+648
+00:55:14.583 --> 00:55:16.695
+Compare what's provisioned with what's used:
+
+649
+00:55:16.975 --> 00:55:25.871
+CPU or memory requests versus actual usage, replica counts versus demand over time, instance shape versus workload profile.
+
+650
+00:55:26.151 --> 00:55:40.509
+Set a target utilisation that respects latency (often 50 to 70% for latency-sensitive services), autoscale to it, pre-scale for known events, and fix shape mismatches (memory-heavy on compute-optimised).
+
+651
+00:55:40.789 --> 00:55:42.879
+Re-check after every major release.
+
+652
+00:55:44.229 --> 00:55:45.317
+Question 7.
+
+653
+00:55:45.597 --> 00:55:48.627
+Why isn't reactive autoscaling enough for a flash sale?
+
+654
+00:55:48.907 --> 00:55:50.272
+Thirty-second answer:
+
+655
+00:55:50.552 --> 00:55:59.981
+Autoscalers react to observed metrics with a lag, metric window, decision, scheduling, image pull, JVM warm-up, often several minutes.
+
+656
+00:56:00.261 --> 00:56:06.277
+A sale that multiplies traffic 5x in seconds overloads the fleet before new capacity arrives.
+
+657
+00:56:06.557 --> 00:56:13.789
+Known events should be pre-scaled from a calendar; unknown spikes need warm pools, fast-starting images and load shedding.
+
+658
+00:56:15.139 --> 00:56:16.163
+Question 8.
+
+659
+00:56:16.443 --> 00:56:19.793
+How do you reduce observability cost without going blind?
+
+660
+00:56:20.073 --> 00:56:21.438
+Thirty-second answer:
+
+661
+00:56:21.718 --> 00:56:45.462
+Log at INFO in production with DEBUG switchable per service; sample traces (head or tail-based, keeping errors and slow requests); control metric cardinality (no user IDs as labels); set retention by value, hot for days, archive for compliance; convert high-volume logs to metrics where you only need counts; and give teams per-service log budgets with alerts.
+
+662
+00:56:46.812 --> 00:56:47.879
+Question 9.
+
+663
+00:56:48.159 --> 00:56:51.167
+How do storage tiers and lifecycle policies work?
+
+664
+00:56:51.447 --> 00:56:52.812
+Thirty-second answer:
+
+665
+00:56:53.092 --> 00:57:08.772
+Data gets less valuable to access quickly as it ages, so you move it through cheaper tiers: hot database or SSD, then object storage standard, then infrequent access, then archive, with lifecycle rules doing the moves automatically.
+
+666
+00:57:09.052 --> 00:57:13.788
+Each colder tier is cheaper per GB but slower or more expensive to read.
+
+667
+00:57:14.068 --> 00:57:17.332
+Retention policies delete data you no longer need.
+
+668
+00:57:18.682 --> 00:57:19.450
+Senior.
+
+669
+00:57:19.730 --> 00:57:20.775
+Question 10.
+
+670
+00:57:21.055 --> 00:57:23.573
+How much capacity should you commit to for a year?
+
+671
+00:57:23.853 --> 00:57:25.218
+Thirty-second answer:
+
+672
+00:57:25.498 --> 00:57:38.319
+Commit to the floor, not the peak: a marginal committed unit pays off only if it would be busy in at least (commit price ÷ on-demand price) of the hours, 60% at a 40% discount.
+
+673
+00:57:38.599 --> 00:57:51.037
+Against a forecast, sweep the commitment level and pick the minimum-cost point; under uncertainty, check expected cost and regret across plausible futures, and ratchet up quarterly as the floor rises.
+
+674
+00:57:52.387 --> 00:57:53.517
+Question 11.
+
+675
+00:57:53.797 --> 00:57:56.656
+A service is the most expensive line on the bill.
+
+676
+00:57:56.936 --> 00:57:57.917
+Do you cut it?
+
+677
+00:57:58.197 --> 00:57:59.563
+Thirty-second answer:
+
+678
+00:57:59.843 --> 00:58:01.208
+Not without its value.
+
+679
+00:58:01.488 --> 00:58:10.917
+Measure what it contributes, an A or B test, attributed revenue, cost avoided, or its role in reliability, and compare with its fully allocated cost.
+
+680
+00:58:11.197 --> 00:58:17.341
+If value clearly exceeds cost, optimise it (cheaper model, caching, rightsizing) rather than cut it.
+
+681
+00:58:17.621 --> 00:58:19.243
+If it doesn't, challenge it.
+
+682
+00:58:20.593 --> 00:58:21.681
+Question 12.
+
+683
+00:58:21.961 --> 00:58:24.499
+Which architecture decisions most affect cost?
+
+684
+00:58:24.779 --> 00:58:26.145
+Thirty-second answer:
+
+685
+00:58:26.425 --> 00:58:41.230
+Service granularity (each service has an HA and operational floor); statefulness and startup time (determine how well you can autoscale); synchronous versus asynchronous processing (async flattens peaks); data placement,
+
+686
+00:58:41.510 --> 00:58:56.379
+retention and replication (storage and transfer); tenancy model (pooling amortises, silos multiply); cells (duplicate infrastructure); serverless versus containers (different cost curves); and code efficiency in hot paths.
+
+687
+00:58:57.729 --> 00:58:59.009
+Question 13.
+
+688
+00:58:59.289 --> 00:59:01.935
+How do you detect cost problems before the invoice?
+
+689
+00:59:02.215 --> 00:59:03.580
+Thirty-second answer:
+
+690
+00:59:03.860 --> 00:59:25.044
+Daily cost data (billing export) joined with tags and usage drivers, per team and per service; anomaly detection on day-over-day and forecast deviations with the top driver named; budgets with alerts at 50 or 80 or 100%; and per-service cost panels so engineers see changes right after deploys.
+
+691
+00:59:26.394 --> 00:59:27.589
+Question 14.
+
+692
+00:59:27.869 --> 00:59:30.855
+How do you control non-production environment costs?
+
+693
+00:59:31.135 --> 00:59:32.501
+Thirty-second answer:
+
+694
+00:59:32.781 --> 00:59:50.679
+Shut them down outside working hours, use smaller instance shapes and fewer replicas, create ephemeral per-PR environments that are destroyed automatically, share heavy dependencies where isolation isn't needed, use spot for CI, and give non-prod its own budget and anomaly alerts.
+
+695
+00:59:52.029 --> 00:59:52.925
+Architect.
+
+696
+00:59:53.205 --> 00:59:54.400
+Question 15.
+
+697
+00:59:54.680 --> 00:59:59.437
+Design a FinOps operating model for a 200-engineer organisation.
+
+698
+00:59:59.717 --> 01:00:01.083
+Thirty-second answer:
+
+699
+01:00:01.363 --> 01:00:08.147
+Engineers own their services' cost; a small central FinOps function owns tooling, commitments and policy.
+
+700
+01:00:08.427 --> 01:00:27.008
+Every resource tagged at provisioning (policy as code); shared costs allocated by drivers; cost per order and per service on every team dashboard; budgets and daily anomaly alerts per team; commitments purchased centrally against the confident floor and reviewed quarterly; retention and tiering
+
+701
+01:00:27.288 --> 01:00:34.947
+defaults per data class; cost sections in design docs; and a monthly review of unit economics with product and finance.
+
+702
+01:00:36.297 --> 01:00:37.491
+Question 16.
+
+703
+01:00:37.771 --> 01:00:41.291
+How do cost and reliability trade off, and how do you decide?
+
+704
+01:00:41.571 --> 01:00:42.937
+Thirty-second answer:
+
+705
+01:00:43.217 --> 01:00:52.283
+Reliability costs money, headroom, replicas, multi-zone, DR regions, cells, and cutting it saves money until an outage costs more.
+
+706
+01:00:52.563 --> 01:01:07.262
+Decide by pricing both sides: expected outage cost (probability times duration times cost per minute, Ch 34 L3) against the reliability spend, tiered by the business criticality of each service.
+
+707
+01:01:08.612 --> 01:01:09.956
+Question 17.
+
+708
+01:01:10.236 --> 01:01:14.076
+How would you reduce cost by 30% without harming the product?
+
+709
+01:01:14.356 --> 01:01:15.721
+Thirty-second answer:
+
+710
+01:01:16.001 --> 01:01:37.228
+Rank spend by owner and driver, then attack structural waste first: autoscale and pre-scale instead of static peak fleets; commit to the confident floor; enforce retention and tiering on logs and clickstream; shut down idle and non-prod capacity; remove orphans; fix requests-versus-usage gaps; move interruptible work to spot.
+
+711
+01:01:37.508 --> 01:01:44.655
+Only then look at code efficiency and architecture changes, and pair every cut with its value and reliability impact.
+
+712
+01:01:46.005 --> 01:01:47.178
+Question 18.
+
+713
+01:01:47.458 --> 01:01:50.786
+How do you forecast cloud cost for a new product or region?
+
+714
+01:01:51.066 --> 01:01:52.431
+Thirty-second answer:
+
+715
+01:01:52.711 --> 01:02:09.607
+Build a driver-based model: business volume forecasts (orders, users, events), then resource drivers (requests, storage, transfer), then cost via unit prices and your current cost per unit, including fixed floors (HA, non-prod, observability).
+
+716
+01:02:09.887 --> 01:02:18.271
+Express demand as ranges and run it as a Monte Carlo to get expected cost and a p90; revisit monthly against actuals.
+
+717
+01:02:19.621 --> 01:02:20.859
+Question 19.
+
+718
+01:02:21.139 --> 01:02:24.616
+How do you make engineers care about cost without slowing them down?
+
+719
+01:02:24.896 --> 01:02:26.261
+Thirty-second answer:
+
+720
+01:02:26.541 --> 01:02:28.952
+Visibility and good defaults, not gates.
+
+721
+01:02:29.232 --> 01:02:46.832
+Show cost next to latency on their dashboards; make cost per order a team metric; put cheap-by-default choices in the paved road (autoscaling templates, finite retention, INFO logging, right-sized base images); alert them quickly on anomalies; and celebrate savings.
+
+722
+01:02:47.112 --> 01:02:50.973
+Reserve reviews for large commitments and one-way-door decisions.
+
+723
+01:02:52.323 --> 01:02:53.433
+Question 20.
+
+724
+01:02:53.713 --> 01:02:56.763
+What distinguishes a principal engineer's view of cost?
+
+725
+01:02:57.043 --> 01:02:58.409
+Thirty-second answer:
+
+726
+01:02:58.689 --> 01:03:09.185
+They treat cost as a design quality with explicit trade-offs, express it in business units, connect it to value, and focus on structural levers rather than one-off cuts.
+
+727
+01:03:09.465 --> 01:03:23.886
+They know which architecture choices set the cost curve, quantify decisions under uncertainty (commitments, serverless versus containers), design guardrails so savings persist, and keep effort proportionate to where the money actually goes.
+
+728
+01:03:25.236 --> 01:03:26.132
+Part 9.
+
+729
+01:03:26.412 --> 01:03:27.820
+Summary and Practice.
+
+730
+01:03:29.070 --> 01:03:30.158
+Key takeaways.
+
+731
+01:03:30.438 --> 01:03:37.713
+Cost is an architecture quality with owners, budgets and trade-offs, not a finance afterthought (§2.1).
+
+732
+01:03:37.993 --> 01:03:47.017
+Allocate every rupee, direct, shared by usage drivers, untagged driven to zero, and express it per order, per customer, per tenant (L1).
+
+733
+01:03:47.297 --> 01:03:52.481
+Judge spend by value, not size: the biggest line may be the best investment (L1).
+
+734
+01:03:52.761 --> 01:03:59.203
+Autoscale the daily curve, pre-scale known events, keep target utilisation below the queueing knee (L2).
+
+735
+01:04:00.553 --> 01:04:08.447
+Commit to the confident floor, never the peak; the curve is flat near the optimum, so avoid the tails and ratchet quarterly (L3).
+
+736
+01:04:08.727 --> 01:04:15.468
+Retention and tiering beat encoding for big streams; rank data by size before optimising (L4).
+
+737
+01:04:15.748 --> 01:04:24.345
+Design for cost: service granularity, startup time, async processing, tenancy and cells set the cost curve (§2.8).
+
+738
+01:04:24.625 --> 01:04:34.844
+Run FinOps continuously: inform, optimise, operate, with anomaly alerts, policy as code and cost in design docs (§2.9).
+
+739
+01:04:36.194 --> 01:04:44.941
+Be proportionate: remove waste and bad incentives; don't trade delivery speed or reliability for pennies (§2.10).
+
+740
+01:04:46.291 --> 01:04:47.613
+Decision cheat sheet.
+
+741
+01:04:47.893 --> 01:04:49.259
+Here is a quick table:
+
+742
+01:04:49.539 --> 01:04:50.861
+Question, and Answer.
+
+743
+01:04:51.141 --> 01:04:52.827
+How do we see where money goes?:
+
+744
+01:04:53.107 --> 01:04:57.480
+Tags + driver-based allocation, then cost per service and per order.
+
+745
+01:04:57.760 --> 01:04:59.765
+Is this expensive service worth it?:
+
+746
+01:05:00.045 --> 01:05:03.885
+Compare allocated cost with measured value (A or B, margin).
+
+747
+01:05:04.165 --> 01:05:05.680
+How big should the fleet be?:
+
+748
+01:05:05.960 --> 01:05:09.693
+Autoscale to a target utilisation; pre-scale known events.
+
+749
+01:05:09.973 --> 01:05:11.253
+How much to commit?:
+
+750
+01:05:11.533 --> 01:05:18.573
+Up to where the marginal unit is busy ≥ commit or on-demand ratio of hours; ratchet.
+
+751
+01:05:18.853 --> 01:05:19.643
+Spot?:
+
+752
+01:05:19.923 --> 01:05:22.248
+Only interruptible, retry-safe work.
+
+753
+01:05:22.528 --> 01:05:23.957
+Logs and clickstream?:
+
+754
+01:05:24.237 --> 01:05:27.736
+Finite retention, compression, lifecycle tiers, sampling.
+
+755
+01:05:28.016 --> 01:05:29.275
+Cross-zone costs?:
+
+756
+01:05:29.555 --> 01:05:32.541
+Check size first; zone-aware routing where it matters.
+
+757
+01:05:32.821 --> 01:05:34.507
+How do we avoid surprises?:
+
+758
+01:05:34.787 --> 01:05:37.368
+Daily anomaly alerts and budgets per team.
+
+759
+01:05:38.718 --> 01:05:39.657
+New design?:
+
+760
+01:05:39.937 --> 01:05:43.435
+Cost section: monthly cost, cost per unit, biggest lever.
+
+761
+01:05:44.785 --> 01:05:45.916
+Exercises.
+
+762
+01:05:46.196 --> 01:05:53.108
+(B2) Add a cost-centre column to L1's bill and produce showback per team (a team owns several services).
+
+763
+01:05:53.388 --> 01:05:56.716
+Which team's number changes most between allocation methods?
+
+764
+01:05:56.996 --> 01:06:03.097
+(B2) In L2, change the target utilisation to 45% and 75%.
+
+765
+01:06:03.377 --> 01:06:05.767
+How do cost and degraded minutes change?
+
+766
+01:06:06.047 --> 01:06:08.841
+Where would you set it for checkout versus a batch service?
+
+767
+01:06:09.121 --> 01:06:13.644
+(B3) Extend L3 with a 3-year commitment at 60% off.
+
+768
+01:06:13.924 --> 01:06:17.807
+When does it beat the 1-year option under the same demand uncertainty?
+
+769
+01:06:19.157 --> 01:06:25.983
+(B3) In L4, add Parquet-like columnar encoding (group each field across events before compressing).
+
+770
+01:06:26.263 --> 01:06:29.634
+How much smaller than row-wise binary + gzip is it?
+
+771
+01:06:29.914 --> 01:06:38.618
+(B4) Build a cost model for launching the platform in a new region: fixed floors, variable costs per order, cross-region replication.
+
+772
+01:06:38.898 --> 01:06:40.818
+What's the break-even order volume?
+
+773
+01:06:42.168 --> 01:06:43.171
+Further reading.
+
+774
+01:06:43.451 --> 01:06:46.885
+FinOps Foundation, FinOps Framework (finops.org).
+
+775
+01:06:47.165 --> 01:06:48.104
+J.R.
+
+776
+01:06:48.384 --> 01:06:51.541
+Storment and Mike Fuller, Cloud FinOps (O'Reilly).
+
+777
+01:06:51.821 --> 01:06:58.797
+AWS Well-Architected Framework, Cost Optimization Pillar (and equivalents for GCP or Azure).
+
+778
+01:06:59.077 --> 01:07:05.989
+Kubernetes documentation on resource requests or limits and the Vertical or Horizontal Pod Autoscalers.
+
+779
+01:07:06.269 --> 01:07:12.648
+Corey Quinn's writing on cloud cost (lastweekinaws.com) for practical, vendor-specific pitfalls.
+
+780
+01:07:13.998 --> 01:07:15.235
+Related chapters.
+
+781
+01:07:15.515 --> 01:07:20.977
+Ch 02, Back-of-the-Envelope Estimation: the arithmetic behind cost models.
+
+782
+01:07:21.257 --> 01:07:25.694
+Ch 21, Data at Scale: storage tiers and lakehouse formats.
+
+783
+01:07:25.974 --> 01:07:30.753
+Ch 25, Performance Engineering: efficient code as a cost lever.
+
+784
+01:07:31.033 --> 01:07:35.619
+Ch 26, Deployment and Infrastructure: autoscaling mechanics.
+
+785
+01:07:35.899 --> 01:07:42.150
+Ch 31, Architecture Decision Making: decisions under uncertainty, queueing and headroom.
+
+786
+01:07:43.500 --> 01:07:49.879
+Ch 34, Modern Architecture Styles: the cost side of microservices, serverless and cells.
+
+787
+01:07:51.229 --> 01:07:52.829
+That's the end of this chapter.
+
+788
+01:07:53.109 --> 01:07:59.231
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+789
+01:07:59.511 --> 01:08:00.962
+See you in the next chapter.
+

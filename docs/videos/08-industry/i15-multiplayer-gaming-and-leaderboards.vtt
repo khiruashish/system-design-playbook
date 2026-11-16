@@ -1,0 +1,3290 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.441
+Multiplayer Gaming and Leaderboards.
+
+2
+00:00:02.721 --> 00:00:07.350
+Chapter I15, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:09.100 --> 00:00:10.060
+At a glance:
+
+4
+00:00:10.340 --> 00:00:11.513
+Chapter at a glance.
+
+5
+00:00:11.793 --> 00:00:20.967
+Sector: gaming (mobile and PC online multiplayer, casual and competitive), Format: system design walkthrough with no code, Reader bands:
+
+6
+00:00:21.247 --> 00:00:22.761
+B1, then B4.
+
+7
+00:00:23.041 --> 00:00:23.937
+Builds on:
+
+8
+00:00:24.217 --> 00:00:31.172
+Ch 51 (top-K), Ch 44 (cache), Ch 41 (chat), I13 (live events).
+
+9
+00:00:31.452 --> 00:00:35.847
+What you get: a reference platform for a popular online multiplayer game.
+
+10
+00:00:36.127 --> 00:00:42.228
+Think a battle-royale or team shooter on mobile, plus casual PvP (player-versus-player) games.
+
+11
+00:00:42.508 --> 00:00:47.479
+The platform covers: accounts and login;. matchmaking by skill and latency;.
+
+12
+00:00:48.829 --> 00:01:10.055
+dedicated game servers allocated worldwide;. real-time netcode: authoritative server, client prediction, lag compensation and rollback;. parties, friends, voice and chat;. leaderboards: global, regional, friends and seasonal, for tens of millions of players;. progression, inventory and the in-game economy and store;. anti-cheat;.
+
+13
+00:01:11.405 --> 00:01:14.520
+live ops, with events, seasons and remote config.
+
+14
+00:01:14.800 --> 00:01:31.632
+It also explains the algorithms (Elo or Glicko or TrueSkill ratings, the matchmaking queue, server tick and interest management, lag compensation, leaderboard ranking at scale, anti-cheat detection, loot and drop fairness) and the data platform and tech stack.
+
+15
+00:01:31.912 --> 00:01:32.893
+Reading time:
+
+16
+00:01:33.173 --> 00:01:34.069
+80 min.
+
+17
+00:01:35.419 --> 00:01:36.166
+Warning:
+
+18
+00:01:36.446 --> 00:01:37.854
+Sources and honesty.
+
+19
+00:01:38.134 --> 00:01:49.270
+Some netcode techniques have been described publicly in developer talks and blogs, including Valve's lag compensation, rollback in fighting games and Overwatch's GDC talks.
+
+20
+00:01:49.550 --> 00:01:52.259
+These are marked publicly described (VERIFY).
+
+21
+00:01:52.539 --> 00:01:57.659
+India's rules on online gaming changed significantly in 2025.
+
+22
+00:01:57.939 --> 00:02:07.070
+The Promotion and Regulation of Online Gaming Act, 2025 addresses real-money games (VERIFY its current status and rules).
+
+23
+00:02:07.350 --> 00:02:12.449
+This chapter designs a free-to-play game with in-app purchases, not real-money gaming.
+
+24
+00:02:12.729 --> 00:02:14.969
+Everything else is a reference design.
+
+25
+00:02:16.319 --> 00:02:17.172
+Part 1.
+
+26
+00:02:17.452 --> 00:02:18.988
+The System in One Page.
+
+27
+00:02:20.238 --> 00:02:21.646
+What makes games different.
+
+28
+00:02:21.926 --> 00:02:23.270
+Here is a quick table:
+
+29
+00:02:23.550 --> 00:02:27.219
+Aspect, and Typical web app, and Real-time multiplayer game.
+
+30
+00:02:27.499 --> 00:02:28.417
+Latency.
+
+31
+00:02:28.697 --> 00:02:29.785
+Typical web app:
+
+32
+00:02:30.065 --> 00:02:31.963
+100s of ms is fine.
+
+33
+00:02:32.243 --> 00:02:33.907
+Real-time multiplayer game:
+
+34
+00:02:34.187 --> 00:02:36.961
+50 to 100 ms round trip matters.
+
+35
+00:02:37.241 --> 00:02:38.414
+Jitter ruins play.
+
+36
+00:02:38.694 --> 00:02:39.462
+State.
+
+37
+00:02:39.742 --> 00:02:40.830
+Typical web app:
+
+38
+00:02:41.110 --> 00:02:42.497
+Request or response.
+
+39
+00:02:42.777 --> 00:02:44.441
+Real-time multiplayer game:
+
+40
+00:02:44.721 --> 00:02:48.603
+Continuous shared simulation at 20 to 60 ticks per second.
+
+41
+00:02:48.883 --> 00:02:49.950
+Consistency.
+
+42
+00:02:50.230 --> 00:02:51.318
+Typical web app:
+
+43
+00:02:51.598 --> 00:02:52.921
+Strong or eventual.
+
+44
+00:02:53.201 --> 00:02:54.865
+Real-time multiplayer game:
+
+45
+00:02:55.145 --> 00:02:58.238
+Server-authoritative world with client-side prediction.
+
+46
+00:02:58.518 --> 00:02:59.457
+Load shape.
+
+47
+00:02:59.737 --> 00:03:00.825
+Typical web app:
+
+48
+00:03:01.105 --> 00:03:01.915
+Diurnal.
+
+49
+00:03:02.195 --> 00:03:03.859
+Real-time multiplayer game:
+
+50
+00:03:04.139 --> 00:03:08.513
+Diurnal plus launch days, season starts, events with 10 times spikes.
+
+51
+00:03:08.793 --> 00:03:09.795
+Adversaries.
+
+52
+00:03:10.075 --> 00:03:11.163
+Typical web app:
+
+53
+00:03:11.443 --> 00:03:12.446
+Fraudsters.
+
+54
+00:03:12.726 --> 00:03:14.390
+Real-time multiplayer game:
+
+55
+00:03:14.670 --> 00:03:16.846
+Cheaters with full control of their client.
+
+56
+00:03:17.126 --> 00:03:17.787
+Fun.
+
+57
+00:03:18.067 --> 00:03:20.030
+Typical web app: n or a.
+
+58
+00:03:20.310 --> 00:03:21.974
+Real-time multiplayer game:
+
+59
+00:03:22.254 --> 00:03:23.961
+Fair matches, short queues.
+
+60
+00:03:24.241 --> 00:03:25.947
+Business metrics depend on them.
+
+61
+00:03:27.297 --> 00:03:28.385
+Main systems.
+
+62
+00:03:28.665 --> 00:03:30.009
+Here is a quick table:
+
+63
+00:03:30.289 --> 00:03:31.804
+System, and What it does.
+
+64
+00:03:32.084 --> 00:03:33.513
+Identity and accounts:
+
+65
+00:03:33.793 --> 00:03:38.444
+Login (guest, phone, social, platform accounts), profiles, linking, bans.
+
+66
+00:03:38.724 --> 00:03:39.492
+Social:
+
+67
+00:03:39.772 --> 00:03:42.567
+Friends, parties, clans, presence, chat, voice.
+
+68
+00:03:42.847 --> 00:03:43.871
+Matchmaking:
+
+69
+00:03:44.151 --> 00:03:47.180
+Queues players by mode, skill, region and party.
+
+70
+00:03:47.460 --> 00:03:49.017
+Forms balanced matches.
+
+71
+00:03:49.297 --> 00:03:50.492
+Game server fleet:
+
+72
+00:03:50.772 --> 00:03:55.188
+Dedicated servers per match, allocated in many regions, autoscaled.
+
+73
+00:03:55.468 --> 00:03:57.345
+Game server (the simulation):
+
+74
+00:03:57.625 --> 00:04:01.252
+Authoritative game loop, netcode, hit detection, match results.
+
+75
+00:04:01.532 --> 00:04:03.153
+Session or lobby service:
+
+76
+00:04:03.433 --> 00:04:06.057
+Match lifecycle, reconnects, spectators.
+
+77
+00:04:06.337 --> 00:04:07.959
+Progression and inventory:
+
+78
+00:04:08.239 --> 00:04:11.631
+XP, levels, battle pass, unlocked items, loadouts.
+
+79
+00:04:11.911 --> 00:04:13.169
+Economy and store:
+
+80
+00:04:13.449 --> 00:04:16.628
+Currencies, purchases, offers, receipts, refunds.
+
+81
+00:04:17.978 --> 00:04:19.365
+Leaderboards and ranks:
+
+82
+00:04:19.645 --> 00:04:23.335
+Seasonal ranked tiers, global and regional boards, friends boards.
+
+83
+00:04:23.615 --> 00:04:24.618
+Anti-cheat:
+
+84
+00:04:24.898 --> 00:04:29.911
+Client integrity, server validation, statistical detection, reports and bans.
+
+85
+00:04:30.191 --> 00:04:31.173
+Live ops:
+
+86
+00:04:31.453 --> 00:04:34.503
+Events, remote config, A or B tests, news, push.
+
+87
+00:04:34.783 --> 00:04:36.447
+Telemetry and analytics:
+
+88
+00:04:36.727 --> 00:04:39.799
+Match events, performance, retention, monetisation.
+
+89
+00:04:41.149 --> 00:04:43.304
+Scale for this design (assumptions).
+
+90
+00:04:43.584 --> 00:04:44.928
+Here is a quick table:
+
+91
+00:04:45.208 --> 00:04:46.531
+Quantity, and Value.
+
+92
+00:04:46.811 --> 00:04:48.027
+Registered players:
+
+93
+00:04:48.307 --> 00:04:50.888
+100M; 20M daily active.
+
+94
+00:04:51.168 --> 00:04:53.301
+Peak concurrent users (CCU):
+
+95
+00:04:53.581 --> 00:04:54.477
+3M.
+
+96
+00:04:54.757 --> 00:04:55.952
+Players per match:
+
+97
+00:04:56.232 --> 00:04:59.453
+100 (battle royale) or 10 (5v5).
+
+98
+00:04:59.733 --> 00:05:02.933
+Concurrent matches: ~30k, 100k.
+
+99
+00:05:03.213 --> 00:05:04.152
+Match length:
+
+100
+00:05:04.432 --> 00:05:07.397
+20 to 30 min (BR), 10 min (casual).
+
+101
+00:05:07.677 --> 00:05:08.829
+Server tick rate:
+
+102
+00:05:09.109 --> 00:05:12.757
+30 Hz (BR), 60 Hz (competitive shooter).
+
+103
+00:05:13.037 --> 00:05:14.040
+Leaderboard:
+
+104
+00:05:14.320 --> 00:05:17.947
+20M entries per season, updated after every match.
+
+105
+00:05:18.227 --> 00:05:21.832
+Telemetry events: ~5M events per second at peak.
+
+106
+00:05:23.182 --> 00:05:24.569
+Estimation highlights:
+
+107
+00:05:24.849 --> 00:05:33.275
+Game server capacity: one process runs one BR match of 100 players at 30 Hz, using about 1 to 2 cores.
+
+108
+00:05:33.555 --> 00:05:41.043
+3M CCU in BR gives 30k matches, which is roughly 30k, 60k cores worldwide at peak.
+
+109
+00:05:41.323 --> 00:05:45.547
+That fleet has to be elastic, and it is the biggest infrastructure cost.
+
+110
+00:05:45.827 --> 00:05:47.129
+Bandwidth per player:
+
+111
+00:05:47.409 --> 00:05:58.054
+30 snapshots per second times ~500 bytes (after delta compression) is ~15 KB per second, or 120 kbps down.
+
+112
+00:05:59.404 --> 00:06:05.100
+3M players need ~360 Gbps of egress from game servers.
+
+113
+00:06:05.380 --> 00:06:08.239
+Egress from game servers is a real cost item.
+
+114
+00:06:08.519 --> 00:06:09.564
+Match results:
+
+115
+00:06:09.844 --> 00:06:15.668
+30k matches ending every ~25 minutes is ~20 results per second.
+
+116
+00:06:15.948 --> 00:06:24.161
+Each result updates up to 100 players, so ~2k leaderboard updates per second on average and more at the top of the hour.
+
+117
+00:06:24.441 --> 00:06:25.465
+Matchmaking:
+
+118
+00:06:25.745 --> 00:06:32.700
+3M players cycling every ~25 minutes means ~2k players per second entering queues.
+
+119
+00:06:32.980 --> 00:06:34.644
+Queues are per region and mode.
+
+120
+00:06:35.994 --> 00:06:36.869
+Part 2.
+
+121
+00:06:37.149 --> 00:06:38.109
+Requirements.
+
+122
+00:06:39.359 --> 00:06:40.212
+Functional.
+
+123
+00:06:40.492 --> 00:06:41.367
+Accounts.
+
+124
+00:06:41.647 --> 00:06:47.961
+Log in, link devices, keep progress across devices, and let parents set controls for minors.
+
+125
+00:06:48.241 --> 00:06:49.009
+Social.
+
+126
+00:06:49.289 --> 00:06:54.921
+Friends, invites, parties of up to 4, clans, text and voice chat, and presence (in match).
+
+127
+00:06:55.201 --> 00:06:56.225
+Matchmaking.
+
+128
+00:06:56.505 --> 00:06:58.788
+Queue for a mode, solo or as a party.
+
+129
+00:06:59.068 --> 00:07:04.167
+Get a fair match (similar skill) with low latency, within about 30 to 60 s.
+
+130
+00:07:04.447 --> 00:07:06.793
+Backfill disconnected slots in some modes.
+
+131
+00:07:08.143 --> 00:07:09.039
+Gameplay.
+
+132
+00:07:09.319 --> 00:07:12.199
+Smooth movement and shooting that feels responsive.
+
+133
+00:07:12.479 --> 00:07:13.951
+Fair hit registration.
+
+134
+00:07:14.231 --> 00:07:15.959
+Reconnect after a disconnect.
+
+135
+00:07:16.239 --> 00:07:18.629
+Spectating, and replays for some modes.
+
+136
+00:07:18.909 --> 00:07:19.783
+Results.
+
+137
+00:07:20.063 --> 00:07:24.607
+A match summary, then XP, rank changes, rewards and leaderboard updates.
+
+138
+00:07:25.957 --> 00:07:26.981
+Leaderboards.
+
+139
+00:07:27.261 --> 00:07:33.192
+Global, country, friends and clan boards; seasonal and all-time; my rank and players around me.
+
+140
+00:07:33.472 --> 00:07:34.325
+Economy.
+
+141
+00:07:34.605 --> 00:07:37.549
+Buy currency through app stores or payment gateways.
+
+142
+00:07:37.829 --> 00:07:40.219
+Buy items, a battle pass and bundles.
+
+143
+00:07:40.499 --> 00:07:42.931
+Receive gifts, promotions and refunds.
+
+144
+00:07:43.211 --> 00:07:44.256
+Anti-cheat.
+
+145
+00:07:44.536 --> 00:07:48.312
+Detect and ban cheats; let players report; handle appeals.
+
+146
+00:07:48.592 --> 00:07:49.573
+Live ops.
+
+147
+00:07:49.853 --> 00:07:55.635
+Timed events, new modes, config changes without an app update, and staged rollout of content.
+
+148
+00:07:56.985 --> 00:07:58.094
+Non-functional.
+
+149
+00:07:58.374 --> 00:07:59.718
+Here is a quick table:
+
+150
+00:07:59.998 --> 00:08:01.363
+Attribute, and Target.
+
+151
+00:08:01.643 --> 00:08:02.838
+In-match latency:
+
+152
+00:08:03.118 --> 00:08:07.939
+Players matched to a server with 60 to 80 ms RTT where possible.
+
+153
+00:08:08.219 --> 00:08:09.713
+Server tick stability:
+
+154
+00:08:09.993 --> 00:08:14.963
+Frame time below the tick budget (33 ms at 30 Hz) with headroom.
+
+155
+00:08:15.243 --> 00:08:16.481
+Matchmaking time:
+
+156
+00:08:16.761 --> 00:08:21.539
+P50 30 s, P95 90 s (relaxed at low population).
+
+157
+00:08:21.819 --> 00:08:22.886
+Availability:
+
+158
+00:08:23.166 --> 00:08:27.198
+Login, matchmaking and store at 99.9%+.
+
+159
+00:08:27.478 --> 00:08:30.315
+A single match can fail without a global impact.
+
+160
+00:08:30.595 --> 00:08:31.918
+Economy correctness:
+
+161
+00:08:32.198 --> 00:08:37.169
+No duplicate grants, no lost purchases, and an audit of every currency movement.
+
+162
+00:08:37.449 --> 00:08:38.771
+Leaderboard freshness:
+
+163
+00:08:39.051 --> 00:08:41.419
+Rank updated within seconds of match end.
+
+164
+00:08:42.769 --> 00:08:43.644
+Fairness:
+
+165
+00:08:43.924 --> 00:08:49.855
+Balanced matches, cheat-free play, transparent odds for random rewards (VERIFY local rules).
+
+166
+00:08:50.135 --> 00:08:50.860
+Cost:
+
+167
+00:08:51.140 --> 00:08:54.745
+Game server fleet cost per CCU hour kept under budget.
+
+168
+00:08:56.095 --> 00:08:56.991
+Part 3.
+
+169
+00:08:57.271 --> 00:08:58.786
+High-Level Architecture.
+
+170
+00:09:00.036 --> 00:09:01.380
+Here is the diagram.
+
+171
+00:09:05.230 --> 00:09:06.297
+Key decisions:
+
+172
+00:09:07.647 --> 00:09:08.991
+Here is a quick table:
+
+173
+00:09:09.271 --> 00:09:11.041
+Decision, and Choice, and Why.
+
+174
+00:09:11.321 --> 00:09:12.473
+Game topology.
+
+175
+00:09:12.753 --> 00:09:13.585
+Choice:
+
+176
+00:09:13.865 --> 00:09:16.873
+Dedicated authoritative servers (not peer-to-peer).
+
+177
+00:09:17.153 --> 00:09:17.836
+Why:
+
+178
+00:09:18.116 --> 00:09:21.188
+Cheating resistance, fairness, no host advantage.
+
+179
+00:09:21.468 --> 00:09:22.407
+Transport.
+
+180
+00:09:22.687 --> 00:09:23.519
+Choice:
+
+181
+00:09:23.799 --> 00:09:28.172
+UDP with a custom reliability layer (or QUIC or ENet-style).
+
+182
+00:09:28.452 --> 00:09:29.135
+Why:
+
+183
+00:09:29.415 --> 00:09:32.209
+TCP head-of-line blocking hurts real time.
+
+184
+00:09:32.489 --> 00:09:33.257
+Fleet.
+
+185
+00:09:33.537 --> 00:09:34.369
+Choice:
+
+186
+00:09:34.649 --> 00:09:42.713
+Container-based fleet management (for example, Kubernetes + Agones, or managed services) across clouds and bare metal.
+
+187
+00:09:42.993 --> 00:09:43.676
+Why:
+
+188
+00:09:43.956 --> 00:09:46.665
+Elasticity plus low latency near players.
+
+189
+00:09:46.945 --> 00:09:47.969
+Matchmaking.
+
+190
+00:09:48.249 --> 00:09:49.081
+Choice:
+
+191
+00:09:49.361 --> 00:09:55.079
+Regional matchmakers with skill + latency + party rules, and expanding search windows.
+
+192
+00:09:55.359 --> 00:09:56.041
+Why:
+
+193
+00:09:56.321 --> 00:09:57.431
+Fair and fast.
+
+194
+00:09:57.711 --> 00:09:58.564
+Economy.
+
+195
+00:09:58.844 --> 00:09:59.676
+Choice:
+
+196
+00:09:59.956 --> 00:10:03.967
+Double-entry ledger of currencies and items, with idempotent grants.
+
+197
+00:10:04.247 --> 00:10:04.929
+Why:
+
+198
+00:10:05.209 --> 00:10:06.596
+Money-like correctness.
+
+199
+00:10:07.946 --> 00:10:08.970
+Leaderboards.
+
+200
+00:10:09.250 --> 00:10:10.082
+Choice:
+
+201
+00:10:10.362 --> 00:10:17.103
+Sharded in-memory sorted sets for the top and near-rank, plus bucketed approximations for global percentile.
+
+202
+00:10:17.383 --> 00:10:18.066
+Why:
+
+203
+00:10:18.346 --> 00:10:20.245
+Fast my rank at 20M+.
+
+204
+00:10:20.525 --> 00:10:21.506
+Live ops.
+
+205
+00:10:21.786 --> 00:10:22.618
+Choice:
+
+206
+00:10:22.898 --> 00:10:26.397
+Remote config and feature flags, content via CDN.
+
+207
+00:10:26.677 --> 00:10:27.359
+Why:
+
+208
+00:10:27.639 --> 00:10:29.581
+Change the game without store updates.
+
+209
+00:10:30.931 --> 00:10:31.848
+Part 4.
+
+210
+00:10:32.128 --> 00:10:34.005
+How It Works, Journeys End to End.
+
+211
+00:10:35.255 --> 00:10:37.687
+Journey 1: from app open to match start.
+
+212
+00:10:37.967 --> 00:10:38.927
+App open.
+
+213
+00:10:39.207 --> 00:10:47.421
+The client checks its version against remote config and downloads updated content (maps, skins) from the CDN in the background.
+
+214
+00:10:47.701 --> 00:10:54.079
+It logs in with a device ID, phone OTP or a platform account, and receives a session token.
+
+215
+00:10:54.359 --> 00:10:56.258
+Presence connects over a WebSocket.
+
+216
+00:10:56.538 --> 00:10:57.477
+Home screen.
+
+217
+00:10:58.827 --> 00:11:04.587
+The profile, inventory, battle pass progress, events (from live ops) and store offers load.
+
+218
+00:11:04.867 --> 00:11:07.320
+Offers may be personalised through experiments.
+
+219
+00:11:07.600 --> 00:11:08.475
+Party up.
+
+220
+00:11:08.755 --> 00:11:12.723
+Friends accept an invite and a party is formed in the social service.
+
+221
+00:11:13.003 --> 00:11:15.179
+The party leader chooses a mode and queues.
+
+222
+00:11:15.459 --> 00:11:19.725
+The whole party enters matchmaking as one ticket with the members' ratings.
+
+223
+00:11:21.075 --> 00:11:22.313
+Latency probing.
+
+224
+00:11:22.593 --> 00:11:29.569
+The client pings a set of region endpoints (quality-of-service beacons) and reports RTTs to the matchmaker.
+
+225
+00:11:29.849 --> 00:11:33.241
+Candidate regions are those under the latency threshold.
+
+226
+00:11:33.521 --> 00:11:35.761
+Matchmaking (§6.2).
+
+227
+00:11:36.041 --> 00:11:38.771
+The ticket enters queues for eligible regions.
+
+228
+00:11:39.051 --> 00:11:47.798
+The matchmaker groups tickets into a balanced match: similar ratings, parties matched to parties where possible, and team balance by total rating.
+
+229
+00:11:48.078 --> 00:11:51.619
+The acceptable skill range widens as wait time grows.
+
+230
+00:11:52.969 --> 00:11:53.972
+Allocation.
+
+231
+00:11:54.252 --> 00:12:02.081
+Once the match is formed, the allocator requests a ready game server in the chosen region from the fleet manager, which keeps a warm buffer.
+
+232
+00:12:02.361 --> 00:12:09.337
+The server gets the match config (map, mode, player IDs, teams) and one-time join tokens for each player.
+
+233
+00:12:09.617 --> 00:12:10.364
+Connect.
+
+234
+00:12:10.644 --> 00:12:15.892
+Clients receive the server IP:port and a join token, and connect over UDP.
+
+235
+00:12:17.242 --> 00:12:26.095
+The server validates tokens, loads players' loadouts from progression (or from the match config) and starts the pre-game lobby, where players drop in.
+
+236
+00:12:27.445 --> 00:12:29.792
+Journey 2: inside a match, the game loop.
+
+237
+00:12:30.072 --> 00:12:31.117
+Client input.
+
+238
+00:12:31.397 --> 00:12:42.683
+Each client frame (60 fps), the client samples input (movement, aim, fire) and sends input commands to the server, tagged with a sequence number and client timestamp.
+
+239
+00:12:42.963 --> 00:12:46.397
+Batches of inputs are sent 30 to 60 times per second.
+
+240
+00:12:46.677 --> 00:12:47.808
+Client prediction.
+
+241
+00:12:48.088 --> 00:12:54.893
+The client applies its own inputs immediately to its local copy of its own character, so movement feels instant.
+
+242
+00:12:55.173 --> 00:12:58.096
+It keeps a history of inputs not yet acknowledged.
+
+243
+00:12:58.376 --> 00:12:59.336
+Server tick.
+
+244
+00:12:59.616 --> 00:13:01.941
+At 30 Hz the authoritative server:
+
+245
+00:13:03.291 --> 00:13:05.041
+Collects inputs from all players.
+
+246
+00:13:05.321 --> 00:13:11.763
+Simulates movement with the game's physics and validates it (speed limits, collisions, no walking through walls).
+
+247
+00:13:12.043 --> 00:13:16.011
+Processes shots with lag compensation (§6.4).
+
+248
+00:13:16.291 --> 00:13:18.873
+Applies damage, deaths and item pickups.
+
+249
+00:13:19.153 --> 00:13:20.753
+Updates the storm or zone.
+
+250
+00:13:21.033 --> 00:13:22.675
+Produces the new world state.
+
+251
+00:13:22.955 --> 00:13:24.406
+Snapshots to clients.
+
+252
+00:13:25.756 --> 00:13:35.612
+The server sends each client a snapshot of relevant state: its own authoritative position and entities in its area of interest (§6.5).
+
+253
+00:13:35.892 --> 00:13:39.903
+Snapshots are delta-compressed against the last acknowledged snapshot.
+
+254
+00:13:40.183 --> 00:13:41.420
+Reconciliation.
+
+255
+00:13:41.700 --> 00:13:49.295
+When the client receives the authoritative state for its own character, it rewinds to that state and replays unacknowledged inputs.
+
+256
+00:13:49.575 --> 00:13:54.119
+Small differences are smoothed; big ones snap (the player feels rubber-banding).
+
+257
+00:13:55.469 --> 00:13:56.855
+Other players' rendering.
+
+258
+00:13:57.135 --> 00:14:07.759
+Clients render other players slightly in the past (for example, 100 ms interpolation buffer) between two snapshots, for smooth movement despite packet jitter.
+
+259
+00:14:08.039 --> 00:14:09.319
+Hit registration.
+
+260
+00:14:09.599 --> 00:14:15.722
+When a player fires, the client may show hit effects immediately (optimistic), but the server decides.
+
+261
+00:14:16.002 --> 00:14:19.970
+Lag compensation rewinds other players to where the shooter saw them.
+
+262
+00:14:21.320 --> 00:14:22.792
+Events and telemetry.
+
+263
+00:14:23.072 --> 00:14:28.149
+Kills, deaths, damage, item use and positions (sampled) are streamed to telemetry.
+
+264
+00:14:28.429 --> 00:14:31.075
+Suspicious patterns are flagged for anti-cheat.
+
+265
+00:14:32.425 --> 00:14:35.475
+Journey 3: match end, rewards and leaderboards.
+
+266
+00:14:35.755 --> 00:14:36.758
+Match ends.
+
+267
+00:14:37.038 --> 00:14:42.307
+The server computes results: placement, kills, damage, survival time, team outcome.
+
+268
+00:14:42.587 --> 00:14:45.425
+It sends a signed match result to the session service.
+
+269
+00:14:45.705 --> 00:14:46.814
+Session service.
+
+270
+00:14:47.094 --> 00:14:53.046
+Validates the result: signature, known server, match ID not already processed (idempotency).
+
+271
+00:14:53.326 --> 00:14:55.289
+Publishes a MatchCompleted event.
+
+272
+00:14:56.639 --> 00:15:00.777
+Consumers (asynchronous, each idempotent by match ID and player):
+
+273
+00:15:01.057 --> 00:15:06.860
+Ratings: update each player's skill rating (§6.1) and ranked points or tier.
+
+274
+00:15:07.140 --> 00:15:08.057
+Progression:
+
+275
+00:15:08.337 --> 00:15:11.281
+XP, battle pass progress, mission completions.
+
+276
+00:15:11.561 --> 00:15:16.511
+Economy: rewards such as soft currency and loot drops, credited through the ledger.
+
+277
+00:15:16.791 --> 00:15:20.759
+Leaderboards: update seasonal scores (§6.6).
+
+278
+00:15:21.039 --> 00:15:25.668
+Anti-cheat: statistical checks on the performance (§6.7).
+
+279
+00:15:27.018 --> 00:15:29.749
+Analytics: the match record goes to the lakehouse.
+
+280
+00:15:30.029 --> 00:15:31.095
+Client summary.
+
+281
+00:15:31.375 --> 00:15:39.247
+The client shows XP gained, rank change and rewards, typically within 1 to 3 s via a push over the realtime gateway.
+
+282
+00:15:39.527 --> 00:15:40.615
+Server teardown.
+
+283
+00:15:40.895 --> 00:15:46.975
+The game server uploads a replay (if recorded), cleans up and returns to the fleet (or is recycled).
+
+284
+00:15:48.325 --> 00:15:50.437
+Journey 4: buying the battle pass.
+
+285
+00:15:50.717 --> 00:15:54.067
+The player taps Buy Battle Pass (950 gems).
+
+286
+00:15:54.347 --> 00:16:08.640
+They have 500 gems, so they buy a gem pack for 449 rupeesthrough the app store (Google Play or App Store billing) or a payment gateway on PC (UPI or cards; VERIFY store policies for India).
+
+287
+00:16:08.920 --> 00:16:12.141
+The store completes payment and the client receives a receipt.
+
+288
+00:16:12.421 --> 00:16:15.237
+The client sends the receipt to the economy service:
+
+289
+00:16:15.517 --> 00:16:18.696
+The service verifies it with the store's server API.
+
+290
+00:16:18.976 --> 00:16:24.736
+It checks the transaction ID has not been used before (idempotency, stopping replayed receipts).
+
+291
+00:16:26.086 --> 00:16:31.355
+It credits gems in the ledger: debit store revenue clearing, credit player gems wallet.
+
+292
+00:16:31.635 --> 00:16:33.427
+The player buys the battle pass.
+
+293
+00:16:33.707 --> 00:16:42.155
+The economy service atomically: debits 950 gems from the wallet;. grants the battle pass entitlement in inventory.
+
+294
+00:16:42.435 --> 00:16:46.489
+This happens in one transaction, or as a saga with compensation.
+
+295
+00:16:47.839 --> 00:16:48.692
+Refunds.
+
+296
+00:16:48.972 --> 00:16:53.196
+Store notifications (refund or chargeback) arrive through webhooks.
+
+297
+00:16:53.476 --> 00:16:58.959
+The service claws back currency, going negative if already spent (policy), and flags abuse.
+
+298
+00:16:59.239 --> 00:17:00.028
+Audit.
+
+299
+00:17:00.308 --> 00:17:09.481
+Every currency movement is a ledger entry with a reason, which supports support-team investigations and finance reconciliation with store reports.
+
+300
+00:17:10.831 --> 00:17:13.221
+Journey 5: a cheater and the ban wave.
+
+301
+00:17:13.501 --> 00:17:15.143
+A player uses an aimbot.
+
+302
+00:17:15.423 --> 00:17:21.887
+It reads game memory, and the client-side anti-cheat module may detect known signatures or tampering.
+
+303
+00:17:22.167 --> 00:17:33.538
+Server-side, statistical signals appear: inhumanly fast target acquisition;. headshot rate far above the rating norm;. tracking through walls;. impossible reaction times.
+
+304
+00:17:33.818 --> 00:17:38.319
+The anti-cheat model (§6.7) scores the player per match.
+
+305
+00:17:39.669 --> 00:17:41.419
+Player reports add evidence.
+
+306
+00:17:41.699 --> 00:17:44.536
+A replay or kill-cam clip goes to a review queue.
+
+307
+00:17:44.816 --> 00:17:45.605
+Action.
+
+308
+00:17:45.885 --> 00:17:49.405
+High-confidence detection leads to the account being flagged.
+
+309
+00:17:49.685 --> 00:17:55.061
+Bans are often held for a ban wave, so cheat makers don't learn which change caused detection.
+
+310
+00:17:55.341 --> 00:17:59.181
+Devices or hardware IDs may be banned for repeat offenders.
+
+311
+00:17:59.461 --> 00:18:03.472
+Affected matches may have rating changes rolled back for victims.
+
+312
+00:18:04.822 --> 00:18:07.595
+Appeals go through a support process with evidence.
+
+313
+00:18:08.945 --> 00:18:10.716
+Journey 6: a season launch.
+
+314
+00:18:10.996 --> 00:18:12.063
+Weeks before.
+
+315
+00:18:12.343 --> 00:18:18.039
+New content (map, skins, battle pass) is built and delivered via the CDN in a patch.
+
+316
+00:18:18.319 --> 00:18:22.351
+Pre-download is enabled days before, which spreads the bandwidth load.
+
+317
+00:18:22.631 --> 00:18:23.612
+Launch hour.
+
+318
+00:18:23.892 --> 00:18:26.921
+Remote config flips the season at a scheduled time.
+
+319
+00:18:27.201 --> 00:18:31.724
+Ranked tiers soft-reset (§6.1) and new leaderboards open.
+
+320
+00:18:32.004 --> 00:18:35.759
+CCU spikes 2 to 3 times as lapsed players return.
+
+321
+00:18:37.109 --> 00:18:38.069
+Capacity.
+
+322
+00:18:38.349 --> 00:18:43.149
+The fleet is pre-scaled with extra warm servers per region, and matchmakers scale.
+
+323
+00:18:43.429 --> 00:18:50.170
+The login service has queueing (You are 12,340 in queue) to protect the backend if needed.
+
+324
+00:18:50.450 --> 00:18:51.325
+Monitoring.
+
+325
+00:18:51.605 --> 00:19:01.482
+Watch queue times, match start failures, crash rates on new content, store purchase success and economy anomalies (an exploit granting infinite currency).
+
+326
+00:19:01.762 --> 00:19:04.642
+Kill switches exist for features and store items.
+
+327
+00:19:05.992 --> 00:19:06.952
+Part 5.
+
+328
+00:19:07.232 --> 00:19:08.768
+Core Subsystems in Depth.
+
+329
+00:19:10.018 --> 00:19:11.682
+Game server fleet management.
+
+330
+00:19:11.962 --> 00:19:13.178
+Fleet per region.
+
+331
+00:19:13.458 --> 00:19:19.751
+Pools of VMs or bare-metal machines, each running several game server processes (containers).
+
+332
+00:19:20.031 --> 00:19:20.863
+States:
+
+333
+00:19:21.143 --> 00:19:24.685
+Ready (warm, waiting), Allocated (match assigned), Shutdown.
+
+334
+00:19:24.965 --> 00:19:26.309
+Buffer autoscaling.
+
+335
+00:19:26.589 --> 00:19:33.010
+Keep a buffer of Ready servers (for example, 10 to 20% or a fixed count) per region and mode.
+
+336
+00:19:33.290 --> 00:19:35.445
+Scale nodes up as the buffer depletes.
+
+337
+00:19:35.725 --> 00:19:38.306
+Scale down by draining nodes without matches.
+
+338
+00:19:39.656 --> 00:19:41.832
+Never kill a node with active matches.
+
+339
+00:19:42.112 --> 00:19:43.392
+Hybrid capacity.
+
+340
+00:19:43.672 --> 00:19:54.765
+Bare metal or reserved instances for baseline load, cloud VMs for peaks, and spot instances only for short matches or with graceful handling (VERIFY cost trade-offs).
+
+341
+00:19:55.045 --> 00:19:55.877
+Tooling.
+
+342
+00:19:56.157 --> 00:20:06.483
+Kubernetes + Agones (open source), or managed services such as GameLift or PlayFab Multiplayer Servers (VERIFY product names and capabilities).
+
+343
+00:20:07.833 --> 00:20:08.537
+Health.
+
+344
+00:20:08.817 --> 00:20:11.355
+Servers report tick timing and player count.
+
+345
+00:20:11.635 --> 00:20:20.638
+The allocator avoids unhealthy nodes, and crashed matches notify the session service to compensate players (for example, no rank loss).
+
+346
+00:20:21.988 --> 00:20:23.311
+Matchmaking service.
+
+347
+00:20:23.591 --> 00:20:24.423
+Tickets.
+
+348
+00:20:24.703 --> 00:20:31.231
+(ticket ID, player IDs, mode, ratings, party size, region RTTs, preferences, created time).
+
+349
+00:20:31.511 --> 00:20:32.385
+Pools.
+
+350
+00:20:32.665 --> 00:20:34.841
+Per (region, mode, maybe platform).
+
+351
+00:20:35.121 --> 00:20:38.236
+Tickets can be in several regional pools until matched.
+
+352
+00:20:38.516 --> 00:20:39.583
+Match function.
+
+353
+00:20:39.863 --> 00:20:46.561
+Runs every ~1 s over each pool and forms matches that meet the constraints (§6.2).
+
+354
+00:20:46.841 --> 00:20:47.823
+Frameworks:
+
+355
+00:20:48.103 --> 00:20:53.457
+Open Match (open source) separates the match function from the infrastructure (VERIFY).
+
+356
+00:20:53.737 --> 00:20:54.569
+Backfill.
+
+357
+00:20:54.849 --> 00:20:57.985
+Replace leavers in ongoing matches (casual modes).
+
+358
+00:20:59.335 --> 00:21:00.914
+Low-population handling.
+
+359
+00:21:01.194 --> 00:21:10.346
+Widen skill ranges, merge regions, add bots for casual modes (commonly done in mobile BR games; VERIFY for any specific title).
+
+360
+00:21:11.696 --> 00:21:13.829
+Netcode and the authoritative server.
+
+361
+00:21:14.109 --> 00:21:15.624
+The server holds the truth.
+
+362
+00:21:15.904 --> 00:21:21.728
+Clients send inputs, not state (I pressed forward, not I am at x,y), so they can't teleport.
+
+363
+00:21:22.008 --> 00:21:23.032
+Validation.
+
+364
+00:21:23.312 --> 00:21:28.773
+Movement speed, fire rate, ammo, cooldowns and line-of-sight are all checked on the server.
+
+365
+00:21:29.053 --> 00:21:30.931
+Reliability over UDP.
+
+366
+00:21:31.211 --> 00:21:34.325
+Unreliable channel for snapshots (latest wins).
+
+367
+00:21:34.605 --> 00:21:39.405
+Reliable-ordered channel for important events (chat, item purchases in-match).
+
+368
+00:21:40.755 --> 00:21:42.910
+ACK bitfields in packet headers.
+
+369
+00:21:43.190 --> 00:21:44.427
+Bandwidth control.
+
+370
+00:21:44.707 --> 00:21:54.073
+Delta compression, quantisation (positions to cm precision, angles to 16 bits), interest management, and priority for nearby entities.
+
+371
+00:21:54.353 --> 00:21:55.334
+Tick budget.
+
+372
+00:21:55.614 --> 00:21:57.043
+Profile the server loop.
+
+373
+00:21:57.323 --> 00:22:04.171
+At 100 players, physics, hit detection and replication must fit inside 33 ms with headroom.
+
+374
+00:22:04.451 --> 00:22:06.670
+Spatial partitioning speeds up queries.
+
+375
+00:22:08.020 --> 00:22:09.215
+Economy ledger.
+
+376
+00:22:09.495 --> 00:22:10.455
+Double-entry.
+
+377
+00:22:10.735 --> 00:22:17.903
+Every movement has matching debit and credit entries, per currency: hard (purchased) gems and soft (earned) coins.
+
+378
+00:22:18.183 --> 00:22:26.161
+Hard currency may need separate accounting of paid versus free portions, for revenue recognition and regulations (VERIFY).
+
+379
+00:22:26.441 --> 00:22:27.721
+Idempotency keys.
+
+380
+00:22:28.001 --> 00:22:31.372
+Store transaction IDs, match IDs and grant IDs.
+
+381
+00:22:31.652 --> 00:22:33.401
+Retries never double-grant.
+
+382
+00:22:33.681 --> 00:22:34.620
+Inventory.
+
+383
+00:22:34.900 --> 00:22:41.620
+Entitlements such as skins and battle pass tiers are recorded with their source (purchase, reward, gift) and time.
+
+384
+00:22:41.900 --> 00:22:43.244
+Exploit containment.
+
+385
+00:22:44.594 --> 00:22:49.927
+Anomaly detection on currency velocity (an account earning 100 times normal).
+
+386
+00:22:50.207 --> 00:22:51.381
+Per-account limits.
+
+387
+00:22:51.661 --> 00:22:52.770
+Rollback tooling.
+
+388
+00:22:54.120 --> 00:22:55.144
+Leaderboards.
+
+389
+00:22:55.424 --> 00:23:04.704
+Types: global;. regional or country;. friends;. clan;. seasonal (reset each season) versus lifetime;. event-specific (time-boxed).
+
+390
+00:23:06.054 --> 00:23:14.331
+Operations: update a score (after a match);. get the top N;. get my rank;. get neighbours (players around me);. get friends' ranks.
+
+391
+00:23:14.611 --> 00:23:17.491
+Implementation: see §6.6.
+
+392
+00:23:18.841 --> 00:23:20.484
+Social, presence and chat.
+
+393
+00:23:20.764 --> 00:23:21.596
+Presence.
+
+394
+00:23:21.876 --> 00:23:25.844
+Heartbeats over WebSocket to a presence store (Redis with TTL).
+
+395
+00:23:26.124 --> 00:23:27.980
+Friends subscribe to changes.
+
+396
+00:23:28.260 --> 00:23:29.113
+Parties.
+
+397
+00:23:29.393 --> 00:23:32.657
+A small state machine (invite, join, leave, leader).
+
+398
+00:23:32.937 --> 00:23:36.756
+Party state is kept on a party service shard and pushed to members.
+
+399
+00:23:37.036 --> 00:23:37.740
+Chat.
+
+400
+00:23:38.020 --> 00:23:44.505
+Similar to Ch 41, with moderation, filters and reporting, plus stricter settings for minors.
+
+401
+00:23:44.785 --> 00:23:45.575
+Voice.
+
+402
+00:23:45.855 --> 00:23:52.831
+In-match team voice is carried by the game server or a separate voice SFU (Vivox-style services; VERIFY).
+
+403
+00:23:53.111 --> 00:23:56.012
+Features include push-to-talk and mute and report.
+
+404
+00:23:57.362 --> 00:23:59.111
+Live ops and remote config.
+
+405
+00:23:59.391 --> 00:24:00.479
+Config service.
+
+406
+00:24:00.759 --> 00:24:10.701
+Versioned JSON configs (drop rates, event schedules, balance tweaks, store layout), targeted by segment (country, platform, app version, experiment arm).
+
+407
+00:24:10.981 --> 00:24:12.943
+Clients fetch at login and on push.
+
+408
+00:24:13.223 --> 00:24:15.762
+Config reaches game servers at match start.
+
+409
+00:24:16.042 --> 00:24:17.087
+Experiments.
+
+410
+00:24:17.367 --> 00:24:24.983
+A or B tests for store offers, onboarding and matchmaking parameters, with guardrail metrics (retention, match quality).
+
+411
+00:24:25.263 --> 00:24:26.266
+Kill switches.
+
+412
+00:24:26.546 --> 00:24:29.917
+For buggy items, exploits, or modes causing crashes.
+
+413
+00:24:31.267 --> 00:24:32.205
+Part 6.
+
+414
+00:24:32.485 --> 00:24:33.445
+Algorithms.
+
+415
+00:24:34.695 --> 00:24:36.039
+Skill rating systems.
+
+416
+00:24:36.319 --> 00:24:37.066
+Elo.
+
+417
+00:24:37.346 --> 00:24:43.895
+Expected score EA = 1 / (1 + 10^((RB minus RA)/400)).
+
+418
+00:24:44.175 --> 00:24:47.695
+After a match, RA ← RA + K(SA minus EA).
+
+419
+00:24:47.975 --> 00:24:50.194
+Simple, and designed for 1v1.
+
+420
+00:24:50.474 --> 00:24:51.946
+Glicko or Glicko-2.
+
+421
+00:24:52.226 --> 00:24:55.277
+Adds rating deviation (RD), the uncertainty.
+
+422
+00:24:55.557 --> 00:24:59.653
+New or returning players have high RD, so their ratings move fast.
+
+423
+00:24:59.933 --> 00:25:02.749
+RD shrinks with play and grows with inactivity.
+
+424
+00:25:04.099 --> 00:25:06.083
+Glicko-2 adds volatility.
+
+425
+00:25:06.363 --> 00:25:09.093
+TrueSkill (published by Microsoft Research).
+
+426
+00:25:09.373 --> 00:25:12.765
+Bayesian: each player has skill ~ N(μ, σ²).
+
+427
+00:25:13.045 --> 00:25:17.547
+Supports teams and multi-player free-for-all (placements in a battle royale).
+
+428
+00:25:17.827 --> 00:25:20.600
+Updates via factor graphs and message passing.
+
+429
+00:25:20.880 --> 00:25:24.208
+The displayed conservative skill is μ minus 3σ.
+
+430
+00:25:25.558 --> 00:25:31.851
+TrueSkill 2 adds factors such as individual performance and quitting (publicly described; VERIFY).
+
+431
+00:25:32.131 --> 00:25:33.795
+Battle royale adaptation.
+
+432
+00:25:34.075 --> 00:25:40.625
+Treat placement as a ranking of teams, and update pairwise or with a TrueSkill-style multi-team update.
+
+433
+00:25:40.905 --> 00:25:42.825
+Kills may add a performance factor.
+
+434
+00:25:43.105 --> 00:25:45.345
+Visible rank versus hidden MMR.
+
+435
+00:25:46.695 --> 00:25:52.519
+Ranked tiers (Bronze, then Diamond) are points-based for motivation, with win streak bonuses.
+
+436
+00:25:52.799 --> 00:25:55.316
+The hidden MMR is used for matchmaking.
+
+437
+00:25:55.596 --> 00:26:00.844
+At season start, soft-reset visible ranks (compress toward the mean) and raise the RD.
+
+438
+00:26:02.194 --> 00:26:03.687
+Matchmaking algorithm.
+
+439
+00:26:03.967 --> 00:26:24.127
+Goal: form matches that minimise a cost combining: skill disparity (within and across teams);. latency (all players under the threshold to the chosen region);. wait time (a penalty that grows as players wait);. party composition (premades versus solos);. other constraints (platform, input device, language).
+
+440
+00:26:24.407 --> 00:26:25.602
+Typical approach:
+
+441
+00:26:26.952 --> 00:26:28.424
+Sort the pool by rating.
+
+442
+00:26:28.704 --> 00:26:31.541
+Candidate groups come from windows around each ticket.
+
+443
+00:26:31.821 --> 00:26:45.197
+Each ticket's acceptable window expands over time, for example, ±50 MMR at 0 s, ±150 at 30 s, ±300 at 60 s.
+
+444
+00:26:45.477 --> 00:26:50.533
+Greedily form matches starting from the oldest tickets, which guards against starvation.
+
+445
+00:26:50.813 --> 00:26:56.509
+For team balance, assign players to teams to minimise the difference in total (or mean) skill.
+
+446
+00:26:56.789 --> 00:27:04.853
+This is a partitioning heuristic: sort by skill and alternate snake-draft (1 to 2-2 to 1), or run a small search.
+
+447
+00:27:06.203 --> 00:27:07.270
+Battle royale:
+
+448
+00:27:07.550 --> 00:27:11.390
+100 players is a large match, so skill matching is looser.
+
+449
+00:27:11.670 --> 00:27:15.595
+Use broad skill brackets, fill by time, and region is critical.
+
+450
+00:27:15.875 --> 00:27:25.454
+Evaluation: measure predicted match quality (for example, the TrueSkill draw probability) against actual outcomes, and queue times by skill band.
+
+451
+00:27:25.734 --> 00:27:27.377
+Top players wait longest.
+
+452
+00:27:28.727 --> 00:27:31.009
+Client prediction and reconciliation.
+
+453
+00:27:31.289 --> 00:27:32.185
+Prediction.
+
+454
+00:27:32.465 --> 00:27:36.156
+The client runs the same movement code locally on its inputs.
+
+455
+00:27:36.436 --> 00:27:41.556
+The server's authoritative state arrives later with the last processed input sequence number.
+
+456
+00:27:41.836 --> 00:27:43.073
+Reconciliation.
+
+457
+00:27:43.353 --> 00:27:46.233
+Set the local state to the server state at sequence N.
+
+458
+00:27:46.513 --> 00:27:48.881
+Re-apply inputs N+1 onwards.
+
+459
+00:27:49.161 --> 00:27:55.177
+If the result differs from the displayed state by a small error, smooth over a few frames; otherwise snap.
+
+460
+00:27:56.527 --> 00:27:57.978
+Entity interpolation.
+
+461
+00:27:58.258 --> 00:28:07.474
+Other players are rendered by interpolating between buffered snapshots at a render time slightly behind the latest (for example, 2 snapshot intervals).
+
+462
+00:28:07.754 --> 00:28:12.533
+This handles jitter; extrapolation is used only briefly on packet loss.
+
+463
+00:28:13.883 --> 00:28:15.205
+Lag compensation.
+
+464
+00:28:15.485 --> 00:28:21.672
+Problem: the shooter sees enemies where they were ~RTT or 2 + interpolation delay ago.
+
+465
+00:28:21.952 --> 00:28:24.725
+Without compensation, players have to aim ahead.
+
+466
+00:28:25.005 --> 00:28:29.784
+Server-side rewind (publicly described for Source engine games; VERIFY):
+
+467
+00:28:30.064 --> 00:28:34.736
+The server keeps a history of each player's hitboxes for the last ~1 s.
+
+468
+00:28:35.016 --> 00:28:43.165
+When a shot command arrives, it estimates the time the shooter saw (current time minus shooter latency minus interpolation delay).
+
+469
+00:28:43.445 --> 00:28:48.779
+It rewinds other players' hitboxes to that time, performs the ray cast and restores them.
+
+470
+00:28:50.129 --> 00:28:52.006
+Trade-off: shot behind cover.
+
+471
+00:28:52.286 --> 00:28:57.193
+The victim reaches cover on their screen but still dies, because the shooter saw them earlier.
+
+472
+00:28:57.473 --> 00:29:03.062
+Cap the rewind (for example, 200 ms) to limit the advantage of high-ping players.
+
+473
+00:29:03.342 --> 00:29:06.222
+Rollback netcode (fighting games, 1v1):
+
+474
+00:29:06.502 --> 00:29:09.254
+Clients simulate with predicted remote inputs.
+
+475
+00:29:09.534 --> 00:29:13.331
+When the actual inputs arrive, they roll back and re-simulate frames.
+
+476
+00:29:14.681 --> 00:29:21.401
+This needs deterministic simulation and fast re-simulation (GGPO-style; publicly described).
+
+477
+00:29:22.751 --> 00:29:23.989
+Interest management.
+
+478
+00:29:24.269 --> 00:29:25.143
+Problem:
+
+479
+00:29:25.423 --> 00:29:28.410
+100 players times 1000s of entities.
+
+480
+00:29:28.690 --> 00:29:33.746
+Sending everything to everyone is too much bandwidth, and it leaks information to wallhacks.
+
+481
+00:29:34.026 --> 00:29:35.349
+Spatial partitioning.
+
+482
+00:29:35.629 --> 00:29:37.399
+A grid or quadtree over the map.
+
+483
+00:29:37.679 --> 00:29:43.034
+Each client receives entities in nearby cells, with priority by distance and relevance.
+
+484
+00:29:43.314 --> 00:29:44.509
+Visibility culling.
+
+485
+00:29:44.789 --> 00:29:48.586
+Don't send enemies the client cannot possibly see (occlusion checks).
+
+486
+00:29:48.866 --> 00:29:51.447
+This reduces what wallhack cheats can reveal.
+
+487
+00:29:51.727 --> 00:29:53.754
+Update frequency by priority.
+
+488
+00:29:54.034 --> 00:29:57.853
+Nearby enemies every tick; distant vehicles every few ticks.
+
+489
+00:29:59.203 --> 00:30:00.845
+Leaderboard ranking at scale.
+
+490
+00:30:01.125 --> 00:30:09.083
+Redis sorted sets (ZADD or ZREVRANK or ZREVRANGE) handle the top-N and rank for millions of entries in O(log N).
+
+491
+00:30:09.363 --> 00:30:15.507
+One sorted set with 20M members is feasible on a large node (memory ~ a few GB).
+
+492
+00:30:15.787 --> 00:30:17.643
+It is a hot key for writes, though.
+
+493
+00:30:17.923 --> 00:30:19.565
+Scaling beyond one node.
+
+494
+00:30:19.845 --> 00:30:21.360
+Shard by score ranges.
+
+495
+00:30:21.640 --> 00:30:26.013
+Keep a small count index (how many players are in each shard or score bucket).
+
+496
+00:30:26.293 --> 00:30:30.219
+Rank = (players in higher buckets) + (rank within the bucket).
+
+497
+00:30:31.569 --> 00:30:33.553
+Updates move a player between buckets.
+
+498
+00:30:33.833 --> 00:30:55.358
+Or shard by player hash, with approximate global rank: maintain a histogram of scores (bucket counts) globally, updated incrementally;. rank about sum of counts above the player's score, plus an estimate within the bucket;. show exact ranks only for the top 10k (a separate exact sorted set) and percentiles for everyone else (Top 3%).
+
+499
+00:30:56.708 --> 00:30:58.009
+Friends leaderboards.
+
+500
+00:30:58.289 --> 00:31:02.151
+Fetch friends' scores directly (a small N) and sort per request.
+
+501
+00:31:02.431 --> 00:31:04.415
+Cache per user for a short TTL.
+
+502
+00:31:04.695 --> 00:31:05.953
+Seasonal resets.
+
+503
+00:31:06.233 --> 00:31:08.751
+Create a new board keyed by season ID.
+
+504
+00:31:09.031 --> 00:31:10.844
+Archive the old one to storage.
+
+505
+00:31:11.124 --> 00:31:11.956
+Ties.
+
+506
+00:31:12.236 --> 00:31:20.961
+Encode the tie-break in the score, for example, score times 10^10 + (MAXTS minus achieved time), so earlier achievers rank higher.
+
+507
+00:31:21.241 --> 00:31:22.137
+Integrity.
+
+508
+00:31:22.417 --> 00:31:25.020
+Only server-validated results update boards.
+
+509
+00:31:25.300 --> 00:31:27.177
+Anti-cheat can remove entries.
+
+510
+00:31:28.527 --> 00:31:29.914
+Anti-cheat detection.
+
+511
+00:31:30.194 --> 00:31:31.026
+Layers:
+
+512
+00:31:31.306 --> 00:31:38.047
+Prevention by design: server authority, input validation, interest management (don't send hidden enemies).
+
+513
+00:31:38.327 --> 00:31:51.021
+Client integrity: anti-tamper and obfuscation;. integrity checks;. detection of known cheat software signatures, debuggers, emulators and rooted devices (with care for false positives);.
+
+514
+00:31:52.371 --> 00:31:58.195
+on PC, kernel-level anti-cheat is used by some titles (controversial; VERIFY).
+
+515
+00:31:58.475 --> 00:32:13.152
+Server-side statistics: features per player per match: headshot ratio;. reaction time (time from an enemy becoming visible to aim on target);. aim snap angles;. accuracy versus distance;. tracking through occluders;.
+
+516
+00:32:14.502 --> 00:32:18.001
+kill or death ratio versus MMR expectations.
+
+517
+00:32:18.281 --> 00:32:25.790
+Models (gradient-boosted trees, sequence models over aim trajectories) score deviation from human distributions.
+
+518
+00:32:26.070 --> 00:32:30.337
+Reports and review: weight reports by the reporter's accuracy history.
+
+519
+00:32:30.617 --> 00:32:39.726
+Response policy: confidence thresholds, delayed ban waves, shadow pools (cheaters matched with cheaters), hardware or device bans, and appeals.
+
+520
+00:32:41.076 --> 00:32:43.188
+Random rewards and drop fairness.
+
+521
+00:32:43.468 --> 00:32:49.591
+Loot drop tables with configured probabilities, served by the server (never computed on the client).
+
+522
+00:32:49.871 --> 00:32:58.297
+Pity systems: a guarantee within N attempts (a counter per player), or increasing probability after failures (bad luck protection).
+
+523
+00:32:58.577 --> 00:33:06.876
+Disclosure: publish odds where required, and consider regulations on paid random items (loot boxes) by country (VERIFY).
+
+524
+00:33:07.156 --> 00:33:12.361
+Auditability: log RNG seeds and outcomes per grant for dispute resolution.
+
+525
+00:33:13.711 --> 00:33:14.650
+Part 7.
+
+526
+00:33:14.930 --> 00:33:16.253
+Data Architecture.
+
+527
+00:33:17.503 --> 00:33:18.889
+Operational stores.
+
+528
+00:33:19.169 --> 00:33:20.513
+Here is a quick table:
+
+529
+00:33:20.793 --> 00:33:22.969
+Data, and Store (reference), and Notes.
+
+530
+00:33:23.249 --> 00:33:24.615
+Accounts, profiles.
+
+531
+00:33:24.895 --> 00:33:26.132
+Store (reference):
+
+532
+00:33:26.412 --> 00:33:30.593
+PostgreSQL or MySQL sharded, or DynamoDB-style.
+
+533
+00:33:30.873 --> 00:33:31.684
+Notes:
+
+534
+00:33:31.964 --> 00:33:33.265
+Low latency lookup.
+
+535
+00:33:33.545 --> 00:33:35.145
+Presence, parties, sessions.
+
+536
+00:33:35.425 --> 00:33:36.663
+Store (reference):
+
+537
+00:33:36.943 --> 00:33:37.711
+Redis.
+
+538
+00:33:37.991 --> 00:33:38.801
+Notes:
+
+539
+00:33:39.081 --> 00:33:39.999
+TTLs.
+
+540
+00:33:40.279 --> 00:33:41.516
+Matchmaking pools.
+
+541
+00:33:41.796 --> 00:33:43.033
+Store (reference):
+
+542
+00:33:43.313 --> 00:33:46.727
+In-memory in the matchmaker (+ Redis for coordination).
+
+543
+00:33:47.007 --> 00:33:47.817
+Notes:
+
+544
+00:33:48.097 --> 00:33:48.929
+Ephemeral.
+
+545
+00:33:49.209 --> 00:33:50.276
+Match results.
+
+546
+00:33:50.556 --> 00:33:51.793
+Store (reference):
+
+547
+00:33:52.073 --> 00:33:55.657
+Kafka + Cassandra or ScyllaDB (by player, time).
+
+548
+00:33:55.937 --> 00:33:56.748
+Notes:
+
+549
+00:33:57.028 --> 00:33:58.031
+Match history.
+
+550
+00:33:58.311 --> 00:33:59.889
+Progression, inventory.
+
+551
+00:34:00.169 --> 00:34:01.407
+Store (reference):
+
+552
+00:34:01.687 --> 00:34:04.695
+NoSQL document per player + event log.
+
+553
+00:34:04.975 --> 00:34:05.785
+Notes:
+
+554
+00:34:06.065 --> 00:34:07.196
+Frequent writes.
+
+555
+00:34:07.476 --> 00:34:08.671
+Economy ledger.
+
+556
+00:34:08.951 --> 00:34:10.188
+Store (reference):
+
+557
+00:34:10.468 --> 00:34:13.668
+PostgreSQL (sharded by player), append-only.
+
+558
+00:34:13.948 --> 00:34:14.759
+Notes:
+
+559
+00:34:15.039 --> 00:34:16.255
+Strong correctness.
+
+560
+00:34:17.605 --> 00:34:18.629
+Leaderboards.
+
+561
+00:34:18.909 --> 00:34:20.146
+Store (reference):
+
+562
+00:34:20.426 --> 00:34:24.799
+Redis sorted sets (+ histograms), snapshots to object storage.
+
+563
+00:34:25.079 --> 00:34:25.890
+Notes:
+
+564
+00:34:26.170 --> 00:34:27.493
+Seasonal archives.
+
+565
+00:34:27.773 --> 00:34:28.669
+Replays.
+
+566
+00:34:28.949 --> 00:34:30.186
+Store (reference):
+
+567
+00:34:30.466 --> 00:34:32.365
+Object storage + CDN.
+
+568
+00:34:32.645 --> 00:34:33.455
+Notes:
+
+569
+00:34:33.735 --> 00:34:34.994
+Retention policy.
+
+570
+00:34:35.274 --> 00:34:36.085
+Config.
+
+571
+00:34:36.365 --> 00:34:37.602
+Store (reference):
+
+572
+00:34:37.882 --> 00:34:39.610
+Versioned store + CDN.
+
+573
+00:34:39.890 --> 00:34:40.701
+Notes:
+
+574
+00:34:40.981 --> 00:34:42.047
+Remote config.
+
+575
+00:34:43.397 --> 00:34:45.083
+Telemetry and analytics.
+
+576
+00:34:45.363 --> 00:34:56.307
+Events: client performance (FPS, crashes, RTT), gameplay (kills, deaths, positions sampled), economy (purchases, grants, spends), social, and funnel steps.
+
+577
+00:34:56.587 --> 00:34:59.147
+These flow to Kafka and then to the lakehouse.
+
+578
+00:34:59.427 --> 00:35:08.984
+Game analytics: weapon balance (win rates, time-to-kill by weapon);. heatmaps of deaths by map location;. match quality (stomps versus close games);.
+
+579
+00:35:10.334 --> 00:35:12.318
+queue times;. server performance.
+
+580
+00:35:12.598 --> 00:35:13.793
+Business analytics:
+
+581
+00:35:14.073 --> 00:35:22.969
+DAU or MAU, retention cohorts (D1 or D7 or D30), ARPDAU, conversion, and churn prediction for re-engagement offers.
+
+582
+00:35:23.249 --> 00:35:23.974
+ML:
+
+583
+00:35:24.254 --> 00:35:31.913
+MMR models, the cheat detector, churn and LTV prediction, offer personalisation, toxicity detection in chat.
+
+584
+00:35:33.263 --> 00:35:34.244
+Data flow.
+
+585
+00:35:34.524 --> 00:35:35.868
+Here is the diagram.
+
+586
+00:35:39.718 --> 00:35:40.593
+Part 8.
+
+587
+00:35:40.873 --> 00:35:42.558
+Tech Stack (reference choice).
+
+588
+00:35:43.808 --> 00:35:45.152
+Here is a quick table:
+
+589
+00:35:45.432 --> 00:35:47.096
+Layer, and Choice, and Notes.
+
+590
+00:35:47.376 --> 00:35:48.848
+Game engine and server.
+
+591
+00:35:49.128 --> 00:35:49.960
+Choice:
+
+592
+00:35:50.240 --> 00:35:58.475
+Unreal Engine or Unity (C++/C), dedicated server builds, custom UDP netcode or engine replication.
+
+593
+00:35:58.755 --> 00:35:59.565
+Notes:
+
+594
+00:35:59.845 --> 00:36:01.616
+Engine choice drives netcode.
+
+595
+00:36:01.896 --> 00:36:02.664
+Fleet.
+
+596
+00:36:02.944 --> 00:36:03.776
+Choice:
+
+597
+00:36:04.056 --> 00:36:10.968
+Kubernetes + Agones, or managed services (GameLift, PlayFab), across multi-cloud and bare metal.
+
+598
+00:36:11.248 --> 00:36:12.059
+Notes:
+
+599
+00:36:12.339 --> 00:36:13.683
+Near-player regions.
+
+600
+00:36:13.963 --> 00:36:14.987
+Matchmaking.
+
+601
+00:36:15.267 --> 00:36:16.099
+Choice:
+
+602
+00:36:16.379 --> 00:36:18.917
+Open Match or custom (Go or Java).
+
+603
+00:36:19.197 --> 00:36:20.008
+Notes:
+
+604
+00:36:20.288 --> 00:36:21.803
+Pluggable match functions.
+
+605
+00:36:22.083 --> 00:36:23.363
+Backend services.
+
+606
+00:36:23.643 --> 00:36:24.475
+Choice:
+
+607
+00:36:24.755 --> 00:36:27.976
+Go or Java or Kotlin or C, gRPC.
+
+608
+00:36:28.256 --> 00:36:29.067
+Notes:
+
+609
+00:36:29.347 --> 00:36:31.139
+Accounts, economy, social.
+
+610
+00:36:31.419 --> 00:36:32.677
+Realtime gateway.
+
+611
+00:36:32.957 --> 00:36:33.789
+Choice:
+
+612
+00:36:34.069 --> 00:36:37.739
+WebSockets (Go or Elixir or Node) + Redis or NATS.
+
+613
+00:36:38.019 --> 00:36:38.829
+Notes:
+
+614
+00:36:39.109 --> 00:36:40.240
+Presence, party.
+
+615
+00:36:40.520 --> 00:36:41.565
+Datastores.
+
+616
+00:36:41.845 --> 00:36:42.677
+Choice:
+
+617
+00:36:42.957 --> 00:36:46.776
+PostgreSQL, DynamoDB or ScyllaDB, Redis.
+
+618
+00:36:47.056 --> 00:36:47.867
+Notes:
+
+619
+00:36:48.147 --> 00:36:49.384
+See §7.
+
+620
+00:36:50.734 --> 00:36:52.206
+Streaming and analytics.
+
+621
+00:36:52.486 --> 00:36:53.318
+Choice:
+
+622
+00:36:53.598 --> 00:36:58.867
+Kafka, Flink, Iceberg or Delta + Spark, Trino or BigQuery or Snowflake.
+
+623
+00:36:59.147 --> 00:36:59.958
+Notes:
+
+624
+00:37:00.238 --> 00:37:01.177
+Telemetry.
+
+625
+00:37:01.457 --> 00:37:02.502
+Anti-cheat.
+
+626
+00:37:02.782 --> 00:37:03.614
+Choice:
+
+627
+00:37:03.894 --> 00:37:09.761
+Commercial (Easy Anti-Cheat, BattlEye) + custom server-side ML (VERIFY products).
+
+628
+00:37:10.041 --> 00:37:10.851
+Notes:
+
+629
+00:37:11.131 --> 00:37:11.963
+Layers.
+
+630
+00:37:12.243 --> 00:37:13.097
+Payments.
+
+631
+00:37:13.377 --> 00:37:14.209
+Choice:
+
+632
+00:37:14.489 --> 00:37:16.921
+App store billing, PC payment gateways.
+
+633
+00:37:17.201 --> 00:37:18.011
+Notes:
+
+634
+00:37:18.291 --> 00:37:20.169
+Receipts verified server-side.
+
+635
+00:37:20.449 --> 00:37:21.238
+Voice.
+
+636
+00:37:21.518 --> 00:37:22.350
+Choice:
+
+637
+00:37:22.630 --> 00:37:26.705
+Vivox or Agora-style services or custom SFU (VERIFY).
+
+638
+00:37:26.985 --> 00:37:27.795
+Notes:
+
+639
+00:37:28.075 --> 00:37:29.057
+Team voice.
+
+640
+00:37:29.337 --> 00:37:30.275
+CDN.
+
+641
+00:37:30.555 --> 00:37:31.387
+Choice:
+
+642
+00:37:31.667 --> 00:37:34.206
+Multi-CDN for patches and assets.
+
+643
+00:37:34.486 --> 00:37:35.297
+Notes:
+
+644
+00:37:35.577 --> 00:37:36.643
+Launch days.
+
+645
+00:37:37.993 --> 00:37:38.889
+Part 9.
+
+646
+00:37:39.169 --> 00:37:41.409
+Security, Privacy and Compliance.
+
+647
+00:37:42.659 --> 00:37:43.833
+Account security:
+
+648
+00:37:44.113 --> 00:37:50.363
+OTP or platform logins, device binding, suspicious login detection, and recovery flows.
+
+649
+00:37:50.643 --> 00:37:55.785
+Minors: age gates and parental controls (spend limits, chat restrictions, playtime);.
+
+650
+00:37:56.065 --> 00:38:02.998
+DPDP Act consent for children's data (VERIFY rules);. platform policies (app store age ratings).
+
+651
+00:38:04.348 --> 00:38:10.940
+Payments: receipt verification, fraud detection (stolen cards, chargeback abuse), and refund handling.
+
+652
+00:38:11.220 --> 00:38:12.863
+Regulation (VERIFY):
+
+653
+00:38:13.143 --> 00:38:24.961
+India's 2025 online gaming law and rules, which affect real-money games, promotion and registration of games;. rules on loot box disclosures in some countries;.
+
+654
+00:38:25.241 --> 00:38:30.127
+GST treatment of in-app purchases;. consumer protection on virtual goods.
+
+655
+00:38:31.477 --> 00:38:37.194
+Content moderation: chat filters, reporting, toxicity models, and bans for harassment.
+
+656
+00:38:37.474 --> 00:38:42.445
+DDoS protection: game servers' UDP ports are DDoS targets.
+
+657
+00:38:42.725 --> 00:38:49.338
+Use provider DDoS protection, relay networks that hide server IPs, and per-connection rate limits.
+
+658
+00:38:50.688 --> 00:38:51.541
+Part 10.
+
+659
+00:38:51.821 --> 00:38:53.741
+Reliability and Operations.
+
+660
+00:38:54.991 --> 00:38:58.767
+Blast radius: a single game server crash affects one match.
+
+661
+00:38:59.047 --> 00:39:03.677
+Compensate those players (no rank loss) and auto-report the crash with dumps.
+
+662
+00:39:03.957 --> 00:39:05.301
+Platform services:
+
+663
+00:39:05.581 --> 00:39:09.805
+Login and matchmaking are critical path, so run them multi-region.
+
+664
+00:39:10.085 --> 00:39:15.354
+Use degraded modes: if leaderboards are down, still play, and queue updates for later.
+
+665
+00:39:15.634 --> 00:39:25.042
+Launch readiness: load tests with bots simulating CCU, pre-scaled fleets, login queues, CDN pre-warming, kill switches and war rooms.
+
+666
+00:39:26.392 --> 00:39:35.309
+Economy incidents: detect exploit spikes quickly;. disable offending items;. roll back via ledger reversals with player communication.
+
+667
+00:39:35.589 --> 00:39:42.437
+Observability: tick-time histograms per server build;. packet loss and RTT by region and ISP;.
+
+668
+00:39:43.787 --> 00:39:51.745
+queue time by skill band;. match start success rate;. crash rates by device;. purchase success;. leaderboard update lag.
+
+669
+00:39:53.095 --> 00:39:54.097
+Part 11.
+
+670
+00:39:54.377 --> 00:39:55.423
+Key Trade-offs.
+
+671
+00:39:56.673 --> 00:39:58.017
+Here is a quick table:
+
+672
+00:39:58.297 --> 00:40:00.814
+Decision, and Chosen, and Accepted cost.
+
+673
+00:40:01.094 --> 00:40:02.075
+Topology.
+
+674
+00:40:02.355 --> 00:40:03.187
+Chosen:
+
+675
+00:40:03.467 --> 00:40:05.430
+Dedicated authoritative servers.
+
+676
+00:40:05.710 --> 00:40:06.883
+Accepted cost:
+
+677
+00:40:07.163 --> 00:40:09.105
+Server cost versus P2P.
+
+678
+00:40:09.385 --> 00:40:10.707
+Lag compensation.
+
+679
+00:40:10.987 --> 00:40:11.819
+Chosen:
+
+680
+00:40:12.099 --> 00:40:13.209
+Rewind with cap.
+
+681
+00:40:13.489 --> 00:40:14.662
+Accepted cost:
+
+682
+00:40:14.942 --> 00:40:16.179
+Shot behind cover.
+
+683
+00:40:16.459 --> 00:40:17.313
+Tick rate.
+
+684
+00:40:17.593 --> 00:40:18.425
+Chosen:
+
+685
+00:40:18.705 --> 00:40:21.819
+30 Hz BR, 60 Hz competitive.
+
+686
+00:40:22.099 --> 00:40:23.273
+Accepted cost:
+
+687
+00:40:23.553 --> 00:40:25.323
+Cost versus responsiveness.
+
+688
+00:40:25.603 --> 00:40:26.627
+Matchmaking.
+
+689
+00:40:26.907 --> 00:40:27.739
+Chosen:
+
+690
+00:40:28.019 --> 00:40:29.513
+Expanding skill windows.
+
+691
+00:40:29.793 --> 00:40:30.966
+Accepted cost:
+
+692
+00:40:31.246 --> 00:40:33.401
+Some unbalanced matches for low wait.
+
+693
+00:40:33.681 --> 00:40:34.705
+Leaderboards.
+
+694
+00:40:34.985 --> 00:40:35.817
+Chosen:
+
+695
+00:40:36.097 --> 00:40:38.081
+Exact top, approximate rest.
+
+696
+00:40:38.361 --> 00:40:39.534
+Accepted cost:
+
+697
+00:40:39.814 --> 00:40:41.457
+Most players see percentiles.
+
+698
+00:40:41.737 --> 00:40:42.974
+Anti-cheat bans.
+
+699
+00:40:43.254 --> 00:40:44.086
+Chosen:
+
+700
+00:40:44.366 --> 00:40:45.646
+Delayed ban waves.
+
+701
+00:40:45.926 --> 00:40:47.099
+Accepted cost:
+
+702
+00:40:47.379 --> 00:40:48.681
+Cheaters play longer.
+
+703
+00:40:48.961 --> 00:40:49.814
+Economy.
+
+704
+00:40:50.094 --> 00:40:50.926
+Chosen:
+
+705
+00:40:51.206 --> 00:40:52.806
+Ledger with idempotency.
+
+706
+00:40:53.086 --> 00:40:54.259
+Accepted cost:
+
+707
+00:40:54.539 --> 00:40:56.267
+Engineering effort like a bank.
+
+708
+00:40:56.547 --> 00:40:57.315
+Fleet.
+
+709
+00:40:57.595 --> 00:40:58.427
+Chosen:
+
+710
+00:40:58.707 --> 00:40:59.689
+Warm buffer.
+
+711
+00:40:59.969 --> 00:41:01.142
+Accepted cost:
+
+712
+00:41:01.422 --> 00:41:02.979
+Idle servers cost money.
+
+713
+00:41:04.329 --> 00:41:05.268
+Part 12.
+
+714
+00:41:05.548 --> 00:41:06.892
+Interview Q and A.
+
+715
+00:41:08.142 --> 00:41:08.974
+Beginner.
+
+716
+00:41:09.254 --> 00:41:10.278
+Question 1.
+
+717
+00:41:10.558 --> 00:41:14.803
+Why do competitive online games use authoritative dedicated servers?
+
+718
+00:41:15.083 --> 00:41:16.449
+Thirty-second answer:
+
+719
+00:41:16.729 --> 00:41:29.123
+The server holds the true game state and validates every input, so clients can't cheat by sending fake positions or damage; it also removes host advantage and NAT problems of peer-to-peer.
+
+720
+00:41:30.473 --> 00:41:31.476
+Question 2.
+
+721
+00:41:31.756 --> 00:41:34.487
+How would you build a leaderboard for a million players?
+
+722
+00:41:34.767 --> 00:41:36.132
+Thirty-second answer:
+
+723
+00:41:36.412 --> 00:41:38.439
+A Redis sorted set keyed by season:
+
+724
+00:41:38.719 --> 00:41:48.617
+ZADD to update after each match, ZREVRANGE for the top N, ZREVRANK for my rank, with snapshots to storage, only server-validated scores update it.
+
+725
+00:41:49.967 --> 00:41:51.013
+Question 3.
+
+726
+00:41:51.293 --> 00:41:54.279
+Why do games use UDP instead of TCP?
+
+727
+00:41:54.559 --> 00:41:55.925
+Thirty-second answer:
+
+728
+00:41:56.205 --> 00:42:10.455
+Real-time state is time-sensitive, a lost old snapshot is useless once a newer one arrives; TCP would block newer data behind retransmissions; games add their own reliability only for messages that need it.
+
+729
+00:42:11.805 --> 00:42:12.872
+Question 4.
+
+730
+00:42:13.152 --> 00:42:15.797
+What is Elo and how does it update after a match?
+
+731
+00:42:16.077 --> 00:42:17.443
+Thirty-second answer:
+
+732
+00:42:17.723 --> 00:42:30.395
+Each player has a rating; the expected result against an opponent comes from the rating difference; after the match, rating moves by K times (actual minus expected), so upsets move ratings more.
+
+733
+00:42:31.745 --> 00:42:32.747
+Intermediate.
+
+734
+00:42:33.027 --> 00:42:34.137
+Question 5.
+
+735
+00:42:34.417 --> 00:42:37.297
+Design matchmaking for a 5v5 game.
+
+736
+00:42:37.577 --> 00:42:38.942
+Thirty-second answer:
+
+737
+00:42:39.222 --> 00:42:57.846
+Tickets (solo or party) with ratings and region pings go into regional pools; every second a match function forms groups within skill windows that widen with wait time, oldest first, then balances teams by total skill; the allocator assigns a warm server and players get join tokens.
+
+738
+00:42:59.196 --> 00:43:00.305
+Question 6.
+
+739
+00:43:00.585 --> 00:43:03.721
+Explain client-side prediction and reconciliation.
+
+740
+00:43:04.001 --> 00:43:05.367
+Thirty-second answer:
+
+741
+00:43:05.647 --> 00:43:20.132
+The client applies its own inputs immediately for responsiveness and remembers them; when authoritative state arrives with the last processed input, it resets to that state and replays unacknowledged inputs, smoothing small corrections.
+
+742
+00:43:21.482 --> 00:43:22.570
+Question 7.
+
+743
+00:43:22.850 --> 00:43:26.903
+How do you make sure in-game purchases are never lost or duplicated?
+
+744
+00:43:27.183 --> 00:43:28.549
+Thirty-second answer:
+
+745
+00:43:28.829 --> 00:43:42.866
+Verify store receipts server-side, use the store transaction ID as an idempotency key, credit currency through a double-entry ledger, grant entitlements atomically with the debit, and handle refund webhooks with clawbacks.
+
+746
+00:43:44.216 --> 00:43:45.240
+Question 8.
+
+747
+00:43:45.520 --> 00:43:47.525
+How do you autoscale game servers?
+
+748
+00:43:47.805 --> 00:43:49.171
+Thirty-second answer:
+
+749
+00:43:49.451 --> 00:44:03.637
+Keep a buffer of warm Ready servers per region and mode, add nodes when the buffer drops, drain nodes without active matches when scaling down, pre-scale for launches, and mix reserved or bare-metal baseline with cloud burst.
+
+750
+00:44:04.987 --> 00:44:06.054
+Question 9.
+
+751
+00:44:06.334 --> 00:44:08.382
+How do you handle the season-launch spike?
+
+752
+00:44:08.662 --> 00:44:10.027
+Thirty-second answer:
+
+753
+00:44:10.307 --> 00:44:22.958
+Pre-download content days before, pre-scale fleets and matchmakers, pre-warm CDNs, flip the season via remote config, protect login with a queue, and watch dashboards with kill switches ready.
+
+754
+00:44:24.308 --> 00:44:25.076
+Senior.
+
+755
+00:44:25.356 --> 00:44:26.401
+Question 10.
+
+756
+00:44:26.681 --> 00:44:29.433
+Explain lag compensation and its trade-offs.
+
+757
+00:44:29.713 --> 00:44:31.079
+Thirty-second answer:
+
+758
+00:44:31.359 --> 00:44:49.919
+The server keeps a short history of hitboxes, and on a shot rewinds other players to where the shooter saw them (now minus latency minus interpolation delay), casts the ray, then restores; it makes aiming fair for the shooter but causes died behind cover for the victim, so cap the rewind window.
+
+759
+00:44:51.269 --> 00:44:52.399
+Question 11.
+
+760
+00:44:52.679 --> 00:44:56.327
+How do you scale a leaderboard to 50 million players with 'my rank'?
+
+761
+00:44:56.607 --> 00:44:57.973
+Thirty-second answer:
+
+762
+00:44:58.253 --> 00:45:17.879
+Exact sorted set for the top 10k; for everyone else maintain a score histogram (bucket counts) updated incrementally, rank about count above plus estimate within bucket and show percentile; or shard by score range with a count index; friends boards computed per request; seasonal keys and archives.
+
+763
+00:45:19.229 --> 00:45:20.317
+Question 12.
+
+764
+00:45:20.597 --> 00:45:23.797
+How does TrueSkill differ from Elo, and why would you use it?
+
+765
+00:45:24.077 --> 00:45:25.443
+Thirty-second answer:
+
+766
+00:45:25.723 --> 00:45:40.485
+TrueSkill models skill as a Gaussian with mean and uncertainty, supports teams and multi-team placements, updates via Bayesian message passing, and matches on conservative skill, better for team and battle royale games and new players.
+
+767
+00:45:41.835 --> 00:45:43.115
+Question 13.
+
+768
+00:45:43.395 --> 00:45:45.635
+Design anti-cheat for a mobile shooter.
+
+769
+00:45:45.915 --> 00:45:47.281
+Thirty-second answer:
+
+770
+00:45:47.561 --> 00:46:05.118
+Server authority and validation, interest management to hide unseen enemies, client integrity checks for tampering, emulators and root, server-side statistical models on aim and reaction features, weighted player reports with replay review, delayed ban waves and appeals.
+
+771
+00:46:06.468 --> 00:46:07.663
+Question 14.
+
+772
+00:46:07.943 --> 00:46:10.929
+How do you reduce bandwidth for a 100-player match?
+
+773
+00:46:11.209 --> 00:46:12.575
+Thirty-second answer:
+
+774
+00:46:12.855 --> 00:46:26.039
+Interest management (spatial grid, visibility), delta compression against acknowledged snapshots, quantisation of positions and angles, priority-based update rates, and sending inputs rather than state upstream.
+
+775
+00:46:27.389 --> 00:46:28.285
+Architect.
+
+776
+00:46:28.565 --> 00:46:29.759
+Question 15.
+
+777
+00:46:30.039 --> 00:46:34.455
+Design the backend for a battle royale game with 3M concurrent players.
+
+778
+00:46:34.735 --> 00:46:36.101
+Thirty-second answer:
+
+779
+00:46:36.381 --> 00:46:50.631
+Accounts, social and presence services; regional matchmakers with latency probing and skill windows; an allocator over Agones-style fleets with warm buffers in many regions; authoritative 30 Hz servers with prediction,
+
+780
+00:46:50.911 --> 00:47:03.541
+lag compensation and interest management; async match-result pipeline to ratings, progression, ledger, leaderboards and anti-cheat; telemetry to Kafka and a lakehouse; live ops config.
+
+781
+00:47:04.891 --> 00:47:06.085
+Question 16.
+
+782
+00:47:06.365 --> 00:47:10.099
+How would you design the in-game economy to be exploit-resistant?
+
+783
+00:47:10.379 --> 00:47:11.744
+Thirty-second answer:
+
+784
+00:47:12.024 --> 00:47:29.069
+A server-authoritative double-entry ledger with idempotent grants and purchases, separate paid and free currency accounting, limits and velocity anomaly detection, config-driven drop tables on the server, kill switches for items and rollback tooling via reversal entries.
+
+785
+00:47:30.419 --> 00:47:31.763
+Question 17.
+
+786
+00:47:32.043 --> 00:47:34.881
+What data platform would you build for a live game?
+
+787
+00:47:35.161 --> 00:47:36.526
+Thirty-second answer:
+
+788
+00:47:36.806 --> 00:47:54.513
+Client, server and service events into Kafka; stream processing for live dashboards and fraud; a lakehouse with warehouse marts for KPIs, balance, economy and match quality; ML for MMR, cheat detection, churn and offers; experiment analysis with guardrails.
+
+789
+00:47:55.863 --> 00:47:57.036
+Question 18.
+
+790
+00:47:57.316 --> 00:48:00.452
+How do you decide the tick rate and server region footprint?
+
+791
+00:48:00.732 --> 00:48:02.097
+Thirty-second answer:
+
+792
+00:48:02.377 --> 00:48:20.852
+Tick rate balances responsiveness against CPU and bandwidth cost per match (competitive modes justify 60 plus Hz); region footprint follows player distribution and RTT targets, with enough population per region to keep queues short, merge regions at low population.
+
+793
+00:48:22.202 --> 00:48:23.439
+Question 19.
+
+794
+00:48:23.719 --> 00:48:25.618
+How would you run live ops safely?
+
+795
+00:48:25.898 --> 00:48:27.263
+Thirty-second answer:
+
+796
+00:48:27.543 --> 00:48:41.218
+Versioned remote config with targeting, staged rollouts and experiments with guardrail metrics, scheduled content activation, kill switches for items and modes, economy anomaly monitors, and rollback of configs.
+
+797
+00:48:42.568 --> 00:48:43.677
+Question 20.
+
+798
+00:48:43.957 --> 00:48:47.584
+Compare a game backend with a ride-hailing or trading backend.
+
+799
+00:48:47.864 --> 00:48:49.229
+Thirty-second answer:
+
+800
+00:48:49.509 --> 00:49:07.877
+All match supply and demand in real time (matchmaking ~ dispatch ~ order matching) and need low latency; games uniquely run a continuous authoritative simulation per match with netcode and face adversarial clients, while their economy needs banking-grade ledgers like trading.
+
+801
+00:49:09.227 --> 00:49:10.273
+Part 13.
+
+802
+00:49:10.553 --> 00:49:11.321
+Summary.
+
+803
+00:49:12.571 --> 00:49:21.189
+Authoritative dedicated servers plus client prediction, interpolation and lag compensation make games feel responsive and stay fair.
+
+804
+00:49:21.469 --> 00:49:27.869
+Matchmaking balances skill (Elo or Glicko or TrueSkill), latency, party makeup and wait time.
+
+805
+00:49:28.149 --> 00:49:30.432
+Skill windows widen as players wait.
+
+806
+00:49:30.712 --> 00:49:35.789
+Fleet management keeps warm servers near players and scales for launches and seasons.
+
+807
+00:49:36.069 --> 00:49:38.821
+Server CPU and egress are the main costs.
+
+808
+00:49:39.101 --> 00:49:44.669
+Leaderboards use exact sorted sets for the top and histograms or percentiles at scale.
+
+809
+00:49:44.949 --> 00:49:47.040
+Only server-validated results count.
+
+810
+00:49:48.390 --> 00:49:52.102
+The economy is a double-entry ledger with idempotent grants.
+
+811
+00:49:52.382 --> 00:49:57.118
+Anti-cheat is layered: design, client integrity, statistics and reports.
+
+812
+00:49:58.468 --> 00:49:59.705
+Related chapters.
+
+813
+00:49:59.985 --> 00:50:03.207
+Ch 51, Real-time Analytics and Top-K.
+
+814
+00:50:03.487 --> 00:50:05.791
+Ch 44, Distributed Cache.
+
+815
+00:50:06.071 --> 00:50:07.671
+Ch 41, Chat.
+
+816
+00:50:07.951 --> 00:50:09.828
+I05, Ride-Hailing.
+
+817
+00:50:10.108 --> 00:50:11.900
+I08, Stockbroking.
+
+818
+00:50:12.180 --> 00:50:13.375
+Next in this tab:
+
+819
+00:50:13.655 --> 00:50:16.748
+I16, Smart Metering and IoT Telemetry.
+
+820
+00:50:18.098 --> 00:50:19.698
+That's the end of this chapter.
+
+821
+00:50:19.978 --> 00:50:26.015
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+822
+00:50:26.295 --> 00:50:27.746
+See you in the next chapter.
+

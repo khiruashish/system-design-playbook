@@ -1,0 +1,3474 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:03.425
+Distributed Key-Value Store.
+
+3
+00:00:03.705 --> 00:00:07.971
+Chapter 54, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:09.721 --> 00:00:10.681
+At a glance:
+
+5
+00:00:10.961 --> 00:00:12.135
+Chapter at a glance.
+
+6
+00:00:12.415 --> 00:00:13.417
+Reader bands:
+
+7
+00:00:13.697 --> 00:00:15.980
+B2, then B4, Prerequisites:
+
+8
+00:00:16.260 --> 00:00:26.265
+Ch 10 (quorums, LWW, CRDTs), Ch 11 (consistent hashing), Ch 12 (clocks, Raft), Ch 44 (caches).
+
+9
+00:00:26.545 --> 00:00:36.380
+What you will build: the inside of a Dynamo or Cassandra-style store that could hold the platform's carts, sessions, order-status timelines and device tokens.
+
+10
+00:00:36.660 --> 00:00:51.977
+It has four parts: a storage engine that turns random writes into sequential ones;. a write-ahead log whose acknowledgements mean something;. anti-entropy that finds divergent replicas cheaply;. tunable consistency and its latency cost.
+
+11
+00:00:53.327 --> 00:00:58.170
+Earlier chapters covered partitioning, quorum arithmetic and conflict resolution.
+
+12
+00:00:58.450 --> 00:01:00.199
+This chapter opens the box.
+
+13
+00:01:00.479 --> 00:01:04.085
+It is the design a key-value store interview question at depth.
+
+14
+00:01:04.365 --> 00:01:05.431
+Lab results:
+
+15
+00:01:05.711 --> 00:01:08.335
+L1: storage engines (real, on disk).
+
+16
+00:01:08.615 --> 00:01:18.151
+Bitcask reads in 1 disk access (p50 2.8 µs, page-cached), but keeps 101 MB of keys in RAM.
+
+17
+00:01:18.431 --> 00:01:28.821
+An LSM tree with 72 SSTables and no Bloom filters read 30 files per hit and 72 per miss (p99 1.3 ms).
+
+18
+00:01:30.171 --> 00:01:34.352
+Bloom filters cut this to 1.24 and 0.59.
+
+19
+00:01:34.632 --> 00:01:42.995
+Compaction cut space amplification from 1.91 times to 1.05 times and brought every read to 1 file.
+
+20
+00:01:43.275 --> 00:01:46.304
+L2: write-ahead log versus a real SIGKILL.
+
+21
+00:01:46.584 --> 00:01:56.227
+Acking from a user-space buffer lost 100 acknowledged writes. write()-then-ack lost none, but only survives a process crash, not a power loss.
+
+22
+00:01:57.577 --> 00:01:58.835
+fsync per record:
+
+23
+00:01:59.115 --> 00:02:01.654
+8,818 acks per second.
+
+24
+00:02:01.934 --> 00:02:02.851
+Group commit:
+
+25
+00:02:03.131 --> 00:02:07.355
+28,750 per second, with the same guarantee.
+
+26
+00:02:07.635 --> 00:02:08.489
+L3:
+
+27
+00:02:08.769 --> 00:02:13.526
+Merkle anti-entropy (real SHA-256, 2M keys).
+
+28
+00:02:13.806 --> 00:02:21.379
+Finding 10 divergent keys took 13.7 KB instead of a 91.6 MB full comparison.
+
+29
+00:02:21.659 --> 00:02:24.689
+Finding 1,000 took 0.9 MB.
+
+30
+00:02:24.969 --> 00:02:29.939
+At 200,000 differences (10%), the saving mostly disappears.
+
+31
+00:02:30.219 --> 00:02:33.163
+L4: tunable consistency (simulation).
+
+32
+00:02:34.513 --> 00:02:43.004
+R=1 or W=1 returned the value from before the client's own acknowledged write ~3% of the time.
+
+33
+00:02:43.284 --> 00:02:54.036
+R=2 or W=2 returned 0% stale reads, at a read p99 of 25.8 ms versus 3.0 ms.
+
+34
+00:02:54.316 --> 00:03:00.823
+W=3 put every replica stall into the write p99 (194 ms).
+
+35
+00:03:01.103 --> 00:03:03.321
+Hedging fixes tails, not staleness.
+
+36
+00:03:03.601 --> 00:03:04.583
+Reading time:
+
+37
+00:03:04.863 --> 00:03:06.655
+110 min + code.
+
+38
+00:03:08.005 --> 00:03:08.858
+Part 1.
+
+39
+00:03:09.138 --> 00:03:11.058
+Introduction and Why It Matters.
+
+40
+00:03:12.308 --> 00:03:14.335
+A story: the carts that came back.
+
+41
+00:03:14.615 --> 00:03:22.785
+The cart service moved from PostgreSQL to a self-managed, Dynamo-style key-value store for write throughput during sales.
+
+42
+00:03:23.065 --> 00:03:24.111
+Within a quarter:
+
+43
+00:03:24.391 --> 00:03:26.119
+Nodes kept running out of disk.
+
+44
+00:03:26.399 --> 00:03:28.959
+Every cart update was a new version on disk.
+
+45
+00:03:29.239 --> 00:03:34.593
+Compaction had been tuned down to save I or O during sales, so old versions piled up.
+
+46
+00:03:34.873 --> 00:03:38.692
+One node hit 100% disk and stopped accepting writes.
+
+47
+00:03:38.972 --> 00:03:40.508
+Removed items came back.
+
+48
+00:03:40.788 --> 00:03:42.559
+A customer removed an item.
+
+49
+00:03:42.839 --> 00:03:48.684
+The replica that took the write stalled, and the read went to another replica, which still had the old cart.
+
+50
+00:03:48.964 --> 00:03:51.737
+That was R=1, W=1.
+
+51
+00:03:52.017 --> 00:03:54.471
+The customer checked out with the removed item.
+
+52
+00:03:55.821 --> 00:03:58.103
+Acknowledged writes vanished after a crash.
+
+53
+00:03:58.383 --> 00:04:00.517
+A node was killed by the OOM killer.
+
+54
+00:04:00.797 --> 00:04:06.983
+The client library had been configured to ack after the write reached the commit-log buffer, not after fsync.
+
+55
+00:04:07.263 --> 00:04:10.250
+The last second of cart updates on that node disappeared.
+
+56
+00:04:10.530 --> 00:04:12.173
+Repair took the cluster down.
+
+57
+00:04:12.453 --> 00:04:17.999
+After a node was replaced, a full repair streamed entire token ranges between replicas.
+
+58
+00:04:18.279 --> 00:04:20.605
+The network saturated during the evening peak.
+
+59
+00:04:21.955 --> 00:04:26.456
+Key-value stores look simple (get, put), but each one is a small database.
+
+60
+00:04:26.736 --> 00:04:35.781
+It has a storage engine with amplification trade-offs, a durability contract, replication with repair, and consistency you choose per request.
+
+61
+00:04:37.131 --> 00:04:37.814
+Quote:
+
+62
+00:04:38.094 --> 00:04:39.758
+The thesis of this chapter.
+
+63
+00:04:40.038 --> 00:04:44.731
+Log-structured storage makes writes cheap and moves the cost to reads and space.
+
+64
+00:04:45.011 --> 00:04:51.454
+Bloom filters and compaction pay it back, and compaction tuning is the core operational trade-off (L1).
+
+65
+00:04:51.734 --> 00:05:00.203
+An acknowledgement is a durability promise: fsync, or group commit, before acking, and detect torn records on recovery (L2).
+
+66
+00:05:00.483 --> 00:05:04.409
+Replicas diverge, so repair must be cheap to run continuously.
+
+67
+00:05:04.689 --> 00:05:08.209
+Merkle trees find small differences in kilobytes (L3).
+
+68
+00:05:08.489 --> 00:05:10.323
+Consistency is per request:
+
+69
+00:05:10.603 --> 00:05:16.491
+R + W N gives read-your-writes, and costs you the tail of the slower replicas (L4).
+
+70
+00:05:17.841 --> 00:05:18.993
+What we'd keep in it.
+
+71
+00:05:19.273 --> 00:05:20.617
+Here is a quick table:
+
+72
+00:05:20.897 --> 00:05:24.759
+Data, and Access, and Consistency need, and Why a KV store.
+
+73
+00:05:25.039 --> 00:05:25.849
+Carts.
+
+74
+00:05:26.129 --> 00:05:27.025
+Access:
+
+75
+00:05:27.305 --> 00:05:30.484
+Read or write by customer, high write rate in sales.
+
+76
+00:05:30.764 --> 00:05:32.023
+Consistency need:
+
+77
+00:05:32.303 --> 00:05:33.369
+Read-your-writes.
+
+78
+00:05:33.649 --> 00:05:34.929
+Why a KV store:
+
+79
+00:05:35.209 --> 00:05:37.193
+Per-key access, scale-out writes.
+
+80
+00:05:37.473 --> 00:05:39.137
+Sessions, device tokens.
+
+81
+00:05:39.417 --> 00:05:40.313
+Access:
+
+82
+00:05:40.593 --> 00:05:41.980
+Get or put by id.
+
+83
+00:05:42.260 --> 00:05:43.519
+Consistency need:
+
+84
+00:05:43.799 --> 00:05:45.079
+Eventual is fine.
+
+85
+00:05:45.359 --> 00:05:46.639
+Why a KV store:
+
+86
+00:05:46.919 --> 00:05:48.433
+Simple, huge volume.
+
+87
+00:05:48.713 --> 00:05:50.143
+Order-status timeline.
+
+88
+00:05:50.423 --> 00:05:51.319
+Access:
+
+89
+00:05:51.599 --> 00:05:53.071
+Append by order id.
+
+90
+00:05:53.351 --> 00:05:54.609
+Consistency need:
+
+91
+00:05:54.889 --> 00:05:56.212
+Monotonic per order.
+
+92
+00:05:56.492 --> 00:05:57.772
+Why a KV store:
+
+93
+00:05:58.052 --> 00:05:59.183
+Wide-row append.
+
+94
+00:05:59.463 --> 00:06:01.041
+Feature flags, config.
+
+95
+00:06:01.321 --> 00:06:02.217
+Access:
+
+96
+00:06:02.497 --> 00:06:03.415
+Read-heavy.
+
+97
+00:06:03.695 --> 00:06:04.953
+Consistency need:
+
+98
+00:06:05.233 --> 00:06:06.492
+Fresh within seconds.
+
+99
+00:06:06.772 --> 00:06:08.052
+Why a KV store:
+
+100
+00:06:08.332 --> 00:06:10.188
+Small, replicated everywhere.
+
+101
+00:06:10.468 --> 00:06:11.748
+Idempotency keys.
+
+102
+00:06:12.028 --> 00:06:12.924
+Access:
+
+103
+00:06:13.204 --> 00:06:14.185
+Put-if-absent.
+
+104
+00:06:14.465 --> 00:06:15.724
+Consistency need:
+
+105
+00:06:16.004 --> 00:06:17.455
+Linearizable per key.
+
+106
+00:06:17.735 --> 00:06:19.015
+Why a KV store:
+
+107
+00:06:19.295 --> 00:06:21.812
+Needs CAS (lightweight transactions).
+
+108
+00:06:23.162 --> 00:06:24.485
+Learning objectives.
+
+109
+00:06:24.765 --> 00:06:26.663
+By the end you will be able to:
+
+110
+00:06:26.943 --> 00:06:28.543
+Explain storage engines:
+
+111
+00:06:28.823 --> 00:06:34.519
+Bitcask, LSM trees, B-trees, and read or write or space amplification (L1).
+
+112
+00:06:34.799 --> 00:06:36.442
+Design the durability path:
+
+113
+00:06:36.722 --> 00:06:39.581
+WAL, fsync, group commit, recovery (L2).
+
+114
+00:06:39.861 --> 00:06:45.834
+Design replication maintenance: hinted handoff, read repair, Merkle anti-entropy (L3).
+
+115
+00:06:46.114 --> 00:06:51.746
+Choose consistency levels per operation and understand the tail-latency cost (L4).
+
+116
+00:06:53.096 --> 00:06:58.195
+Put it together: partitioning, membership (gossip), failure detection, and compare-and-set.
+
+117
+00:06:59.545 --> 00:07:00.419
+Part 2.
+
+118
+00:07:00.699 --> 00:07:02.577
+Core Concepts, Beginner to Deep.
+
+119
+00:07:03.827 --> 00:07:06.195
+Intuition: a ledger, not a whiteboard.
+
+120
+00:07:06.475 --> 00:07:13.173
+A whiteboard lets you erase and rewrite (update in place), but erasing is slow when the board is huge and crowded.
+
+121
+00:07:13.453 --> 00:07:18.808
+A ledger only lets you append: writing is fast, and the latest line for an account wins.
+
+122
+00:07:19.088 --> 00:07:28.560
+To read an account, you search from the newest pages backwards, and every so often you copy the ledger into a clean new book with only the latest lines (compaction).
+
+123
+00:07:28.840 --> 00:07:31.037
+Clerks in three branches keep copies.
+
+124
+00:07:31.317 --> 00:07:37.931
+To check they agree, they compare page totals, then line totals only on pages that differ (Merkle trees).
+
+125
+00:07:38.211 --> 00:07:43.587
+How many branches must confirm before you trust a balance is up to you (R and W).
+
+126
+00:07:44.937 --> 00:07:45.897
+Requirements.
+
+127
+00:07:46.177 --> 00:07:54.177
+Functional. get(key), put(key, value), delete(key); optional TTL; conditional put (compare-and-set) for some keys.
+
+128
+00:07:54.457 --> 00:07:57.486
+Per-request consistency level (ONE, QUORUM, ALL).
+
+129
+00:07:57.766 --> 00:08:00.710
+Range scans within a partition (for timelines).
+
+130
+00:08:00.990 --> 00:08:02.099
+Non-functional.
+
+131
+00:08:02.379 --> 00:08:11.553
+Scale horizontally to tens of TB and hundreds of thousands of ops per second. p99 10 ms for QUORUM ops in-region.
+
+132
+00:08:12.903 --> 00:08:16.529
+Survive node loss without data loss (RF=3).
+
+133
+00:08:16.809 --> 00:08:19.113
+Keep serving during a single-AZ outage.
+
+134
+00:08:19.393 --> 00:08:23.532
+Acknowledged writes are durable according to the chosen durability level.
+
+135
+00:08:24.882 --> 00:08:25.927
+Estimation.
+
+136
+00:08:26.207 --> 00:08:27.551
+Here is a quick table:
+
+137
+00:08:27.831 --> 00:08:29.261
+Quantity, and Estimate.
+
+138
+00:08:29.541 --> 00:08:30.330
+Carts:
+
+139
+00:08:30.610 --> 00:08:37.991
+5M active times ~2 KB = 10 GB (tiny); writes ~50k per second in sales.
+
+140
+00:08:38.271 --> 00:08:39.658
+Sessions or tokens:
+
+141
+00:08:39.938 --> 00:08:43.735
+50M times 500 B = 25 GB.
+
+142
+00:08:44.015 --> 00:08:44.975
+Timelines:
+
+143
+00:08:45.255 --> 00:08:51.719
+1.5M orders per day times 10 events times 200 B = 3 GB per day.
+
+144
+00:08:51.999 --> 00:08:53.023
+Replication:
+
+145
+00:08:53.303 --> 00:09:01.325
+RF=3, then ~3 times raw; LSM space amplification 1.1 to 2 times on top (L1).
+
+146
+00:09:01.605 --> 00:09:02.437
+Nodes:
+
+147
+00:09:02.717 --> 00:09:06.237
+Sized by IOPS and compaction headroom more than by bytes.
+
+148
+00:09:07.587 --> 00:09:08.803
+Storage engines.
+
+149
+00:09:09.083 --> 00:09:18.149
+L1 used 2M puts (40% overwrites) and 100k deletes, with 122 MB of live data, on real files:
+
+150
+00:09:19.499 --> 00:09:20.843
+Here is a quick table:
+
+151
+00:09:21.123 --> 00:09:31.491
+Engine, and Read hit p50 or p99, and Read miss p50, and Files read per hit or miss, and Space amplification, and RAM for lookups.
+
+152
+00:09:31.771 --> 00:09:34.438
+Bitcask (log + in-memory hash index).
+
+153
+00:09:34.718 --> 00:09:37.086
+Read hit p50 or p99:
+
+154
+00:09:37.366 --> 00:09:39.457
+2.8 or 18 µs.
+
+155
+00:09:39.737 --> 00:09:41.123
+Read miss p50:
+
+156
+00:09:41.403 --> 00:09:43.089
+0.3 µs.
+
+157
+00:09:43.369 --> 00:09:45.033
+Files read per hit or miss:
+
+158
+00:09:45.313 --> 00:09:47.254
+1.00 or 0.
+
+159
+00:09:47.534 --> 00:09:48.942
+Space amplification:
+
+160
+00:09:49.222 --> 00:09:50.779
+1.92 times.
+
+161
+00:09:51.059 --> 00:09:52.489
+RAM for lookups:
+
+162
+00:09:52.769 --> 00:09:54.283
+101 MB.
+
+163
+00:09:54.563 --> 00:09:57.571
+LSM, 72 SSTables, no Bloom.
+
+164
+00:09:57.851 --> 00:10:00.219
+Read hit p50 or p99:
+
+165
+00:10:00.499 --> 00:10:04.467
+114 or 1,340 µs.
+
+166
+00:10:04.747 --> 00:10:06.134
+Read miss p50:
+
+167
+00:10:06.414 --> 00:10:08.270
+81.6 µs.
+
+168
+00:10:08.550 --> 00:10:10.214
+Files read per hit or miss:
+
+169
+00:10:10.494 --> 00:10:12.393
+30.5 or 72.
+
+170
+00:10:12.673 --> 00:10:14.081
+Space amplification:
+
+171
+00:10:14.361 --> 00:10:15.961
+1.91 times.
+
+172
+00:10:16.241 --> 00:10:17.670
+RAM for lookups:
+
+173
+00:10:17.950 --> 00:10:18.931
+10 MB.
+
+174
+00:10:19.211 --> 00:10:21.046
+LSM + Bloom filters.
+
+175
+00:10:21.326 --> 00:10:23.694
+Read hit p50 or p99:
+
+176
+00:10:23.974 --> 00:10:26.555
+7.6 or 45 µs.
+
+177
+00:10:26.835 --> 00:10:28.222
+Read miss p50:
+
+178
+00:10:28.502 --> 00:10:30.230
+4.0 µs.
+
+179
+00:10:30.510 --> 00:10:32.174
+Files read per hit or miss:
+
+180
+00:10:32.454 --> 00:10:35.291
+1.24 or 0.59.
+
+181
+00:10:35.571 --> 00:10:36.979
+Space amplification:
+
+182
+00:10:37.259 --> 00:10:38.859
+1.91 times.
+
+183
+00:10:39.139 --> 00:10:40.569
+RAM for lookups:
+
+184
+00:10:40.849 --> 00:10:41.894
+12 MB.
+
+185
+00:10:42.174 --> 00:10:44.926
+LSM + Bloom, after full compaction.
+
+186
+00:10:45.206 --> 00:10:47.574
+Read hit p50 or p99:
+
+187
+00:10:47.854 --> 00:10:50.179
+5.3 or 20 µs.
+
+188
+00:10:50.459 --> 00:10:51.846
+Read miss p50:
+
+189
+00:10:52.126 --> 00:10:53.769
+0.1 µs.
+
+190
+00:10:54.049 --> 00:10:55.713
+Files read per hit or miss:
+
+191
+00:10:55.993 --> 00:10:59.065
+1.00 or 0.01.
+
+192
+00:10:59.345 --> 00:11:00.753
+Space amplification:
+
+193
+00:11:01.033 --> 00:11:02.889
+1.05 times.
+
+194
+00:11:03.169 --> 00:11:04.598
+RAM for lookups:
+
+195
+00:11:04.878 --> 00:11:05.966
+7 MB.
+
+196
+00:11:07.316 --> 00:11:09.385
+(Reads here hit the OS page cache.
+
+197
+00:11:09.665 --> 00:11:17.345
+On cold SSDs each file read costs ~100 µs, so the files-read columns are the portable result.
+
+198
+00:11:17.625 --> 00:11:25.476
+Write throughput varied from run to run between 48 and 115 MB per second, so we don't compare engines on it.).
+
+199
+00:11:25.756 --> 00:11:28.060
+Bitcask: one seek per read, and simple.
+
+200
+00:11:28.340 --> 00:11:32.479
+Every key must fit in RAM, and a range scan is impossible.
+
+201
+00:11:32.759 --> 00:11:37.388
+The LSM tree (LevelDB, RocksDB, Cassandra, ScyllaDB):
+
+202
+00:11:37.668 --> 00:11:43.535
+The write path is WAL, then memtable, then flush to immutable sorted SSTables.
+
+203
+00:11:43.815 --> 00:11:47.185
+Reads check the memtable, then SSTables newest-first.
+
+204
+00:11:48.535 --> 00:11:53.997
+Deletes are tombstones, which must survive until compaction has passed every older copy.
+
+205
+00:11:54.277 --> 00:11:57.093
+Bloom filters make negative lookups nearly free.
+
+206
+00:11:57.373 --> 00:12:00.509
+Without them, a missing key reads every SSTable.
+
+207
+00:12:00.789 --> 00:12:01.706
+Compaction:
+
+208
+00:12:01.986 --> 00:12:05.421
+Size-tiered (write-optimised; higher space amplification).
+
+209
+00:12:05.701 --> 00:12:09.605
+Leveled (read- and space-optimised; higher write amplification).
+
+210
+00:12:09.885 --> 00:12:12.829
+Time-window (for TTL or time-series data).
+
+211
+00:12:14.179 --> 00:12:18.040
+It competes with foreground I or O, so it needs throttling and headroom.
+
+212
+00:12:18.320 --> 00:12:21.435
+Turning it down during peaks is how the story's disks filled.
+
+213
+00:12:21.715 --> 00:12:30.824
+B-trees (InnoDB, PostgreSQL) update in place: good reads and range scans, random writes, and write amplification from pages.
+
+214
+00:12:31.104 --> 00:12:37.739
+The RUM conjecture says you can't minimise read, update and memory or space overheads all at once.
+
+215
+00:12:39.089 --> 00:12:40.411
+The durability path.
+
+216
+00:12:40.691 --> 00:12:48.521
+L2 used a child JVM that acked each record, a parent that sent it SIGKILL, and then recovery with a CRC check:
+
+217
+00:12:49.871 --> 00:12:51.215
+Here is a quick table:
+
+218
+00:12:51.495 --> 00:12:54.972
+Ack policy, and Acked, and ACKED BUT LOST, and Acks per second.
+
+219
+00:12:55.252 --> 00:12:57.279
+Buffered in the process, ack at once.
+
+220
+00:12:57.559 --> 00:12:58.284
+Acked:
+
+221
+00:12:58.564 --> 00:13:02.233
+3,381,860.
+
+222
+00:13:02.513 --> 00:13:03.623
+ACKED BUT LOST:
+
+223
+00:13:03.903 --> 00:13:04.841
+100.
+
+224
+00:13:05.121 --> 00:13:06.273
+Acks per second:
+
+225
+00:13:06.553 --> 00:13:11.908
+2,254,050. write() to the OS, no fsync.
+
+226
+00:13:12.188 --> 00:13:12.913
+Acked:
+
+227
+00:13:13.193 --> 00:13:17.268
+1,158,499.
+
+228
+00:13:17.548 --> 00:13:18.657
+ACKED BUT LOST:
+
+229
+00:13:18.937 --> 00:13:20.815
+0 (process crash only).
+
+230
+00:13:21.095 --> 00:13:22.247
+Acks per second:
+
+231
+00:13:22.527 --> 00:13:26.879
+772,250. fsync every record.
+
+232
+00:13:27.159 --> 00:13:27.884
+Acked:
+
+233
+00:13:28.164 --> 00:13:30.383
+13,228.
+
+234
+00:13:30.663 --> 00:13:31.772
+ACKED BUT LOST:
+
+235
+00:13:32.052 --> 00:13:32.799
+0.
+
+236
+00:13:33.079 --> 00:13:34.231
+Acks per second:
+
+237
+00:13:34.511 --> 00:13:36.260
+8,818.
+
+238
+00:13:36.540 --> 00:13:39.420
+Group commit (8 writers, one fsync per batch).
+
+239
+00:13:39.700 --> 00:13:40.425
+Acked:
+
+240
+00:13:40.705 --> 00:13:43.137
+43,132.
+
+241
+00:13:43.417 --> 00:13:44.527
+ACKED BUT LOST:
+
+242
+00:13:44.807 --> 00:13:45.553
+0.
+
+243
+00:13:45.833 --> 00:13:46.985
+Acks per second:
+
+244
+00:13:47.265 --> 00:13:49.569
+28,750.
+
+245
+00:13:50.919 --> 00:13:51.986
+The three layers:
+
+246
+00:13:52.266 --> 00:13:54.527
+Process buffers are lost on any crash.
+
+247
+00:13:54.807 --> 00:14:00.119
+The OS page cache survives a process crash, but not power loss or a kernel panic.
+
+248
+00:14:00.399 --> 00:14:02.917
+The device, after fsync, survives both.
+
+249
+00:14:03.197 --> 00:14:08.338
+Check that the device honours flushes, and that its write cache is battery-backed where relevant.
+
+250
+00:14:08.618 --> 00:14:11.711
+Group commit batches concurrent writes into one fsync.
+
+251
+00:14:11.991 --> 00:14:16.258
+It is the reason databases and Kafka can be both durable and fast.
+
+252
+00:14:17.608 --> 00:14:24.605
+Replication as durability: with RF=3 and W=QUORUM, a write is on two machines.
+
+253
+00:14:24.885 --> 00:14:33.397
+Many stores then fsync the commit log periodically (for example, every 10 s), betting that two machines won't lose power at once.
+
+254
+00:14:33.677 --> 00:14:36.237
+That is a choice to make knowingly, per keyspace.
+
+255
+00:14:36.517 --> 00:14:44.453
+Recovery: replay the WAL into the memtable, and stop at the first record with a bad length or CRC (a torn write).
+
+256
+00:14:45.803 --> 00:14:47.297
+Replication maintenance.
+
+257
+00:14:47.577 --> 00:14:53.827
+Hinted handoff: when a replica is down, a coordinator stores the write as a hint and delivers it later.
+
+258
+00:14:54.107 --> 00:14:58.843
+With a sloppy quorum, stand-in nodes accept writes to keep W satisfiable.
+
+259
+00:14:59.123 --> 00:15:02.537
+That keeps writes available, but a read quorum may not see them.
+
+260
+00:15:02.817 --> 00:15:08.683
+Read repair: a read that sees divergent versions writes the newest back to the stale replicas.
+
+261
+00:15:08.963 --> 00:15:10.947
+Anti-entropy with Merkle trees.
+
+262
+00:15:11.227 --> 00:15:15.729
+L3 used real SHA-256 over 2M keys:
+
+263
+00:15:17.079 --> 00:15:18.423
+Here is a quick table:
+
+264
+00:15:18.703 --> 00:15:28.132
+Differing keys, and Full comparison, and Merkle depth 15 (~61 keys or leaf), and Merkle depth 18 (~7 keys or leaf).
+
+265
+00:15:28.412 --> 00:15:29.116
+10.
+
+266
+00:15:29.396 --> 00:15:30.612
+Full comparison:
+
+267
+00:15:30.892 --> 00:15:32.599
+91.6 MB.
+
+268
+00:15:32.879 --> 00:15:36.271
+Merkle depth 15 (~61 keys or leaf):
+
+269
+00:15:36.551 --> 00:15:38.300
+36.9 KB.
+
+270
+00:15:38.580 --> 00:15:41.673
+Merkle depth 18 (~7 keys or leaf):
+
+271
+00:15:41.953 --> 00:15:43.660
+13.7 KB.
+
+272
+00:15:43.940 --> 00:15:44.964
+1,000.
+
+273
+00:15:45.244 --> 00:15:46.460
+Full comparison:
+
+274
+00:15:46.740 --> 00:15:48.447
+91.6 MB.
+
+275
+00:15:48.727 --> 00:15:52.119
+Merkle depth 15 (~61 keys or leaf):
+
+276
+00:15:52.399 --> 00:15:53.785
+3.1 MB.
+
+277
+00:15:54.065 --> 00:15:57.159
+Merkle depth 18 (~7 keys or leaf):
+
+278
+00:15:57.439 --> 00:15:58.932
+0.9 MB.
+
+279
+00:15:59.212 --> 00:16:00.300
+20,000.
+
+280
+00:16:00.580 --> 00:16:01.796
+Full comparison:
+
+281
+00:16:02.076 --> 00:16:03.783
+91.6 MB.
+
+282
+00:16:04.063 --> 00:16:07.455
+Merkle depth 15 (~61 keys or leaf):
+
+283
+00:16:07.735 --> 00:16:09.420
+43.8 MB.
+
+284
+00:16:09.700 --> 00:16:12.793
+Merkle depth 18 (~7 keys or leaf):
+
+285
+00:16:13.073 --> 00:16:14.631
+11.5 MB.
+
+286
+00:16:14.911 --> 00:16:16.212
+200,000.
+
+287
+00:16:16.492 --> 00:16:17.708
+Full comparison:
+
+288
+00:16:17.988 --> 00:16:19.695
+91.6 MB.
+
+289
+00:16:19.975 --> 00:16:23.367
+Merkle depth 15 (~61 keys or leaf):
+
+290
+00:16:23.647 --> 00:16:25.396
+93.6 MB.
+
+291
+00:16:25.676 --> 00:16:28.769
+Merkle depth 18 (~7 keys or leaf):
+
+292
+00:16:29.049 --> 00:16:30.756
+56.5 MB.
+
+293
+00:16:32.106 --> 00:16:34.602
+Merkle trees find small divergence cheaply.
+
+294
+00:16:34.882 --> 00:16:38.551
+They cost round trips (17 to 20 here) and tree maintenance.
+
+295
+00:16:38.831 --> 00:16:45.530
+When divergence is large (a replaced node), streaming the whole range is as cheap and simpler, so throttle it.
+
+296
+00:16:45.810 --> 00:16:51.591
+Incremental repair (repair only data written since the last repair) keeps routine repairs small.
+
+297
+00:16:51.871 --> 00:16:56.906
+Schedule repairs within the tombstone grace period, or deleted data can resurrect.
+
+298
+00:16:58.256 --> 00:16:59.685
+Tunable consistency.
+
+299
+00:16:59.965 --> 00:17:11.613
+L4 modelled N=3 replicas, with a 3% chance of a stall per replica per request, and a read issued 0 to 20 ms after the client's own acknowledged write:
+
+300
+00:17:12.963 --> 00:17:14.307
+Here is a quick table:
+
+301
+00:17:14.587 --> 00:17:19.174
+Config, and Write p99, and Read p99, and Stale reads.
+
+302
+00:17:19.454 --> 00:17:22.185
+R=1, read sent to one replica.
+
+303
+00:17:22.465 --> 00:17:23.787
+Write p99:
+
+304
+00:17:24.067 --> 00:17:25.561
+3.0 ms.
+
+305
+00:17:25.841 --> 00:17:27.227
+Read p99:
+
+306
+00:17:27.507 --> 00:17:29.790
+173.7 ms.
+
+307
+00:17:30.070 --> 00:17:31.115
+Stale reads:
+
+308
+00:17:31.395 --> 00:17:33.145
+2.97%.
+
+309
+00:17:33.425 --> 00:17:36.902
+R=1 + hedge to a 2nd after 5 ms.
+
+310
+00:17:37.182 --> 00:17:38.505
+Write p99:
+
+311
+00:17:38.785 --> 00:17:40.278
+3.0 ms.
+
+312
+00:17:40.558 --> 00:17:41.945
+Read p99:
+
+313
+00:17:42.225 --> 00:17:43.569
+8.3 ms.
+
+314
+00:17:43.849 --> 00:17:44.894
+Stale reads:
+
+315
+00:17:45.174 --> 00:17:47.030
+3.07%.
+
+316
+00:17:47.310 --> 00:17:50.147
+R=1, read sent to all, first wins.
+
+317
+00:17:50.427 --> 00:17:51.750
+Write p99:
+
+318
+00:17:52.030 --> 00:17:53.523
+3.0 ms.
+
+319
+00:17:53.803 --> 00:17:55.190
+Read p99:
+
+320
+00:17:55.470 --> 00:17:56.963
+3.0 ms.
+
+321
+00:17:57.243 --> 00:17:58.289
+Stale reads:
+
+322
+00:17:58.569 --> 00:18:00.467
+3.00%.
+
+323
+00:18:00.747 --> 00:18:03.137
+W=1, R=2.
+
+324
+00:18:03.417 --> 00:18:04.739
+Write p99:
+
+325
+00:18:05.019 --> 00:18:06.513
+3.0 ms.
+
+326
+00:18:06.793 --> 00:18:08.179
+Read p99:
+
+327
+00:18:08.459 --> 00:18:10.166
+25.8 ms.
+
+328
+00:18:10.446 --> 00:18:11.491
+Stale reads:
+
+329
+00:18:11.771 --> 00:18:13.649
+0.08%.
+
+330
+00:18:13.929 --> 00:18:16.382
+W=2, R=1.
+
+331
+00:18:16.662 --> 00:18:17.985
+Write p99:
+
+332
+00:18:18.265 --> 00:18:19.822
+6.7 ms.
+
+333
+00:18:20.102 --> 00:18:21.489
+Read p99:
+
+334
+00:18:21.769 --> 00:18:23.262
+3.0 ms.
+
+335
+00:18:23.542 --> 00:18:24.587
+Stale reads:
+
+336
+00:18:24.867 --> 00:18:26.531
+2.74%.
+
+337
+00:18:26.811 --> 00:18:29.521
+W=2, R=2 (quorum).
+
+338
+00:18:29.801 --> 00:18:31.123
+Write p99:
+
+339
+00:18:31.403 --> 00:18:32.961
+6.7 ms.
+
+340
+00:18:33.241 --> 00:18:34.627
+Read p99:
+
+341
+00:18:34.907 --> 00:18:36.614
+25.8 ms.
+
+342
+00:18:36.894 --> 00:18:37.939
+Stale reads:
+
+343
+00:18:38.219 --> 00:18:40.246
+0.00%.
+
+344
+00:18:40.526 --> 00:18:43.022
+W=3, R=1.
+
+345
+00:18:43.302 --> 00:18:44.625
+Write p99:
+
+346
+00:18:44.905 --> 00:18:47.145
+193.7 ms.
+
+347
+00:18:47.425 --> 00:18:48.811
+Read p99:
+
+348
+00:18:49.091 --> 00:18:50.585
+3.0 ms.
+
+349
+00:18:50.865 --> 00:18:51.910
+Stale reads:
+
+350
+00:18:52.190 --> 00:18:54.217
+0.00%.
+
+351
+00:18:55.567 --> 00:19:04.313
+R + W N guarantees the read set overlaps the write set, so read-your-writes holds, as long as there are no sloppy-quorum stand-ins.
+
+352
+00:19:04.593 --> 00:19:07.175
+Otherwise, reads can miss the client's own write.
+
+353
+00:19:07.455 --> 00:19:11.231
+Tails: waiting for more replicas means inheriting more stalls.
+
+354
+00:19:11.511 --> 00:19:15.415
+W=ALL makes every replica's hiccup a write outage.
+
+355
+00:19:15.695 --> 00:19:19.193
+Hedging or speculative retries fix tails, not staleness.
+
+356
+00:19:19.473 --> 00:19:22.759
+Sending every read to all replicas triples read load.
+
+357
+00:19:23.039 --> 00:19:24.169
+Beyond quorums:
+
+358
+00:19:25.519 --> 00:19:32.815
+Linearizable per-key operations (compare-and-set for idempotency keys, inventory counters) need consensus:
+
+359
+00:19:33.095 --> 00:19:40.541
+Paxos or Raft, like Cassandra LWT or a Raft-based store such as etcd or TiKV (Ch 12).
+
+360
+00:19:40.821 --> 00:19:49.098
+Conflicts from concurrent writes need LWW (clock-skew risk), vector clocks with siblings, or CRDTs (Ch 10).
+
+361
+00:19:50.448 --> 00:19:52.048
+Partitioning and membership.
+
+362
+00:19:52.328 --> 00:19:55.528
+Consistent hashing with virtual nodes (Ch 11).
+
+363
+00:19:55.808 --> 00:20:02.955
+Each key's N replicas are the next N distinct nodes on the ring, spread across racks or AZs (rack-aware placement).
+
+364
+00:20:03.235 --> 00:20:10.595
+Membership and failure detection: gossip with phi-accrual failure detectors (Cassandra), or a coordination service.
+
+365
+00:20:10.875 --> 00:20:14.672
+A node that is suspected isn't removed; it is routed around.
+
+366
+00:20:14.952 --> 00:20:23.315
+Hot partitions: a single hot key (a viral cart? unlikely; a global counter, yes) needs key splitting or a different design.
+
+367
+00:20:24.665 --> 00:20:26.243
+Build, buy or configure.
+
+368
+00:20:26.523 --> 00:20:33.115
+Managed (DynamoDB, Cosmos DB, Bigtable) removes storage-engine and repair operations.
+
+369
+00:20:33.395 --> 00:20:38.003
+You pay per request and capacity, and keep your data-modelling responsibility.
+
+370
+00:20:38.283 --> 00:20:46.113
+Self-managed (Cassandra or ScyllaDB, Riak) gives control, at the cost of operating compaction, repair and upgrades.
+
+371
+00:20:46.393 --> 00:20:55.929
+Raft-based KV (etcd, TiKV, FoundationDB) gives linearizable operations and transactions at lower write throughput per key range.
+
+372
+00:20:56.209 --> 00:21:05.446
+Redis is a cache or ephemeral store unless its persistence and replication settings are explicitly chosen for durability (Ch 44).
+
+373
+00:21:06.796 --> 00:21:07.927
+Interview framing.
+
+374
+00:21:08.207 --> 00:21:09.828
+Design a key-value store.
+
+375
+00:21:10.108 --> 00:21:10.791
+Cover:
+
+376
+00:21:11.071 --> 00:21:28.095
+API and consistency needs;. partitioning (consistent hashing, vnodes);. replication (N, placement);. consistency (R, W, sloppy quorum, hinted handoff);. conflict resolution;. the storage engine (LSM, compaction, Bloom filters);.
+
+377
+00:21:29.445 --> 00:21:36.954
+durability (WAL, fsync, group commit);. repair (read repair, Merkle trees);. membership and failure detection.
+
+378
+00:21:37.234 --> 00:21:46.557
+Staff-level signals include amplification trade-offs, ack means durable, tombstones and gcgrace, and tail latency versus consistency.
+
+379
+00:21:47.907 --> 00:21:48.803
+Part 3.
+
+380
+00:21:49.083 --> 00:21:50.811
+Architecture and Diagrams.
+
+381
+00:21:52.061 --> 00:21:53.106
+Component view.
+
+382
+00:21:53.386 --> 00:21:54.730
+Here is the diagram.
+
+383
+00:21:58.580 --> 00:22:01.375
+Sequence: happy path, a QUORUM write then read.
+
+384
+00:22:01.655 --> 00:22:04.449
+The sequence diagram walks through it step by step.
+
+385
+00:22:04.729 --> 00:22:07.140
+C to K: put cart 42 at QUORUM.
+
+386
+00:22:07.420 --> 00:22:09.255
+K to A: write v7.
+
+387
+00:22:09.535 --> 00:22:11.391
+K to B: write v7.
+
+388
+00:22:11.671 --> 00:22:13.569
+K to D: write v7.
+
+389
+00:22:13.849 --> 00:22:16.452
+A to A: commit log group fsync, memtable.
+
+390
+00:22:16.732 --> 00:22:17.969
+A to K: ack.
+
+391
+00:22:18.249 --> 00:22:19.551
+B to K: ack.
+
+392
+00:22:19.831 --> 00:22:22.071
+K to C: ok, 2 of 3 acked.
+
+393
+00:22:22.351 --> 00:22:25.081
+D to K: ack later, stall 60 ms.
+
+394
+00:22:25.361 --> 00:22:27.793
+C to K: get cart 42 at QUORUM.
+
+395
+00:22:28.073 --> 00:22:29.503
+K to A: read.
+
+396
+00:22:29.783 --> 00:22:31.233
+K to D: read.
+
+397
+00:22:31.513 --> 00:22:33.092
+A to K: v7.
+
+398
+00:22:33.372 --> 00:22:36.828
+D to K: v7. and so on, as shown on screen.
+
+399
+00:22:40.678 --> 00:22:44.241
+Sequence: failure path, a replica down, hints and repair.
+
+400
+00:22:44.521 --> 00:22:47.315
+The sequence diagram walks through it step by step.
+
+401
+00:22:47.595 --> 00:22:49.217
+K to A: write v8.
+
+402
+00:22:49.497 --> 00:22:51.097
+K to B: write v8.
+
+403
+00:22:51.377 --> 00:22:53.062
+K to D: unreachable.
+
+404
+00:22:53.342 --> 00:22:55.283
+K to K: store hint for C.
+
+405
+00:22:55.563 --> 00:22:56.801
+A to K: ack.
+
+406
+00:22:57.081 --> 00:22:58.382
+B to K: ack.
+
+407
+00:22:58.662 --> 00:23:00.326
+K to D: replay hints.
+
+408
+00:23:00.606 --> 00:23:01.545
+R to A:
+
+409
+00:23:01.825 --> 00:23:03.723
+Merkle root for range 17.
+
+410
+00:23:04.003 --> 00:23:04.899
+R to D:
+
+411
+00:23:05.179 --> 00:23:07.078
+Merkle root for range 17.
+
+412
+00:23:07.358 --> 00:23:10.899
+R to R: roots differ, descend to 12 differing leaves.
+
+413
+00:23:11.179 --> 00:23:13.398
+R to D: stream 84 keys.
+
+414
+00:23:17.248 --> 00:23:19.829
+State: a key's lifecycle on one replica.
+
+415
+00:23:20.109 --> 00:23:21.453
+Here is the diagram.
+
+416
+00:23:25.303 --> 00:23:26.221
+Part 4.
+
+417
+00:23:26.501 --> 00:23:28.122
+Design Document Excerpt:
+
+418
+00:23:28.402 --> 00:23:29.831
+Cart and Session Store.
+
+419
+00:23:31.081 --> 00:23:31.828
+Note:
+
+420
+00:23:32.108 --> 00:23:35.863
+Design Document (excerpt), Cart and Session KV Store.
+
+421
+00:23:36.143 --> 00:23:37.039
+Status:
+
+422
+00:23:37.319 --> 00:23:38.599
+Accepted, Authors:
+
+423
+00:23:38.879 --> 00:23:40.692
+Platform data team, Reviewers:
+
+424
+00:23:40.972 --> 00:23:43.340
+Cart, Checkout, SRE, Security.
+
+425
+00:23:43.620 --> 00:23:46.543
+Context, Disks filled when compaction was throttled.
+
+426
+00:23:46.823 --> 00:23:49.873
+Stale reads at ONE resurrected removed items.
+
+427
+00:23:50.153 --> 00:23:52.479
+Acks before fsync lost writes on crash.
+
+428
+00:23:52.759 --> 00:23:55.447
+Full repairs saturated the network at peak.
+
+429
+00:23:56.797 --> 00:24:04.199
+Decision, Carts at RF=3, QUORUM reads and writes, commit log group-committed with fsync before ack.
+
+430
+00:24:04.479 --> 00:24:09.173
+Sessions at RF=3, ONE or ONE with periodic commit-log sync.
+
+431
+00:24:09.453 --> 00:24:13.591
+Leveled compaction for carts, time-window for sessions (TTL).
+
+432
+00:24:13.871 --> 00:24:17.242
+Compaction headroom enforced (disk at most 50%).
+
+433
+00:24:17.522 --> 00:24:20.807
+Incremental Merkle repair nightly, within gcgrace.
+
+434
+00:24:21.087 --> 00:24:23.199
+Throttled streaming for node replacement.
+
+435
+00:24:23.479 --> 00:24:27.042
+Idempotency keys moved to a Raft-backed store with CAS.
+
+436
+00:24:28.392 --> 00:24:40.296
+Related ADRs, ADR-400 Storage: leveled compaction for carts, TWCS for sessions, Bloom FP 1%, alerts at 50% disk (L1).
+
+437
+00:24:40.576 --> 00:24:50.923
+ADR-401 Durability: carts commitlogsync=group, sessions periodic 10 s; both RF=3 across 3 AZs (L2).
+
+438
+00:24:51.203 --> 00:24:59.309
+ADR-402 Repair: incremental nightly, full weekly per range, throttled; replacement streams off-peak (L3).
+
+439
+00:24:59.589 --> 00:25:12.368
+ADR-403 Consistency: carts QUORUM or QUORUM with speculative retry at p99; sessions ONE or ONE; idempotency keys in etcd-like Raft store (L4).
+
+440
+00:25:12.648 --> 00:25:13.608
+Requirements.
+
+441
+00:25:13.888 --> 00:25:14.720
+R1:
+
+442
+00:25:14.000 --> 00:25:18.477
+Cart read-your-writes for the same customer across devices.
+
+443
+00:25:19.827 --> 00:25:20.659
+R2:
+
+444
+00:25:20.939 --> 00:25:25.910
+No acknowledged cart write lost when a single node crashes or loses power.
+
+445
+00:25:26.190 --> 00:25:27.043
+R3:
+
+446
+00:25:27.323 --> 00:25:33.531
+Cart p99 at most 10 ms for QUORUM ops in-region, including stall-prone replicas.
+
+447
+00:25:33.811 --> 00:25:34.707
+R4:
+
+448
+00:25:34.987 --> 00:25:39.446
+Replica divergence repaired within 7 days (gcgrace 10 days).
+
+449
+00:25:39.726 --> 00:25:40.601
+R5:
+
+450
+00:25:40.881 --> 00:25:46.491
+Disk usage never above 50% of capacity per node, so compaction always has room.
+
+451
+00:25:46.771 --> 00:25:48.179
+Decisions in detail.
+
+452
+00:25:48.459 --> 00:25:50.593
+Storage (ADR-400).
+
+453
+00:25:50.873 --> 00:25:54.414
+Compaction throughput is capped at 30% of disk bandwidth.
+
+454
+00:25:54.694 --> 00:25:58.043
+Never pause compaction during sales: pre-scale instead.
+
+455
+00:25:59.393 --> 00:26:01.932
+Durability (ADR-401).
+
+456
+00:26:02.212 --> 00:26:03.876
+Group commit window 2 ms.
+
+457
+00:26:04.156 --> 00:26:07.953
+Measured cost: +0.8 ms p50 on writes.
+
+458
+00:26:08.233 --> 00:26:10.367
+Repair (ADR-402).
+
+459
+00:26:10.647 --> 00:26:13.591
+A repair scheduler (Reaper-style) runs per range.
+
+460
+00:26:13.871 --> 00:26:15.236
+Its bytes are monitored.
+
+461
+00:26:15.516 --> 00:26:18.161
+Consistency (ADR-403).
+
+462
+00:26:18.441 --> 00:26:22.175
+The client library enforces a consistency level per table.
+
+463
+00:26:22.455 --> 00:26:26.103
+The speculative retry threshold follows the p99.
+
+464
+00:26:26.383 --> 00:26:27.407
+Consequences.
+
+465
+00:26:27.687 --> 00:26:32.657
+Costs: more disk headroom (cost), quorum tails, and a separate store for CAS.
+
+466
+00:26:34.007 --> 00:26:39.767
+Benefits: no resurrected items, durable acks, predictable repair, and disks that don't fill.
+
+467
+00:26:41.117 --> 00:26:42.077
+Part 5.
+
+468
+00:26:42.357 --> 00:26:44.341
+Hands-On Code, Level Ladder.
+
+469
+00:26:45.591 --> 00:26:46.359
+Info:
+
+470
+00:26:46.639 --> 00:26:47.727
+What's real here.
+
+471
+00:26:48.007 --> 00:26:57.799
+L1 builds real engines on real files: an append log with a hash index, SSTables with sparse indexes and Bloom filters, and full compaction.
+
+472
+00:26:58.079 --> 00:26:59.935
+Reads hit the OS page cache.
+
+473
+00:27:00.215 --> 00:27:06.679
+L2 runs a real child JVM, a real SIGKILL, real fsync, and CRC-checked recovery.
+
+474
+00:27:06.959 --> 00:27:10.117
+Power loss can't be simulated here, as the lab states.
+
+475
+00:27:10.397 --> 00:27:16.007
+L3 computes real SHA-256 Merkle trees over 2M keys.
+
+476
+00:27:16.287 --> 00:27:20.255
+L4 is a latency simulation with stated stall assumptions.
+
+477
+00:27:21.605 --> 00:27:25.552
+All four labs are JDK 21 with no dependencies.
+
+478
+00:27:25.832 --> 00:27:32.253
+L1 writes about 1 GB under or tmp or kvlab or data and deletes it afterwards.
+
+479
+00:27:32.533 --> 00:27:41.515
+L2 is two classes in one file, so compile it with javac -d out WalL2.java and run it with java -cp out WalL2.
+
+480
+00:27:42.865 --> 00:27:45.489
+L1, Storage engines on real files.
+
+481
+00:27:45.769 --> 00:27:46.707
+Requirement:
+
+482
+00:27:46.987 --> 00:27:52.982
+Absorb a heavy write load, and still answer point reads, including for keys that don't exist, fast.
+
+483
+00:27:53.262 --> 00:27:55.993
+Three engines, built here, run the same workload.
+
+484
+00:27:57.343 --> 00:28:00.436
+Here is the Java code, LsmL1.java.
+
+485
+00:28:00.716 --> 00:28:04.961
+It runs to 248 lines; the full listing is in the chapter.
+
+486
+00:28:05.241 --> 00:28:18.745
+LsmL1.java, run with: java -Xmx2g LsmL1.java (JDK 21, no dependencies; writes ~1 GB under or tmp or kvlab or data).
+
+487
+00:28:19.025 --> 00:28:21.457
+HOW A KEY-VALUE STORE'S STORAGE ENGINE WORKS.
+
+488
+00:28:21.737 --> 00:28:25.108
+2,000,000 puts of 100-byte values (fixed seed):
+
+489
+00:28:25.388 --> 00:28:28.097
+1,200,000 distinct keys.
+
+490
+00:28:28.377 --> 00:28:32.153
+(so 40% are overwrites), then 100,000 deletes.
+
+491
+00:28:32.433 --> 00:28:35.612
+Three REAL on-disk engines built here, same workload:
+
+492
+00:28:38.462 --> 00:28:39.379
+On screen:
+
+493
+00:28:39.659 --> 00:28:52.715
+2,000,000 puts (1,200,000 distinct keys) + 100,000 deletes; 1,103,928 live keys = 122.
+
+494
+00:28:52.995 --> 00:28:59.417
+MB of live data. engine write read hit read miss files read files read space RAM for.
+
+495
+00:28:59.697 --> 00:29:05.649
+MB per second p50 or p99 p50 per hit per. miss amplif. lookups.
+
+496
+00:29:05.929 --> 00:29:21.033
+E1) Bitcask: log + in-memory hash index 115 2.8 or 18 µs 0.3 µs 1.00 0.00 1.92x 101.
+
+497
+00:29:21.313 --> 00:29:22.081
+MB.
+
+498
+00:29:22.361 --> 00:29:38.062
+E2) LSM: memtable + 72 SSTables, no Bloom 81 114.4 or 1340 µs 81.6 µs 30.48 72.00.
+
+499
+00:29:38.342 --> 00:29:40.539
+1.91x 10 MB.
+
+500
+00:29:40.819 --> 00:29:56.243
+E3) LSM + Bloom filters (72 SSTables) 65 7.6 or 45 µs 4.0 µs 1.24 0.59 1.91x 12 MB.
+
+501
+00:29:56.523 --> 00:30:10.134
+E4) LSM + Bloom, after full compaction, 5.3 or 20 µs 0.1 µs 1.00 0.01 1.05x 7 MB.
+
+502
+00:30:10.414 --> 00:30:11.929
+The rest is in the chapter.
+
+503
+00:30:14.779 --> 00:30:15.632
+Reading it:
+
+504
+00:30:15.912 --> 00:30:21.928
+Bitcask reads fast, but its RAM grows with the number of keys (101 MB here).
+
+505
+00:30:22.208 --> 00:30:30.827
+The LSM tree keeps a small in-memory index, but without Bloom filters a hit reads 30 files and a miss reads all 72.
+
+506
+00:30:31.107 --> 00:30:33.581
+Bloom filters bring reads to about one file.
+
+507
+00:30:33.861 --> 00:30:42.608
+Compaction drops the overwritten half of the data (1.91 times, then 1.05 times ) and the last extra probes.
+
+508
+00:30:43.958 --> 00:30:50.785
+Write MB per second varied between runs (48 to 115) and is not a fair comparison here.
+
+509
+00:30:52.135 --> 00:30:54.353
+L2, What an acknowledgement survives.
+
+510
+00:30:54.633 --> 00:30:55.572
+Requirement:
+
+511
+00:30:55.852 --> 00:30:59.052
+No acknowledged write may be lost when the process dies.
+
+512
+00:30:59.332 --> 00:31:06.009
+A real child process is killed with SIGKILL mid-stream, and its log is then recovered with CRC checks.
+
+513
+00:31:07.359 --> 00:31:10.047
+Here is the Java code, WalL2.java.
+
+514
+00:31:10.327 --> 00:31:14.722
+It runs to 137 lines; the full listing is in the chapter.
+
+515
+00:31:15.002 --> 00:31:21.466
+WalL2.java, run with: java WalL2.java (JDK 21, no dependencies).
+
+516
+00:31:21.746 --> 00:31:23.666
+ACKNOWLEDGED MUST MEAN WILL SURVIVE.
+
+517
+00:31:23.946 --> 00:31:37.237
+A child JVM appends 128-byte records (seq + payload + CRC32) to a write-ahead. log and prints A seq to the parent the moment it considers each record durable.
+
+518
+00:31:37.517 --> 00:31:39.991
+After 2.5 s the parent KILLS the.
+
+519
+00:31:42.841 --> 00:31:56.559
+On screen: child JVM appends 128-byte records, acks each; parent SIGKILLs it after 2.5 s and. recovers the log. ack policy acked recovered ACKED BUT LOST acks per second.
+
+520
+00:31:56.839 --> 00:32:11.388
+M1) buffered in the process, ack at once 3,381,860 3,381,760 100 2,254,050.
+
+521
+00:32:11.668 --> 00:32:27.113
+M2) write() to the OS each record, no fsync 1,158,499 1,158,499 0 772,250.
+
+522
+00:32:27.393 --> 00:32:37.036
+M3) fsync every record 13,228 13,229 0 8,818.
+
+523
+00:32:37.316 --> 00:32:38.703
+M4) group commit:
+
+524
+00:32:38.983 --> 00:32:51.996
+8 writers, one fsync per batch 43,132 43,139 0 28,750. then an acknowledgement is a promise.
+
+525
+00:32:52.276 --> 00:32:55.519
+Acking from a user-space buffer breaks it on any. crash.
+
+526
+00:32:55.799 --> 00:32:57.121
+Handing bytes to the.
+
+527
+00:32:57.401 --> 00:33:04.057
+OS survives a process kill (the kernel still has them) but not a power cut. fsync. per record keeps the.
+
+528
+00:33:04.337 --> 00:33:05.852
+The rest is in the chapter.
+
+529
+00:33:08.702 --> 00:33:09.555
+Reading it:
+
+530
+00:33:09.835 --> 00:33:13.547
+Acking from a user-space buffer loses whatever was still buffered:
+
+531
+00:33:13.827 --> 00:33:21.401
+100 acknowledged records here. write() without fsync survives this process kill because the kernel holds the data.
+
+532
+00:33:21.681 --> 00:33:25.798
+It would not survive a power cut. fsync per record is safe but slow.
+
+533
+00:33:26.078 --> 00:33:30.003
+Group commit is 3.3 times faster with the same guarantee.
+
+534
+00:33:31.353 --> 00:33:32.612
+A development note.
+
+535
+00:33:32.892 --> 00:33:35.025
+A first version read acks through a pipe.
+
+536
+00:33:35.305 --> 00:33:41.620
+The parent lost the final ack lines when the child died, which hid the losses, so acks now go to a file.
+
+537
+00:33:42.970 --> 00:33:44.997
+L3, Merkle anti-entropy.
+
+538
+00:33:45.277 --> 00:33:46.215
+Requirement:
+
+539
+00:33:46.495 --> 00:33:51.146
+Find and fix the keys two replicas disagree on without shipping everything.
+
+540
+00:33:51.426 --> 00:33:59.042
+Real SHA-256 trees over 2M keys, with divergence from 10 to 200,000 keys.
+
+541
+00:34:00.392 --> 00:34:03.293
+Here is the Java code, MerkleL3.java.
+
+542
+00:34:03.573 --> 00:34:07.691
+It runs to 107 lines; the full listing is in the chapter.
+
+543
+00:34:07.971 --> 00:34:16.504
+MerkleL3.java, run with: java -Xmx3g MerkleL3.java (JDK 21, no dependencies).
+
+544
+00:34:16.784 --> 00:34:17.893
+ANTI-ENTROPY:
+
+545
+00:34:18.173 --> 00:34:20.499
+FINDING WHAT TWO REPLICAS DISAGREE ON.
+
+546
+00:34:20.779 --> 00:34:28.011
+Replica A holds 2,000,000 keys; replica B is the same except for. writes it missed while it was down (fixed seed).
+
+547
+00:34:28.291 --> 00:34:31.277
+To repair, the replicas must find the differing keys.
+
+548
+00:34:31.557 --> 00:34:32.581
+REAL hashing.
+
+549
+00:34:35.431 --> 00:34:36.349
+On screen:
+
+550
+00:34:36.629 --> 00:34:47.893
+2,000,000 keys per replica; full comparison ships 91.6 MB every time. differing keys method bytes exchanged round trips keys to repair roots equal.
+
+551
+00:34:48.173 --> 00:34:51.735
+10 F full pairs 91.6 MB 1 10 yes.
+
+552
+00:34:52.015 --> 00:35:01.402
+M depth 15 (~61 or leaf) 36.9 KB 17 10 yes (tree build 367 ms).
+
+553
+00:35:01.682 --> 00:35:10.173
+M depth 18 (~7 or leaf) 13.7 KB 20 10 yes (tree build 524 ms).
+
+554
+00:35:10.453 --> 00:35:15.210
+1,000 F full pairs 91.6 MB 1 1,000 yes.
+
+555
+00:35:15.490 --> 00:35:21.805
+M depth 15 (~61 or leaf) 3.1 MB 17 1,000 yes.
+
+556
+00:35:22.085 --> 00:35:28.335
+M depth 18 (~7 or leaf) 900.9 KB 20 1,000 yes.
+
+557
+00:35:28.615 --> 00:35:33.522
+20,000 F full pairs 91.6 MB 1 20,000 yes.
+
+558
+00:35:33.802 --> 00:35:40.650
+M depth 15 (~61 or leaf) 43.8 MB 17 20,000 yes.
+
+559
+00:35:40.930 --> 00:35:46.925
+M depth 18 (~7 or leaf) 11.5 MB 20 20,000 yes.
+
+560
+00:35:47.205 --> 00:35:52.986
+200,000 F full pairs 91.6 MB 1 200,000 yes.
+
+561
+00:35:53.266 --> 00:35:54.781
+The rest is in the chapter.
+
+562
+00:35:57.631 --> 00:35:58.484
+Reading it:
+
+563
+00:35:58.764 --> 00:36:02.455
+For small divergence, the tree finds the differences in kilobytes.
+
+564
+00:36:02.735 --> 00:36:05.231
+As divergence grows, the savings shrink.
+
+565
+00:36:05.511 --> 00:36:09.863
+At 10% of keys, the shallower tree ships more than a full comparison.
+
+566
+00:36:10.143 --> 00:36:14.644
+After repair, every root matched, which is the proof the replicas converged.
+
+567
+00:36:15.994 --> 00:36:18.938
+L4, Consistency levels and tail latency.
+
+568
+00:36:19.218 --> 00:36:20.157
+Requirement:
+
+569
+00:36:20.437 --> 00:36:23.871
+Read-your-writes for carts without blowing up p99.
+
+570
+00:36:24.151 --> 00:36:27.991
+N=3 with stall-prone replicas and write-then-read pairs.
+
+571
+00:36:29.341 --> 00:36:32.221
+Here is the Java code, QuorumL4.java.
+
+572
+00:36:32.501 --> 00:36:36.341
+It runs to 79 lines; the full listing is in the chapter.
+
+573
+00:36:36.621 --> 00:36:43.725
+QuorumL4.java, run with: java QuorumL4.java (JDK 21, no dependencies).
+
+574
+00:36:44.005 --> 00:36:45.413
+TUNABLE CONSISTENCY:
+
+575
+00:36:45.693 --> 00:36:49.171
+WHAT R AND W COST IN LATENCY AND BUY IN FRESHNESS.
+
+576
+00:36:49.451 --> 00:36:51.115
+N = 3 replicas.
+
+577
+00:36:51.395 --> 00:37:02.616
+One-way network+processing. time per message: lognormal, median 1 ms; each replica independently has a 3% chance per request of a stall (GC.
+
+578
+00:37:05.466 --> 00:37:06.383
+On screen:
+
+579
+00:37:06.663 --> 00:37:25.415
+N=3, one-way latency median 1 ms, 3% stall chance per replica per request (+20 to 200. ms); 200,000 write, then read pairs. config write p50 write p99 read p50 read p99 stale reads.
+
+580
+00:37:25.695 --> 00:37:38.879
+W=1 R=1 (read sent to one replica) 1.6 ms 3.0 ms 2.2 ms 173.7 ms 2.97%.
+
+581
+00:37:39.159 --> 00:37:51.917
+W=1 R=1 + hedge to a 2nd after 5 ms 1.6 ms 3.0 ms 2.2 ms 8.3 ms 3.07%.
+
+582
+00:37:52.197 --> 00:38:04.719
+W=1 R=1 (read sent to all, first wins) 1.6 ms 3.0 ms 1.6 ms 3.0 ms 3.00%.
+
+583
+00:38:04.999 --> 00:38:15.538
+W=1 R=2 1.6 ms 3.0 ms 2.2 ms 25.8 ms 0.08%.
+
+584
+00:38:15.818 --> 00:38:25.674
+W=2 R=1 2.2 ms 6.7 ms 1.6 ms 3.0 ms 2.74%.
+
+585
+00:38:25.954 --> 00:38:38.498
+W=2 R=2 (quorum, R+WN) 2.2 ms 6.7 ms 2.2 ms 25.8 ms 0.00%.
+
+586
+00:38:38.778 --> 00:38:55.909
+W=3 R=1 3.1 ms 193.7 ms 1.6 ms 3.0 ms 0.00%. then the tail comes from stalls, and how many replicas you wait for decides who pays.
+
+587
+00:38:56.189 --> 00:38:57.703
+The rest is in the chapter.
+
+588
+00:39:00.553 --> 00:39:01.407
+Reading it:
+
+589
+00:39:01.687 --> 00:39:05.057
+Staleness depends only on R + W versus N.
+
+590
+00:39:05.337 --> 00:39:09.796
+The three R=1 variants all show ~3% stale reads.
+
+591
+00:39:10.076 --> 00:39:13.340
+Tails depend on how many replicas you wait for, and whom.
+
+592
+00:39:13.620 --> 00:39:18.975
+Quorum reads cost a 26 ms p99 when two of three replicas are slow.
+
+593
+00:39:19.255 --> 00:39:22.583
+W=3 turns every stall into a slow write.
+
+594
+00:39:23.933 --> 00:39:24.871
+Part 6.
+
+595
+00:39:25.151 --> 00:39:26.431
+Production Concerns.
+
+596
+00:39:27.681 --> 00:39:28.833
+Failure modes.
+
+597
+00:39:29.113 --> 00:39:30.457
+Here is a quick table:
+
+598
+00:39:30.737 --> 00:39:33.020
+Failure, and Symptom, and Mitigation.
+
+599
+00:39:33.300 --> 00:39:34.580
+Compaction starved.
+
+600
+00:39:34.860 --> 00:39:35.671
+Symptom:
+
+601
+00:39:35.951 --> 00:39:37.999
+Disk fills, reads slow (L1).
+
+602
+00:39:38.279 --> 00:39:39.281
+Mitigation:
+
+603
+00:39:39.561 --> 00:39:42.249
+Headroom, throttled but never paused compaction.
+
+604
+00:39:42.529 --> 00:39:45.388
+No Bloom filters or too many SSTables.
+
+605
+00:39:45.668 --> 00:39:46.479
+Symptom:
+
+606
+00:39:46.759 --> 00:39:48.231
+Slow misses (L1).
+
+607
+00:39:48.511 --> 00:39:49.513
+Mitigation:
+
+608
+00:39:49.793 --> 00:39:51.649
+Blooms, compaction strategy.
+
+609
+00:39:51.929 --> 00:39:53.167
+Tombstone pile-ups.
+
+610
+00:39:53.447 --> 00:39:54.257
+Symptom:
+
+611
+00:39:54.537 --> 00:39:57.460
+Slow scans, resurrection after missed repair.
+
+612
+00:39:57.740 --> 00:40:02.860
+Mitigation: gcgrace versus repair schedule; avoid delete-heavy patterns.
+
+613
+00:40:03.140 --> 00:40:04.484
+Ack before fsync.
+
+614
+00:40:04.764 --> 00:40:05.575
+Symptom:
+
+615
+00:40:05.855 --> 00:40:07.967
+Lost acknowledged writes (L2).
+
+616
+00:40:08.247 --> 00:40:09.249
+Mitigation:
+
+617
+00:40:09.529 --> 00:40:12.175
+Group commit; documented durability levels.
+
+618
+00:40:12.455 --> 00:40:13.884
+Divergent replicas.
+
+619
+00:40:14.164 --> 00:40:14.975
+Symptom:
+
+620
+00:40:15.255 --> 00:40:16.343
+Stale reads.
+
+621
+00:40:16.623 --> 00:40:17.625
+Mitigation:
+
+622
+00:40:17.905 --> 00:40:20.487
+Hints, read repair, Merkle repair (L3).
+
+623
+00:40:20.767 --> 00:40:22.367
+Full-range repair at peak.
+
+624
+00:40:22.647 --> 00:40:23.457
+Symptom:
+
+625
+00:40:23.737 --> 00:40:25.124
+Network saturation.
+
+626
+00:40:25.404 --> 00:40:26.407
+Mitigation:
+
+627
+00:40:26.687 --> 00:40:28.649
+Incremental, throttled, off-peak.
+
+628
+00:40:29.999 --> 00:40:32.346
+R + W at most N for carts.
+
+629
+00:40:32.626 --> 00:40:33.437
+Symptom:
+
+630
+00:40:33.717 --> 00:40:35.957
+Read-your-write violations (L4).
+
+631
+00:40:36.237 --> 00:40:37.239
+Mitigation:
+
+632
+00:40:37.519 --> 00:40:38.735
+QUORUM for carts.
+
+633
+00:40:39.015 --> 00:40:40.338
+W = ALL.
+
+634
+00:40:40.618 --> 00:40:41.429
+Symptom:
+
+635
+00:40:41.709 --> 00:40:44.034
+Write outages on any stall (L4).
+
+636
+00:40:44.314 --> 00:40:45.317
+Mitigation:
+
+637
+00:40:45.597 --> 00:40:46.791
+QUORUM + hints.
+
+638
+00:40:47.071 --> 00:40:49.055
+Clock skew with LWW.
+
+639
+00:40:49.335 --> 00:40:50.146
+Symptom:
+
+640
+00:40:50.426 --> 00:40:51.535
+Lost updates.
+
+641
+00:40:51.815 --> 00:40:52.818
+Mitigation:
+
+642
+00:40:53.098 --> 00:40:56.106
+Vector clocks or CRDTs or single writer.
+
+643
+00:40:57.456 --> 00:40:58.544
+Observability.
+
+644
+00:40:58.824 --> 00:41:05.693
+Per node: pending compactions, SSTables per read (histogram), Bloom false-positive rate, disk usage.
+
+645
+00:41:05.973 --> 00:41:09.643
+Commit-log sync latency, group sizes, dropped mutations.
+
+646
+00:41:09.923 --> 00:41:14.232
+Hints stored or replayed, read-repair rate, repair progress and bytes.
+
+647
+00:41:14.512 --> 00:41:19.568
+Per table: latency by consistency level, speculative retries, timeouts.
+
+648
+00:41:20.918 --> 00:41:21.857
+Security.
+
+649
+00:41:22.137 --> 00:41:26.147
+Encryption in transit between nodes and clients; at rest on disks.
+
+650
+00:41:26.427 --> 00:41:30.822
+Authentication and per-keyspace authorisation; no anonymous access.
+
+651
+00:41:31.102 --> 00:41:38.718
+Backups via snapshots (SSTables are immutable, so hard-link snapshots are cheap), stored off-cluster and encrypted.
+
+652
+00:41:40.068 --> 00:41:40.964
+Performance.
+
+653
+00:41:41.244 --> 00:41:44.359
+Token-aware clients (send directly to a replica).
+
+654
+00:41:44.639 --> 00:41:49.417
+Prepared statements or batching per partition; avoid multi-partition batches.
+
+655
+00:41:49.697 --> 00:41:56.353
+Size partitions sensibly (for example, 100 MB each); split wide rows by time buckets.
+
+656
+00:41:57.703 --> 00:41:58.429
+Cost.
+
+657
+00:41:58.709 --> 00:42:06.133
+Replication factor times space amplification times compaction headroom = real disk per GB of data.
+
+658
+00:42:06.413 --> 00:42:09.997
+Managed services trade operations for per-request pricing.
+
+659
+00:42:10.277 --> 00:42:12.111
+Model both at peak and average.
+
+660
+00:42:12.391 --> 00:42:15.549
+Tiered storage for cold SSTables where supported.
+
+661
+00:42:16.899 --> 00:42:17.837
+Part 7.
+
+662
+00:42:18.117 --> 00:42:19.824
+Anti-Patterns and Pitfalls.
+
+663
+00:42:21.074 --> 00:42:21.991
+Watch out:
+
+664
+00:42:22.271 --> 00:42:22.911
+1.
+
+665
+00:42:23.191 --> 00:42:26.199
+Treating the KV store like a relational DB.
+
+666
+00:42:26.479 --> 00:42:28.805
+Joins and ad-hoc queries don't exist.
+
+667
+00:42:29.085 --> 00:42:30.685
+Model by access pattern.
+
+668
+00:42:32.035 --> 00:42:32.952
+Watch out:
+
+669
+00:42:33.232 --> 00:42:33.936
+2.
+
+670
+00:42:34.216 --> 00:42:36.648
+Throttling compaction to 'save I or O'.
+
+671
+00:42:36.928 --> 00:42:39.765
+Space and read amplification explode (L1).
+
+672
+00:42:41.115 --> 00:42:42.033
+Watch out:
+
+673
+00:42:42.313 --> 00:42:43.059
+3.
+
+674
+00:42:43.339 --> 00:42:45.707
+No Bloom filters on read-heavy tables.
+
+675
+00:42:45.987 --> 00:42:48.483
+Misses read every SSTable (L1).
+
+676
+00:42:49.833 --> 00:42:50.751
+Watch out:
+
+677
+00:42:51.031 --> 00:42:51.735
+4.
+
+678
+00:42:52.015 --> 00:42:54.063
+Acking before fsync without knowing it.
+
+679
+00:42:54.343 --> 00:42:55.793
+Lost writes (L2).
+
+680
+00:42:57.143 --> 00:42:58.061
+Watch out:
+
+681
+00:42:58.341 --> 00:42:59.109
+5.
+
+682
+00:42:59.389 --> 00:43:01.373
+Assuming write() means durable.
+
+683
+00:43:01.653 --> 00:43:04.127
+Only the process crash is covered (L2).
+
+684
+00:43:05.477 --> 00:43:06.395
+Watch out:
+
+685
+00:43:06.675 --> 00:43:07.421
+6.
+
+686
+00:43:07.701 --> 00:43:08.960
+Never running repair.
+
+687
+00:43:09.240 --> 00:43:11.501
+Divergence and resurrected deletes.
+
+688
+00:43:12.851 --> 00:43:13.769
+Watch out:
+
+689
+00:43:14.049 --> 00:43:14.795
+7.
+
+690
+00:43:15.075 --> 00:43:16.462
+Full repairs at peak.
+
+691
+00:43:16.742 --> 00:43:18.790
+Network saturation (L3).
+
+692
+00:43:20.140 --> 00:43:21.057
+Watch out:
+
+693
+00:43:21.337 --> 00:43:22.020
+8.
+
+694
+00:43:22.300 --> 00:43:29.041
+R=1 or W=1 for read-your-write data. ~3% stale reads (L4).
+
+695
+00:43:30.391 --> 00:43:31.309
+Watch out:
+
+696
+00:43:31.589 --> 00:43:32.335
+9.
+
+697
+00:43:32.615 --> 00:43:34.514
+W=ALL for 'safety'.
+
+698
+00:43:34.794 --> 00:43:37.205
+Tail latency and outages (L4).
+
+699
+00:43:38.555 --> 00:43:39.472
+Watch out:
+
+700
+00:43:39.752 --> 00:43:40.456
+10.
+
+701
+00:43:40.736 --> 00:43:42.293
+Quorums for compare-and-set.
+
+702
+00:43:42.573 --> 00:43:45.027
+Quorums don't give linearizable CAS.
+
+703
+00:43:45.307 --> 00:43:46.501
+Use consensus.
+
+704
+00:43:47.851 --> 00:43:48.769
+Watch out:
+
+705
+00:43:49.049 --> 00:43:49.881
+11.
+
+706
+00:43:50.161 --> 00:43:51.654
+Delete-heavy queue patterns.
+
+707
+00:43:51.934 --> 00:43:53.491
+Tombstones slow everything.
+
+708
+00:43:54.841 --> 00:43:55.759
+Watch out:
+
+709
+00:43:56.039 --> 00:43:56.828
+12.
+
+710
+00:43:57.108 --> 00:43:58.324
+Huge partitions.
+
+711
+00:43:58.604 --> 00:44:00.972
+Hotspots, slow compaction and repair.
+
+712
+00:44:02.322 --> 00:44:03.197
+Part 8.
+
+713
+00:44:03.477 --> 00:44:04.821
+Interview Q and A.
+
+714
+00:44:06.071 --> 00:44:06.903
+Beginner.
+
+715
+00:44:07.183 --> 00:44:08.207
+Question 1.
+
+716
+00:44:08.487 --> 00:44:11.836
+Design a distributed key-value store, main components?
+
+717
+00:44:12.116 --> 00:44:13.481
+Thirty-second answer:
+
+718
+00:44:13.761 --> 00:44:32.983
+Consistent-hash partitioning with virtual nodes; N replicas per key across racks or AZs; coordinators that apply R or W consistency levels; hinted handoff, read repair and Merkle anti-entropy; per-node LSM storage (commit log, memtable, SSTables, Bloom filters,
+
+719
+00:44:33.263 --> 00:44:41.711
+compaction); gossip membership and failure detection; conflict resolution by LWW, vector clocks or CRDTs.
+
+720
+00:44:43.061 --> 00:44:44.063
+Question 2.
+
+721
+00:44:44.343 --> 00:44:46.071
+How does an LSM tree work?
+
+722
+00:44:46.351 --> 00:44:47.717
+Thirty-second answer:
+
+723
+00:44:47.997 --> 00:45:08.327
+Writes append to a commit log and update an in-memory sorted memtable; full memtables flush to immutable sorted SSTables; reads check memtable then SSTables newest-first, skipping via Bloom filters; deletes are tombstones; compaction merges SSTables, dropping old versions and expired tombstones.
+
+724
+00:45:09.677 --> 00:45:10.723
+Question 3.
+
+725
+00:45:11.003 --> 00:45:13.200
+What does R + W N guarantee?
+
+726
+00:45:13.480 --> 00:45:14.845
+Thirty-second answer:
+
+727
+00:45:15.125 --> 00:45:28.779
+Every read quorum overlaps every write quorum, so a read sees at least one replica with the latest acknowledged write (absent sloppy quorums and concurrent writes), read-your-writes; it does not make operations linearizable.
+
+728
+00:45:30.129 --> 00:45:31.195
+Question 4.
+
+729
+00:45:31.475 --> 00:45:34.185
+What is a Bloom filter doing in a storage engine?
+
+730
+00:45:34.465 --> 00:45:35.830
+Thirty-second answer:
+
+731
+00:45:36.110 --> 00:45:51.406
+Per SSTable, a compact bit array answering definitely not here or maybe here; it lets reads skip SSTables that can't contain the key, making negative lookups nearly free at ~10 bits per key for 1% false positives.
+
+732
+00:45:52.756 --> 00:45:53.759
+Intermediate.
+
+733
+00:45:54.039 --> 00:45:55.148
+Question 5.
+
+734
+00:45:55.428 --> 00:45:56.857
+When is a write durable?
+
+735
+00:45:57.137 --> 00:45:58.503
+Thirty-second answer:
+
+736
+00:45:58.783 --> 00:46:04.564
+When it's on stable storage (fsynced) on as many machines as your durability promise requires.
+
+737
+00:46:04.844 --> 00:46:13.975
+Process buffers die with the process, the OS page cache dies with power, fsync survives both; replication spreads risk across machines.
+
+738
+00:46:14.255 --> 00:46:16.217
+Ack only after the promised level.
+
+739
+00:46:17.567 --> 00:46:18.677
+Question 6.
+
+740
+00:46:18.957 --> 00:46:21.111
+What are hinted handoff and read repair?
+
+741
+00:46:21.391 --> 00:46:22.757
+Thirty-second answer:
+
+742
+00:46:23.037 --> 00:46:30.119
+Hinted handoff: coordinators store writes for unreachable replicas and replay them when they return (within a window).
+
+743
+00:46:30.399 --> 00:46:36.309
+Read repair: when a read sees divergent versions, the newest is written back to stale replicas.
+
+744
+00:46:36.589 --> 00:46:41.815
+Both reduce divergence; neither guarantees full convergence, anti-entropy does.
+
+745
+00:46:43.165 --> 00:46:44.253
+Question 7.
+
+746
+00:46:44.533 --> 00:46:46.432
+How do Merkle trees help repair?
+
+747
+00:46:46.712 --> 00:46:48.077
+Thirty-second answer:
+
+748
+00:46:48.357 --> 00:47:04.187
+Each replica builds a hash tree over key ranges; comparing roots shows whether ranges match; descending only into differing subtrees locates divergent leaves; only those keys are exchanged, kilobytes for small divergence instead of whole ranges.
+
+749
+00:47:05.537 --> 00:47:06.561
+Question 8.
+
+750
+00:47:06.841 --> 00:47:09.081
+What are tombstones and why do they matter?
+
+751
+00:47:09.361 --> 00:47:10.726
+Thirty-second answer:
+
+752
+00:47:11.006 --> 00:47:26.323
+Deletes in LSM or replicated stores are markers, not removals, so older copies elsewhere don't resurrect the data; they must persist until every replica has seen them (gcgrace) and compaction can drop both marker and data.
+
+753
+00:47:26.603 --> 00:47:30.998
+Too many slow reads; purging before repair completes resurrects deletes.
+
+754
+00:47:32.348 --> 00:47:33.415
+Question 9.
+
+755
+00:47:33.695 --> 00:47:36.191
+Bitcask versus LSM versus B-tree?
+
+756
+00:47:36.471 --> 00:47:37.836
+Thirty-second answer:
+
+757
+00:47:38.116 --> 00:47:44.943
+Bitcask: append log + in-memory hash index, one-seek reads, all keys in RAM, no ranges.
+
+758
+00:47:45.223 --> 00:47:51.708
+LSM: sequential writes, sparse in-memory index, Bloom filters and compaction, good for write-heavy.
+
+759
+00:47:51.988 --> 00:47:57.940
+B-tree: in-place updates, great reads and ranges, random writes and page write amplification.
+
+760
+00:47:59.290 --> 00:48:00.058
+Senior.
+
+761
+00:48:00.338 --> 00:48:01.383
+Question 10.
+
+762
+00:48:01.663 --> 00:48:04.479
+How do you choose consistency levels per operation?
+
+763
+00:48:04.759 --> 00:48:06.125
+Thirty-second answer:
+
+764
+00:48:06.405 --> 00:48:27.738
+By what a stale or lost read or write costs: carts and order status need read-your-writes (QUORUM or QUORUM); sessions and counters tolerate ONE; compare-and-set needs consensus; consider tail latency (quorums inherit the second-slowest replica), availability during failures, and hedging or speculative retry for tails.
+
+765
+00:48:29.088 --> 00:48:30.219
+Question 11.
+
+766
+00:48:30.499 --> 00:48:33.293
+How does compaction strategy affect a workload?
+
+767
+00:48:33.573 --> 00:48:34.939
+Thirty-second answer:
+
+768
+00:48:35.219 --> 00:48:43.240
+Size-tiered merges similar-sized files: low write amplification, high space or read amplification, good for write-heavy.
+
+769
+00:48:43.520 --> 00:48:52.459
+Leveled keeps non-overlapping levels: reads touch ~1 file per level, low space amp, higher write amp, good for read-heavy or updates.
+
+770
+00:48:52.739 --> 00:48:56.813
+Time-window groups by time for TTL data, dropping whole files.
+
+771
+00:48:58.163 --> 00:48:59.251
+Question 12.
+
+772
+00:48:59.531 --> 00:49:01.835
+How do you handle a node replacement safely?
+
+773
+00:49:02.115 --> 00:49:03.481
+Thirty-second answer:
+
+774
+00:49:03.761 --> 00:49:17.478
+Bootstrap the new node to stream its ranges from replicas (throttled), keep QUORUM consistency during streaming, run repair after, verify with Merkle roots, avoid doing it at peak, and ensure disk headroom on neighbours.
+
+775
+00:49:18.828 --> 00:49:20.108
+Question 13.
+
+776
+00:49:20.388 --> 00:49:23.225
+How do you implement compare-and-set in a leaderless store?
+
+777
+00:49:23.505 --> 00:49:24.871
+Thirty-second answer:
+
+778
+00:49:25.151 --> 00:49:28.884
+You can't with quorums alone, concurrent writers can both succeed.
+
+779
+00:49:29.164 --> 00:49:40.513
+Use a consensus protocol per key (Paxos-based lightweight transactions in Cassandra, Raft in etcd or TiKV) at higher latency, or route the key to a single writer.
+
+780
+00:49:41.863 --> 00:49:43.058
+Question 14.
+
+781
+00:49:43.338 --> 00:49:45.663
+What metrics reveal storage engine trouble?
+
+782
+00:49:45.943 --> 00:49:47.309
+Thirty-second answer:
+
+783
+00:49:47.589 --> 00:50:00.517
+Pending compactions, SSTables per read, Bloom false-positive rates, tombstones scanned per read, disk usage versus headroom, write stalls (memtable flush backpressure), p99 by operation.
+
+784
+00:50:01.867 --> 00:50:02.763
+Architect.
+
+785
+00:50:03.043 --> 00:50:04.237
+Question 15.
+
+786
+00:50:04.517 --> 00:50:07.653
+Design a Dynamo-style key-value store end to end.
+
+787
+00:50:07.933 --> 00:50:09.299
+Thirty-second answer:
+
+788
+00:50:09.579 --> 00:50:33.131
+Ring with vnodes, rack-aware replicas, coordinator with per-request R or W, sloppy quorum + hinted handoff, read repair, Merkle anti-entropy, vector clocks or LWW or CRDT conflict handling, LSM storage with group-committed WAL, Bloom filters and tuned compaction, gossip membership with phi detectors, monitoring and repair scheduling.
+
+789
+00:50:34.481 --> 00:50:35.675
+Question 16.
+
+790
+00:50:35.955 --> 00:50:39.262
+Managed (DynamoDB) or self-managed (Cassandra)?
+
+791
+00:50:39.542 --> 00:50:40.907
+Thirty-second answer:
+
+792
+00:50:41.187 --> 00:50:54.094
+Managed removes operations (compaction, repair, upgrades) and scales with pay-per-use; self-managed gives control, predictable cost at steady high throughput, and portability, at the price of expertise.
+
+793
+00:50:54.374 --> 00:50:59.409
+Decide by team capacity, cost at your load, feature needs and lock-in tolerance.
+
+794
+00:51:00.759 --> 00:51:02.103
+Question 17.
+
+795
+00:51:02.383 --> 00:51:06.735
+How do you migrate carts from PostgreSQL to a KV store safely?
+
+796
+00:51:07.015 --> 00:51:08.380
+Thirty-second answer:
+
+797
+00:51:08.660 --> 00:51:23.039
+Model by access pattern; dual-write with the old store authoritative; backfill; compare reads (shadow reads) and fix differences; switch reads per cohort; switch authority; keep a rollback path; monitor consistency and latency.
+
+798
+00:51:24.389 --> 00:51:25.562
+Question 18.
+
+799
+00:51:25.842 --> 00:51:29.127
+What happens to a leaderless store during a network partition?
+
+800
+00:51:29.407 --> 00:51:30.773
+Thirty-second answer:
+
+801
+00:51:31.053 --> 00:51:49.314
+Each side may accept writes if it can form the requested quorum (or sloppy quorum); after healing, conflicting versions are reconciled by LWW (possible lost updates), siblings or vector clocks (app merge), or CRDTs; hints and repair converge replicas.
+
+802
+00:51:49.594 --> 00:51:51.834
+QUORUM writes fail on the minority side.
+
+803
+00:51:53.184 --> 00:51:54.421
+Question 19.
+
+804
+00:51:54.701 --> 00:51:56.515
+How do you size a KV cluster?
+
+805
+00:51:56.795 --> 00:51:58.160
+Thirty-second answer:
+
+806
+00:51:58.440 --> 00:52:20.477
+From data times RF times space amplification times headroom (≥ 2 times for compaction), IOPS for reads or writes including compaction write amplification, latency targets with consistency levels, and failure tolerance (serve with one AZ down); validate with load tests including compaction and repair running.
+
+807
+00:52:21.827 --> 00:52:22.937
+Question 20.
+
+808
+00:52:23.217 --> 00:52:25.798
+What does 'healthy' look like for the KV platform?
+
+809
+00:52:26.078 --> 00:52:27.443
+Thirty-second answer:
+
+810
+00:52:27.723 --> 00:52:44.107
+Latency within SLO per consistency level; no dropped mutations; bounded pending compactions and SSTables per read; disk under headroom; repair completing within gcgrace; hints small; zero acknowledged-write loss in chaos tests.
+
+811
+00:52:45.457 --> 00:52:46.353
+Part 9.
+
+812
+00:52:46.633 --> 00:52:48.041
+Summary and Practice.
+
+813
+00:52:49.291 --> 00:52:50.379
+Key takeaways.
+
+814
+00:52:50.659 --> 00:52:55.289
+LSM trees trade read and space amplification for sequential writes.
+
+815
+00:52:55.569 --> 00:52:58.449
+Bloom filters and compaction pay it back (L1).
+
+816
+00:52:58.729 --> 00:53:03.251
+Ack means durable: fsync, or group commit, before acknowledging (L2).
+
+817
+00:53:03.531 --> 00:53:05.985
+Merkle trees make routine repair cheap.
+
+818
+00:53:06.265 --> 00:53:08.846
+Large divergence means streaming (L3).
+
+819
+00:53:09.126 --> 00:53:13.137
+R + W N gives read-your-writes and costs tail latency.
+
+820
+00:53:13.417 --> 00:53:16.297
+Consensus is needed for CAS (L4).
+
+821
+00:53:16.577 --> 00:53:20.353
+Operations are the product: headroom, repair and tombstones.
+
+822
+00:53:21.703 --> 00:53:23.025
+Decision cheat sheet.
+
+823
+00:53:23.305 --> 00:53:24.649
+Here is a quick table:
+
+824
+00:53:24.929 --> 00:53:26.103
+Need, and Choice.
+
+825
+00:53:26.383 --> 00:53:27.812
+Write-heavy per-key data:
+
+826
+00:53:28.092 --> 00:53:32.145
+LSM (leveled for updates, TWCS for TTL).
+
+827
+00:53:32.425 --> 00:53:33.599
+Negative lookups:
+
+828
+00:53:33.879 --> 00:53:36.375
+Bloom filters ~1% FP.
+
+829
+00:53:36.655 --> 00:53:37.700
+Durable acks:
+
+830
+00:53:37.980 --> 00:53:40.177
+Group-committed WAL with fsync.
+
+831
+00:53:40.457 --> 00:53:41.844
+Replica convergence:
+
+832
+00:53:42.124 --> 00:53:45.516
+Hints + read repair + incremental Merkle repair.
+
+833
+00:53:45.796 --> 00:53:46.863
+Read-your-writes:
+
+834
+00:53:47.143 --> 00:53:48.316
+QUORUM or QUORUM.
+
+835
+00:53:48.596 --> 00:53:49.321
+CAS:
+
+836
+00:53:49.601 --> 00:53:52.033
+Consensus (LWT or Raft).
+
+837
+00:53:52.313 --> 00:53:53.167
+Tails:
+
+838
+00:53:53.447 --> 00:53:55.431
+Speculative retry or hedging.
+
+839
+00:53:56.781 --> 00:53:57.911
+Exercises.
+
+840
+00:53:58.191 --> 00:54:02.245
+(B2) In L1, flush at 16 MB instead of 4 MB.
+
+841
+00:54:02.525 --> 00:54:05.810
+How do SSTable count and read amplification change?
+
+842
+00:54:06.090 --> 00:54:10.314
+(B3) In L2, change the group-commit batch to wait up to 2 ms.
+
+843
+00:54:10.594 --> 00:54:13.090
+Measure acks per second and ack latency.
+
+844
+00:54:13.370 --> 00:54:17.061
+(B3) In L3, use 4-way fanout instead of binary.
+
+845
+00:54:17.341 --> 00:54:19.026
+Compare bytes and round trips.
+
+846
+00:54:19.306 --> 00:54:24.511
+(B4) In L4, add a sloppy quorum: during a stall a stand-in accepts the write.
+
+847
+00:54:24.791 --> 00:54:27.522
+Does QUORUM still give 0% stale reads?
+
+848
+00:54:28.872 --> 00:54:35.741
+(B4) Design leveled compaction and compute its write amplification for 10 levels with a ratio of 10.
+
+849
+00:54:37.091 --> 00:54:38.094
+Further reading.
+
+850
+00:54:38.374 --> 00:54:39.569
+DeCandia et al.
+
+851
+00:54:39.849 --> 00:54:40.702
+Dynamo:
+
+852
+00:54:40.982 --> 00:54:44.822
+Amazon's Highly Available Key-value Store (2007).
+
+853
+00:54:45.102 --> 00:54:46.126
+O'Neil et al.
+
+854
+00:54:46.406 --> 00:54:51.953
+The Log-Structured Merge-Tree (1996); the RocksDB wiki on compaction.
+
+855
+00:54:52.233 --> 00:54:57.993
+Lakshman and Malik, Cassandra (2010); the Bitcask paper (Basho, 2010).
+
+856
+00:54:58.273 --> 00:54:59.659
+Athanassoulis et al.
+
+857
+00:54:59.939 --> 00:55:01.475
+Designing Access Methods:
+
+858
+00:55:01.755 --> 00:55:04.635
+The RUM Conjecture (2016).
+
+859
+00:55:04.915 --> 00:55:09.246
+Kleppmann, Designing Data-Intensive Applications, chapters 3 and 5.
+
+860
+00:55:10.596 --> 00:55:11.833
+Related chapters.
+
+861
+00:55:12.113 --> 00:55:15.996
+Ch 10, Replication: quorums and conflict resolution.
+
+862
+00:55:16.276 --> 00:55:19.945
+Ch 11, Partitioning and Sharding: consistent hashing.
+
+863
+00:55:20.225 --> 00:55:23.404
+Ch 12, Consistency, Time and Consensus:
+
+864
+00:55:23.684 --> 00:55:25.092
+CAS via Raft.
+
+865
+00:55:25.372 --> 00:55:28.807
+Ch 44, Distributed Cache: the cache in front.
+
+866
+00:55:30.157 --> 00:55:31.757
+That's the end of this chapter.
+
+867
+00:55:32.037 --> 00:55:38.074
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+868
+00:55:38.354 --> 00:55:39.805
+See you in the next chapter.
+

@@ -1,0 +1,2714 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.142
+Testing Distributed Systems.
+
+2
+00:00:02.422 --> 00:00:06.646
+Chapter 29, from the Production part of the System Design Playbook.
+
+3
+00:00:08.396 --> 00:00:09.356
+At a glance:
+
+4
+00:00:09.636 --> 00:00:10.809
+Chapter at a glance.
+
+5
+00:00:11.089 --> 00:00:12.092
+Reader bands:
+
+6
+00:00:12.372 --> 00:00:14.655
+B2, then B4, Prerequisites:
+
+7
+00:00:14.935 --> 00:00:19.991
+Ch 12, Ch 17, Ch 18, Ch 28, What you will build:
+
+8
+00:00:20.271 --> 00:00:35.801
+How the grocery platform proves its services are correct before an outage does it for them, the test pyramid, property-based tests, consumer-driven contracts, linearizability checking, and integration tests against a real database with fault injection.
+
+9
+00:00:36.081 --> 00:00:39.793
+Every lab is a real, runnable test that finds a real bug.
+
+10
+00:00:40.073 --> 00:00:42.015
+L1: property-based testing.
+
+11
+00:00:42.295 --> 00:00:57.548
+A hand-rolled property tester threw 1,000 random inputs at a money splitter, found that the naive one loses paise on odd splits, and shrank the failure to the minimal reproducer: total=1 split 2 ways loses 1 paisa.
+
+12
+00:00:58.898 --> 00:01:01.074
+L2: consumer-driven contracts.
+
+13
+00:01:01.354 --> 00:01:17.077
+A checkout consumer published a contract; verifying the provider against it (with no consumer running) passed v1 and failed v2 the instant the provider renamed totalpaise, then amount and dropped currency, naming the exact missing fields.
+
+14
+00:01:17.357 --> 00:01:19.511
+L3: linearizability checking.
+
+15
+00:01:19.791 --> 00:01:32.975
+A from-scratch checker (the idea behind Jepsen or Knossos) accepted a correct register history and rejected both a stale read and a lost update, with a concrete no valid order exists verdict.
+
+16
+00:01:34.325 --> 00:01:37.781
+L4: integration testing on real PostgreSQL.
+
+17
+00:01:38.061 --> 00:01:53.251
+A mock-free test proved isolation via rollback, caught a missing UNIQUE constraint (failed as shipped, passed after the migration), and verified the app fails cleanly when the DB backend is killed mid-transaction with no partial write.
+
+18
+00:01:53.531 --> 00:01:54.512
+Reading time:
+
+19
+00:01:54.792 --> 00:01:56.755
+120 min + code.
+
+20
+00:01:58.105 --> 00:01:58.958
+Part 1.
+
+21
+00:01:59.238 --> 00:02:01.158
+Introduction and Why It Matters.
+
+22
+00:02:02.408 --> 00:02:05.587
+A story: the tests were green and the checkout was broken.
+
+23
+00:02:05.867 --> 00:02:10.645
+The order service had 94% unit-test coverage and a green pipeline.
+
+24
+00:02:10.925 --> 00:02:13.741
+It still shipped three production incidents in one quarter:
+
+25
+00:02:14.021 --> 00:02:15.963
+A rounding bug in split payments.
+
+26
+00:02:16.243 --> 00:02:26.739
+When a shared cart's total didn't divide evenly across payers, the sum of the charges was one paisa short of the total, and the ledger reconciliation job failed every night.
+
+27
+00:02:27.019 --> 00:02:32.501
+Every unit test passed, because every unit test used a total that happened to divide evenly.
+
+28
+00:02:32.781 --> 00:02:36.429
+Nobody wrote the odd case, because nobody thought of it (L1).
+
+29
+00:02:37.779 --> 00:02:39.081
+A broken contract.
+
+30
+00:02:39.361 --> 00:02:44.139
+The cart team refactored a response field from totalpaise to amount and deployed.
+
+31
+00:02:44.419 --> 00:02:46.489
+Their tests passed (they updated them).
+
+32
+00:02:46.769 --> 00:02:50.673
+Checkout's tests passed (they mocked the cart response with the old shape).
+
+33
+00:02:50.953 --> 00:02:54.281
+In production, checkout read null and every order failed.
+
+34
+00:02:54.561 --> 00:03:02.518
+Two green pipelines, one outage, because the mock on the consumer side and the real provider had silently diverged (L2).
+
+35
+00:03:03.868 --> 00:03:05.660
+A stale read from a replica.
+
+36
+00:03:05.940 --> 00:03:10.591
+Under load, order reads were routed to an async replica that lagged the primary.
+
+37
+00:03:10.871 --> 00:03:22.476
+A customer added an item, and the next screen showed the old cart, a linearizability violation that no functional test caught, because it only appeared under concurrency + replica lag.
+
+38
+00:03:22.756 --> 00:03:29.391
+The team argued for a week about whether it was really a bug before someone recorded a history and proved it (L3).
+
+39
+00:03:30.741 --> 00:03:36.351
+The retro's conclusion: coverage measured how much code ran, not whether the system was correct.
+
+40
+00:03:36.631 --> 00:03:40.855
+The mocks tested the team's assumptions about other services, not reality.
+
+41
+00:03:41.135 --> 00:03:53.381
+And nothing tested the properties that actually matter in a distributed system, that money is conserved, that contracts hold across teams, that consistency guarantees are real under concurrency and failure.
+
+42
+00:03:53.661 --> 00:03:56.797
+This chapter is about the tests that would have caught all three.
+
+43
+00:03:58.147 --> 00:04:00.451
+Where this lives in the grocery platform.
+
+44
+00:04:00.731 --> 00:04:02.096
+Here is a quick table:
+
+45
+00:04:02.376 --> 00:04:05.725
+Test type, and What it proves, and Speed or count, and Lab.
+
+46
+00:04:06.005 --> 00:04:06.773
+Unit.
+
+47
+00:04:07.053 --> 00:04:08.056
+What it proves:
+
+48
+00:04:08.336 --> 00:04:11.131
+A function or class is correct in isolation.
+
+49
+00:04:11.411 --> 00:04:13.821
+Speed or count: ms, thousands.
+
+50
+00:04:14.101 --> 00:04:15.189
+Property-based.
+
+51
+00:04:15.469 --> 00:04:16.472
+What it proves:
+
+52
+00:04:16.752 --> 00:04:20.016
+A property holds for all inputs, not just examples.
+
+53
+00:04:20.296 --> 00:04:23.453
+Speed or count: ms, hundreds of cases each.
+
+54
+00:04:23.733 --> 00:04:24.416
+Lab:
+
+55
+00:04:24.696 --> 00:04:25.528
+L1.
+
+56
+00:04:25.808 --> 00:04:26.704
+Contract.
+
+57
+00:04:26.984 --> 00:04:27.987
+What it proves:
+
+58
+00:04:28.267 --> 00:04:32.235
+A consumer and provider agree on the API, tested separately.
+
+59
+00:04:32.515 --> 00:04:34.669
+Speed or count: fast, per pair.
+
+60
+00:04:34.949 --> 00:04:35.632
+Lab:
+
+61
+00:04:35.912 --> 00:04:36.744
+L2.
+
+62
+00:04:37.024 --> 00:04:38.027
+Integration.
+
+63
+00:04:38.307 --> 00:04:39.309
+What it proves:
+
+64
+00:04:39.589 --> 00:04:43.515
+Code + real dependency (DB, broker) behave together.
+
+65
+00:04:43.795 --> 00:04:45.928
+Speed or count: slow, hundreds.
+
+66
+00:04:46.208 --> 00:04:46.891
+Lab:
+
+67
+00:04:47.171 --> 00:04:48.045
+L4.
+
+68
+00:04:48.325 --> 00:04:50.608
+Consistency or linearizability.
+
+69
+00:04:50.888 --> 00:04:51.891
+What it proves:
+
+70
+00:04:52.171 --> 00:04:55.563
+The system honours its stated guarantee under concurrency.
+
+71
+00:04:55.843 --> 00:04:59.107
+Speed or count: offline, on recorded histories.
+
+72
+00:04:59.387 --> 00:05:00.069
+Lab:
+
+73
+00:05:00.349 --> 00:05:01.203
+L3.
+
+74
+00:05:01.483 --> 00:05:02.379
+End-to-end.
+
+75
+00:05:02.659 --> 00:05:03.661
+What it proves:
+
+76
+00:05:03.941 --> 00:05:06.139
+A user journey works across services.
+
+77
+00:05:06.419 --> 00:05:08.296
+Speed or count: slow, few.
+
+78
+00:05:08.576 --> 00:05:10.453
+Lab: §2.9.
+
+79
+00:05:11.803 --> 00:05:13.361
+Load or soak or chaos.
+
+80
+00:05:13.641 --> 00:05:14.643
+What it proves:
+
+81
+00:05:14.923 --> 00:05:16.950
+It holds up under traffic and faults.
+
+82
+00:05:17.230 --> 00:05:19.193
+Speed or count: scheduled.
+
+83
+00:05:19.473 --> 00:05:20.155
+Lab:
+
+84
+00:05:20.435 --> 00:05:22.867
+Ch 25, Ch 27.
+
+85
+00:05:24.217 --> 00:05:25.540
+Learning objectives.
+
+86
+00:05:25.820 --> 00:05:27.697
+By the end you will be able to:
+
+87
+00:05:27.977 --> 00:05:32.329
+Shape a test suite with the pyramid and know what each layer can and can't prove.
+
+88
+00:05:32.609 --> 00:05:39.180
+Write property-based tests that find the edge cases you didn't think of, and read a shrunk counterexample (L1).
+
+89
+00:05:39.460 --> 00:05:45.433
+Use consumer-driven contracts so services can be tested and deployed independently (L2).
+
+90
+00:05:45.713 --> 00:05:52.412
+Check linearizability on a recorded history and understand how Jepsen finds consistency bugs (L3).
+
+91
+00:05:53.762 --> 00:06:00.546
+Write integration tests against real dependencies with proper isolation and fault injection (L4).
+
+92
+00:06:00.826 --> 00:06:05.135
+Diagnose and prevent flaky tests, and know when to test in production.
+
+93
+00:06:06.485 --> 00:06:07.360
+Part 2.
+
+94
+00:06:07.640 --> 00:06:09.539
+Core Concepts, Beginner to Deep.
+
+95
+00:06:10.789 --> 00:06:14.458
+Intuition: you can't test a distributed system by example.
+
+96
+00:06:14.738 --> 00:06:20.690
+A single function has a manageable input space; a few examples plus the edge cases cover it.
+
+97
+00:06:20.970 --> 00:06:32.319
+A distributed system's behaviour depends on inputs times interleavings times failures times timing, which is astronomically large and mostly invisible to example-based tests.
+
+98
+00:06:32.599 --> 00:06:40.834
+So testing distributed systems is about changing the question: from does it work on these inputs? to does this property hold for all inputs?
+
+99
+00:06:41.114 --> 00:06:47.023
+(property-based testing, L1);. from do my mocks match? to does the contract between services hold?
+
+100
+00:06:47.303 --> 00:06:49.074
+(contract testing, L2);.
+
+101
+00:06:50.424 --> 00:06:55.309
+from did the test pass? to does a valid explanation of this observed history exist?
+
+102
+00:06:55.589 --> 00:07:02.544
+(linearizability, L3);. from does the mock behave? to does the real dependency behave, including when it fails?
+
+103
+00:07:02.824 --> 00:07:05.448
+(integration + fault injection, L4).
+
+104
+00:07:06.798 --> 00:07:10.019
+The test pyramid (and the ice-cream-cone anti-pattern).
+
+105
+00:07:10.299 --> 00:07:19.665
+The pyramid: many fast, isolated unit tests at the base; fewer integration tests in the middle; a handful of slow end-to-end tests at the top.
+
+106
+00:07:19.945 --> 00:07:29.843
+The shape follows from cost: unit tests are milliseconds and pinpoint failures; e2e tests are minutes, flaky, and only tell you something broke somewhere.
+
+107
+00:07:30.123 --> 00:07:41.195
+The ice-cream cone (the anti-pattern) inverts it, mostly manual or e2e tests, few unit tests, and gives you slow, flaky pipelines that fail without saying why.
+
+108
+00:07:41.475 --> 00:07:56.793
+In a microservices world the pyramid gains a crucial middle layer, contract tests (L2), which give integration-level confidence at unit-level speed by testing each side against a shared contract instead of spinning up the whole system.
+
+109
+00:07:58.143 --> 00:08:01.001
+Test doubles: mocks, stubs, fakes, spies.
+
+110
+00:08:01.281 --> 00:08:03.884
+A test double stands in for a real dependency:
+
+111
+00:08:04.164 --> 00:08:08.708
+Stub, returns canned answers (when(repo.find(1)).thenReturn(order)).
+
+112
+00:08:08.988 --> 00:08:13.404
+Mock, a stub that also asserts on interactions (was save() called once?).
+
+113
+00:08:13.684 --> 00:08:18.164
+Fake, a working lightweight implementation (an in-memory repository).
+
+114
+00:08:18.444 --> 00:08:21.239
+Spy, wraps a real object and records calls.
+
+115
+00:08:22.589 --> 00:08:28.669
+Doubles make unit tests fast and deterministic, but they encode your assumptions about the dependency.
+
+116
+00:08:28.949 --> 00:08:38.591
+The §1.1 contract break is the classic failure: the mock said the cart returns totalpaise, reality said amount, and the mock never updated.
+
+117
+00:08:38.871 --> 00:08:53.783
+Rule of thumb: mock at architectural boundaries you own the contract for, and back every mocked cross-service boundary with a contract test (L2) and every mocked datastore with at least some integration tests against the real thing (L4).
+
+118
+00:08:55.133 --> 00:08:56.499
+Property-based testing.
+
+119
+00:08:56.779 --> 00:09:07.445
+Instead of examples, you state an invariant and let the framework generate hundreds of random inputs to try to break it; on failure it shrinks the input to the smallest counterexample.
+
+120
+00:09:07.725 --> 00:09:08.963
+Classic properties:
+
+121
+00:09:09.243 --> 00:09:14.768
+Round-trip: decode(encode(x)) == x (serializers, Ch 28).
+
+122
+00:09:15.048 --> 00:09:20.019
+Invariant: the split parts sum to the total; a balance is never negative (L1).
+
+123
+00:09:20.299 --> 00:09:24.309
+Oracle: the fast implementation agrees with a slow obvious one.
+
+124
+00:09:24.589 --> 00:09:29.965
+Idempotency: f(f(x)) == f(x) (retries, Ch 20).
+
+125
+00:09:31.315 --> 00:09:37.609
+Commutativity: applying events in any order yields the same state (CRDTs, Ch 12).
+
+126
+00:09:37.889 --> 00:09:43.670
+Tools: jqwik (Java), Hypothesis (Python), QuickCheck (Haskell), fast-check (JS).
+
+127
+00:09:43.950 --> 00:09:50.286
+L1 builds a tiny one from scratch, random generation + shrinking, and finds the paise-loss bug.
+
+128
+00:09:50.566 --> 00:10:07.867
+Shrinking is the killer feature: a random failure at total=727563, n=9 is useless as a bug report; shrunk to total=1, n=2 it's obvious and becomes a one-line regression test.
+
+129
+00:10:09.217 --> 00:10:11.329
+Contract testing (consumer-driven).
+
+130
+00:10:11.609 --> 00:10:25.263
+In a consumer-driven contract (CDC), the consumer declares exactly the requests it makes and the response fields it depends on; that contract is published; the provider is verified against it in isolation.
+
+131
+00:10:25.543 --> 00:10:27.740
+Neither side needs the other running.
+
+132
+00:10:28.020 --> 00:10:31.668
+Why it beats end-to-end integration for cross-service correctness:
+
+133
+00:10:31.948 --> 00:10:36.449
+Speed and stability: no need to stand up a fleet; each side tests alone.
+
+134
+00:10:36.729 --> 00:10:46.735
+It catches the break at the source: the provider's build fails the moment it violates a contract a consumer relies on (L2), naming the fields, before deploy.
+
+135
+00:10:48.085 --> 00:11:02.399
+It documents real usage: the contract is the consumer's actual needs, so the provider can freely change anything not in any contract (L2 changed items freely; it broke only because it touched totalpaise or currency).
+
+136
+00:11:02.679 --> 00:11:08.098
+Pact is the common tool (a broker stores contracts and gates deploys via can-I-deploy).
+
+137
+00:11:08.378 --> 00:11:12.901
+L2 builds the mechanic from scratch: publish, then verify, then break.
+
+138
+00:11:13.181 --> 00:11:23.997
+CDC pairs naturally with schema-registry compatibility for events (Ch 28 L3), contracts for the sync API, the registry for the async bus.
+
+139
+00:11:25.347 --> 00:11:29.101
+Integration testing with real dependencies (Testcontainers).
+
+140
+00:11:29.381 --> 00:11:42.843
+Some bugs live only at the boundary with a real dependency: a constraint your ORM doesn't know about, a subtle SQL dialect difference, a transaction-isolation surprise, a serialization mismatch.
+
+141
+00:11:43.123 --> 00:11:55.176
+Testcontainers starts a real PostgreSQL or Kafka or Redis in a throwaway Docker container per test run, so integration tests hit the real engine and clean up automatically.
+
+142
+00:11:55.456 --> 00:12:12.928
+L4 uses a real PostgreSQL directly (Docker being unavailable here) and: isolates tests by running each in a transaction it rolls back (fast; the DB is pristine after), the alternative is schema or database-per-test (stronger isolation, slower);.
+
+143
+00:12:14.278 --> 00:12:26.203
+catches a real schema bug a mock never could, a missing UNIQUE constraint (the mock enforces nothing);. injects a fault, killing the DB backend mid-transaction, to test the error path.
+
+144
+00:12:27.553 --> 00:12:31.009
+Testing for consistency: linearizability and Jepsen.
+
+145
+00:12:31.289 --> 00:12:37.988
+The hardest distributed bugs are consistency violations that appear only under concurrency + failure.
+
+146
+00:12:38.268 --> 00:12:47.527
+You can't assert them with examples; you record a history (each operation's real-time window and result) and check whether a valid explanation exists.
+
+147
+00:12:47.807 --> 00:13:01.865
+Linearizability (Ch 12): there is a single total order of operations consistent with real time (if A returns before B starts, A precedes B) and with the object's semantics (a read returns the last write).
+
+148
+00:13:02.145 --> 00:13:07.244
+A checker searches for such an order; none existing = a violation (L3).
+
+149
+00:13:08.594 --> 00:13:28.605
+Jepsen is the framework that does this at scale: it drives a real distributed database with randomized concurrent operations under injected faults (network partitions, process pauses, clock skew) via nemesis, records the history, and checks it with Knossos (linearizability) or Elle (transactional anomalies).
+
+150
+00:13:28.885 --> 00:13:32.341
+It has found serious bugs in many production databases.
+
+151
+00:13:32.621 --> 00:13:39.639
+L3 builds the checker's core, the real-time-aware search, and shows it rejecting a stale read and a lost update.
+
+152
+00:13:40.989 --> 00:13:42.973
+Deterministic simulation testing.
+
+153
+00:13:43.253 --> 00:13:58.741
+The most powerful technique for the implementation of a distributed system: run the entire system, every node, the network, the clock, disk, on a single-threaded deterministic simulation where you control time and message delivery from a seed.
+
+154
+00:13:59.021 --> 00:14:07.085
+Because everything is deterministic, a failing seed replays exactly, so a one-in-a-billion race becomes a reproducible bug.
+
+155
+00:14:07.365 --> 00:14:12.677
+You then inject partitions, reorderings, and crashes and explore millions of schedules.
+
+156
+00:14:12.957 --> 00:14:19.677
+FoundationDB pioneered this; TigerBeetle, and frameworks like madsim (Rust) and turmoil follow it.
+
+157
+00:14:19.957 --> 00:14:33.632
+It requires designing the code for it (all I or O and time behind injectable interfaces), which is a significant commitment, the payoff is finding and reproducing concurrency bugs that are otherwise Heisenbugs.
+
+158
+00:14:34.982 --> 00:14:37.286
+End-to-end, smoke, and canary tests.
+
+159
+00:14:37.566 --> 00:14:45.075
+End-to-end exercises a full user journey (add to cart, then checkout, then order confirmed) across real services.
+
+160
+00:14:45.355 --> 00:14:50.177
+Keep them few, they're slow and flaky, and reserve them for the critical revenue paths.
+
+161
+00:14:50.457 --> 00:14:58.499
+Smoke tests are a tiny set run right after deploy to confirm the system is alive (health endpoints, one login, one order).
+
+162
+00:14:58.779 --> 00:15:10.171
+Canary or synthetic monitoring runs scripted journeys continuously in production against real endpoints, alerting when a journey breaks, testing in production (Ch 24).
+
+163
+00:15:11.521 --> 00:15:13.740
+Flaky tests, test data, and CI.
+
+164
+00:15:14.020 --> 00:15:20.740
+Flaky tests (pass or fail non-deterministically) destroy trust in the suite, people start ignoring red.
+
+165
+00:15:21.020 --> 00:15:27.420
+Causes: timing or sleep, shared state between tests, real time or clock, ordering dependence, network.
+
+166
+00:15:27.700 --> 00:15:39.263
+Fixes: control time (inject a clock), isolate state (L4's rollback), await conditions instead of sleeping, quarantine and fix, never retry-until-green as a habit.
+
+167
+00:15:39.543 --> 00:15:47.884
+Test data: builders or factories over shared fixtures; each test creates what it needs; reset between tests (rollback or truncate).
+
+168
+00:15:49.234 --> 00:16:01.863
+CI: run the fast layers on every push, gate merges on green, run slow integration or e2e on a schedule or pre-merge; make the pipeline fast (parallelize) or people route around it.
+
+169
+00:16:03.213 --> 00:16:06.392
+Coverage, mutation testing, and what tested means.
+
+170
+00:16:06.672 --> 00:16:14.501
+Line or branch coverage measures which code ran, not whether it was checked, you can have 100% coverage with no assertions.
+
+171
+00:16:14.781 --> 00:16:29.032
+Mutation testing (PIT for Java) measures test quality: it makes small changes to your code (mutations) and checks whether a test fails; a surviving mutant is code your tests execute but don't actually verify.
+
+172
+00:16:29.312 --> 00:16:41.323
+It's the honest answer to are these tests worth anything? far more meaningful than a coverage percentage, and the antidote to the §1.1 94% coverage, still broken trap.
+
+173
+00:16:42.673 --> 00:16:43.569
+Part 3.
+
+174
+00:16:43.849 --> 00:16:45.577
+Architecture and Diagrams.
+
+175
+00:16:46.827 --> 00:16:49.301
+The test pyramid for the grocery platform.
+
+176
+00:16:49.581 --> 00:16:50.925
+Here is the diagram.
+
+177
+00:16:54.775 --> 00:16:57.229
+Sequence: consumer-driven contract flow.
+
+178
+00:16:57.509 --> 00:17:00.175
+The sequence diagram walks through it step by step.
+
+179
+00:17:00.455 --> 00:17:04.317
+Con to Con: run tests against a MOCK shaped by the contract.
+
+180
+00:17:04.597 --> 00:17:08.906
+Con to Broker: publish contract (request + required fields).
+
+181
+00:17:09.186 --> 00:17:11.490
+Prov to Broker: fetch the contract.
+
+182
+00:17:11.770 --> 00:17:16.293
+Prov to Prov: replay the request at the REAL provider, verify fields.
+
+183
+00:17:16.573 --> 00:17:19.901
+Prov to Broker: verification PASS - safe to deploy.
+
+184
+00:17:20.181 --> 00:17:23.743
+Prov to Prov: build FAILS, names missing fields (L2).
+
+185
+00:17:27.593 --> 00:17:31.028
+Sequence: linearizability checking of a recorded history.
+
+186
+00:17:31.308 --> 00:17:33.975
+The sequence diagram walks through it step by step.
+
+187
+00:17:34.255 --> 00:17:38.692
+Clients to Sys: concurrent read or write ops (under injected faults).
+
+188
+00:17:38.972 --> 00:17:42.897
+Sys to Rec: each op logged with invoke, return + result.
+
+189
+00:17:43.177 --> 00:17:45.588
+Rec to Chk: the recorded history.
+
+190
+00:17:45.868 --> 00:17:50.839
+Chk to Chk: search for a real-time-respecting legal sequential order.
+
+191
+00:17:51.119 --> 00:17:52.569
+Chk to Chk:
+
+192
+00:17:52.849 --> 00:17:53.873
+LINEARIZABLE.
+
+193
+00:17:54.153 --> 00:17:55.604
+Chk to Chk:
+
+194
+00:17:55.884 --> 00:17:58.743
+VIOLATION - concrete counterexample (L3).
+
+195
+00:18:02.593 --> 00:18:05.558
+State: a test's lifecycle with rollback isolation.
+
+196
+00:18:05.838 --> 00:18:07.182
+Here is the diagram.
+
+197
+00:18:11.032 --> 00:18:11.949
+Part 4.
+
+198
+00:18:12.229 --> 00:18:13.851
+Design Document Excerpt:
+
+199
+00:18:14.131 --> 00:18:15.624
+Grocery Test Strategy.
+
+200
+00:18:16.874 --> 00:18:17.621
+Note:
+
+201
+00:18:17.901 --> 00:18:21.826
+Design Document (excerpt), Test Strategy v2.0.
+
+202
+00:18:22.106 --> 00:18:23.002
+Status:
+
+203
+00:18:23.282 --> 00:18:24.562
+Accepted, Authors:
+
+204
+00:18:24.842 --> 00:18:26.741
+Platform Quality Guild, Reviewers:
+
+205
+00:18:27.021 --> 00:18:28.770
+Service leads, SRE.
+
+206
+00:18:29.050 --> 00:18:34.959
+Context, 26 services, shared datastores, an event bus, and mobile or partner clients.
+
+207
+00:18:35.239 --> 00:18:42.450
+A quarter of green pipeline outages (rounding bug, contract break, stale read) showed coverage is not correctness.
+
+208
+00:18:42.730 --> 00:19:03.082
+Decision, Adopt the pyramid with a strong contract layer; mandate property-based tests for money or serialization or idempotency logic; integration tests against real dependencies for every repository or adapter; linearizability or Jepsen-style checks for any component claiming strong consistency;
+
+209
+00:19:03.362 --> 00:19:07.437
+and mutation testing as the quality gate instead of a coverage number.
+
+210
+00:19:08.787 --> 00:19:34.984
+Related ADRs, ADR-150 Test pyramid + no ice-cream-cone; ADR-151 Consumer-driven contracts (Pact) gate cross-service deploys; ADR-152 Property-based tests for invariant-bearing logic; ADR-153 Integration tests on real deps (Testcontainers) with rollback isolation; ADR-154 Jepsen-style consistency
+
+211
+00:19:35.264 --> 00:19:47.552
+checks for stateful stores; ADR-155 Mutation score, not line coverage, as the gate; ADR-156 Flaky tests quarantined within 24h.
+
+212
+00:19:47.832 --> 00:19:48.792
+Requirements.
+
+213
+00:19:49.072 --> 00:19:50.672
+R1, Fast feedback.
+
+214
+00:19:50.952 --> 00:20:00.019
+Unit + property + contract layers run on every push in under 10 minutes; slow integration or e2e run pre-merge and nightly.
+
+215
+00:20:01.369 --> 00:20:02.883
+R2, No mock drift.
+
+216
+00:20:03.163 --> 00:20:11.035
+Every mocked cross-service boundary MUST have a contract test; every mocked datastore MUST have integration tests on the real engine.
+
+217
+00:20:11.315 --> 00:20:13.129
+R3, Invariants proven.
+
+218
+00:20:13.409 --> 00:20:18.742
+Money math, serialization round-trips, and idempotency MUST have property-based tests.
+
+219
+00:20:19.022 --> 00:20:19.833
+(L1.).
+
+220
+00:20:20.113 --> 00:20:22.822
+R4, Consistency proven, not asserted.
+
+221
+00:20:23.102 --> 00:20:29.331
+Any store or feature claiming linearizability MUST pass a recorded-history check under fault injection.
+
+222
+00:20:29.611 --> 00:20:30.529
+(L3.).
+
+223
+00:20:30.809 --> 00:20:32.451
+R5, Quality measured.
+
+224
+00:20:32.731 --> 00:20:37.574
+Merge gate is a mutation score threshold on changed code, not line coverage.
+
+225
+00:20:38.924 --> 00:20:40.972
+R6, No flaky tolerance.
+
+226
+00:20:41.252 --> 00:20:49.551
+A flaky test is quarantined within 24h and fixed or deleted within a week; retry-until-green is banned in CI.
+
+227
+00:20:49.831 --> 00:20:51.239
+Decisions in detail.
+
+228
+00:20:51.519 --> 00:20:54.911
+Contracts gate deploys (ADR-151).
+
+229
+00:20:55.191 --> 00:21:04.727
+Consumers publish contracts to a broker; providers verify in CI; a can-i-deploy check blocks a provider release that would break a live consumer.
+
+230
+00:21:05.007 --> 00:21:05.860
+(L2.).
+
+231
+00:21:06.140 --> 00:21:15.569
+Property tests for invariants (ADR-152). jqwik for Java; the shrunk counterexample is committed as a regression unit test.
+
+232
+00:21:15.849 --> 00:21:16.660
+(L1.).
+
+233
+00:21:18.010 --> 00:21:21.893
+Real-dependency integration (ADR-153).
+
+234
+00:21:22.173 --> 00:21:28.914
+Testcontainers-backed; rollback-per-test isolation; fault-injection tests for connection loss and timeouts.
+
+235
+00:21:29.194 --> 00:21:30.090
+(L4.).
+
+236
+00:21:30.370 --> 00:21:33.549
+Consistency checks (ADR-154).
+
+237
+00:21:33.829 --> 00:21:43.514
+Record histories under a nemesis (partitions, pauses); check with a linearizability or Elle checker; run in the nightly pipeline for stateful components.
+
+238
+00:21:43.794 --> 00:21:44.711
+(L3.).
+
+239
+00:21:44.991 --> 00:21:48.106
+Mutation gate (ADR-155).
+
+240
+00:21:48.386 --> 00:21:54.487
+PIT on changed files; surviving mutants block merge; coverage is reported but not gated.
+
+241
+00:21:55.837 --> 00:21:56.861
+Consequences.
+
+242
+00:21:57.141 --> 00:22:06.656
+More engineering investment in the middle of the pyramid (contracts, real-dependency integration) and in property or consistency tests for the risky code.
+
+243
+00:22:06.936 --> 00:22:15.981
+In return: independent deploys, edge cases found before production, consistency guarantees that are actually true, and a suite people trust.
+
+244
+00:22:16.261 --> 00:22:19.248
+The coverage number theatre is explicitly abandoned.
+
+245
+00:22:20.598 --> 00:22:21.558
+Part 5.
+
+246
+00:22:21.838 --> 00:22:23.822
+Hands-On Code, Level Ladder.
+
+247
+00:22:25.072 --> 00:22:25.840
+Info:
+
+248
+00:22:26.120 --> 00:22:27.208
+What's real here.
+
+249
+00:22:27.488 --> 00:22:42.443
+L1, L2 and L3 are pure JDK 21 (no dependencies), the property tester, the contract verifier over real HTTP, and the linearizability checker are all built from scratch so you can see the mechanism.
+
+250
+00:22:42.723 --> 00:22:56.120
+L4 runs against real PostgreSQL 16 (local cluster on:5581) through the real JDBC driver, including a real pgterminatebackend fault injection.
+
+251
+00:22:56.400 --> 00:23:07.579
+Framework equivalents (jqwik, Pact, Jepsen or Knossos, Testcontainers) are named where they'd replace the hand-rolled version; snippets needing them are marked VERIFY.
+
+252
+00:23:08.929 --> 00:23:12.235
+L1, Property-based testing that finds an edge case.
+
+253
+00:23:12.515 --> 00:23:13.454
+Requirement:
+
+254
+00:23:13.734 --> 00:23:18.534
+Our split-payment math passed every unit test and still lost a paisa in production.
+
+255
+00:23:18.814 --> 00:23:20.990
+Find that class of bug automatically.
+
+256
+00:23:21.270 --> 00:23:33.601
+A hand-rolled property tester states one invariant, the split parts sum to the total, throws 1,000 random (total, n) at each splitter, and shrinks any failure to the smallest input that still breaks it.
+
+257
+00:23:34.951 --> 00:23:37.852
+Here is the Java code, PropertyL1.java.
+
+258
+00:23:38.132 --> 00:23:42.228
+It runs to 111 lines; the full listing is in the chapter.
+
+259
+00:23:42.508 --> 00:23:49.591
+PropertyL1.java, run with: java PropertyL1.java (JDK 21, no dependencies).
+
+260
+00:23:49.871 --> 00:24:04.441
+PROPERTY-BASED TESTING from scratch: instead of a few hand-picked examples, we state a PROPERTY that must hold for ALL. inputs and let the framework throw hundreds of random inputs at it, then SHRINK any failure to the smallest counter-.
+
+261
+00:24:07.291 --> 00:24:08.209
+On screen:
+
+262
+00:24:08.489 --> 00:24:16.723
+Property-based testing: state one property ('the split parts sum to the total') and. throw 1000 random. inputs at each splitter.
+
+263
+00:24:17.003 --> 00:24:21.633
+A failure is SHRUNK to the smallest input that still breaks. it. splitNaive:
+
+264
+00:24:21.913 --> 00:24:22.723
+FAILED.
+
+265
+00:24:23.003 --> 00:24:39.686
+Random counterexample total=727563 n=9; shrunk to the minimal. failing case: total=1 split 2 ways = 0, 0, then sum=0, LOST 1 paise. splitCorrect:
+
+266
+00:24:39.966 --> 00:24:59.337
+PASSED 1000 random cases, property 'parts sum to total' holds. then the naive splitter passes hand-picked even cases (100 or 4 = 25 each) but a random. search finds an ODD. case in milliseconds; shrinking reports the minimal reproducer (for example, 1 paisa.
+
+267
+00:24:59.617 --> 00:25:01.131
+The rest is in the chapter.
+
+268
+00:25:03.981 --> 00:25:25.635
+Reading it: splitNaive (integer division) passes hand-picked even cases but a random search finds an odd one immediately; shrinking reduces the messy total=727563, n=9 to the minimal total=1, n=2, then parts 0,0, 1 paisa lost.
+
+269
+00:25:25.915 --> 00:25:35.536
+That minimal case is the regression unit test you commit. splitCorrect distributes the remainder and passes all 1,000 cases, the property holds.
+
+270
+00:25:36.886 --> 00:25:48.897
+The lesson: example-based tests only cover the cases you thought of; a property + random generation covers the ones you didn't, and shrinking makes every failure a clean, minimal bug report.
+
+271
+00:25:49.177 --> 00:26:03.811
+In real code you'd use jqwik (@Property void partssumtototal(@ForAll long total, @ForAll @IntRange(min=1,max=20) int n)), which generates, shrinks and re-runs the shrunk case automatically.
+
+272
+00:26:05.161 --> 00:26:07.636
+L2, Consumer-driven contract testing.
+
+273
+00:26:07.916 --> 00:26:08.855
+Requirement:
+
+274
+00:26:09.135 --> 00:26:15.407
+The cart team renamed a field and broke checkout in production, even though both teams' pipelines were green.
+
+275
+00:26:15.687 --> 00:26:17.095
+Catch that at build time.
+
+276
+00:26:17.375 --> 00:26:19.764
+The checkout consumer publishes a contract:
+
+277
+00:26:20.044 --> 00:26:25.783
+GET or cart or 42 must return cartid (number), totalpaise (number), currency (string).
+
+278
+00:26:26.063 --> 00:26:31.972
+We verify two provider versions against it over real HTTP, with no consumer running.
+
+279
+00:26:33.322 --> 00:26:36.266
+Here is the Java code, ContractL2.java.
+
+280
+00:26:36.546 --> 00:26:40.706
+It runs to 119 lines; the full listing is in the chapter.
+
+281
+00:26:40.986 --> 00:26:48.282
+ContractL2.java, run with: java ContractL2.java (JDK 21, no dependencies).
+
+282
+00:26:48.562 --> 00:26:52.829
+CONSUMER-DRIVEN CONTRACT TESTING from scratch (the idea behind Pact).
+
+283
+00:26:53.109 --> 00:27:02.197
+Integration tests that spin up every service are. slow and flaky; contract tests let each side be tested ALONE against a shared CONTRACT.
+
+284
+00:27:02.477 --> 00:27:04.183
+The CONSUMER (a checkout.
+
+285
+00:27:07.033 --> 00:27:07.951
+On screen:
+
+286
+00:27:08.231 --> 00:27:14.951
+Consumer-driven contract: the checkout consumer needs cartid:number. totalpaise:number, currency:string.
+
+287
+00:27:15.231 --> 00:27:21.844
+We verify each provider version against that contract, with NO consumer running, just. the published contract.
+
+288
+00:27:22.124 --> 00:27:24.321
+Contract (published by the consumer):
+
+289
+00:27:24.601 --> 00:27:33.924
+GET or cart or 42 must return totalpaise=number. cartid=number, currency=string. provider v1 (original):
+
+290
+00:27:34.204 --> 00:27:40.391
+VERIFIED, honours the contract. provider v2 (renamed totalpaise, then amount, dropped currency):
+
+291
+00:27:40.671 --> 00:27:53.087
+CONTRACT BROKEN. missing/!number field 'totalpaise', missing/!string field 'currency'. then v1 passes: every field the consumer relies on is present with the right type. v2.
+
+292
+00:27:53.367 --> 00:27:54.881
+The rest is in the chapter.
+
+293
+00:27:57.731 --> 00:28:11.769
+Reading it: v1 is verified: every field the consumer relies on is present with the right type. v2 refactored totalpaise, then amount and dropped currency, a change the provider team believed was internal.
+
+294
+00:28:12.049 --> 00:28:18.193
+Verification fails the provider's build and names the exact missing fields, before it reaches checkout.
+
+295
+00:28:19.543 --> 00:28:24.385
+The provider changed items freely, the contract doesn't mention it, so it's fair game.
+
+296
+00:28:24.665 --> 00:28:30.383
+That's the discipline: you may change anything no consumer contract depends on, and nothing it does.
+
+297
+00:28:30.663 --> 00:28:41.201
+In practice Pact records these interactions from the consumer's tests, a broker stores them, and a can-i-deploy gate blocks a provider release that would break a live consumer.
+
+298
+00:28:41.481 --> 00:28:48.031
+This is the sync-API counterpart to the schema-registry check for events (Ch 28 L3).
+
+299
+00:28:49.381 --> 00:28:53.242
+L3, Linearizability checking (the idea behind Jepsen).
+
+300
+00:28:53.522 --> 00:28:54.461
+Requirement:
+
+301
+00:28:54.741 --> 00:28:57.258
+Under load, a read returned a stale cart.
+
+302
+00:28:57.538 --> 00:29:00.823
+The team argued for a week about whether it was 'really' a bug.
+
+303
+00:29:01.103 --> 00:29:02.341
+Prove it mechanically.
+
+304
+00:29:02.621 --> 00:29:16.487
+A from-scratch checker takes a recorded history (each operation's real-time window invoke, return and result) and searches for a single sequential order that respects both real time and register semantics.
+
+305
+00:29:16.767 --> 00:29:21.845
+If none exists, the history is not linearizable, the system violated its guarantee.
+
+306
+00:29:23.195 --> 00:29:26.032
+Here is the Java code, LinearL3.java.
+
+307
+00:29:26.312 --> 00:29:30.493
+It runs to 122 lines; the full listing is in the chapter.
+
+308
+00:29:30.773 --> 00:29:37.643
+LinearL3.java, run with: java LinearL3.java (JDK 21, no dependencies).
+
+309
+00:29:37.923 --> 00:29:41.912
+LINEARIZABILITY CHECKING, the technique behind Jepsen or Knossos.
+
+310
+00:29:42.192 --> 00:29:53.179
+You cannot unit-test a distributed register by asking. is it correct?; you RECORD a concurrent HISTORY of operations (each with the real-time window invoke, return and.
+
+311
+00:29:56.029 --> 00:29:56.946
+On screen:
+
+312
+00:29:57.226 --> 00:30:06.527
+Linearizability checking: given a recorded history of a distributed register (initial. value 0), does a valid. sequential order exist?
+
+313
+00:30:06.807 --> 00:30:12.546
+The checker respects real-time order AND register semantics (a. read = the last write).
+
+314
+00:30:12.826 --> 00:30:16.154
+History 1, correct register (quorum reads or writes):
+
+315
+00:30:16.434 --> 00:30:18.589
+C1 write(1) 0..3.
+
+316
+00:30:18.869 --> 00:30:21.557
+C2 read()-1 2..5.
+
+317
+00:30:21.837 --> 00:30:23.927
+C1 write(2) 6..8.
+
+318
+00:30:24.207 --> 00:30:28.218
+C3 read()-2 9..11. then LINEARIZABLE.
+
+319
+00:30:28.498 --> 00:30:30.567
+A valid real-time order exists:
+
+320
+00:30:30.847 --> 00:30:33.258
+W1 R1 W2 R2.
+
+321
+00:30:33.538 --> 00:30:36.461
+History 2, async replica served a STALE read:
+
+322
+00:30:36.741 --> 00:30:38.255
+The rest is in the chapter.
+
+323
+00:30:41.105 --> 00:30:41.959
+Reading it:
+
+324
+00:30:42.239 --> 00:30:54.996
+History 1 (correct register) is linearizable, the checker even prints a valid order (W1 R1 W2 R2); C2's read overlapped C1's write, so returning 1 is legal.
+
+325
+00:30:55.276 --> 00:31:05.772
+History 2 (async replica) is rejected: write(1) completed and a read observed 1, then a later read returned 0, the value travelled backwards in time.
+
+326
+00:31:06.052 --> 00:31:09.231
+No order can respect both real time and semantics.
+
+327
+00:31:10.581 --> 00:31:20.863
+History 3 (lost update) is rejected: two writes completed in sequence (1 then 2), but a later read returned 1, it must see the last completed write, 2.
+
+328
+00:31:21.143 --> 00:31:24.045
+This is the checker at the heart of Jepsen or Knossos.
+
+329
+00:31:24.325 --> 00:31:37.637
+The other half is generating randomized concurrent histories under a nemesis (partitions, pauses, clock skew) and checking each, which is how Jepsen finds violations that survive every functional test.
+
+330
+00:31:37.917 --> 00:31:43.037
+Real checkers (Knossos, Elle) add heavy pruning because the search is exponential.
+
+331
+00:31:44.387 --> 00:31:49.421
+L4, Integration testing on real PostgreSQL, with fault injection.
+
+332
+00:31:49.701 --> 00:31:50.640
+Requirement:
+
+333
+00:31:50.920 --> 00:31:55.741
+A mocked repository passed while a missing DB constraint let duplicates through.
+
+334
+00:31:56.021 --> 00:31:59.157
+Test against the real database, including when it fails.
+
+335
+00:31:59.437 --> 00:32:13.837
+This runs against real PostgreSQL 16 and does three things a mock cannot: isolate tests via rollback, catch a missing UNIQUE constraint, and inject a real fault by killing the DB backend mid-transaction.
+
+336
+00:32:15.187 --> 00:32:18.515
+Here is the Java code, IntegrationL4.java.
+
+337
+00:32:18.795 --> 00:32:23.126
+It runs to 142 lines; the full listing is in the chapter.
+
+338
+00:32:23.406 --> 00:32:37.294
+IntegrationL4.java, run with: java -cp or tmp or pgjdbc.jar IntegrationL4.java (real PostgreSQL 16 on:5581).
+
+339
+00:32:37.574 --> 00:32:47.729
+INTEGRATION TESTING against a REAL database (what Testcontainers gives you when Docker is available, here we use a. real local PostgreSQL directly).
+
+340
+00:32:48.009 --> 00:32:51.550
+Three things unit tests with a mocked repository CANNOT do:
+
+341
+00:32:54.400 --> 00:32:55.317
+On screen:
+
+342
+00:32:55.597 --> 00:33:00.141
+Integration testing against REAL PostgreSQL 16 (not a mock).
+
+343
+00:33:00.421 --> 00:33:02.853
+Three capabilities a mock. can't give you:
+
+344
+00:33:03.133 --> 00:33:09.789
+A) Isolation: each test runs in a transaction that is rolled back, the table is. untouched afterward.
+
+345
+00:33:10.069 --> 00:33:16.469
+PASS 5 tests each inserted a row then rolled back; row count unchanged (0 ==.
+
+346
+00:33:16.749 --> 00:33:17.539
+0).
+
+347
+00:33:17.819 --> 00:33:19.717
+B) Catch a real schema bug:
+
+348
+00:33:19.997 --> 00:33:22.557
+'registering the same email twice must fail'.
+
+349
+00:33:22.837 --> 00:33:26.848
+Run 1, against the table AS SHIPPED (no unique constraint on email):
+
+350
+00:33:27.128 --> 00:33:29.432
+FAIL duplicate email is rejected.
+
+351
+00:33:29.712 --> 00:33:32.784
+Run 2, after the migration adds UNIQUE (email):
+
+352
+00:33:33.064 --> 00:33:35.240
+PASS duplicate email is rejected.
+
+353
+00:33:35.520 --> 00:33:37.035
+The rest is in the chapter.
+
+354
+00:33:39.885 --> 00:33:40.738
+Reading it:
+
+355
+00:33:41.018 --> 00:33:49.722
+A, Isolation: five tests each insert a row and roll back; the row count is unchanged afterward, so tests can't pollute each other.
+
+356
+00:33:50.002 --> 00:33:52.605
+Fast, no cleanup, no ordering dependence.
+
+357
+00:33:53.955 --> 00:34:06.307
+B, Real bug caught: duplicate email must be rejected FAILS against the table as shipped (no UNIQUE constraint, both inserts succeed) and PASSES after the migration adds UNIQUE (email).
+
+358
+00:34:06.587 --> 00:34:10.768
+A mock enforces nothing, so it would have passed both times and hidden the bug.
+
+359
+00:34:11.048 --> 00:34:17.107
+(The suite's 1 failed is the caught bug, exactly what you want the test to do before the constraint exists.).
+
+360
+00:34:18.457 --> 00:34:34.222
+C, Fault injection: we pgterminatebackend the very connection mid-transaction; the commit() throws (terminating connection due to administrator command) and no partial row survives, the app fails cleanly and the uncommitted write is discarded.
+
+361
+00:34:34.502 --> 00:34:38.427
+This exercises the error path that only a real failure triggers.
+
+362
+00:34:38.707 --> 00:34:40.051
+Framework equivalent:
+
+363
+00:34:40.331 --> 00:34:51.638
+Testcontainers (@Container PostgreSQLContainer) starts a real, throwaway PostgreSQL per run and cleans up automatically, the same realism, containerized.
+
+364
+00:34:52.988 --> 00:34:53.927
+Part 6.
+
+365
+00:34:54.207 --> 00:34:55.487
+Production Concerns.
+
+366
+00:34:56.737 --> 00:34:58.465
+Failure modes of a test suite.
+
+367
+00:34:58.745 --> 00:35:00.110
+Here is a quick table:
+
+368
+00:35:00.390 --> 00:35:02.587
+Failure, and Cause, and Mitigation.
+
+369
+00:35:02.867 --> 00:35:04.702
+Green pipeline, broken prod.
+
+370
+00:35:04.982 --> 00:35:05.750
+Cause:
+
+371
+00:35:06.030 --> 00:35:09.550
+Coverage without assertions; mocks that don't match reality.
+
+372
+00:35:09.830 --> 00:35:10.833
+Mitigation:
+
+373
+00:35:11.113 --> 00:35:18.345
+Mutation testing (§2.11); contract tests (L2); integration on real deps (L4).
+
+374
+00:35:18.625 --> 00:35:19.606
+Mock drift.
+
+375
+00:35:19.886 --> 00:35:20.654
+Cause:
+
+376
+00:35:20.934 --> 00:35:23.622
+Consumer mock and provider diverge silently.
+
+377
+00:35:23.902 --> 00:35:24.905
+Mitigation:
+
+378
+00:35:25.185 --> 00:35:27.958
+Consumer-driven contracts gating deploys (L2).
+
+379
+00:35:28.238 --> 00:35:29.539
+Missed edge cases.
+
+380
+00:35:29.819 --> 00:35:30.587
+Cause:
+
+381
+00:35:30.867 --> 00:35:32.574
+Only example-based tests.
+
+382
+00:35:32.854 --> 00:35:33.857
+Mitigation:
+
+383
+00:35:34.137 --> 00:35:37.230
+Property-based tests for invariant logic (L1).
+
+384
+00:35:37.510 --> 00:35:39.003
+Consistency bug shipped.
+
+385
+00:35:39.283 --> 00:35:40.051
+Cause:
+
+386
+00:35:40.331 --> 00:35:43.190
+No test exercises concurrency + faults.
+
+387
+00:35:43.470 --> 00:35:44.473
+Mitigation:
+
+388
+00:35:44.753 --> 00:35:50.875
+Linearizability or Jepsen checks (L3); deterministic simulation (§2.8).
+
+389
+00:35:51.155 --> 00:35:52.542
+Flaky suite ignored.
+
+390
+00:35:52.822 --> 00:35:53.590
+Cause:
+
+391
+00:35:53.870 --> 00:35:55.939
+Timing, shared state, real clock.
+
+392
+00:35:56.219 --> 00:35:57.222
+Mitigation:
+
+393
+00:35:57.502 --> 00:36:03.795
+Control time, isolate state (L4), await not sleep, quarantine (§2.10).
+
+394
+00:36:05.145 --> 00:36:06.745
+Slow suite routed around.
+
+395
+00:36:07.025 --> 00:36:07.793
+Cause:
+
+396
+00:36:08.073 --> 00:36:10.377
+Ice-cream cone; serial e2e.
+
+397
+00:36:10.657 --> 00:36:11.660
+Mitigation:
+
+398
+00:36:11.940 --> 00:36:16.100
+Rebalance to the pyramid; parallelize; contracts over e2e.
+
+399
+00:36:16.380 --> 00:36:17.596
+Works on my machine.
+
+400
+00:36:17.876 --> 00:36:18.644
+Cause:
+
+401
+00:36:18.924 --> 00:36:21.313
+Tests depend on local state or ordering.
+
+402
+00:36:21.593 --> 00:36:22.596
+Mitigation:
+
+403
+00:36:22.876 --> 00:36:26.247
+Hermetic tests; ephemeral real deps (Testcontainers).
+
+404
+00:36:27.597 --> 00:36:30.413
+Observability of the suite (Ch 24).
+
+405
+00:36:30.693 --> 00:36:39.247
+Track flaky rate per test, suite duration and its trend, mutation score on changed code, and contract-verification results per pair.
+
+406
+00:36:39.527 --> 00:36:47.463
+In production, synthetic or canary journeys and SLO monitoring are the continuation of testing, they catch what pre-prod can't.
+
+407
+00:36:48.813 --> 00:36:49.752
+Security.
+
+408
+00:36:50.032 --> 00:36:57.243
+Tests must not use production data with real PII; use synthetic or anonymized data (Ch 23).
+
+409
+00:36:57.523 --> 00:37:04.627
+Never bake real secrets into test fixtures or CI logs; use a test vault or rotated test credentials.
+
+410
+00:37:04.907 --> 00:37:13.952
+Include security tests: authz checks (a user can't read another's orders), input validation, and dependency or SAST scans in CI.
+
+411
+00:37:15.302 --> 00:37:17.115
+Performance and scale of testing.
+
+412
+00:37:17.395 --> 00:37:25.374
+Parallelize unit or property tests (they're independent); shard integration tests; cache dependencies and container images.
+
+413
+00:37:25.654 --> 00:37:30.305
+Property tests: tune case count and generators (bias toward boundaries:
+
+414
+00:37:30.585 --> 00:37:38.841
+0, 1, max, negatives); use a fixed seed in CI for reproducibility and a random seed nightly to keep exploring.
+
+415
+00:37:39.121 --> 00:37:46.993
+Reuse a single Testcontainer across a class where isolation allows (rollback-per-test), rather than a fresh container per test.
+
+416
+00:37:48.343 --> 00:37:49.068
+Cost.
+
+417
+00:37:49.348 --> 00:37:56.985
+The expensive layers are integration or e2e (compute, time) and Jepsen or simulation runs (long, scheduled).
+
+418
+00:37:57.265 --> 00:38:05.799
+Spend there proportionally to risk: payments and inventory get consistency and fault-injection testing; a static content service does not.
+
+419
+00:38:06.079 --> 00:38:13.247
+The cheap layers (unit or property or contract) are where most confidence should come from, that's the whole point of the pyramid.
+
+420
+00:38:14.597 --> 00:38:15.535
+Part 7.
+
+421
+00:38:15.815 --> 00:38:17.522
+Anti-Patterns and Pitfalls.
+
+422
+00:38:18.772 --> 00:38:19.689
+Watch out:
+
+423
+00:38:19.969 --> 00:38:20.609
+1.
+
+424
+00:38:20.889 --> 00:38:22.404
+Chasing a coverage number.
+
+425
+00:38:22.684 --> 00:38:28.231
+100% line coverage with weak assertions catches nothing (§1.1).
+
+426
+00:38:28.511 --> 00:38:32.500
+Measure test quality with mutation testing, not lines executed.
+
+427
+00:38:33.850 --> 00:38:34.767
+Watch out:
+
+428
+00:38:35.047 --> 00:38:35.751
+2.
+
+429
+00:38:36.031 --> 00:38:37.290
+The ice-cream cone.
+
+430
+00:38:37.570 --> 00:38:44.845
+Mostly manual or e2e tests, few unit tests, then slow, flaky pipelines that can't localize failures.
+
+431
+00:38:45.125 --> 00:38:46.725
+Invert it back to the pyramid.
+
+432
+00:38:48.075 --> 00:38:48.992
+Watch out:
+
+433
+00:38:49.272 --> 00:38:50.019
+3.
+
+434
+00:38:50.299 --> 00:38:53.456
+Mocking a cross-service boundary with no contract test.
+
+435
+00:38:53.736 --> 00:38:56.595
+Your mock encodes assumptions that silently rot.
+
+436
+00:38:56.875 --> 00:39:01.376
+Back every mocked service boundary with a consumer-driven contract (L2).
+
+437
+00:39:02.726 --> 00:39:03.643
+Watch out:
+
+438
+00:39:03.923 --> 00:39:04.627
+4.
+
+439
+00:39:04.907 --> 00:39:07.830
+Only example-based tests for invariant logic.
+
+440
+00:39:08.110 --> 00:39:11.566
+You test the cases you thought of; the bug is in the case you didn't.
+
+441
+00:39:11.846 --> 00:39:16.667
+Use property-based tests for money, serialization, idempotency (L1).
+
+442
+00:39:18.017 --> 00:39:18.935
+Watch out:
+
+443
+00:39:19.215 --> 00:39:19.983
+5.
+
+444
+00:39:20.263 --> 00:39:22.823
+Asserting consistency with functional tests.
+
+445
+00:39:23.103 --> 00:39:27.220
+Strong-consistency bugs only appear under concurrency + faults.
+
+446
+00:39:27.500 --> 00:39:32.321
+You must record a history and check it (L3), not eyeball a single-threaded test.
+
+447
+00:39:33.671 --> 00:39:34.589
+Watch out:
+
+448
+00:39:34.869 --> 00:39:35.615
+6.
+
+449
+00:39:35.895 --> 00:39:39.095
+Testing only against an in-memory fake of your database.
+
+450
+00:39:39.375 --> 00:39:48.122
+H2-standing-in-for-Postgres hides constraint, dialect, and isolation bugs (L4's missing UNIQUE would pass against a naive fake).
+
+451
+00:39:48.402 --> 00:39:50.493
+Integration-test the real engine.
+
+452
+00:39:51.843 --> 00:39:52.760
+Watch out:
+
+453
+00:39:53.040 --> 00:39:53.787
+7.
+
+454
+00:39:54.067 --> 00:39:55.475
+Thread.sleep in tests.
+
+455
+00:39:55.755 --> 00:39:58.549
+Timing-based waits are the 1 source of flakiness.
+
+456
+00:39:58.829 --> 00:40:03.267
+Await a condition (poll with a deadline) or inject a controllable clock.
+
+457
+00:40:04.617 --> 00:40:05.534
+Watch out:
+
+458
+00:40:05.814 --> 00:40:06.497
+8.
+
+459
+00:40:06.777 --> 00:40:08.590
+Retry-until-green in CI.
+
+460
+00:40:08.870 --> 00:40:14.097
+Auto-retrying flaky tests hides real intermittent bugs and normalizes red.
+
+461
+00:40:14.377 --> 00:40:16.489
+Quarantine and fix the flake instead.
+
+462
+00:40:17.839 --> 00:40:18.756
+Watch out:
+
+463
+00:40:19.036 --> 00:40:19.783
+9.
+
+464
+00:40:20.063 --> 00:40:22.025
+Shared mutable state between tests.
+
+465
+00:40:22.305 --> 00:40:26.295
+Order-dependent tests pass alone and fail in the suite (or vice versa).
+
+466
+00:40:26.575 --> 00:40:30.393
+Isolate: rollback (L4), fresh fixtures, no static state.
+
+467
+00:40:31.743 --> 00:40:32.661
+Watch out:
+
+468
+00:40:32.941 --> 00:40:33.645
+10.
+
+469
+00:40:33.925 --> 00:40:35.567
+No fault-injection tests.
+
+470
+00:40:35.847 --> 00:40:41.053
+Happy-path integration tests never exercise the error handling that matters most.
+
+471
+00:40:41.333 --> 00:40:48.629
+Kill connections, add latency, return 500s, and assert clean failure (L4-C, Ch 27).
+
+472
+00:40:49.979 --> 00:40:50.896
+Watch out:
+
+473
+00:40:51.176 --> 00:40:52.008
+11.
+
+474
+00:40:52.288 --> 00:41:05.600
+A random counterexample with no shrinking. total=727563, n=9 is a useless bug report; total=1, n=2 is obvious.
+
+475
+00:41:05.880 --> 00:41:10.083
+Always shrink, and commit the shrunk case as a regression test (L1).
+
+476
+00:41:11.433 --> 00:41:12.350
+Watch out:
+
+477
+00:41:12.630 --> 00:41:13.419
+12.
+
+478
+00:41:13.699 --> 00:41:16.942
+Testing in prod as a substitute for pre-prod tests.
+
+479
+00:41:17.222 --> 00:41:21.019
+Canaries and synthetics complement the pyramid; they don't replace it.
+
+480
+00:41:21.299 --> 00:41:22.131
+Do both.
+
+481
+00:41:23.481 --> 00:41:24.356
+Part 8.
+
+482
+00:41:24.636 --> 00:41:25.980
+Interview Q and A.
+
+483
+00:41:27.230 --> 00:41:28.062
+Beginner.
+
+484
+00:41:28.342 --> 00:41:29.366
+Question 1.
+
+485
+00:41:29.646 --> 00:41:32.057
+What is the test pyramid, and why that shape?
+
+486
+00:41:32.337 --> 00:41:33.702
+Thirty-second answer:
+
+487
+00:41:33.982 --> 00:41:41.982
+Many fast, isolated unit tests at the base; fewer integration tests in the middle; a few slow end-to-end tests at the top.
+
+488
+00:41:42.262 --> 00:41:52.246
+The shape follows cost and signal: unit tests are milliseconds and pinpoint the failure; e2e tests are slow, flaky, and only say something broke.
+
+489
+00:41:52.526 --> 00:41:55.918
+You want most confidence to come from the cheap, precise layers.
+
+490
+00:41:56.198 --> 00:42:01.105
+The inverted version, mostly e2e, is the ice-cream cone anti-pattern.
+
+491
+00:42:02.455 --> 00:42:03.457
+Question 2.
+
+492
+00:42:03.737 --> 00:42:07.065
+Mocks versus stubs versus fakes, and the risk of mocking?
+
+493
+00:42:07.345 --> 00:42:08.711
+Thirty-second answer:
+
+494
+00:42:08.991 --> 00:42:22.559
+A stub returns canned values; a mock also asserts on interactions (was this called?); a fake is a working lightweight implementation (in-memory repo); a spy wraps a real object and records calls.
+
+495
+00:42:22.839 --> 00:42:35.212
+The risk: a double encodes your assumption about the dependency, which can silently diverge from reality, a mocked service response with the wrong field shape passes your test and breaks in production.
+
+496
+00:42:36.562 --> 00:42:37.607
+Question 3.
+
+497
+00:42:37.887 --> 00:42:41.770
+What's the difference between unit, integration, and end-to-end tests?
+
+498
+00:42:42.050 --> 00:42:43.415
+Thirty-second answer:
+
+499
+00:42:43.695 --> 00:42:48.538
+Unit tests one function or class in isolation with doubles (fast, thousands).
+
+500
+00:42:48.818 --> 00:42:56.498
+Integration tests your code with a real dependency, a database, a broker, to catch boundary bugs (slower, hundreds).
+
+501
+00:42:56.778 --> 00:43:02.239
+End-to-end tests a full user journey across multiple real services (slowest, a few).
+
+502
+00:43:02.519 --> 00:43:06.594
+Each proves something different; you need all three in pyramid proportions.
+
+503
+00:43:07.944 --> 00:43:09.011
+Question 4.
+
+504
+00:43:09.291 --> 00:43:11.723
+What makes a test flaky, and why does it matter?
+
+505
+00:43:12.003 --> 00:43:13.368
+Thirty-second answer:
+
+506
+00:43:13.648 --> 00:43:24.485
+A flaky test passes and fails without the code changing, usually from timing (sleep), shared state between tests, real clock or time, test-ordering dependence, or network.
+
+507
+00:43:24.765 --> 00:43:32.979
+It matters because it destroys trust: once people see red that isn't real, they start ignoring red, and a genuine failure slips through.
+
+508
+00:43:33.259 --> 00:43:35.392
+Fix flakes; don't retry them away.
+
+509
+00:43:36.742 --> 00:43:37.745
+Intermediate.
+
+510
+00:43:38.025 --> 00:43:39.134
+Question 5.
+
+511
+00:43:39.414 --> 00:43:42.422
+What is property-based testing and when do you reach for it?
+
+512
+00:43:42.702 --> 00:43:44.067
+Thirty-second answer:
+
+513
+00:43:44.347 --> 00:43:56.251
+Instead of hand-picked examples, you state an invariant that must hold for all inputs and let the framework throw hundreds of random inputs at it, shrinking any failure to the minimal counterexample.
+
+514
+00:43:56.531 --> 00:44:08.350
+Reach for it when a property is easy to state but the input space is large: money math, serialization round-trips, idempotency, ordering-independence, or a fast-versus-reference oracle.
+
+515
+00:44:09.700 --> 00:44:10.809
+Question 6.
+
+516
+00:44:11.089 --> 00:44:13.479
+Explain consumer-driven contract testing.
+
+517
+00:44:13.759 --> 00:44:15.124
+Thirty-second answer:
+
+518
+00:44:15.404 --> 00:44:27.329
+The consumer declares exactly the requests it makes and the response fields it depends on; that contract is published; the provider is verified against it in isolation, with no consumer running.
+
+519
+00:44:27.609 --> 00:44:33.817
+If the provider changes something a consumer relies on, its build fails immediately, naming the fields.
+
+520
+00:44:34.097 --> 00:44:39.559
+It gives cross-service correctness at unit-test speed and lets teams deploy independently.
+
+521
+00:44:40.909 --> 00:44:41.997
+Question 7.
+
+522
+00:44:42.277 --> 00:44:46.095
+Why test against a real database instead of an in-memory fake?
+
+523
+00:44:46.375 --> 00:44:47.741
+Thirty-second answer:
+
+524
+00:44:48.021 --> 00:44:59.242
+Because the bugs that matter at the DB boundary, constraints, unique or foreign keys, SQL-dialect quirks, transaction isolation, sequence behaviour, don't exist in a fake.
+
+525
+00:44:59.522 --> 00:45:05.495
+An H2-for-Postgres fake will happily accept a duplicate the real UNIQUE index would reject.
+
+526
+00:45:05.775 --> 00:45:11.087
+Testcontainers spins up a real engine per run so integration tests hit reality.
+
+527
+00:45:12.437 --> 00:45:13.461
+Question 8.
+
+528
+00:45:13.741 --> 00:45:17.283
+How do you keep integration tests isolated and repeatable?
+
+529
+00:45:17.563 --> 00:45:18.928
+Thirty-second answer:
+
+530
+00:45:19.208 --> 00:45:28.147
+Each test starts a transaction, does its work, asserts, and rolls back, so the database is pristine for the next test and tests can't pollute each other.
+
+531
+00:45:28.427 --> 00:45:30.219
+It's fast and needs no cleanup.
+
+532
+00:45:30.499 --> 00:45:39.160
+Where a test must commit (to test triggers, or cross-connection visibility), use schema-per-test or truncate-between, which are stronger but slower.
+
+533
+00:45:40.510 --> 00:45:41.577
+Question 9.
+
+534
+00:45:41.857 --> 00:45:45.121
+What is mutation testing and why prefer it to coverage?
+
+535
+00:45:45.401 --> 00:45:46.766
+Thirty-second answer:
+
+536
+00:45:47.046 --> 00:45:54.406
+Mutation testing makes tiny changes to your code (flip a to =, remove a line) and checks whether any test fails.
+
+537
+00:45:54.686 --> 00:46:00.659
+A surviving mutant is code your tests run but don't actually verify, a gap coverage can't see.
+
+538
+00:46:00.939 --> 00:46:09.345
+It measures test quality, whereas line coverage only measures which code executed, which can be 100% with zero assertions.
+
+539
+00:46:10.695 --> 00:46:11.463
+Senior.
+
+540
+00:46:11.743 --> 00:46:12.788
+Question 10.
+
+541
+00:46:13.068 --> 00:46:15.841
+What is linearizability and how do you test for it?
+
+542
+00:46:16.121 --> 00:46:17.487
+Thirty-second answer:
+
+543
+00:46:17.767 --> 00:46:31.975
+Linearizability means every operation appears to take effect atomically at some instant between its invocation and its response, consistent with real time and the object's semantics (a read returns the latest write).
+
+544
+00:46:32.255 --> 00:46:44.180
+You can't assert it by example; you record a history, each op's real-time window and result, and run a checker that searches for a single sequential order respecting real time and semantics.
+
+545
+00:46:44.460 --> 00:46:47.809
+If none exists, the system violated linearizability.
+
+546
+00:46:49.159 --> 00:46:50.290
+Question 11.
+
+547
+00:46:50.570 --> 00:46:54.709
+How does Jepsen find consistency bugs that survive normal testing?
+
+548
+00:46:54.989 --> 00:46:56.354
+Thirty-second answer:
+
+549
+00:46:56.634 --> 00:47:14.042
+Jepsen drives a real distributed database with randomized concurrent operations while a nemesis injects real faults, network partitions, process pauses, clock skew, records the exact real-time history, and checks it with a linearizability or anomaly checker.
+
+550
+00:47:14.322 --> 00:47:23.389
+Normal tests never combine concurrency with faults with an automated consistency oracle, so they miss the bugs that only appear in that combination.
+
+551
+00:47:24.739 --> 00:47:25.827
+Question 12.
+
+552
+00:47:26.107 --> 00:47:30.309
+How do you test the resilience patterns (timeout, retry, circuit breaker)?
+
+553
+00:47:30.589 --> 00:47:31.955
+Thirty-second answer:
+
+554
+00:47:32.235 --> 00:47:49.067
+With fault injection: make the dependency slow, error, or unavailable and assert the pattern behaves, the timeout fires at the bound, retries are idempotent and capped with backoff+jitter, the breaker opens after the threshold and short-circuits, and a fallback is served.
+
+555
+00:47:49.347 --> 00:47:55.960
+You test these against a controllable fake dependency (or a real one with a fault switch), not the happy path.
+
+556
+00:47:57.310 --> 00:47:58.590
+Question 13.
+
+557
+00:47:58.870 --> 00:48:02.838
+A field in a provider's response is used by three consumers.
+
+558
+00:48:03.118 --> 00:48:04.633
+How do you change it safely?
+
+559
+00:48:04.913 --> 00:48:06.278
+Thirty-second answer:
+
+560
+00:48:06.558 --> 00:48:07.795
+Look at the contracts.
+
+561
+00:48:08.075 --> 00:48:25.633
+If the change touches a field a consumer's contract relies on, the provider's verification fails and you don't ship until the consumers are updated, you evolve additively (add the new field, keep the old), migrate consumers, then remove the old field once no contract references it.
+
+562
+00:48:25.913 --> 00:48:29.049
+If the field is in no contract, you can change it freely.
+
+563
+00:48:30.399 --> 00:48:31.593
+Question 14.
+
+564
+00:48:31.873 --> 00:48:35.713
+How do you design tests to run fast enough that people keep them green?
+
+565
+00:48:35.993 --> 00:48:37.359
+Thirty-second answer:
+
+566
+00:48:37.639 --> 00:48:42.097
+Keep the pyramid: most tests unit or property (parallel, milliseconds).
+
+567
+00:48:42.377 --> 00:48:46.196
+Make cross-service confidence come from contracts, not e2e.
+
+568
+00:48:46.476 --> 00:48:55.713
+For integration, reuse a single real dependency with rollback isolation instead of a fresh container per test, and shard or parallelize.
+
+569
+00:48:55.993 --> 00:49:01.007
+Run the fast layers on every push (10 min) and the slow ones pre-merge or nightly.
+
+570
+00:49:01.287 --> 00:49:05.041
+A slow suite gets bypassed, so speed is a correctness property.
+
+571
+00:49:06.391 --> 00:49:07.287
+Architect.
+
+572
+00:49:07.567 --> 00:49:08.762
+Question 15.
+
+573
+00:49:09.042 --> 00:49:13.607
+Design a testing strategy for a payments-critical microservices platform.
+
+574
+00:49:13.887 --> 00:49:15.253
+Thirty-second answer:
+
+575
+00:49:15.533 --> 00:49:17.559
+Pyramid with a strong contract layer.
+
+576
+00:49:17.839 --> 00:49:25.818
+Unit + property tests for all money or serialization or idempotency logic (money conservation as a property).
+
+577
+00:49:26.098 --> 00:49:29.682
+Consumer-driven contracts gating every cross-service deploy.
+
+578
+00:49:29.962 --> 00:49:33.589
+Integration tests on real datastores with fault injection.
+
+579
+00:49:33.869 --> 00:49:42.210
+Jepsen or linearizability checks for the ledger and inventory (anything claiming strong consistency), run nightly under a nemesis.
+
+580
+00:49:42.490 --> 00:49:44.474
+Mutation score as the merge gate.
+
+581
+00:49:44.754 --> 00:49:48.637
+Canary or synthetic journeys and SLO monitoring in prod.
+
+582
+00:49:48.917 --> 00:49:54.037
+Invest proportionally to risk, payments get everything, static content gets the base.
+
+583
+00:49:55.387 --> 00:49:56.581
+Question 16.
+
+584
+00:49:56.861 --> 00:50:00.595
+What is deterministic simulation testing and when is it worth it?
+
+585
+00:50:00.875 --> 00:50:02.240
+Thirty-second answer:
+
+586
+00:50:02.520 --> 00:50:13.165
+You run the entire system, nodes, network, clock, disk, on a single-threaded deterministic simulator driven by a seed, so every run is exactly reproducible.
+
+587
+00:50:13.445 --> 00:50:22.064
+You inject partitions, reorderings, crashes and clock skew and explore millions of schedules; a failing seed replays the exact bug.
+
+588
+00:50:22.344 --> 00:50:25.309
+It turns Heisenbugs into reproducible failures.
+
+589
+00:50:25.589 --> 00:50:36.213
+It's worth it for the implementation of core distributed infrastructure (a database, a consensus system), where correctness under adversarial scheduling is existential.
+
+590
+00:50:37.563 --> 00:50:38.907
+Question 17.
+
+591
+00:50:39.187 --> 00:50:43.987
+How do you test data migrations and schema changes safely (Ch 28)?
+
+592
+00:50:44.267 --> 00:50:45.633
+Thirty-second answer:
+
+593
+00:50:45.913 --> 00:51:00.675
+Test the migration itself, not just the post-migration code: run it against a realistic-size copy in CI and assert it's online (no long locks), reversible where required, and idempotent or resumable for backfills.
+
+594
+00:51:00.955 --> 00:51:10.513
+Add contract or compatibility tests so old and new code both work against each intermediate schema, and a reconciliation test for store-to-store moves.
+
+595
+00:51:10.793 --> 00:51:16.531
+Verify against a real engine, because locking and constraint behaviour are engine-specific.
+
+596
+00:51:17.881 --> 00:51:19.055
+Question 18.
+
+597
+00:51:19.335 --> 00:51:24.348
+How do you test time-dependent and eventually-consistent behaviour without flakiness?
+
+598
+00:51:24.628 --> 00:51:25.993
+Thirty-second answer:
+
+599
+00:51:26.273 --> 00:51:27.767
+Never use Thread.sleep.
+
+600
+00:51:28.047 --> 00:51:34.809
+Inject a controllable clock so you can advance time deterministically for TTLs, schedulers, and backoff.
+
+601
+00:51:35.089 --> 00:51:44.519
+For eventual consistency, await the expected state by polling with a deadline (and assert it converges within a bound), rather than asserting immediately.
+
+602
+00:51:44.799 --> 00:51:48.617
+For ordering or lag, record and check rather than assume timing.
+
+603
+00:51:49.967 --> 00:51:51.205
+Question 19.
+
+604
+00:51:51.485 --> 00:51:53.895
+How much should you test in production, and how?
+
+605
+00:51:54.175 --> 00:51:55.541
+Thirty-second answer:
+
+606
+00:51:55.821 --> 00:51:58.551
+As a complement to pre-prod, not a replacement.
+
+607
+00:51:58.831 --> 00:52:18.458
+Use canary or synthetic monitoring (scripted journeys run continuously against prod), feature-flag canaries and progressive rollouts with automated rollback on SLO regression, shadow or mirror traffic to a new version, and careful chaos experiments in prod once you've earned confidence in staging.
+
+608
+00:52:18.738 --> 00:52:25.117
+The goal is to catch what only production reveals, real traffic shapes, real data, real dependencies.
+
+609
+00:52:26.467 --> 00:52:27.576
+Question 20.
+
+610
+00:52:27.856 --> 00:52:30.800
+Your suite is green but you have no confidence in it.
+
+611
+00:52:31.080 --> 00:52:32.061
+What do you do?
+
+612
+00:52:32.341 --> 00:52:33.707
+Thirty-second answer:
+
+613
+00:52:33.987 --> 00:52:36.077
+Diagnose quality, not quantity.
+
+614
+00:52:36.357 --> 00:52:40.923
+Run mutation testing to find code that's executed but unverified.
+
+615
+00:52:41.203 --> 00:52:49.267
+Audit the mocks: is every cross-service boundary backed by a contract test, every datastore by a real-dependency integration test?
+
+616
+00:52:49.547 --> 00:52:55.264
+Add property tests for the invariant-bearing logic (money, serialization, idempotency).
+
+617
+00:52:55.544 --> 00:52:59.192
+Add consistency checks for anything claiming strong guarantees.
+
+618
+00:52:59.472 --> 00:53:01.179
+Kill flakes so red means red.
+
+619
+00:53:01.459 --> 00:53:03.080
+Then rebalance to the pyramid.
+
+620
+00:53:04.430 --> 00:53:05.326
+Part 9.
+
+621
+00:53:05.606 --> 00:53:07.014
+Summary and Practice.
+
+622
+00:53:08.264 --> 00:53:09.352
+Key takeaways.
+
+623
+00:53:09.632 --> 00:53:11.253
+Coverage is not correctness.
+
+624
+00:53:11.533 --> 00:53:22.115
+Measure test quality (mutation testing), and prove properties, contracts, and consistency, not just that code ran (§1.1, §2.11).
+
+625
+00:53:22.395 --> 00:53:28.859
+Shape the suite as a pyramid with a strong contract layer; avoid the ice-cream cone (§2.2).
+
+626
+00:53:29.139 --> 00:53:40.808
+Mocks encode assumptions that rot; back every mocked boundary with a contract test and every mocked datastore with real-dependency integration (§2.3, L2, L4).
+
+627
+00:53:42.158 --> 00:53:48.793
+Property-based tests find the edge cases you didn't think of and shrink them to minimal reproducers (L1).
+
+628
+00:53:49.073 --> 00:53:56.177
+Consumer-driven contracts let services be tested and deployed independently and catch breaks at the source (L2).
+
+629
+00:53:56.457 --> 00:54:03.859
+Consistency must be checked, not asserted: record histories and run a linearizability or Jepsen checker (L3).
+
+630
+00:54:04.139 --> 00:54:10.155
+Integration-test against the real engine with rollback isolation and fault injection (L4).
+
+631
+00:54:11.505 --> 00:54:19.953
+Kill flakiness (control time, isolate state, await don't sleep) or the suite loses all value (§2.10).
+
+632
+00:54:21.303 --> 00:54:22.626
+Decision cheat sheet.
+
+633
+00:54:22.906 --> 00:54:24.271
+Here is a quick table:
+
+634
+00:54:24.551 --> 00:54:26.301
+Need to test..., and Use.
+
+635
+00:54:26.581 --> 00:54:30.805
+A pure function or invariant (money, serialization, idempotency):
+
+636
+00:54:31.085 --> 00:54:33.026
+Property-based test (L1).
+
+637
+00:54:33.306 --> 00:54:35.397
+Two services agree on an API:
+
+638
+00:54:35.677 --> 00:54:37.853
+Consumer-driven contract (L2).
+
+639
+00:54:38.133 --> 00:54:42.463
+Code + real DB or broker behaviour, constraints, transactions:
+
+640
+00:54:42.743 --> 00:54:45.559
+Integration test on the real engine (L4).
+
+641
+00:54:45.839 --> 00:54:49.146
+Strong-consistency claim under concurrency + faults:
+
+642
+00:54:49.426 --> 00:54:52.199
+Linearizability or Jepsen check (L3).
+
+643
+00:54:52.479 --> 00:54:53.909
+A full revenue journey:
+
+644
+00:54:54.189 --> 00:54:57.047
+A few end-to-end tests (§2.9).
+
+645
+00:54:57.327 --> 00:55:00.506
+Resilience patterns (timeout or retry or breaker):
+
+646
+00:55:00.786 --> 00:55:03.751
+Fault injection (Ch 27, L4-C).
+
+647
+00:55:04.031 --> 00:55:05.695
+Is my suite actually good?:
+
+648
+00:55:05.975 --> 00:55:08.834
+Mutation testing (§2.11).
+
+649
+00:55:09.114 --> 00:55:12.122
+Time or TTL or eventual consistency:
+
+650
+00:55:12.402 --> 00:55:16.498
+Injected clock + await-with-deadline (§2.10).
+
+651
+00:55:17.848 --> 00:55:19.256
+What only prod reveals:
+
+652
+00:55:19.536 --> 00:55:23.419
+Canary or synthetic + shadow traffic (§2.9).
+
+653
+00:55:24.769 --> 00:55:25.899
+Exercises.
+
+654
+00:55:26.179 --> 00:55:30.937
+(B2) Write a property-based test for a parsePrice or formatPrice round-trip.
+
+655
+00:55:31.217 --> 00:55:36.145
+Introduce a bug (drop trailing zeros) and confirm the tester finds and shrinks it.
+
+656
+00:55:36.425 --> 00:55:41.033
+(B2) Define a consumer-driven contract for an endpoint your service calls.
+
+657
+00:55:41.313 --> 00:55:47.926
+Break the provider (rename a field) and watch verification fail; then evolve it additively and watch it pass.
+
+658
+00:55:48.206 --> 00:55:59.107
+(B3) Take L4's integration test and add a fault-injection case for a statement timeout (a slow query hitting statementtimeout); assert the app surfaces it and rolls back.
+
+659
+00:56:00.457 --> 00:56:12.511
+(B3) Extend L3's checker to a read or write register with a CAS operation, and construct a history that's linearizable for a correct CAS but not for a broken one.
+
+660
+00:56:12.791 --> 00:56:19.937
+(B4) Design the CI pipeline for §1.1's service so all three incidents would have been caught pre-merge.
+
+661
+00:56:20.217 --> 00:56:23.439
+Which layer catches each, and where in the pipeline does it run?
+
+662
+00:56:24.789 --> 00:56:25.791
+Further reading.
+
+663
+00:56:26.071 --> 00:56:38.807
+Growing Object-Oriented Software, Guided by Tests (Freeman and Pryce), the London-school mocking discipline. jqwik or Hypothesis or QuickCheck docs, property-based testing and shrinking.
+
+664
+00:56:39.087 --> 00:56:42.437
+Pact docs, consumer-driven contracts and can-i-deploy.
+
+665
+00:56:42.717 --> 00:56:45.981
+Testcontainers docs, real dependencies in tests.
+
+666
+00:56:46.261 --> 00:56:50.357
+Kyle Kingsbury's Jepsen analyses and the Knossos or Elle checkers.
+
+667
+00:56:50.637 --> 00:56:55.543
+FoundationDB or TigerBeetle talks on deterministic simulation testing.
+
+668
+00:56:56.893 --> 00:57:00.371
+PIT (pitest), mutation testing for the JVM.
+
+669
+00:57:01.721 --> 00:57:02.958
+Related chapters.
+
+670
+00:57:03.238 --> 00:57:08.337
+Ch 12, Consistency, Time and Consensus: what linearizability means.
+
+671
+00:57:08.617 --> 00:57:14.035
+Ch 17, Inter-Service Communication: the boundaries contract tests protect.
+
+672
+00:57:14.315 --> 00:57:19.201
+Ch 18, Resilience Patterns: what fault-injection tests exercise.
+
+673
+00:57:19.481 --> 00:57:25.817
+Ch 20, Idempotency, IDs and Distributed Locks: the idempotency you property-test.
+
+674
+00:57:26.097 --> 00:57:33.862
+Ch 27, Reliability and Disaster Recovery: chaos engineering, the production end of fault injection.
+
+675
+00:57:35.212 --> 00:57:40.737
+Ch 28, Schema and Data Evolution: testing migrations and compatibility.
+
+676
+00:57:42.087 --> 00:57:43.687
+That's the end of this chapter.
+
+677
+00:57:43.967 --> 00:57:50.090
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+678
+00:57:50.370 --> 00:57:51.821
+See you in the next chapter.
+
