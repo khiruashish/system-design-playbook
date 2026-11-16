@@ -1,0 +1,119 @@
+name: Chapter videos
+
+# Generates the narrated chapter videos (tools/videos) for every chapter that has none yet, in parallel shards.
+# MP4s are pushed to the orphan `videos` branch; captions, posters, manifest.json and the Videos page are
+# committed to the branch the workflow ran on. Re-running only builds chapters still missing from the manifest.
+on:
+  push:
+    branches: [claude/chapter-videos]
+    paths: [".github/workflows/videos.yml", "tools/videos/**"]
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: Parallel jobs
+        default: "20"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chapter-videos
+  cancel-in-progress: false
+
+env:
+  VIDEO_WORK: /tmp/sdp-work
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      any: ${{ steps.plan.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q pyyaml numpy pillow soundfile
+      - id: plan
+        run: |
+          m=$(python tools/videos/plan_shards.py "${{ inputs.shards || '20' }}")
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+          echo "any=$(python -c 'import json,sys; print(str(bool(json.loads(sys.argv[1])["include"])).lower())' "$m")" >> "$GITHUB_OUTPUT"
+          echo "$m" | python -c 'import json,sys; [print(s["shard"], s["pages"]) for s in json.load(sys.stdin)["include"]]'
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: System packages (ffmpeg, fonts used by the slides)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-inter fonts-jetbrains-mono fonts-dejavu-core >/dev/null
+      - name: Python packages + Chromium for Mermaid
+        run: |
+          pip install -q -r tools/videos/requirements.txt
+          python -m playwright install --with-deps chromium >/dev/null
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.VIDEO_WORK }}/models
+          key: kokoro-v1.0-int8
+      - name: Generate shard ${{ matrix.shard }}
+        run: python tools/videos/make_videos.py ${{ matrix.pages }}
+      - name: Collect results
+        if: always()
+        run: |
+          mkdir -p out
+          cp -r docs/videos out/docs-videos
+          [ -d "$VIDEO_WORK/mp4" ] && cp -r "$VIDEO_WORK/mp4" out/mp4 || mkdir -p out/mp4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shard-${{ matrix.shard }}
+          path: out
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: always() && needs.build.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q pyyaml numpy pillow soundfile
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Check out the videos branch
+        run: |
+          git clone --quiet --depth 1 --branch videos --single-branch \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" videos-repo
+      - name: Merge results
+        run: python tools/videos/merge_results.py artifacts videos-repo
+      - name: Push MP4s to the videos branch
+        run: |
+          cd videos-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Add chapter videos (run ${{ github.run_id }})" || exit 0
+          for i in 1 2 3 4 5; do git push -q origin videos && exit 0; sleep $((i*15)); git pull -q --rebase origin videos; done
+          exit 1
+      - name: Commit captions, posters and manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/videos
+          git commit -q -m "Add chapter video captions and manifest (run ${{ github.run_id }})" || exit 0
+          for i in 1 2 3 4 5; do git push -q origin "HEAD:${{ github.ref_name }}" && exit 0; sleep $((i*15)); git pull -q --rebase origin "${{ github.ref_name }}"; done
+          exit 1

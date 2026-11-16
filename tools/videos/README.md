@@ -23,3 +23,11 @@ python tools/videos/make_videos.py 01-foundations/07-caching.md                 
 ```
 
 Narration audio and rendered diagrams are cached in `$VIDEO_WORK` (default `/tmp/sdp-work`).
+
+## Running on GitHub Actions
+
+`.github/workflows/videos.yml` does the same thing in parallel: `plan_shards.py` splits the chapters still missing
+from `manifest.json` into balanced shards (20 by default), each shard runs `make_videos.py` on its chapters, and
+a final job (`merge_results.py`) pushes the MP4s to `videos` and commits captions, posters, the manifest and the
+Videos page to the branch the workflow ran on. It runs on pushes that touch `tools/videos/**` or the workflow,
+or manually (Actions → Chapter videos → Run workflow). Re-running only builds chapters that are still missing.
