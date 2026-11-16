@@ -12,9 +12,13 @@ on:
       shards:
         description: Parallel jobs
         default: "20"
+      from_run:
+        description: Only publish the artifacts of this earlier run id (skips generation)
+        default: ""
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: chapter-videos
@@ -29,13 +33,22 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       any: ${{ steps.plan.outputs.any }}
+      from_run: ${{ steps.from.outputs.run }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - id: from
+        # publish-only mode: tools/videos/publish-from-run holds the id of an earlier run whose artifacts to publish
+        run: |
+          r="${{ inputs.from_run }}"
+          [ -z "$r" ] && [ -f tools/videos/publish-from-run ] && r=$(tr -dc 0-9 < tools/videos/publish-from-run)
+          echo "run=$r" >> "$GITHUB_OUTPUT"; echo "publish-only from run: ${r:-none}"
       - run: pip install -q pyyaml numpy pillow soundfile
+        if: steps.from.outputs.run == ''
       - id: plan
+        if: steps.from.outputs.run == ''
         run: |
           m=$(python tools/videos/plan_shards.py "${{ inputs.shards || '20' }}")
           echo "matrix=$m" >> "$GITHUB_OUTPUT"
@@ -82,8 +95,8 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: build
-    if: always() && needs.build.result != 'skipped'
+    needs: [plan, build]
+    if: always() && needs.plan.result == 'success' && (needs.build.result != 'skipped' || needs.plan.outputs.from_run != '')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,26 +107,40 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          run-id: ${{ needs.plan.outputs.from_run || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Check out the videos branch
         run: |
           git clone --quiet --depth 1 --branch videos --single-branch \
             "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" videos-repo
       - name: Merge results
         run: python tools/videos/merge_results.py artifacts videos-repo
-      - name: Push MP4s to the videos branch
+      - name: Push MP4s to the videos branch (in batches; GitHub rejects pushes over 2 GB)
         run: |
           cd videos-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -q -m "Add chapter videos (run ${{ github.run_id }})" || exit 0
-          for i in 1 2 3 4 5; do git push -q origin videos && exit 0; sleep $((i*15)); git pull -q --rebase origin videos; done
-          exit 1
+          push() { for i in 1 2 3 4 5; do git push -q origin videos && return 0; sleep $((i*15)); git pull -q --rebase origin videos; done; return 1; }
+          git ls-files --others --modified --exclude-standard -z | xargs -0 -n1 echo > ../pending.txt
+          total=$(wc -l < ../pending.txt); echo "$total files to publish"
+          batch=() size=0 n=0
+          while IFS= read -r f; do
+            batch+=("$f"); size=$((size + $(stat -c %s "$f")))
+            if [ "$size" -ge 600000000 ]; then
+              n=$((n+1)); git add -- "${batch[@]}"; git commit -q -m "Add chapter videos, batch $n (run ${{ github.run_id }})"; push
+              echo "pushed batch $n (${#batch[@]} files, $((size/1000000)) MB)"; batch=() size=0
+            fi
+          done < ../pending.txt
+          if [ ${#batch[@]} -gt 0 ]; then
+            n=$((n+1)); git add -- "${batch[@]}"; git commit -q -m "Add chapter videos, batch $n (run ${{ github.run_id }})"; push
+            echo "pushed batch $n (${#batch[@]} files, $((size/1000000)) MB)"
+          fi
       - name: Commit captions, posters and manifest
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/videos
+          git rm -q --ignore-unmatch tools/videos/publish-from-run
           git commit -q -m "Add chapter video captions and manifest (run ${{ github.run_id }})" || exit 0
           for i in 1 2 3 4 5; do git push -q origin "HEAD:${{ github.ref_name }}" && exit 0; sleep $((i*15)); git pull -q --rebase origin "${{ github.ref_name }}"; done
           exit 1
