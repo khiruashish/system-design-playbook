@@ -1,0 +1,5510 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.843
+Partitioning and Sharding.
+
+2
+00:00:02.123 --> 00:00:06.497
+Chapter 11, from the Distributed Core part of the System Design Playbook.
+
+3
+00:00:08.247 --> 00:00:09.207
+At a glance:
+
+4
+00:00:09.487 --> 00:00:10.660
+Chapter at a glance.
+
+5
+00:00:10.940 --> 00:00:11.943
+Reader bands:
+
+6
+00:00:12.223 --> 00:00:14.527
+B1, then B4, Prerequisites:
+
+7
+00:00:14.807 --> 00:00:20.503
+Ch 05, Ch 06, Ch 09, Ch 10, What you will build:
+
+8
+00:00:20.783 --> 00:00:22.575
+Partitioning for the orders data.
+
+9
+00:00:22.855 --> 00:00:27.015
+It starts with a plain-Java comparison of partitioning schemes (L1).
+
+10
+00:00:27.295 --> 00:00:42.057
+Then it adds PostgreSQL declarative partitioning behind a Spring service (L2) and application-level sharding with 1,024 logical buckets, bucket-carrying order ids and bounded scatter-gather (L3).
+
+11
+00:00:42.337 --> 00:00:47.457
+It ends with online bucket moves under a write fence and hot-key splitting (L4).
+
+12
+00:00:47.737 --> 00:01:01.668
+Two real labs back the claims: a Redis 7 Cluster (hash slots, MOVED or ASK, CROSSSLOT, live resharding) and PostgreSQL 16 (partition pruning, the uniqueness rule, and a two-shard bucket move with a fence).
+
+13
+00:01:01.948 --> 00:01:02.929
+Reading time:
+
+14
+00:01:03.209 --> 00:01:05.577
+110 min + code + labs.
+
+15
+00:01:06.927 --> 00:01:07.781
+Part 1.
+
+16
+00:01:08.061 --> 00:01:09.981
+Introduction and Why It Matters.
+
+17
+00:01:11.231 --> 00:01:14.537
+A story: the resharding that moved 80 % of the data.
+
+18
+00:01:14.817 --> 00:01:20.492
+By the second Diwali sale, the orders database had outgrown one PostgreSQL primary.
+
+19
+00:01:20.772 --> 00:01:28.217
+The team split it into four shards with the simplest rule anyone could think of: shard = hash(customerid) % 4.
+
+20
+00:01:28.497 --> 00:01:29.607
+It worked for a year.
+
+21
+00:01:30.957 --> 00:01:32.919
+Then growth demanded a fifth shard.
+
+22
+00:01:33.199 --> 00:01:41.434
+The change to the rule was one character, % 4 became % 5, and the migration plan said copy rows whose shard changed.
+
+23
+00:01:41.714 --> 00:01:43.997
+Nobody had calculated how many that was.
+
+24
+00:01:44.277 --> 00:01:46.858
+About 80 % of all rows changed shards.
+
+25
+00:01:47.138 --> 00:01:58.253
+The copy ran for 31 hours, ate the disk and I or O budget of all five databases, and made p99 checkout latency four times worse for the whole weekend.
+
+26
+00:01:58.533 --> 00:02:01.071
+Worse, writes kept arriving during the copy.
+
+27
+00:02:01.351 --> 00:02:08.839
+Rows written to the old shard after they had been copied, but before the application switched rules, were simply not on the new shard.
+
+28
+00:02:09.119 --> 00:02:17.525
+212 orders disappeared from customers' order history until a reconciliation script found them in the old shards a week later.
+
+29
+00:02:18.875 --> 00:02:29.136
+Two months later a different incident: the new mega dark store in Bengaluru, 5 % of all orders by itself, landed on the same shard as three other busy stores.
+
+30
+00:02:29.416 --> 00:02:36.349
+The store dashboard, which queried orders by storeid, pinned that shard's CPU at 95 % every evening.
+
+31
+00:02:36.629 --> 00:02:39.424
+Neither incident was about the database engine.
+
+32
+00:02:39.704 --> 00:02:41.859
+Both were partitioning design mistakes:
+
+33
+00:02:43.209 --> 00:02:46.985
+The key, then shard function must not depend on the number of shards.
+
+34
+00:02:47.265 --> 00:02:55.094
+Hash into a fixed number of logical buckets (1,024 here), and map buckets to shards in a small, versioned table.
+
+35
+00:02:55.374 --> 00:02:59.854
+Adding a shard then moves ~1 or N of the data, a bucket at a time.
+
+36
+00:03:00.134 --> 00:03:01.478
+A move needs a fence.
+
+37
+00:03:01.758 --> 00:03:08.691
+Copy while writable, then block writes to the bucket on the source for a short final delta, verify, flip the map.
+
+38
+00:03:08.971 --> 00:03:14.689
+A stale writer gets BUCKETMOVED and retries, instead of writing into a copy nobody will read.
+
+39
+00:03:16.039 --> 00:03:20.497
+Pick the partition key from the dominant access pattern, and plan for the others.
+
+40
+00:03:20.777 --> 00:03:31.871
+Orders are read by customer (partition by customer) but also by store (a separately partitioned read model or a bounded scatter-gather), and a single huge key needs splitting.
+
+41
+00:03:33.221 --> 00:03:33.903
+Quote:
+
+42
+00:03:34.183 --> 00:03:35.847
+The thesis of this chapter.
+
+43
+00:03:36.127 --> 00:03:41.311
+Partitioning buys capacity by giving up the ability to see all the data in one place.
+
+44
+00:03:41.591 --> 00:03:49.783
+Every design is a choice of which queries stay on one partition, which ones fan out, and how data moves when the partition count changes.
+
+45
+00:03:50.063 --> 00:03:53.839
+Make those three choices on purpose, before the data forces them.
+
+46
+00:03:55.189 --> 00:03:57.493
+Where this lives in the grocery platform.
+
+47
+00:03:57.773 --> 00:03:59.117
+Here is a quick table:
+
+48
+00:03:59.397 --> 00:04:01.851
+Data, and Partitioning, and Key, and Why.
+
+49
+00:04:02.131 --> 00:04:04.755
+Orders, order items (PostgreSQL).
+
+50
+00:04:05.035 --> 00:04:05.995
+Partitioning:
+
+51
+00:04:06.275 --> 00:04:07.491
+App-level sharding:
+
+52
+00:04:07.771 --> 00:04:13.872
+1,024 buckets, then 4 shard clusters, each with its own replicas (Ch 10).
+
+53
+00:04:14.152 --> 00:04:16.989
+Key: customerid (order ids carry the bucket).
+
+54
+00:04:17.269 --> 00:04:17.952
+Why:
+
+55
+00:04:18.232 --> 00:04:20.792
+Order history and checkout are per customer.
+
+56
+00:04:21.072 --> 00:04:23.141
+Orders by store (read model).
+
+57
+00:04:23.421 --> 00:04:24.381
+Partitioning:
+
+58
+00:04:24.661 --> 00:04:28.075
+Separate table sharded by storeid, fed by order events.
+
+59
+00:04:28.355 --> 00:04:30.829
+Key: storeid (salted for mega stores).
+
+60
+00:04:31.109 --> 00:04:31.792
+Why:
+
+61
+00:04:32.072 --> 00:04:34.675
+Store dashboards and picking without scatter-gather.
+
+62
+00:04:34.955 --> 00:04:36.107
+Payments ledger.
+
+63
+00:04:36.387 --> 00:04:37.347
+Partitioning:
+
+64
+00:04:37.627 --> 00:04:40.080
+Same buckets as orders (co-located).
+
+65
+00:04:40.360 --> 00:04:41.683
+Key: customerid.
+
+66
+00:04:41.963 --> 00:04:42.645
+Why:
+
+67
+00:04:42.925 --> 00:04:45.613
+Order + payment in one local transaction.
+
+68
+00:04:45.893 --> 00:04:47.280
+Order events archive.
+
+69
+00:04:47.560 --> 00:04:48.520
+Partitioning:
+
+70
+00:04:48.800 --> 00:04:52.427
+PostgreSQL range partitions by month on each shard.
+
+71
+00:04:52.707 --> 00:04:53.923
+Key: createdat.
+
+72
+00:04:54.203 --> 00:04:54.885
+Why:
+
+73
+00:04:55.165 --> 00:04:58.280
+Drop old months cheaply; queries by time window.
+
+74
+00:04:59.630 --> 00:05:01.891
+Inventory (per store and SKU).
+
+75
+00:05:02.171 --> 00:05:03.131
+Partitioning:
+
+76
+00:05:03.411 --> 00:05:04.649
+Hash by storeid.
+
+77
+00:05:04.929 --> 00:05:06.038
+Key: storeid.
+
+78
+00:05:06.318 --> 00:05:07.001
+Why:
+
+79
+00:05:07.281 --> 00:05:10.673
+Every reservation is for one store (Ch 09).
+
+80
+00:05:10.953 --> 00:05:12.937
+Carts, sessions (Redis Cluster).
+
+81
+00:05:13.217 --> 00:05:14.177
+Partitioning:
+
+82
+00:05:14.457 --> 00:05:17.337
+16,384 hash slots.
+
+83
+00:05:17.617 --> 00:05:19.281
+Key: customerid hash tag.
+
+84
+00:05:19.561 --> 00:05:20.243
+Why:
+
+85
+00:05:20.523 --> 00:05:22.763
+Multi-key cart ops stay in one slot.
+
+86
+00:05:23.043 --> 00:05:25.049
+Rider locations (Cassandra).
+
+87
+00:05:25.329 --> 00:05:26.289
+Partitioning:
+
+88
+00:05:26.569 --> 00:05:28.105
+Token ring with vnodes.
+
+89
+00:05:28.385 --> 00:05:29.046
+Key:
+
+90
+00:05:29.326 --> 00:05:30.542
+(city, riderid).
+
+91
+00:05:30.822 --> 00:05:31.505
+Why:
+
+92
+00:05:31.785 --> 00:05:33.641
+Even spread, per-rider reads.
+
+93
+00:05:33.921 --> 00:05:35.094
+Kafka topics.
+
+94
+00:05:35.374 --> 00:05:36.334
+Partitioning:
+
+95
+00:05:36.614 --> 00:05:38.065
+Partitions per topic.
+
+96
+00:05:38.345 --> 00:05:39.966
+Key: orderid or storeid.
+
+97
+00:05:40.246 --> 00:05:40.929
+Why:
+
+98
+00:05:41.209 --> 00:05:44.409
+Ordering per key, parallel consumers (Ch 14).
+
+99
+00:05:44.689 --> 00:05:46.545
+Catalog search (OpenSearch).
+
+100
+00:05:46.825 --> 00:05:47.785
+Partitioning:
+
+101
+00:05:48.065 --> 00:05:49.323
+Shards per index.
+
+102
+00:05:49.603 --> 00:05:50.265
+Key:
+
+103
+00:05:50.545 --> 00:05:52.251
+Document routing by id.
+
+104
+00:05:52.531 --> 00:05:53.214
+Why:
+
+105
+00:05:53.494 --> 00:05:56.865
+Search fan-out is the normal query (Ch 22).
+
+106
+00:05:58.215 --> 00:05:59.537
+Learning objectives.
+
+107
+00:05:59.817 --> 00:06:01.161
+Here is a quick table:
+
+108
+00:06:01.441 --> 00:06:03.639
+Band, and After this chapter you can....
+
+109
+00:06:03.919 --> 00:06:04.751
+B1:
+
+110
+00:06:05.031 --> 00:06:14.183
+Explain partitioning versus replication, range versus hash partitioning, and why a query without the partition key touches every partition.
+
+111
+00:06:14.463 --> 00:06:15.337
+B2:
+
+112
+00:06:15.617 --> 00:06:25.921
+Choose a partition key from access patterns, use PostgreSQL declarative partitioning and pruning, and explain why a unique constraint must include the partition key.
+
+113
+00:06:26.201 --> 00:06:27.097
+B3:
+
+114
+00:06:27.377 --> 00:06:36.593
+Design application-level sharding with logical buckets and a versioned shard map, route by id without a global index, and bound scatter-gather.
+
+115
+00:06:36.873 --> 00:06:37.769
+B4:
+
+116
+00:06:38.049 --> 00:06:51.276
+Move data online without losing writes (copy, catch up, fence, verify, flip), handle hot partitions, and reason about Redis Cluster slot migration (MOVED or ASK) and consistent hashing.
+
+117
+00:06:52.626 --> 00:06:53.501
+Part 2.
+
+118
+00:06:53.781 --> 00:06:55.658
+Core Concepts, Beginner to Deep.
+
+119
+00:06:56.908 --> 00:06:59.383
+Intuition: the post office sorting room.
+
+120
+00:06:59.663 --> 00:07:07.087
+One clerk sorting all of a city's mail can't keep up, so the post office hires eight clerks and gives each one a set of pigeonholes.
+
+121
+00:07:07.367 --> 00:07:21.191
+If clerks split the mail by pincode range (560001 to 560020 to clerk 1, and so on), finding all mail for 5600xx is easy: one clerk.
+
+122
+00:07:21.471 --> 00:07:28.084
+But the new IT park in 560103 floods one clerk while others are idle.
+
+123
+00:07:28.364 --> 00:07:30.881
+That's range partitioning and its hot range.
+
+124
+00:07:31.161 --> 00:07:41.465
+If clerks split the mail by a shuffle of the pincode (a hash), the work spreads evenly, but all mail for 5600xx now means asking all eight.
+
+125
+00:07:41.745 --> 00:07:43.836
+That's hash partitioning and scatter-gather.
+
+126
+00:07:45.186 --> 00:07:52.610
+If the post office numbers clerks and uses pincode % 8, hiring a ninth clerk reshuffles almost every pigeonhole.
+
+127
+00:07:52.890 --> 00:08:05.711
+If instead it has 1,024 labelled pigeonholes and gives each clerk a set of them, hiring a ninth clerk means handing over about 1 or 9 of the pigeonholes, and the labels on the letters never change.
+
+128
+00:08:05.991 --> 00:08:07.442
+That's logical buckets.
+
+129
+00:08:07.722 --> 00:08:13.781
+Replication (Ch 10) is photocopying a clerk's pigeonholes so a second clerk can take over.
+
+130
+00:08:14.061 --> 00:08:16.365
+Partitioning is splitting the pigeonholes.
+
+131
+00:08:16.645 --> 00:08:20.143
+Real systems do both: each partition is replicated.
+
+132
+00:08:21.493 --> 00:08:24.352
+Partitioning versus replication versus sharding.
+
+133
+00:08:24.632 --> 00:08:25.976
+Here is a quick table:
+
+134
+00:08:26.256 --> 00:08:27.408
+Term, and Meaning.
+
+135
+00:08:27.688 --> 00:08:28.648
+Partitioning:
+
+136
+00:08:28.928 --> 00:08:32.341
+Splitting one dataset into disjoint pieces (partitions).
+
+137
+00:08:32.621 --> 00:08:39.171
+Can happen inside one database server (PostgreSQL declarative partitioning) or across servers.
+
+138
+00:08:39.451 --> 00:08:40.283
+Sharding:
+
+139
+00:08:40.563 --> 00:08:47.197
+Partitioning across servers, so each server (shard) holds only some of the data and takes only some of the writes.
+
+140
+00:08:47.477 --> 00:08:48.501
+Replication:
+
+141
+00:08:48.781 --> 00:08:52.067
+Copying the same data to several servers (Ch 10).
+
+142
+00:08:52.347 --> 00:08:53.115
+Shard:
+
+143
+00:08:53.395 --> 00:08:59.453
+One physical database cluster (a primary + replicas) holding a set of partitions or buckets.
+
+144
+00:08:59.733 --> 00:09:01.568
+Partition key or shard key:
+
+145
+00:09:01.848 --> 00:09:05.155
+The column(s) whose value decides where a row lives.
+
+146
+00:09:06.505 --> 00:09:09.491
+Replication scales reads and survives failures.
+
+147
+00:09:09.771 --> 00:09:14.571
+It doesn't scale writes or storage: every replica stores and applies every write.
+
+148
+00:09:14.851 --> 00:09:19.331
+Partitioning is the only way to scale writes and storage beyond one machine.
+
+149
+00:09:19.611 --> 00:09:24.582
+That's why every large system does both, with names like shard 3, replica 2.
+
+150
+00:09:24.862 --> 00:09:30.814
+Partition inside one server first (it's cheap, and it helps with pruning, maintenance and retention).
+
+151
+00:09:31.094 --> 00:09:43.105
+Shard across servers only when one primary can't take the writes or hold the data, after the Ch 09 steps (indexes, caching, read replicas, a bigger machine) are exhausted.
+
+152
+00:09:44.455 --> 00:09:45.735
+Range partitioning.
+
+153
+00:09:46.015 --> 00:09:57.129
+Each partition holds a contiguous range of keys: orders by month, customers A, F, pincodes 560001 to 560050.
+
+154
+00:09:58.479 --> 00:09:59.823
+Here is a quick table:
+
+155
+00:10:00.103 --> 00:10:01.575
+Strengths, and Weaknesses.
+
+156
+00:10:01.855 --> 00:10:05.930
+Range scans stay in one or a few partitions (orders in September):
+
+157
+00:10:06.210 --> 00:10:18.071
+Monotonic keys (time, sequence ids) send all new writes to the newest partition (L1 D: all 10,000 of today's writes land in 2026 to 09).
+
+158
+00:10:18.351 --> 00:10:25.306
+Dropping old data is DROP TABLE orders202501 (instant, no vacuum):
+
+159
+00:10:25.586 --> 00:10:30.215
+Skewed key distributions make uneven partitions; boundaries need tuning.
+
+160
+00:10:30.495 --> 00:10:33.333
+Split a big range into two without touching others:
+
+161
+00:10:33.613 --> 00:10:36.130
+Needs a range, then partition directory.
+
+162
+00:10:37.480 --> 00:10:45.373
+Good fit: time-series retention inside one server, where all writes in the newest partition is fine because it's still one server.
+
+163
+00:10:45.653 --> 00:10:55.531
+Used across servers by HBase, Bigtable, Spanner, CockroachDB and TiDB, which automatically split ranges that get too big or too hot.
+
+164
+00:10:56.881 --> 00:11:00.187
+Hash partitioning. partition = f(hash(key)).
+
+165
+00:11:00.467 --> 00:11:08.659
+A good hash spreads keys evenly, whatever the key distribution (L1 A: max or avg 1.00x).
+
+166
+00:11:10.009 --> 00:11:11.353
+Here is a quick table:
+
+167
+00:11:11.633 --> 00:11:13.105
+Strengths, and Weaknesses.
+
+168
+00:11:13.385 --> 00:11:17.396
+Even spread of data and writes, no hot range from monotonic keys:
+
+169
+00:11:17.676 --> 00:11:19.831
+Range queries touch every partition.
+
+170
+00:11:20.111 --> 00:11:22.777
+No directory needed if f is a formula:
+
+171
+00:11:23.057 --> 00:11:28.924
+Every query without the key touches every partition (lab A: storeid scanned all 8 partitions). :
+
+172
+00:11:29.204 --> 00:11:34.687
+One very hot key still lands on one partition (hashing spreads keys, not load per key).
+
+173
+00:11:36.037 --> 00:11:40.026
+The hash must be stable across languages, versions and processes.
+
+174
+00:11:40.306 --> 00:11:49.287
+Java's String.hashCode() happens to be specified, but Object.hashCode() isn't, and many languages randomize string hashes per process.
+
+175
+00:11:49.567 --> 00:11:59.615
+Use a named hash (CRC32C, Murmur3, xxHash, or MD5 when speed doesn't matter) and pin it with a golden-value test:
+
+176
+00:11:59.895 --> 00:12:04.887
+Buckets.of(cust-42) == 532 must hold forever.
+
+177
+00:12:06.237 --> 00:12:10.035
+From hash mod N to consistent hashing to logical buckets.
+
+178
+00:12:10.315 --> 00:12:12.960
+The question is what happens when N changes.
+
+179
+00:12:13.240 --> 00:12:18.168
+L1 measured it with 200,000 customers going from 4 to 5 shards:
+
+180
+00:12:19.518 --> 00:12:40.574
+On screen: scheme max or avg moved on 4, then 5. hash mod N 1.00x 80.1%. consistent hashing, 1 point per shard 1.80x 17.2%. consistent hashing, 150 vnodes 1.02x 20.3%.
+
+181
+00:12:40.854 --> 00:12:47.510
+1,024 fixed buckets, then shards 1.00x 19.7%.
+
+182
+00:12:50.360 --> 00:12:51.469
+hash mod N.
+
+183
+00:12:51.749 --> 00:13:05.893
+Perfectly even, but changing N remaps a key unless h mod 4 == h mod 5, which is true for only ~1 or 5 of keys. ~80 % of data moves (the §1.1 story).
+
+184
+00:13:06.173 --> 00:13:14.259
+Only acceptable if N never changes, or if you always double N (then exactly half the keys move, and each shard splits into two).
+
+185
+00:13:15.609 --> 00:13:17.806
+Consistent hashing (Karger et al.
+
+186
+00:13:18.086 --> 00:13:19.707
+1997).
+
+187
+00:13:19.987 --> 00:13:25.171
+Hash both keys and shards onto a ring, and a key belongs to the next shard clockwise.
+
+188
+00:13:25.451 --> 00:13:30.977
+Adding a shard takes keys only from its clockwise neighbour, so only ~1 or N moves.
+
+189
+00:13:31.257 --> 00:13:41.646
+With one point per shard the arcs are uneven (1.80x: one shard has almost twice the average), and the new shard takes from one neighbour, not from all.
+
+190
+00:13:41.926 --> 00:13:51.206
+Virtual nodes (150 points per shard) fix both: even load (1.02x), and a new shard takes a little from everyone.
+
+191
+00:13:51.486 --> 00:13:56.115
+Used by Dynamo, Cassandra (vnodes or tokens), Riak, many caches.
+
+192
+00:13:57.465 --> 00:13:59.428
+Fixed logical buckets (slots).
+
+193
+00:13:59.708 --> 00:14:11.079
+Hash keys into a fixed number of buckets B that never changes (1,024, or Redis Cluster's 16,384), and keep a bucket, then shard map.
+
+194
+00:14:11.359 --> 00:14:15.220
+Adding a shard means reassigning ~B or N buckets to it:
+
+195
+00:14:15.500 --> 00:14:18.572
+19.7 % moved, perfectly even.
+
+196
+00:14:18.852 --> 00:14:23.588
+It's consistent hashing with the ring replaced by an explicit table, which gives you:
+
+197
+00:14:23.868 --> 00:14:29.201
+Control: move exactly the buckets you choose, one at a time, verifiable, pausable.
+
+198
+00:14:29.481 --> 00:14:32.404
+Unequal shards: give a bigger machine more buckets.
+
+199
+00:14:32.684 --> 00:14:36.567
+Hot bucket isolation: move one hot bucket to its own shard.
+
+200
+00:14:37.917 --> 00:14:44.210
+A unit of migration: bucket 532 is something you can fence, copy, checksum and flip.
+
+201
+00:14:44.490 --> 00:14:49.781
+The cost: a small map (1,024 entries) to store, version and distribute.
+
+202
+00:14:50.061 --> 00:14:53.730
+That's a feature: the map is the single source of truth for routing.
+
+203
+00:14:54.010 --> 00:15:05.637
+Pick B much larger than the maximum shard count you'll ever want (≥ 10 times headroom, and a power of 2 is convenient), because B can't change without rehashing everything.
+
+204
+00:15:06.987 --> 00:15:07.627
+Tip:
+
+205
+00:15:07.907 --> 00:15:11.384
+Rule of thumb. hash mod N only if N is fixed forever.
+
+206
+00:15:11.664 --> 00:15:17.000
+Consistent hashing with vnodes when nodes come and go automatically (caches, Dynamo-style stores).
+
+207
+00:15:18.280 --> 00:15:23.677
+Fixed buckets + a versioned map for databases you operate and rebalance deliberately.
+
+208
+00:15:25.027 --> 00:15:26.499
+Choosing the partition key.
+
+209
+00:15:26.779 --> 00:15:30.086
+The partition key decides which queries are cheap forever.
+
+210
+00:15:30.366 --> 00:15:31.326
+A checklist:
+
+211
+00:15:31.606 --> 00:15:34.209
+List the queries by volume and latency need.
+
+212
+00:15:34.489 --> 00:15:49.038
+For orders: my orders (customer, very high), get order by id (very high), checkout transaction (order + items + payment, high), store's open orders (store, medium), all orders yesterday (analytics, low, offline).
+
+213
+00:15:49.318 --> 00:15:58.193
+Choose the key that keeps the most important queries and transactions on one partition. customerid keeps my orders, checkout and payments together.
+
+214
+00:15:59.543 --> 00:16:01.271
+Check the cardinality and skew.
+
+215
+00:16:01.551 --> 00:16:06.031
+Millions of customers, the biggest one a few hundred orders: good. storeid:
+
+216
+00:16:06.311 --> 00:16:17.383
+500 stores, one with 5 % of all orders: bad as a primary key (L1 C: the busiest of 64 shards carries 3.90x the average).
+
+217
+00:16:17.663 --> 00:16:19.113
+Check write distribution.
+
+218
+00:16:19.393 --> 00:16:22.657
+A timestamp key concentrates all writes (L1 D).
+
+219
+00:16:22.937 --> 00:16:33.881
+Plan every other query: give it its own partitioned copy (a read model), a global index, a bounded scatter-gather, or send it to the analytics store (Ch 21).
+
+220
+00:16:35.231 --> 00:16:36.341
+Compound keys.
+
+221
+00:16:36.621 --> 00:16:47.287
+Cassandra-style PRIMARY KEY ((city, riderid), ts): the partition key (city, riderid) picks the node, and the clustering key ts orders rows inside it.
+
+222
+00:16:47.567 --> 00:16:56.357
+The same pattern appears in PostgreSQL as PRIMARY KEY (customerid, id) with an index on (customerid, createdat desc).
+
+223
+00:16:56.637 --> 00:16:57.703
+Co-location.
+
+224
+00:16:57.983 --> 00:17:09.525
+Tables that are joined or written in one transaction should share the partition key: orders, orderitems and payments all by customerid (Citus calls this co-located tables).
+
+225
+00:17:09.805 --> 00:17:16.055
+Then checkout is a local transaction, and no distributed transaction (Ch 13) is needed.
+
+226
+00:17:17.405 --> 00:17:19.368
+Routing: who knows where a key lives?
+
+227
+00:17:19.648 --> 00:17:20.992
+Here is a quick table:
+
+228
+00:17:21.272 --> 00:17:24.067
+Approach, and How, and Examples, and Trade-offs.
+
+229
+00:17:24.347 --> 00:17:25.627
+Client-side routing.
+
+230
+00:17:25.907 --> 00:17:26.568
+How:
+
+231
+00:17:26.848 --> 00:17:30.325
+The client library holds the map and connects straight to the shard.
+
+232
+00:17:30.605 --> 00:17:31.565
+Examples:
+
+233
+00:17:31.845 --> 00:17:36.645
+Redis Cluster smart clients, Cassandra drivers (token-aware), our ShardRouter.
+
+234
+00:17:36.925 --> 00:17:37.885
+Trade-offs:
+
+235
+00:17:38.165 --> 00:17:39.509
+Fastest (no hop).
+
+236
+00:17:39.789 --> 00:17:43.672
+Every client must refresh the map, and stale maps must be detected.
+
+237
+00:17:43.952 --> 00:17:45.445
+Proxy or router tier.
+
+238
+00:17:45.725 --> 00:17:46.387
+How:
+
+239
+00:17:46.667 --> 00:17:48.843
+Clients talk to a router that knows the map.
+
+240
+00:17:49.123 --> 00:17:50.083
+Examples:
+
+241
+00:17:50.363 --> 00:17:55.120
+Vitess vtgate, MongoDB mongos, Citus coordinator, Twemproxy.
+
+242
+00:17:55.400 --> 00:17:56.360
+Trade-offs:
+
+243
+00:17:56.640 --> 00:17:59.008
+Simple clients, one place to change.
+
+244
+00:17:59.288 --> 00:18:02.445
+Extra hop, and the router tier must scale and be HA.
+
+245
+00:18:02.725 --> 00:18:03.941
+Any node forwards.
+
+246
+00:18:04.221 --> 00:18:04.883
+How:
+
+247
+00:18:05.163 --> 00:18:08.363
+Any node accepts the request and forwards or redirects.
+
+248
+00:18:08.643 --> 00:18:09.603
+Examples:
+
+249
+00:18:09.883 --> 00:18:12.549
+Cassandra coordinator, Redis Cluster MOVED.
+
+250
+00:18:12.829 --> 00:18:13.789
+Trade-offs:
+
+251
+00:18:14.069 --> 00:18:15.285
+No special tier.
+
+252
+00:18:15.565 --> 00:18:17.101
+An extra hop on a miss.
+
+253
+00:18:18.451 --> 00:18:30.697
+Where the map lives: a coordination service (ZooKeeper, etcd, Consul, Ch 12), a config table, or the database itself (Redis Cluster gossips the slot map between nodes).
+
+254
+00:18:30.977 --> 00:18:33.323
+Stale maps are normal, not exceptional.
+
+255
+00:18:33.603 --> 00:18:36.057
+The design must make them safe and self-healing:
+
+256
+00:18:36.337 --> 00:18:39.622
+The node that no longer owns the key refuses (Redis:
+
+257
+00:18:39.902 --> 00:18:48.115
+MOVED 4133 127.0.0.1:7002, our fence:
+
+258
+00:18:48.395 --> 00:18:52.086
+BUCKETMOVED bucket=40 movedto=shardB).
+
+259
+00:18:52.366 --> 00:18:54.905
+The client refreshes its map and retries.
+
+260
+00:18:55.185 --> 00:18:58.961
+The map carries a version, so a client never goes back to an older one.
+
+261
+00:19:00.311 --> 00:19:02.999
+Routing by id without a global index.
+
+262
+00:19:03.279 --> 00:19:06.265
+GET or orders/id doesn't know the customer.
+
+263
+00:19:06.545 --> 00:19:07.420
+Options:
+
+264
+00:19:07.700 --> 00:19:12.777
+A global orderid, then customerid lookup table (another store to keep consistent).
+
+265
+00:19:13.057 --> 00:19:16.108
+A scatter-gather on every id lookup (expensive).
+
+266
+00:19:17.458 --> 00:19:33.650
+Put the bucket in the id: ord2141a0de1f7a40df6a5d04 carries bucket 0x214 = 532, the same bucket as its customer.
+
+267
+00:19:33.930 --> 00:19:36.469
+Any service can route the id with no lookup.
+
+268
+00:19:36.749 --> 00:19:43.661
+(Instagram's ids embed a logical shard, and Twitter's Snowflake embeds a worker id for the same reason.
+
+269
+00:19:43.941 --> 00:19:46.159
+Ch 20 covers id design.).
+
+270
+00:19:47.509 --> 00:19:50.347
+Secondary indexes: local versus global.
+
+271
+00:19:50.627 --> 00:19:55.960
+Partitioning by customer makes orders of store-7 a query on a non-partition key.
+
+272
+00:19:57.310 --> 00:19:58.654
+Here is a quick table:
+
+273
+00:19:58.934 --> 00:20:03.563
+Local (document-partitioned) index, and Global (term-partitioned) index.
+
+274
+00:20:03.843 --> 00:20:04.505
+What.
+
+275
+00:20:04.785 --> 00:20:07.067
+Local (document-partitioned) index:
+
+276
+00:20:07.347 --> 00:20:09.801
+Each partition indexes only its own rows.
+
+277
+00:20:10.081 --> 00:20:11.979
+Global (term-partitioned) index:
+
+278
+00:20:12.259 --> 00:20:17.059
+One index over all data, itself partitioned by the indexed value (storeid).
+
+279
+00:20:17.339 --> 00:20:18.086
+Write.
+
+280
+00:20:18.366 --> 00:20:20.649
+Local (document-partitioned) index:
+
+281
+00:20:20.929 --> 00:20:22.913
+Local, in the same transaction.
+
+282
+00:20:23.193 --> 00:20:25.091
+Global (term-partitioned) index:
+
+283
+00:20:25.371 --> 00:20:30.107
+Touches another partition: async (event-fed) or a distributed transaction.
+
+284
+00:20:30.387 --> 00:20:31.497
+Read by store.
+
+285
+00:20:31.777 --> 00:20:34.059
+Local (document-partitioned) index:
+
+286
+00:20:34.339 --> 00:20:36.878
+Scatter-gather over all partitions (lab A:
+
+287
+00:20:37.158 --> 00:20:44.177
+2.818 ms over 8 partitions versus 0.138 ms for one; lab B:
+
+288
+00:20:44.457 --> 00:20:48.083
+170 + 230 rows from two shards).
+
+289
+00:20:48.363 --> 00:20:50.262
+Global (term-partitioned) index:
+
+290
+00:20:50.542 --> 00:20:51.587
+One partition.
+
+291
+00:20:51.867 --> 00:20:52.934
+Consistency.
+
+292
+00:20:53.214 --> 00:20:55.497
+Local (document-partitioned) index:
+
+293
+00:20:55.777 --> 00:20:57.014
+Same as the data.
+
+294
+00:20:57.294 --> 00:20:59.193
+Global (term-partitioned) index:
+
+295
+00:20:59.473 --> 00:21:04.998
+Usually eventually consistent (DynamoDB GSIs, our event-fed read model).
+
+296
+00:21:06.348 --> 00:21:07.308
+Examples.
+
+297
+00:21:07.588 --> 00:21:09.871
+Local (document-partitioned) index:
+
+298
+00:21:10.151 --> 00:21:16.721
+PostgreSQL partitioned indexes, Elasticsearch, MongoDB, Cassandra secondary indexes.
+
+299
+00:21:17.001 --> 00:21:18.900
+Global (term-partitioned) index:
+
+300
+00:21:19.180 --> 00:21:29.164
+DynamoDB GSI, our ordersbystore table, Spanner or CockroachDB secondary indexes (transactional, at the cost of distributed writes).
+
+301
+00:21:30.514 --> 00:21:51.271
+Scatter-gather cost grows with the partition count, and tail latency grows faster: the query is as slow as the slowest partition, so if each shard is slow 1 % of the time, a 64-way fan-out is slow ~47 % of the time (1 minus 0.99⁶⁴), which Dean and Barroso call the tail at scale.
+
+302
+00:21:51.551 --> 00:21:59.167
+Keep scatter-gathers rare, bounded (a top-K with a limit per shard, a deadline, partial results flagged) and off hot paths.
+
+303
+00:22:00.517 --> 00:22:02.288
+Hot partitions and hot keys.
+
+304
+00:22:02.568 --> 00:22:03.955
+Hashing spreads keys.
+
+305
+00:22:04.235 --> 00:22:06.091
+It can't spread load within one key.
+
+306
+00:22:07.441 --> 00:22:08.785
+Here is a quick table:
+
+307
+00:22:09.065 --> 00:22:11.198
+Cause, and Example, and Mitigation.
+
+308
+00:22:11.478 --> 00:22:12.417
+Skewed key.
+
+309
+00:22:12.697 --> 00:22:13.571
+Example:
+
+310
+00:22:13.851 --> 00:22:16.198
+The mega store has 5 % of orders.
+
+311
+00:22:16.478 --> 00:22:17.481
+Mitigation:
+
+312
+00:22:17.761 --> 00:22:22.731
+Salt or split the key: store-MEGA0..N, and read all salts (verified:
+
+313
+00:22:23.011 --> 00:22:26.979
+4.11x, then 1.68x with 4 salts).
+
+314
+00:22:27.259 --> 00:22:28.411
+Monotonic key.
+
+315
+00:22:28.691 --> 00:22:29.566
+Example:
+
+316
+00:22:29.846 --> 00:22:33.003
+Range partitions by time, auto-increment ids.
+
+317
+00:22:33.283 --> 00:22:34.286
+Mitigation:
+
+318
+00:22:34.566 --> 00:22:37.190
+Hash, or prefix the key with a hash or bucket.
+
+319
+00:22:37.470 --> 00:22:39.347
+Celebrity or viral item.
+
+320
+00:22:39.627 --> 00:22:40.502
+Example:
+
+321
+00:22:40.782 --> 00:22:43.875
+A flash-sale SKU read 50 K times a second.
+
+322
+00:22:44.155 --> 00:22:45.158
+Mitigation:
+
+323
+00:22:45.438 --> 00:22:50.921
+Cache and replicate the key (Ch 07), request coalescing, read replicas.
+
+324
+00:22:51.201 --> 00:22:52.225
+Hot counter.
+
+325
+00:22:52.505 --> 00:22:53.379
+Example:
+
+326
+00:22:53.659 --> 00:22:55.601
+A per-store orders today counter.
+
+327
+00:22:55.881 --> 00:22:56.883
+Mitigation:
+
+328
+00:22:57.163 --> 00:23:01.323
+Sharded counters (N sub-counters summed on read), or batch updates.
+
+329
+00:23:01.603 --> 00:23:02.841
+Unlucky placement.
+
+330
+00:23:03.121 --> 00:23:03.995
+Example:
+
+331
+00:23:04.275 --> 00:23:06.323
+Several busy buckets on one shard.
+
+332
+00:23:06.603 --> 00:23:07.606
+Mitigation:
+
+333
+00:23:07.886 --> 00:23:11.385
+Move buckets (the bucket map makes this a routine operation).
+
+334
+00:23:12.735 --> 00:23:16.980
+Salting has a price: reads of that key become a fan-out over its salts.
+
+335
+00:23:17.260 --> 00:23:23.340
+Salt only the keys that need it, from a config list driven by metrics, and keep the number of salts small.
+
+336
+00:23:24.690 --> 00:23:27.335
+Rebalancing: moving data while it's being written.
+
+337
+00:23:27.615 --> 00:23:30.453
+Rebalancing is where sharded systems lose data.
+
+338
+00:23:30.733 --> 00:23:40.717
+The naive sequence copy, then flip the map, then delete has a window: a writer with the old map writes to the source after the copy and before it learns about the flip.
+
+339
+00:23:40.997 --> 00:23:43.834
+That write lands in a copy that's about to be deleted.
+
+340
+00:23:44.114 --> 00:23:51.410
+The simulation in L4 lost 88 of 24,456 acknowledged writes this way.
+
+341
+00:23:51.690 --> 00:23:53.311
+A safe move of one bucket:
+
+342
+00:23:53.591 --> 00:23:55.170
+Bulk copy while writable.
+
+343
+00:23:55.450 --> 00:23:57.157
+Copy the bucket to the target.
+
+344
+00:23:57.437 --> 00:24:00.509
+Record a watermark (a change sequence or LSN).
+
+345
+00:24:01.859 --> 00:24:02.712
+Catch up.
+
+346
+00:24:02.992 --> 00:24:07.856
+Copy rows changed since the watermark, again and again, until the delta is small.
+
+347
+00:24:08.136 --> 00:24:13.491
+(Production tools use CDC or logical replication for this, see Ch 13.).
+
+348
+00:24:13.771 --> 00:24:14.880
+Fence the source.
+
+349
+00:24:15.160 --> 00:24:22.776
+From now on, the source rejects writes to the bucket (a trigger, a flag checked in the write path, or Redis's MIGRATING state).
+
+350
+00:24:23.056 --> 00:24:26.149
+Writers get BUCKETMOVED, reload the map and retry.
+
+351
+00:24:26.429 --> 00:24:29.907
+Copy the final delta, then verify (count + checksum).
+
+352
+00:24:30.187 --> 00:24:32.811
+Flip the map (version + 1) and publish it.
+
+353
+00:24:33.091 --> 00:24:35.864
+Delete from the source later, after a grace period.
+
+354
+00:24:37.214 --> 00:24:40.841
+The write freeze is only steps 3 to 5 for one small delta:
+
+355
+00:24:41.121 --> 00:24:50.081
+36 ms max per bucket in the L4 simulation, versus ~230 ms in the lab's simpler fence-first variant.
+
+356
+00:24:50.361 --> 00:24:56.462
+Moving one bucket at a time keeps the freeze per customer tiny and the rest of the system unaffected.
+
+357
+00:24:57.812 --> 00:25:04.916
+Redis Cluster does the same thing per hash slot: the source marks the slot MIGRATING and the target marks it IMPORTING.
+
+358
+00:25:05.196 --> 00:25:07.223
+Keys move one by one with MIGRATE.
+
+359
+00:25:07.503 --> 00:25:18.084
+While the slot is in flight, the source answers requests for already moved keys with ASK slot target, which means try the target once, for this request only, with ASKING.
+
+360
+00:25:18.364 --> 00:25:21.308
+Keys not yet moved are still served by the source.
+
+361
+00:25:21.588 --> 00:25:28.735
+When the slot is done, SETSLOT NODE makes the target the owner, and the source answers with MOVED, which means update your map.
+
+362
+00:25:29.015 --> 00:25:31.340
+The lab shows every one of these replies.
+
+363
+00:25:32.690 --> 00:25:35.698
+Partitioning inside one PostgreSQL server.
+
+364
+00:25:35.978 --> 00:25:42.826
+Declarative partitioning (PARTITION BY RANGE LIST HASH) splits a table into child tables on one server:
+
+365
+00:25:43.106 --> 00:25:50.295
+Partition pruning: a query with the partition key scans only matching partitions (lab A: ordersp1 only).
+
+366
+00:25:50.575 --> 00:25:52.175
+Without the key, all of them.
+
+367
+00:25:52.455 --> 00:25:55.997
+Maintenance: vacuum, reindex and backup per partition.
+
+368
+00:25:56.277 --> 00:25:57.215
+Retention:
+
+369
+00:25:57.495 --> 00:25:59.010
+DETACH or DROP a month.
+
+370
+00:26:00.360 --> 00:26:09.661
+Uniqueness rule: a unique or primary key must include all partition key columns, because each partition enforces uniqueness only locally.
+
+371
+00:26:09.941 --> 00:26:13.269
+Lab A shows the error for a primary key on id alone.
+
+372
+00:26:13.549 --> 00:26:20.035
+Global uniqueness of id alone must come from the id generator (Ch 20), not a constraint.
+
+373
+00:26:20.315 --> 00:26:26.203
+Too many partitions slow planning and use more memory, so keep it to hundreds, not tens of thousands.
+
+374
+00:26:26.483 --> 00:26:27.827
+It doesn't add servers.
+
+375
+00:26:28.107 --> 00:26:39.755
+For that you need Citus (distributed tables over PostgreSQL workers), application-level sharding (this chapter's L3 or L4), or a distributed SQL database.
+
+376
+00:26:41.105 --> 00:26:42.577
+Choosing a sharding approach.
+
+377
+00:26:42.857 --> 00:26:44.201
+Here is a quick table:
+
+378
+00:26:44.481 --> 00:26:47.489
+Option, and What you get, and What you give up, and Fit.
+
+379
+00:26:47.769 --> 00:26:50.905
+Stay on one primary + partitioning + replicas.
+
+380
+00:26:51.185 --> 00:26:52.102
+What you get:
+
+381
+00:26:52.382 --> 00:26:55.411
+Simplicity, full SQL, local transactions.
+
+382
+00:26:55.691 --> 00:26:56.651
+What you give up:
+
+383
+00:26:56.931 --> 00:26:59.043
+Write or storage ceiling of one machine.
+
+384
+00:26:59.323 --> 00:26:59.963
+Fit:
+
+385
+00:27:00.243 --> 00:27:02.761
+Most systems, for longer than people think.
+
+386
+00:27:03.041 --> 00:27:05.835
+Application-level sharding (buckets + map).
+
+387
+00:27:06.115 --> 00:27:07.033
+What you get:
+
+388
+00:27:07.313 --> 00:27:10.662
+Full control, any SQL engine, predictable moves.
+
+389
+00:27:10.942 --> 00:27:11.902
+What you give up:
+
+390
+00:27:12.182 --> 00:27:15.318
+You build routing, moves, cross-shard queries, tooling.
+
+391
+00:27:15.598 --> 00:27:16.238
+Fit:
+
+392
+00:27:16.518 --> 00:27:19.569
+Clear partition key, a team to own it (this chapter).
+
+393
+00:27:19.849 --> 00:27:22.985
+Middleware sharding (Vitess, Citus, ShardingSphere).
+
+394
+00:27:23.265 --> 00:27:24.182
+What you get:
+
+395
+00:27:24.462 --> 00:27:27.811
+Routing, resharding and some cross-shard queries built in.
+
+396
+00:27:28.091 --> 00:27:29.051
+What you give up:
+
+397
+00:27:29.331 --> 00:27:32.339
+Another system to operate; SQL limitations.
+
+398
+00:27:32.619 --> 00:27:33.259
+Fit:
+
+399
+00:27:33.539 --> 00:27:38.659
+MySQL (Vitess), PostgreSQL (Citus), JDBC (ShardingSphere).
+
+400
+00:27:38.939 --> 00:27:43.889
+Distributed SQL (Spanner, CockroachDB, YugabyteDB, TiDB).
+
+401
+00:27:44.169 --> 00:27:45.086
+What you get:
+
+402
+00:27:45.366 --> 00:27:50.315
+Automatic range splits and moves, distributed transactions, global indexes.
+
+403
+00:27:50.595 --> 00:27:51.555
+What you give up:
+
+404
+00:27:51.835 --> 00:27:55.633
+Latency on cross-range transactions; cost; new ops skills.
+
+405
+00:27:55.913 --> 00:27:56.553
+Fit:
+
+406
+00:27:56.833 --> 00:28:01.014
+Multi-region, many access patterns, strong consistency needs.
+
+407
+00:28:02.364 --> 00:28:07.655
+NoSQL with native partitioning (DynamoDB, Cassandra, MongoDB).
+
+408
+00:28:07.935 --> 00:28:08.852
+What you get:
+
+409
+00:28:09.132 --> 00:28:11.073
+Partitioning is the data model.
+
+410
+00:28:11.353 --> 00:28:12.313
+What you give up:
+
+411
+00:28:12.593 --> 00:28:15.111
+Query flexibility; you still choose the key.
+
+412
+00:28:15.391 --> 00:28:16.031
+Fit:
+
+413
+00:28:16.311 --> 00:28:20.364
+Key-value or wide-column access patterns (Ch 06).
+
+414
+00:28:21.714 --> 00:28:22.610
+Part 3.
+
+415
+00:28:22.890 --> 00:28:24.618
+Architecture and Diagrams.
+
+416
+00:28:25.868 --> 00:28:27.873
+Component view: sharded orders.
+
+417
+00:28:28.153 --> 00:28:29.497
+Here is the diagram.
+
+418
+00:28:33.347 --> 00:28:36.910
+Every shard is itself a replicated cluster (Ch 10).
+
+419
+00:28:37.190 --> 00:28:42.993
+The shard map is small (1,024 rows plus a version) and cached in every pod.
+
+420
+00:28:43.273 --> 00:28:50.270
+Store queries go to a separately partitioned read model fed by events, not to a scatter-gather over the order shards.
+
+421
+00:28:50.550 --> 00:28:54.838
+Scatter-gather is kept for rare support and admin queries, with a deadline.
+
+422
+00:28:56.188 --> 00:28:59.751
+Sequence: happy path, place an order and read it back by id.
+
+423
+00:29:00.031 --> 00:29:02.825
+The sequence diagram walks through it step by step.
+
+424
+00:29:03.105 --> 00:29:04.001
+C to O:
+
+425
+00:29:04.281 --> 00:29:06.820
+POST or orders customer cust-42.
+
+426
+00:29:07.100 --> 00:29:09.425
+O to R: bucket of cust-42.
+
+427
+00:29:09.705 --> 00:29:13.012
+R to O: bucket 532 on shard-c.
+
+428
+00:29:13.292 --> 00:29:14.167
+O to A:
+
+429
+00:29:14.447 --> 00:29:21.785
+BEGIN insert order ord214... bucket 532, items, payment intent, outbox row.
+
+430
+00:29:22.065 --> 00:29:22.940
+A to O:
+
+431
+00:29:23.220 --> 00:29:25.609
+COMMIT ok, one local transaction.
+
+432
+00:29:25.889 --> 00:29:26.807
+O to C:
+
+433
+00:29:27.087 --> 00:29:35.599
+201 ord2141a0de1f7a40df6a5d04.
+
+434
+00:29:35.879 --> 00:29:39.932
+A to K: outbox relay publishes order.order.placed.v1.
+
+435
+00:29:40.212 --> 00:29:41.108
+C to O:
+
+436
+00:29:41.388 --> 00:29:50.028
+GET or orders or ord2141a0de1f7a40df6a5d04.
+
+437
+00:29:50.308 --> 00:29:54.511
+O to R: bucket from id prefix 0x214.
+
+438
+00:29:54.791 --> 00:29:59.420
+R to O: bucket 532 on shard-c, no lookup needed.
+
+439
+00:29:59.700 --> 00:30:02.175
+O to A: select by bucket and id.
+
+440
+00:30:02.455 --> 00:30:03.991
+A to O: order row.
+
+441
+00:30:04.271 --> 00:30:05.188
+O to C:
+
+442
+00:30:05.468 --> 00:30:06.663
+200 order.
+
+443
+00:30:10.513 --> 00:30:14.715
+Sequence: failure path, a writer with a stale map during a bucket move.
+
+444
+00:30:14.995 --> 00:30:17.790
+The sequence diagram walks through it step by step.
+
+445
+00:30:18.070 --> 00:30:21.270
+M to S: bulk copy bucket 40 while writable.
+
+446
+00:30:21.550 --> 00:30:23.427
+M to T: upsert rows.
+
+447
+00:30:23.707 --> 00:30:26.374
+M to S: catch-up deltas until small.
+
+448
+00:30:26.654 --> 00:30:30.494
+M to S: insert into bucketfence 40 movedto shard-e.
+
+449
+00:30:30.774 --> 00:30:35.361
+W to S: insert order into bucket 40 using map v7.
+
+450
+00:30:35.641 --> 00:30:36.793
+S to W:
+
+451
+00:30:37.073 --> 00:30:41.019
+ERROR BUCKETMOVED bucket=40 movedto=shard-e.
+
+452
+00:30:41.299 --> 00:30:43.411
+M to S: copy final delta.
+
+453
+00:30:43.691 --> 00:30:45.995
+M to T: upsert final delta.
+
+454
+00:30:46.275 --> 00:30:48.899
+M to M: checksum source equals target.
+
+455
+00:30:49.179 --> 00:30:52.998
+M to CFG: set bucket 40 to shard-e, version 8.
+
+456
+00:30:53.278 --> 00:30:55.603
+W to CFG: reload map.
+
+457
+00:30:55.883 --> 00:30:58.187
+CFG to W: map v8.
+
+458
+00:30:58.467 --> 00:31:01.710
+W to T: retry insert into bucket 40.
+
+459
+00:31:01.990 --> 00:31:05.361
+T to W: ok. and so on, as shown on screen.
+
+460
+00:31:09.211 --> 00:31:13.968
+If the checksums don't match, the mover keeps the fence, doesn't flip the map, and pages.
+
+461
+00:31:14.248 --> 00:31:19.816
+Writes to that one bucket fail until a human decides, which is better than silently losing them.
+
+462
+00:31:21.166 --> 00:31:23.129
+State: one bucket during a move.
+
+463
+00:31:23.409 --> 00:31:24.753
+Here is the diagram.
+
+464
+00:31:28.603 --> 00:31:30.416
+Aborting is free until the fence.
+
+465
+00:31:30.696 --> 00:31:35.816
+After the fence, the only exits are flip or remove the fence, and both are explicit.
+
+466
+00:31:37.166 --> 00:31:38.083
+Part 4.
+
+467
+00:31:38.363 --> 00:31:39.985
+Design Document Excerpt:
+
+468
+00:31:40.265 --> 00:31:41.865
+Sharding the Orders Database.
+
+469
+00:31:43.115 --> 00:31:44.459
+Here is a quick table:
+
+470
+00:31:44.739 --> 00:31:46.040
+Field, and Value.
+
+471
+00:31:46.320 --> 00:31:47.664
+Author or Reviewers:
+
+472
+00:31:47.944 --> 00:31:51.869
+Platform data team or Orders, Payments, Store Ops, SRE.
+
+473
+00:31:52.149 --> 00:31:53.045
+Status:
+
+474
+00:31:53.325 --> 00:31:54.200
+Approved.
+
+475
+00:31:54.480 --> 00:31:55.803
+Related ADRs:
+
+476
+00:31:56.083 --> 00:32:11.784
+ADR-041 Application-level sharding with 1,024 logical buckets; ADR-042 Event-fed ordersbystore read model; ADR-043 Online bucket moves with a write fence.
+
+477
+00:32:13.134 --> 00:32:13.774
+1.
+
+478
+00:32:14.054 --> 00:32:15.462
+Context and Problem.
+
+479
+00:32:15.742 --> 00:32:28.499
+The orders primary (Ch 10's quorum-sync cluster) is at 70 % CPU and 6.8 TB at P90 sale peaks, and projected to hit its write ceiling in ~9 months.
+
+480
+00:32:28.779 --> 00:32:35.201
+A mod-N reshard in another team moved 80 % of its data and lost writes (§1.1).
+
+481
+00:32:35.481 --> 00:32:39.385
+The store dashboard's storeid queries are the top CPU consumer.
+
+482
+00:32:39.665 --> 00:32:40.369
+2.
+
+483
+00:32:40.649 --> 00:32:41.993
+Goals or Non-Goals.
+
+484
+00:32:43.343 --> 00:32:58.639
+Goals: scale writes and storage horizontally; keep checkout (order + items + payment) a local transaction; add shards online with no lost writes; per-customer and by-id reads on one shard; store queries without scatter-gather.
+
+485
+00:32:58.919 --> 00:33:07.708
+Non-goals: cross-shard ACID transactions (Ch 13 sagas where needed); multi-region write placement (Ch 27).
+
+486
+00:33:07.988 --> 00:33:08.735
+3.
+
+487
+00:33:09.015 --> 00:33:09.975
+Requirements.
+
+488
+00:33:11.325 --> 00:33:12.669
+Here is a quick table:
+
+489
+00:33:12.949 --> 00:33:14.421
+ID, and Requirement.
+
+490
+00:33:14.701 --> 00:33:15.746
+NFR-1:
+
+491
+00:33:16.026 --> 00:33:21.210
+Order history and order-by-id: one shard, p99 at most 20 ms.
+
+492
+00:33:21.490 --> 00:33:22.535
+NFR-2:
+
+493
+00:33:22.815 --> 00:33:29.727
+Adding a shard moves at most 1 or N of data, online, with zero lost or unreachable acknowledged writes.
+
+494
+00:33:30.007 --> 00:33:31.074
+NFR-3:
+
+495
+00:33:31.354 --> 00:33:36.410
+Write freeze per bucket during a move at most 250 ms p99.
+
+496
+00:33:36.690 --> 00:33:37.778
+NFR-4:
+
+497
+00:33:38.058 --> 00:33:44.586
+Store order queries p99 at most 100 ms and not dependent on the order-shard count.
+
+498
+00:33:44.866 --> 00:33:45.911
+NFR-5:
+
+499
+00:33:46.191 --> 00:33:50.415
+Stale routing must fail safe (refuse) and self-heal within 5 s.
+
+500
+00:33:50.695 --> 00:33:51.783
+NFR-6:
+
+501
+00:33:52.063 --> 00:33:58.122
+Any single hot key at most 25 % of one shard's capacity (salting for known hot stores).
+
+502
+00:33:59.472 --> 00:34:00.176
+4.
+
+503
+00:34:00.456 --> 00:34:02.547
+Capacity and latency estimates.
+
+504
+00:34:03.897 --> 00:34:05.241
+Here is a quick table:
+
+505
+00:34:05.521 --> 00:34:07.825
+Item, and Calculation, and Result.
+
+506
+00:34:08.105 --> 00:34:09.811
+Orders data in 3 years.
+
+507
+00:34:10.091 --> 00:34:11.158
+Calculation:
+
+508
+00:34:11.438 --> 00:34:17.262
+Ch 02: ~6.8 TB now times ~2.5x growth.
+
+509
+00:34:17.542 --> 00:34:19.569
+Result: ~17 TB.
+
+510
+00:34:19.849 --> 00:34:20.937
+Shards needed.
+
+511
+00:34:21.217 --> 00:34:26.422
+Calculation: at most 3 TB and at most 60 % peak CPU per shard.
+
+512
+00:34:26.702 --> 00:34:27.513
+Result:
+
+513
+00:34:27.793 --> 00:34:29.841
+4 now, 8 in ~2 years.
+
+514
+00:34:30.121 --> 00:34:30.910
+Buckets.
+
+515
+00:34:31.190 --> 00:34:32.257
+Calculation:
+
+516
+00:34:32.537 --> 00:34:38.873
+1,024 ≥ 10 times the max shard count we plan (64).
+
+517
+00:34:39.153 --> 00:34:39.963
+Result:
+
+518
+00:34:40.243 --> 00:34:43.230
+128 buckets per shard at 8 shards.
+
+519
+00:34:43.510 --> 00:34:44.577
+Bucket size.
+
+520
+00:34:44.857 --> 00:34:45.923
+Calculation:
+
+521
+00:34:46.203 --> 00:34:49.147
+17 TB or 1,024.
+
+522
+00:34:49.427 --> 00:34:56.937
+Result: ~17 GB per bucket: copy ~3 to 6 min at 50 to 100 MB per second.
+
+523
+00:34:57.217 --> 00:34:59.819
+Data moved going 4, then 5 shards.
+
+524
+00:35:00.099 --> 00:35:01.166
+Calculation:
+
+525
+00:35:01.446 --> 00:35:02.897
+1 or 5 of buckets.
+
+526
+00:35:03.177 --> 00:35:07.401
+Result: ~205 buckets, ~20 % (L1:
+
+527
+00:35:07.681 --> 00:35:09.451
+19.7 %).
+
+528
+00:35:09.731 --> 00:35:10.670
+Shard map.
+
+529
+00:35:10.950 --> 00:35:12.017
+Calculation:
+
+530
+00:35:12.297 --> 00:35:15.262
+1,024 times (int + short name).
+
+531
+00:35:15.542 --> 00:35:16.353
+Result:
+
+532
+00:35:16.633 --> 00:35:18.894
+20 KB, cached in every pod.
+
+533
+00:35:20.244 --> 00:35:21.695
+Store read model lag.
+
+534
+00:35:21.975 --> 00:35:23.041
+Calculation:
+
+535
+00:35:23.321 --> 00:35:25.540
+Outbox, then Kafka, then consumer.
+
+536
+00:35:25.820 --> 00:35:29.575
+Result: p99 2 s (acceptable to Store Ops).
+
+537
+00:35:30.925 --> 00:35:31.693
+5.
+
+538
+00:35:31.973 --> 00:35:41.807
+Proposed design. bucket = CRC32C(customerid) mod 1024, in a shared library with golden-value tests.
+
+539
+00:35:42.087 --> 00:35:47.421
+The function never changes. shardmap(bucket, shard, version) in the config DB.
+
+540
+00:35:47.701 --> 00:35:51.626
+Pods poll every 5 s and reload immediately on BUCKETMOVED.
+
+541
+00:35:51.906 --> 00:35:53.677
+Map versions only increase.
+
+542
+00:35:53.957 --> 00:36:05.135
+Order ids carry the bucket (ordbucket hexms hexrandom), so by-id routing needs no lookup. orders, orderitems, payments and the outbox are co-located by bucket.
+
+543
+00:36:05.415 --> 00:36:08.829
+Every table has bucket as the first primary-key column.
+
+544
+00:36:10.179 --> 00:36:14.253
+Each shard is a Ch 10 cluster (quorum sync to 2 standbys).
+
+545
+00:36:14.533 --> 00:36:22.021
+Store queries use ordersbystore, keyed by (storeid, salt), fed by order.order.placed.v1 and status events.
+
+546
+00:36:22.301 --> 00:36:24.477
+Known hot stores get 4 to 8 salts.
+
+547
+00:36:24.757 --> 00:36:38.432
+Moves: the bucket-mover job runs bulk copy, then catch-up (logical replication or change sequence), then fence (trigger on bucketfence), then final delta, then checksum, then map flip, then delayed delete.
+
+548
+00:36:38.712 --> 00:36:41.656
+One bucket at a time per shard pair, rate-limited.
+
+549
+00:36:41.936 --> 00:36:49.637
+Scatter-gather only for admin or support endpoints: per-shard limit, 300 ms deadline, partial results flagged.
+
+550
+00:36:50.987 --> 00:36:51.734
+7.
+
+551
+00:36:52.014 --> 00:36:53.529
+Alternatives considered.
+
+552
+00:36:54.879 --> 00:36:56.223
+Here is a quick table:
+
+553
+00:36:56.503 --> 00:37:00.023
+Option, and Pros, and Cons, and Verdict. hash mod N.
+
+554
+00:37:00.303 --> 00:37:01.156
+Pros:
+
+555
+00:37:01.436 --> 00:37:02.247
+No map.
+
+556
+00:37:02.527 --> 00:37:06.153
+Cons: ~80 % data moves per change (L1).
+
+557
+00:37:06.433 --> 00:37:07.244
+Verdict:
+
+558
+00:37:07.524 --> 00:37:08.441
+Rejected.
+
+559
+00:37:08.721 --> 00:37:10.599
+Consistent hashing with vnodes.
+
+560
+00:37:10.879 --> 00:37:11.732
+Pros:
+
+561
+00:37:12.012 --> 00:37:13.164
+No central map.
+
+562
+00:37:13.444 --> 00:37:14.255
+Cons:
+
+563
+00:37:14.535 --> 00:37:18.055
+Moves are hard to control and verify, and not unit-based.
+
+564
+00:37:18.335 --> 00:37:19.145
+Verdict:
+
+565
+00:37:19.425 --> 00:37:22.049
+Rejected for the DB (fine for caches).
+
+566
+00:37:22.329 --> 00:37:25.167
+1,024 buckets + versioned map.
+
+567
+00:37:25.447 --> 00:37:30.716
+Pros: ~1 or N moves, bucket = unit of move or fence or verify.
+
+568
+00:37:30.996 --> 00:37:31.807
+Cons:
+
+569
+00:37:32.087 --> 00:37:34.369
+Map to operate; routing library.
+
+570
+00:37:34.649 --> 00:37:35.460
+Verdict:
+
+571
+00:37:35.740 --> 00:37:36.572
+Chosen.
+
+572
+00:37:36.852 --> 00:37:37.663
+Citus.
+
+573
+00:37:37.943 --> 00:37:38.796
+Pros:
+
+574
+00:37:39.076 --> 00:37:42.724
+Distributed tables, co-location, shard moves built in.
+
+575
+00:37:43.004 --> 00:37:43.815
+Cons:
+
+576
+00:37:44.095 --> 00:37:48.959
+Extension version coupling to managed PostgreSQL offerings; team skills.
+
+577
+00:37:49.239 --> 00:37:50.049
+Verdict:
+
+578
+00:37:50.329 --> 00:37:51.801
+Revisit in 12 months.
+
+579
+00:37:53.151 --> 00:37:55.541
+CockroachDB or YugabyteDB.
+
+580
+00:37:55.821 --> 00:37:56.674
+Pros:
+
+581
+00:37:56.954 --> 00:37:59.215
+Automatic splits, global indexes.
+
+582
+00:37:59.495 --> 00:38:00.306
+Cons:
+
+583
+00:38:00.586 --> 00:38:03.637
+Migration cost, cross-range txn latency.
+
+584
+00:38:03.917 --> 00:38:04.727
+Verdict:
+
+585
+00:38:05.007 --> 00:38:07.951
+Revisit for multi-region (Ch 27).
+
+586
+00:38:08.231 --> 00:38:09.981
+Scatter-gather for store queries.
+
+587
+00:38:10.261 --> 00:38:11.114
+Pros:
+
+588
+00:38:11.394 --> 00:38:12.503
+No read model.
+
+589
+00:38:12.783 --> 00:38:13.594
+Cons:
+
+590
+00:38:13.874 --> 00:38:16.647
+Cost grows with shard count; tail latency.
+
+591
+00:38:16.927 --> 00:38:17.738
+Verdict:
+
+592
+00:38:18.018 --> 00:38:20.493
+Rejected for the dashboard, kept for admin.
+
+593
+00:38:21.843 --> 00:38:22.525
+8.
+
+594
+00:38:22.805 --> 00:38:23.957
+Failure modes.
+
+595
+00:38:24.237 --> 00:38:27.288
+Stale map writes: refused by the fence, retried.
+
+596
+00:38:27.568 --> 00:38:30.448
+Checksum mismatch: fence kept, no flip, page.
+
+597
+00:38:30.728 --> 00:38:35.251
+Mover crash mid-copy: restart from the watermark (idempotent upserts).
+
+598
+00:38:35.531 --> 00:38:39.968
+A shard down: its buckets (~25 %) fail, the rest serve.
+
+599
+00:38:40.248 --> 00:38:43.683
+Map store down: pods keep the cached map, and moves pause.
+
+600
+00:38:43.963 --> 00:38:46.843
+Read model lag: the dashboard shows as of time.
+
+601
+00:38:47.123 --> 00:38:47.827
+10.
+
+602
+00:38:48.107 --> 00:38:49.195
+Observability.
+
+603
+00:38:49.475 --> 00:39:06.029
+Requests and latency per shard and bucket (top-N hot buckets), shard skew (max or avg), map version per pod, BUCKETMOVED rate, mover progress or freeze time or checksum results, scatter-gather fan-out and partial-result rate, read model lag.
+
+604
+00:39:07.379 --> 00:39:08.233
+14.
+
+605
+00:39:08.513 --> 00:39:14.379
+Decision (ADR-041 or 042 or 043 summary).
+
+606
+00:39:14.659 --> 00:39:23.342
+Orders are sharded at the application level by customerid into 1,024 fixed buckets mapped to shard clusters by a versioned map.
+
+607
+00:39:23.622 --> 00:39:25.414
+Order ids carry their bucket.
+
+608
+00:39:25.694 --> 00:39:29.939
+Store queries use an event-fed read model keyed by salted storeid.
+
+609
+00:39:30.219 --> 00:39:37.793
+Buckets move online with bulk copy, catch-up, a DB-level write fence, checksum verification and a versioned map flip.
+
+610
+00:39:39.143 --> 00:39:40.103
+Part 5.
+
+611
+00:39:40.383 --> 00:39:42.367
+Hands-On Code, Level Ladder.
+
+612
+00:39:43.617 --> 00:39:44.961
+Here is a quick table:
+
+613
+00:39:45.241 --> 00:39:47.929
+Level, and New requirement that forces the step.
+
+614
+00:39:48.209 --> 00:39:49.041
+L1:
+
+615
+00:39:49.321 --> 00:39:56.083
+Show how partitioning schemes balance data, how much moves when a shard is added, and what skew and range keys do.
+
+616
+00:39:56.363 --> 00:39:57.430
+(plain Java).
+
+617
+00:39:57.710 --> 00:39:58.521
+L2:
+
+618
+00:39:58.801 --> 00:40:03.793
+The orders table is too big to maintain as one table, but one server is still enough.
+
+619
+00:40:04.073 --> 00:40:07.571
+(PostgreSQL declarative partitioning behind Spring).
+
+620
+00:40:07.851 --> 00:40:08.705
+L3:
+
+621
+00:40:08.985 --> 00:40:15.470
+One server isn't enough: shard across clusters, route by customer and by id, handle store queries.
+
+622
+00:40:15.750 --> 00:40:16.625
+L4:
+
+623
+00:40:16.905 --> 00:40:22.345
+Add shards online without losing a write, and stop one mega store from overloading a shard.
+
+624
+00:40:22.625 --> 00:40:23.457
+Labs:
+
+625
+00:40:23.737 --> 00:40:30.499
+Real Redis 7 Cluster and real PostgreSQL 16: every behaviour claimed above, reproduced.
+
+626
+00:40:31.849 --> 00:40:35.796
+L1, Concept: comparing partitioning schemes (plain Java).
+
+627
+00:40:36.076 --> 00:40:37.591
+Here is the Java code.
+
+628
+00:40:37.871 --> 00:40:42.031
+It runs to 119 lines; the full listing is in the chapter.
+
+629
+00:40:42.311 --> 00:40:47.089
+PartitioningL1.java, run with: java PartitioningL1.java.
+
+630
+00:40:47.369 --> 00:40:50.953
+Compare ways to split 200,000 orders across shards:
+
+631
+00:40:51.233 --> 00:40:55.884
+A. balance (max or average load) B. data moved when adding a 5th shard.
+
+632
+00:40:58.734 --> 00:41:00.526
+Actual output from running it:
+
+633
+00:41:01.876 --> 00:41:02.793
+On screen:
+
+634
+00:41:03.073 --> 00:41:04.055
+A+B.
+
+635
+00:41:04.335 --> 00:41:28.441
+200,000 customer keys on 4 shards, then add a 5th. scheme max or avg moved on 4, then 5. hash mod N 1.00x 80.1%. consistent hashing, 1 point per shard 1.80x 17.2%. consistent hashing, 150 vnodes 1.02x 20.3%.
+
+636
+00:41:28.721 --> 00:41:35.377
+1,024 fixed buckets, then shards 1.00x 19.7%.
+
+637
+00:41:35.657 --> 00:41:36.340
+C.
+
+638
+00:41:36.620 --> 00:41:38.241
+Shard orders by storeid:
+
+639
+00:41:38.521 --> 00:41:42.895
+500 stores, one mega dark store takes 5 % of all orders.
+
+640
+00:41:43.175 --> 00:41:47.313
+4 shards: busiest shard carries 1.11x the average.
+
+641
+00:41:47.593 --> 00:41:52.351
+16 shards: busiest shard carries 1.76x the average.
+
+642
+00:41:52.631 --> 00:41:57.495
+64 shards: busiest shard carries 3.90x the average.
+
+643
+00:41:57.775 --> 00:41:58.500
+D.
+
+644
+00:41:58.780 --> 00:42:05.351
+Range-partition orders by month versus hash: where do today's 10,000 writes land? range by month:
+
+645
+00:42:05.631 --> 00:42:27.732
+2026 to 09=10000 ← one hot partition for all writes. hash by id: s0=2512, s1=2524, s2=2486, s3=2478 ← writes spread; but 'last.
+
+646
+00:42:28.012 --> 00:42:29.527
+The rest is in the chapter.
+
+647
+00:42:32.377 --> 00:42:37.795
+What L1 shows: all hash schemes balance well once each shard owns many points or buckets.
+
+648
+00:42:38.075 --> 00:42:42.918
+The difference is what happens when N changes. mod N moves 80 % of keys.
+
+649
+00:42:43.198 --> 00:42:49.769
+Consistent hashing with one point per shard moves little but balances badly, and vnodes fix the balance.
+
+650
+00:42:50.049 --> 00:42:52.971
+Fixed buckets are even and move exactly 1 or N.
+
+651
+00:42:53.251 --> 00:43:09.145
+Section C shows that no scheme fixes a skewed key: the more shards you add, the more the mega store's shard stands out (1.11x at 4 shards, 3.90x at 64), because the average shrinks and the mega store doesn't.
+
+652
+00:43:09.425 --> 00:43:13.777
+Section D shows range-by-time sending every write to one partition.
+
+653
+00:43:15.127 --> 00:43:19.159
+L2, PostgreSQL declarative partitioning behind Spring.
+
+654
+00:43:19.439 --> 00:43:27.076
+Requirement: the orders table is 400 M rows and vacuum takes hours, but one server still has the capacity.
+
+655
+00:43:27.356 --> 00:43:36.977
+Partition by customerid inside the server, so per-customer queries prune to one partition, and range-partition the event archive by month for retention.
+
+656
+00:43:38.327 --> 00:43:40.119
+Schema (Flyway V11).
+
+657
+00:43:40.399 --> 00:43:41.999
+Here is the SQL code.
+
+658
+00:43:42.279 --> 00:43:45.906
+It runs to 41 lines; the full listing is in the chapter.
+
+659
+00:43:46.186 --> 00:43:48.575
+V11partitionorders.sql.
+
+660
+00:43:48.855 --> 00:43:56.279
+16 partitions: enough to keep each one vacuum-friendly; a later split means re-creating, so don't go too small.
+
+661
+00:43:59.129 --> 00:44:00.196
+Repository.
+
+662
+00:44:00.476 --> 00:44:01.991
+Here is the Java code.
+
+663
+00:44:02.271 --> 00:44:05.919
+It runs to 54 lines; the full listing is in the chapter.
+
+664
+00:44:06.199 --> 00:44:09.697
+Prunes to ONE partition: customerid is in the WHERE clause.
+
+665
+00:44:12.547 --> 00:44:13.721
+Retention job.
+
+666
+00:44:14.001 --> 00:44:15.515
+Here is the Java code.
+
+667
+00:44:15.795 --> 00:44:19.529
+It runs to 39 lines; the full listing is in the chapter.
+
+668
+00:44:19.809 --> 00:44:24.459
+Creates next month's partition ahead of time and drops months past retention.
+
+669
+00:44:27.309 --> 00:44:28.056
+Warning:
+
+670
+00:44:28.336 --> 00:44:30.725
+What was and wasn't verified for L2.
+
+671
+00:44:31.005 --> 00:44:39.688
+The partitioning behaviour (pruning, the primary-key rule, row spread) was verified on real PostgreSQL 16 in Lab A below.
+
+672
+00:44:39.968 --> 00:44:47.605
+The Spring code wasn't compiled here: this environment can't download Spring or the JDBC driver from Maven Central.
+
+673
+00:44:47.885 --> 00:44:55.907
+JdbcClient is the Spring Framework 6.1 plus API, and.query(Class) maps records by constructor.
+
+674
+00:44:56.187 --> 00:44:59.131
+Check against your Spring Boot 4 version.!-- VERIFY --.
+
+675
+00:45:00.481 --> 00:45:08.374
+What L2 adds: partitioning inside one server makes per-customer queries touch one partition and makes retention a DROP.
+
+676
+00:45:08.654 --> 00:45:10.403
+It doesn't add write capacity.
+
+677
+00:45:10.683 --> 00:45:16.891
+The store query still scans every partition, and the primary key had to change to (customerid, id).
+
+678
+00:45:18.241 --> 00:45:21.697
+L3, Application-level sharding with logical buckets.
+
+679
+00:45:21.977 --> 00:45:24.751
+Requirement: one primary can't take the writes.
+
+680
+00:45:25.031 --> 00:45:27.356
+Shard across four clusters by customer.
+
+681
+00:45:27.636 --> 00:45:30.068
+By-id reads must route without a lookup.
+
+682
+00:45:30.348 --> 00:45:33.143
+Store queries must not depend on the shard count.
+
+683
+00:45:34.493 --> 00:45:35.282
+Buckets.
+
+684
+00:45:35.562 --> 00:45:37.077
+Here is the Java code.
+
+685
+00:45:37.357 --> 00:45:40.898
+It runs to 19 lines; the full listing is in the chapter.
+
+686
+00:45:41.178 --> 00:45:42.949
+The key, then bucket function.
+
+687
+00:45:43.229 --> 00:45:53.447
+It must NEVER change once data exists (the bucket is also stored in every row). so it lives in one shared library and is covered by a golden-value test.
+
+688
+00:45:56.297 --> 00:45:58.324
+Order ids that carry the bucket.
+
+689
+00:45:58.604 --> 00:46:00.119
+Here is the Java code.
+
+690
+00:46:00.399 --> 00:46:04.111
+It runs to 34 lines; the full listing is in the chapter.
+
+691
+00:46:04.391 --> 00:46:23.761
+Order ids carry their bucket, so GET or orders/id routes to one shard without a global lookup: ordbucket:3 hexepochMillis:11 hexrandom:8 hex for example, ord1a319978e2a1c09f2c11ab.
+
+692
+00:46:24.041 --> 00:46:30.015
+Time-ordered within a bucket (good for B-tree inserts, Ch 05), unguessable suffix.
+
+693
+00:46:32.865 --> 00:46:34.166
+Versioned shard map.
+
+694
+00:46:34.446 --> 00:46:35.961
+Here is the Java code.
+
+695
+00:46:36.241 --> 00:46:39.889
+It runs to 31 lines; the full listing is in the chapter.
+
+696
+00:46:40.169 --> 00:46:42.473
+Versioned bucket, then shard assignment.
+
+697
+00:46:42.753 --> 00:46:47.211
+Loaded from the config store; pods reload on a timer and on BUCKETMOVED.
+
+698
+00:46:50.061 --> 00:46:51.384
+Bounded scatter-gather.
+
+699
+00:46:51.664 --> 00:46:53.179
+Here is the Java code.
+
+700
+00:46:53.459 --> 00:46:56.872
+It runs to 50 lines; the full listing is in the chapter.
+
+701
+00:46:57.152 --> 00:47:03.104
+Query every shard in parallel with a deadline, merge the top-K, and say whether the answer is complete.
+
+702
+00:47:03.384 --> 00:47:09.784
+Used only for queries WITHOUT the shard key (store dashboards, support search), keep them rare and bounded.
+
+703
+00:47:12.634 --> 00:47:15.194
+Spring wiring: one DataSource per shard.
+
+704
+00:47:15.474 --> 00:47:16.989
+Here is the Java code.
+
+705
+00:47:17.269 --> 00:47:20.895
+It runs to 48 lines; the full listing is in the chapter.
+
+706
+00:47:21.175 --> 00:47:25.186
+Picks the JdbcClient for a customer's or an order's shard.
+
+707
+00:47:25.466 --> 00:47:37.327
+There is deliberately NO routing DataSource. keyed by a ThreadLocal: the shard is an explicit argument, so a missing key is a compile error, not a. silent query on the default shard.
+
+708
+00:47:40.177 --> 00:47:41.671
+Sharded repository.
+
+709
+00:47:41.951 --> 00:47:43.465
+Here is the Java code.
+
+710
+00:47:43.745 --> 00:47:47.159
+It runs to 50 lines; the full listing is in the chapter.
+
+711
+00:47:50.009 --> 00:48:02.126
+ShardMapLoader is a small interface, ShardMap load() plus void onChange(ConsumerShardMap), implemented by polling select bucket, shard, version from shardmap every 5 s.
+
+712
+00:48:02.406 --> 00:48:08.209
+The Spring code wasn't compiled here (no Maven Central access in this environment).!-- VERIFY --.
+
+713
+00:48:08.489 --> 00:48:16.275
+The pure-Java parts (Buckets, OrderIds, ShardMap, ScatterGather) were merged into one file with a check harness and run:
+
+714
+00:48:17.625 --> 00:48:27.439
+On screen: golden values: cust-42, then bucket 532, cust-4242, then bucket 751.
+
+715
+00:48:27.719 --> 00:48:49.287
+200,000 customers over 1,024 buckets: min 186, max 206 (avg 195). new order id for cust-42: ord2141a0de1f7a40df6a5d04, then bucket 532, then shard-a.
+
+716
+00:48:49.567 --> 00:49:25.315
+(customer routes to shard-a). legacy or forged id rejected: not a sharded order id: ord42. map v2 after moving 205 buckets to shard-e: shard-a=51, shard-b=256, shard-c=256. shard-d=256, shard-e=205. scatter-gather top 4 (deadline 200 ms, shard-c slow): shard-a-o4, shard-b-o4. shard-a-o3, shard-b-o3 complete=false failed=shard-c.
+
+717
+00:49:28.165 --> 00:49:35.675
+Golden values (cust-42, then 532) are what a unit test pins, so nobody improves the hash later.
+
+718
+00:49:35.955 --> 00:49:45.256
+1,024 buckets over 200,000 customers range from 186 to 206 per bucket: an even base for moves.
+
+719
+00:49:45.536 --> 00:49:56.864
+The order id carries bucket 0x214 = 532, and routing by id lands on the same shard as routing by customer, without a lookup.
+
+720
+00:49:57.144 --> 00:50:05.699
+Moving 205 buckets to a fifth shard gives exactly the ~1 or N from §2.5, and the map version goes up.
+
+721
+00:50:07.049 --> 00:50:17.459
+Scatter-gather with one slow shard returns what it has by the deadline and says it's incomplete (failed=shard-c), so the UI can show a banner instead of hanging.
+
+722
+00:50:17.739 --> 00:50:19.617
+Store queries: the read model.
+
+723
+00:50:19.897 --> 00:50:21.753
+Store dashboards don't scatter-gather.
+
+724
+00:50:22.033 --> 00:50:28.966
+An event consumer maintains ordersbystore, which is sharded by (storeid, salt) on its own set of databases:
+
+725
+00:50:30.316 --> 00:50:31.831
+Here is the Java code.
+
+726
+00:50:32.111 --> 00:50:35.823
+It runs to 29 lines; the full listing is in the chapter.
+
+727
+00:50:38.673 --> 00:50:42.982
+StoreKeys.of is the shardKey function from L4's salting example.
+
+728
+00:50:43.262 --> 00:50:48.723
+The where eventversion guard makes redelivered or reordered events harmless (Ch 14).
+
+729
+00:50:49.003 --> 00:50:54.529
+The dashboard reads the read model and shows updated 1.2 s ago from the consumer lag.
+
+730
+00:50:55.879 --> 00:51:00.743
+Labs, real Redis 7 Cluster and real PostgreSQL 16, then.
+
+731
+00:51:01.023 --> 00:51:03.028
+Every script below was run as-is:
+
+732
+00:51:03.308 --> 00:51:23.447
+Redis 7.0.15 with three masters (ports 7001 to 7003, plus 7004 added later), and PostgreSQL 16 (5511 single node, 5521 shard A, 5522 shard B).
+
+733
+00:51:23.727 --> 00:51:29.572
+The outputs are copied verbatim, and your node ids, key names in a slot and timings will differ.
+
+734
+00:51:29.852 --> 00:51:33.287
+PostgreSQL labs must run as a non-root user.
+
+735
+00:51:33.567 --> 00:51:36.809
+The scripts are in labs or ch11-sharding/.
+
+736
+00:51:38.159 --> 00:51:38.885
+Setup.
+
+737
+00:51:39.165 --> 00:51:40.487
+Here is the shell code.
+
+738
+00:51:40.767 --> 00:51:44.522
+It runs to 47 lines; the full listing is in the chapter.
+
+739
+00:51:44.802 --> 00:51:46.359
+Redis 7 Cluster lab:
+
+740
+00:51:46.639 --> 00:51:55.685
+3 masters on 7001 to 7003 (no replicas, to keep it small) + a spare node config on 7004.
+
+741
+00:51:58.535 --> 00:51:59.388
+Lab A:
+
+742
+00:51:59.668 --> 00:52:02.079
+PostgreSQL partitioning (script).
+
+743
+00:52:02.359 --> 00:52:03.681
+Here is the shell code.
+
+744
+00:52:03.961 --> 00:52:07.780
+It runs to 37 lines; the full listing is in the chapter.
+
+745
+00:52:08.060 --> 00:52:13.863
+Experiment A: single-node declarative partitioning, pruning, scatter, and the uniqueness rule.
+
+746
+00:52:16.713 --> 00:52:18.057
+Lab A: output.
+
+747
+00:52:18.337 --> 00:52:43.147
+On screen: == query WITH the partition key (customerid): partitions scanned. ordersp1. == query WITHOUT the partition key (storeid): partitions scanned. ordersp0 ordersp1 ordersp2 ordersp3 ordersp4 ordersp5 ordersp6 ordersp7. == timing (warm cache): by customer versus by store. customerid = 'cust-42' Execution Time:
+
+748
+00:52:43.427 --> 00:52:48.505
+0.138 ms. storeid = 'store-7' Execution Time:
+
+749
+00:52:48.785 --> 00:52:53.521
+2.818 ms. == a primary key on id alone:
+
+750
+00:52:53.801 --> 00:52:58.921
+ERROR: unique constraint on partitioned table must include all partitioning columns.
+
+751
+00:52:59.201 --> 00:53:00.075
+DETAIL:
+
+752
+00:53:00.355 --> 00:53:11.001
+PRIMARY KEY constraint on table orders lacks column customerid which. is part of the partition key. == a primary key that includes the partition key:
+
+753
+00:53:11.281 --> 00:53:15.099
+OK (uniqueness of id alone is now only per partition).
+
+754
+00:53:15.379 --> 00:53:16.894
+The rest is in the chapter.
+
+755
+00:53:19.744 --> 00:53:22.283
+Lab B: two shards, bucket move (script).
+
+756
+00:53:22.563 --> 00:53:23.885
+Here is the shell code.
+
+757
+00:53:24.165 --> 00:53:27.984
+It runs to 67 lines; the full listing is in the chapter.
+
+758
+00:53:28.264 --> 00:53:41.043
+Experiment B: application-level sharding with 64 logical buckets on 2 physical shards. and an ONLINE move of buckets 32 to 63 from shard A to shard B with a write fence.
+
+759
+00:53:43.893 --> 00:53:45.365
+Lab B: output.
+
+760
+00:53:45.645 --> 00:54:03.266
+On screen: == before: shard A has 200000 rows in 64 buckets; shard B has 0. == moved buckets 32 to 63 in 7350 ms, every bucket verified by count + checksum. shard A:
+
+761
+00:54:03.546 --> 00:54:08.965
+100570 rows, buckets 0 to 31. shard B:
+
+762
+00:54:09.245 --> 00:54:20.231
+99430 rows, buckets 32 to 63. == a stale writer (old shard map) inserts into a moved bucket on shard A:
+
+763
+00:54:20.511 --> 00:54:21.215
+ERROR:
+
+764
+00:54:21.495 --> 00:54:34.082
+BUCKETMOVED bucket=40 movedto=shardB. == a customer's orders are still one-shard reads: cust-4242, then bucket 19, then shard A:
+
+765
+00:54:34.362 --> 00:54:42.959
+10 orders (one shard, one index lookup). == but 'orders of store-7' needs a scatter-gather over both shards: shard A:
+
+766
+00:54:43.239 --> 00:54:44.989
+170 shard B:
+
+767
+00:54:45.269 --> 00:54:46.698
+230 total:
+
+768
+00:54:46.978 --> 00:54:47.938
+400.
+
+769
+00:54:50.788 --> 00:54:51.663
+Lab C:
+
+770
+00:54:51.943 --> 00:54:53.436
+Redis Cluster (script).
+
+771
+00:54:53.716 --> 00:54:55.039
+Here is the shell code.
+
+772
+00:54:55.319 --> 00:54:59.052
+It runs to 74 lines; the full listing is in the chapter.
+
+773
+00:54:59.332 --> 00:55:06.287
+Redis Cluster lab: hash slots, MOVED, CROSSSLOT, hash tags, live slot migration (ASK), adding a node.
+
+774
+00:55:09.137 --> 00:55:10.587
+Lab C: output.
+
+775
+00:55:10.867 --> 00:55:56.877
+On screen: == slot ownership (key, then CRC16(key) mod 16384, then owning node). port 7001 owns 5461 slots 0 to 5460. port 7002 owns 5462 slots 5461 to 10922. port 7003 owns 5461 slots 10923 to 16383. == where keys live. order:ord1001 - slot 8262. order:ord1002 - slot 4133. cust-42:orders - slot
+
+776
+00:55:57.157 --> 00:56:06.501
+3330. cust-42:cart - slot 3330. == a client that ignores cluster topology:
+
+777
+00:56:06.781 --> 00:56:11.197
+SET order:ord1002 via port 7001:
+
+778
+00:56:11.477 --> 00:56:12.245
+OK.
+
+779
+00:56:12.525 --> 00:56:16.856
+SET order:ord1002 via port 7002:
+
+780
+00:56:17.136 --> 00:56:24.624
+MOVED 4133 127.0.0.1:7001.
+
+781
+00:56:24.904 --> 00:56:29.277
+SET order:ord1002 via port 7003:
+
+782
+00:56:29.557 --> 00:56:37.045
+MOVED 4133 127.0.0.1:7001.
+
+783
+00:56:37.325 --> 00:56:38.840
+The rest is in the chapter.
+
+784
+00:56:41.690 --> 00:56:42.778
+Reading the labs.
+
+785
+00:56:43.058 --> 00:56:43.911
+Lab A.
+
+786
+00:56:44.191 --> 00:56:49.333
+The customer query plan touches ordersp1 only, and the store query touches all eight.
+
+787
+00:56:49.613 --> 00:57:00.407
+On a small warm table that's 0.138 ms versus 2.818 ms (20 times ), and the gap grows with partition count and data size.
+
+788
+00:57:00.687 --> 00:57:05.573
+The primary key on id alone fails with PostgreSQL's own explanation.
+
+789
+00:57:05.853 --> 00:57:10.397
+Rows spread 49.2 K, 51.5 K per partition.
+
+790
+00:57:11.747 --> 00:57:12.621
+Lab B.
+
+791
+00:57:12.901 --> 00:57:16.720
+200,000 rows in 64 buckets on shard A.
+
+792
+00:57:17.000 --> 00:57:25.683
+Buckets 32 to 63 moved to shard B, each verified by count + checksum, and the data ends up ~50 or 50.
+
+793
+00:57:25.963 --> 00:57:32.469
+A writer with the old map is refused with BUCKETMOVED bucket=40 movedto=shardB.
+
+794
+00:57:32.749 --> 00:57:35.032
+It doesn't silently write to a dead copy.
+
+795
+00:57:35.312 --> 00:57:42.608
+A customer is still a one-shard read, and a store is a two-shard scatter-gather (170 + 230).
+
+796
+00:57:42.888 --> 00:57:58.376
+This lab fences first and then copies, so every bucket is frozen for its whole copy (7,350 ms or 32 about 230 ms each on tiny buckets, and minutes on real 17 GB buckets).
+
+797
+00:57:58.656 --> 00:58:00.235
+L4 removes that cost.
+
+798
+00:58:01.585 --> 00:58:02.459
+Lab C.
+
+799
+00:58:02.739 --> 00:58:12.467
+Keys map to slots by CRC16 mod 16384, and hash-tagged keys share a slot (3330).
+
+800
+00:58:12.747 --> 00:58:16.097
+A node that doesn't own the slot answers MOVED with the owner.
+
+801
+00:58:16.377 --> 00:58:21.347
+A multi-key command across slots fails with CROSSSLOT, and succeeds with a hash tag.
+
+802
+00:58:21.627 --> 00:58:27.835
+During a slot migration, the source answers ASK for moved keys and still serves unmoved ones.
+
+803
+00:58:28.115 --> 00:58:30.099
+The target refuses without ASKING.
+
+804
+00:58:30.379 --> 00:58:32.342
+After SETSLOT NODE, it's MOVED.
+
+805
+00:58:32.622 --> 00:58:42.841
+Adding a fourth node and rebalancing moved 25 % of keys (1 or 4, as the theory says), and every node ended up with 4,096 slots.
+
+806
+00:58:44.191 --> 00:58:47.839
+L4, Online moves without lost writes, and hot-key splitting.
+
+807
+00:58:48.119 --> 00:58:51.276
+Requirement: add a fifth shard during business hours.
+
+808
+00:58:51.556 --> 00:58:59.193
+Zero lost or unreachable writes, a freeze per bucket measured in milliseconds, and no shard overloaded by the mega store.
+
+809
+00:59:00.543 --> 00:59:02.485
+ShardStore (what the mover needs).
+
+810
+00:59:02.765 --> 00:59:04.279
+Here is the Java code.
+
+811
+00:59:04.559 --> 00:59:07.930
+It runs to 30 lines; the full listing is in the chapter.
+
+812
+00:59:08.210 --> 00:59:10.002
+What the mover needs from one shard.
+
+813
+00:59:10.282 --> 00:59:17.215
+The JDBC version maps each method to one SQL statement (see §5 L4 SQL).
+
+814
+00:59:17.495 --> 00:59:22.807
+Rows of a bucket whose change sequence is greater than afterSeq (0 = everything).
+
+815
+00:59:23.087 --> 00:59:27.034
+Idempotent upsert keyed by orderId (copies may be retried).
+
+816
+00:59:29.884 --> 00:59:30.865
+BucketMover.
+
+817
+00:59:31.145 --> 00:59:32.660
+Here is the Java code.
+
+818
+00:59:32.940 --> 00:59:36.609
+It runs to 53 lines; the full listing is in the chapter.
+
+819
+00:59:36.889 --> 00:59:39.599
+Online move of one bucket from source to target:
+
+820
+00:59:39.879 --> 00:59:43.569
+1. bulk copy while the bucket stays WRITABLE on the source.
+
+821
+00:59:43.849 --> 00:59:49.332
+2. catch up deltas (rows changed since the last watermark) until the delta is small.
+
+822
+00:59:52.182 --> 00:59:54.337
+JDBC mapping of ShardStore.
+
+823
+00:59:54.617 --> 00:59:56.217
+Here is the SQL code.
+
+824
+00:59:56.497 --> 01:00:00.230
+It runs to 26 lines; the full listing is in the chapter.
+
+825
+01:00:00.510 --> 01:00:17.235
+Each ShardStore method is one statement. changeseq is a bigint from a sequence, set by a trigger on every insert or update: create sequence orderschangeseq;. alter table orders add column changeseq bigint not null default nextval('orderschangeseq');.
+
+826
+01:00:20.085 --> 01:00:31.157
+Deletes during a move need a tombstone (a soft-delete flag or a deletedorders table scanned by the delta) because a delta scan can't see a row that no longer exists.
+
+827
+01:00:31.437 --> 01:00:35.085
+Orders are never hard-deleted, so the mover doesn't need one here.
+
+828
+01:00:35.365 --> 01:00:48.123
+At larger scale, replace the change-sequence scans with logical replication of one bucket (a publication with a row filter WHERE (bucket = 40), PostgreSQL 15 plus).!-- VERIFY --.
+
+829
+01:00:49.473 --> 01:00:56.982
+The mover was verified against an in-memory ShardStore whose write path checks the fence atomically with the write, like the trigger.
+
+830
+01:00:57.262 --> 01:00:59.865
+Eight writer threads insert orders continuously.
+
+831
+01:01:00.145 --> 01:01:04.838
+They cache the shard map and refresh it every 50 ms or on BUCKETMOVED.
+
+832
+01:01:05.118 --> 01:01:20.009
+The harness moves buckets 512 to 1023 (half the data) from shard-a to shard-b, first naively and then with BucketMover, and then checks that every acknowledged write is on the shard that the final map routes to:
+
+833
+01:01:21.359 --> 01:01:22.276
+On screen:
+
+834
+01:01:22.556 --> 01:01:46.300
+Move buckets 512 to 1023 from shard-a to shard-b while 8 writers run (clients refresh. their map every 50 ms). naive copy, then flip, then delete: acked writes=24456, lost or unreachable=88, BUCKETMOVED. retries=0, move time ms=3120,
+
+835
+01:01:46.580 --> 01:02:24.441
+rows A or B=62396 or 62042. bulk + catch-up + fence: acked writes=30292, lost or unreachable=0, BUCKETMOVED. retries=3735, move time ms=7191, max write-freeze per bucket µs=35793, rows copied. under fence (all buckets)=2, rows A or B=65155 or 65137.
+
+836
+01:02:27.291 --> 01:02:29.445
+Naive (copy, then flip, then delete):
+
+837
+01:02:29.725 --> 01:02:32.861
+88 acknowledged writes lost or unreachable.
+
+838
+01:02:33.141 --> 01:02:41.952
+These writers still had the old map, wrote to shard-a after the copy, and the rows were deleted with the bucket or stranded where routing no longer looks.
+
+839
+01:02:42.232 --> 01:02:45.539
+No errors were raised: the writes succeeded and then vanished.
+
+840
+01:02:45.819 --> 01:02:47.995
+That's the §1.1 incident.
+
+841
+01:02:49.345 --> 01:02:51.158
+Bulk + catch-up + fence:
+
+842
+01:02:51.438 --> 01:02:52.505
+0 lost.
+
+843
+01:02:52.785 --> 01:02:58.417
+3,735 writes hit the fence and retried after a map reload.
+
+844
+01:02:58.697 --> 01:03:02.387
+That's the price, and it's invisible to customers (a few ms).
+
+845
+01:03:02.667 --> 01:03:08.470
+Only 2 rows in total had to be copied under the fence across all 512 buckets.
+
+846
+01:03:08.750 --> 01:03:12.590
+The catch-up loop had moved everything else while the buckets were writable.
+
+847
+01:03:12.870 --> 01:03:23.643
+The longest freeze for one bucket was 36 ms (in-memory; on a real DB, expect tens to low hundreds of ms per bucket, dominated by the checksum query).
+
+848
+01:03:23.923 --> 01:03:30.729
+Hot keys: salting the mega store (applies to the ordersbystore read model, where storeid is the partition key):
+
+849
+01:03:32.079 --> 01:03:33.593
+Here is the Java code.
+
+850
+01:03:33.873 --> 01:03:37.607
+It runs to 35 lines; the full listing is in the chapter.
+
+851
+01:03:37.887 --> 01:03:42.281
+HotKeySalting.java, run with: java HotKeySalting.java.
+
+852
+01:03:42.561 --> 01:03:45.292
+The mega dark store takes 5 % of all orders.
+
+853
+01:03:45.572 --> 01:03:48.943
+Shard its store-level data by (store, salt) instead of store.
+
+854
+01:03:49.223 --> 01:03:55.239
+Hot keys (from a config list, refreshed from metrics) get a salt; everything else keeps a single key.
+
+855
+01:03:58.089 --> 01:03:59.006
+On screen:
+
+856
+01:03:59.286 --> 01:04:05.281
+64 shards, busiest shard versus average: store-MEGA split into 1 salted keys:
+
+857
+01:04:05.561 --> 01:04:09.827
+4.11x. store-MEGA split into 4 salted keys:
+
+858
+01:04:10.107 --> 01:04:14.566
+1.68x. store-MEGA split into 16 salted keys:
+
+859
+01:04:14.846 --> 01:04:19.497
+1.64x. store-MEGA split into 64 salted keys:
+
+860
+01:04:19.777 --> 01:04:25.921
+1.58x. price: reading store-MEGA's orders now takes one lookup per salt, merged.
+
+861
+01:04:28.771 --> 01:04:35.043
+Four salts take the mega store from 4.11x to 1.68x the average shard.
+
+862
+01:04:35.323 --> 01:04:45.691
+More salts barely help, because what's left (~1.6x) is ordinary variance of 500 stores over 64 shards, which bucket moves fix.
+
+863
+01:04:45.971 --> 01:04:49.427
+The salt list comes from config, driven by per-key metrics.
+
+864
+01:04:49.707 --> 01:04:58.411
+It only grows while the store is hot, and a salt count never shrinks without a rebuild, because readers must query every salt that ever held data.
+
+865
+01:04:59.761 --> 01:05:01.894
+What changed from L1 to L4.
+
+866
+01:05:02.174 --> 01:05:03.518
+Here is a quick table:
+
+867
+01:05:03.798 --> 01:05:07.254
+Concern, and L1, and L2, and L3, and L4.
+
+868
+01:05:07.534 --> 01:05:08.707
+Where data lives.
+
+869
+01:05:08.987 --> 01:05:09.819
+L1:
+
+870
+01:05:10.099 --> 01:05:11.358
+Simulated schemes.
+
+871
+01:05:11.638 --> 01:05:12.449
+L2:
+
+872
+01:05:12.729 --> 01:05:14.350
+Partitions on one server.
+
+873
+01:05:14.630 --> 01:05:15.483
+L3:
+
+874
+01:05:15.763 --> 01:05:17.683
+Buckets on 4 shard clusters.
+
+875
+01:05:17.963 --> 01:05:18.838
+L4:
+
+876
+01:05:19.118 --> 01:05:20.846
+Same, rebalanced online.
+
+877
+01:05:21.126 --> 01:05:22.278
+Write capacity.
+
+878
+01:05:22.558 --> 01:05:23.369
+L2:
+
+879
+01:05:23.649 --> 01:05:24.651
+One primary.
+
+880
+01:05:24.931 --> 01:05:28.217
+L3: ~4 times (one primary per shard).
+
+881
+01:05:28.497 --> 01:05:29.371
+L4:
+
+882
+01:05:29.651 --> 01:05:31.081
+Add shards as needed.
+
+883
+01:05:31.361 --> 01:05:32.555
+Adding capacity.
+
+884
+01:05:32.835 --> 01:05:33.667
+L1:
+
+885
+01:05:33.947 --> 01:05:38.662
+Measured: mod N moves 80 %, buckets 19.7 %.
+
+886
+01:05:38.942 --> 01:05:39.753
+L2:
+
+887
+01:05:40.033 --> 01:05:41.483
+N or A (one server).
+
+888
+01:05:41.763 --> 01:05:43.982
+L3: ~1 or N of buckets.
+
+889
+01:05:44.262 --> 01:05:45.137
+L4:
+
+890
+01:05:45.417 --> 01:05:48.297
+Moved with fence, 0 lost writes (verified).
+
+891
+01:05:48.577 --> 01:05:50.369
+Customer or by-id reads.
+
+892
+01:05:50.649 --> 01:05:51.459
+L2:
+
+893
+01:05:51.739 --> 01:05:54.214
+One partition (needs customer id).
+
+894
+01:05:54.494 --> 01:05:55.347
+L3:
+
+895
+01:05:55.627 --> 01:05:57.505
+One shard (bucket in the id).
+
+896
+01:05:57.785 --> 01:05:58.659
+L4:
+
+897
+01:05:58.939 --> 01:06:00.774
+Same, stale maps self-heal.
+
+898
+01:06:02.124 --> 01:06:03.127
+Store reads.
+
+899
+01:06:03.407 --> 01:06:04.239
+L1:
+
+900
+01:06:04.519 --> 01:06:05.521
+Skew measured.
+
+901
+01:06:05.801 --> 01:06:06.612
+L2:
+
+902
+01:06:06.892 --> 01:06:08.321
+Scan all partitions.
+
+903
+01:06:08.601 --> 01:06:09.455
+L3:
+
+904
+01:06:09.735 --> 01:06:12.913
+Event-fed read model; bounded scatter-gather for admin.
+
+905
+01:06:13.193 --> 01:06:14.068
+L4:
+
+906
+01:06:14.348 --> 01:06:18.743
+Salted hot keys (4.11x, then 1.68x).
+
+907
+01:06:19.023 --> 01:06:19.897
+Evidence.
+
+908
+01:06:20.177 --> 01:06:21.009
+L1:
+
+909
+01:06:21.289 --> 01:06:22.335
+Simulation.
+
+910
+01:06:22.615 --> 01:06:23.425
+L2:
+
+911
+01:06:23.705 --> 01:06:25.689
+Lab A (real PostgreSQL).
+
+912
+01:06:25.969 --> 01:06:26.823
+L3:
+
+913
+01:06:27.103 --> 01:06:29.172
+Harness + Lab B + Lab C.
+
+914
+01:06:29.452 --> 01:06:30.327
+L4:
+
+915
+01:06:30.607 --> 01:06:33.764
+Harness with concurrent writers + Labs B and C.
+
+916
+01:06:35.114 --> 01:06:36.053
+Part 6.
+
+917
+01:06:36.333 --> 01:06:37.613
+Production Concerns.
+
+918
+01:06:38.863 --> 01:06:40.015
+Failure modes.
+
+919
+01:06:40.295 --> 01:06:41.639
+Here is a quick table:
+
+920
+01:06:41.919 --> 01:06:45.801
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+921
+01:06:46.081 --> 01:06:48.364
+Writes lost during a move (no fence).
+
+922
+01:06:48.644 --> 01:06:49.839
+Detection signal:
+
+923
+01:06:50.119 --> 01:06:54.791
+Reconciliation finds rows only on the old shard; missing order tickets.
+
+924
+01:06:55.071 --> 01:06:56.287
+Blast radius:
+
+925
+01:06:56.567 --> 01:06:58.785
+Silent data loss (L4 naive:
+
+926
+01:06:59.065 --> 01:07:00.260
+88 writes).
+
+927
+01:07:00.540 --> 01:07:01.543
+Mitigation:
+
+928
+01:07:01.823 --> 01:07:07.177
+Fence + final delta + checksum before flip; delete only after a grace period.
+
+929
+01:07:07.457 --> 01:07:09.143
+Stale shard map in a pod.
+
+930
+01:07:09.423 --> 01:07:10.617
+Detection signal:
+
+931
+01:07:10.897 --> 01:07:14.503
+BUCKETMOVED or MOVED rate; map version skew across pods.
+
+932
+01:07:14.783 --> 01:07:15.999
+Blast radius:
+
+933
+01:07:16.279 --> 01:07:18.988
+Retries; errors if the client doesn't refresh.
+
+934
+01:07:19.268 --> 01:07:20.271
+Mitigation:
+
+935
+01:07:20.551 --> 01:07:24.476
+Refresh on refusal, poll with a version, versions only increase.
+
+936
+01:07:24.756 --> 01:07:26.228
+Checksum mismatch at flip.
+
+937
+01:07:26.508 --> 01:07:27.703
+Detection signal:
+
+938
+01:07:27.983 --> 01:07:28.985
+Mover alert.
+
+939
+01:07:29.265 --> 01:07:30.481
+Blast radius:
+
+940
+01:07:30.761 --> 01:07:32.873
+One bucket's writes blocked while fenced.
+
+941
+01:07:33.153 --> 01:07:34.156
+Mitigation:
+
+942
+01:07:34.436 --> 01:07:37.700
+Keep fence, don't flip, page; runbook to diff and repair.
+
+943
+01:07:37.980 --> 01:07:38.940
+Hot shard.
+
+944
+01:07:39.220 --> 01:07:40.415
+Detection signal:
+
+945
+01:07:40.695 --> 01:07:44.961
+Per-shard CPU or latency skew; top-N buckets by QPS.
+
+946
+01:07:45.241 --> 01:07:46.457
+Blast radius:
+
+947
+01:07:46.737 --> 01:07:49.980
+Everyone on that shard (~1 or N of customers).
+
+948
+01:07:50.260 --> 01:07:51.263
+Mitigation:
+
+949
+01:07:51.543 --> 01:07:54.081
+Move hot buckets; salt hot keys; cache.
+
+950
+01:07:55.431 --> 01:07:56.562
+One shard down.
+
+951
+01:07:56.842 --> 01:07:58.037
+Detection signal:
+
+952
+01:07:58.317 --> 01:08:00.941
+Health checks; errors on 1 or N of buckets.
+
+953
+01:08:01.221 --> 01:08:04.591
+Blast radius: ~1 or N of customers, not all.
+
+954
+01:08:04.871 --> 01:08:05.874
+Mitigation:
+
+955
+01:08:06.154 --> 01:08:15.626
+Each shard is a replicated cluster (Ch 10); degrade per shard; don't let one shard's timeouts exhaust shared pools (bulkheads, Ch 18).
+
+956
+01:08:15.906 --> 01:08:17.613
+Scatter-gather tail latency.
+
+957
+01:08:17.893 --> 01:08:19.087
+Detection signal:
+
+958
+01:08:19.367 --> 01:08:22.695
+Fan-out p99 ≫ single-shard p99.
+
+959
+01:08:22.975 --> 01:08:24.191
+Blast radius:
+
+960
+01:08:24.471 --> 01:08:28.589
+Admin or support endpoints; pool exhaustion if on a hot path.
+
+961
+01:08:28.869 --> 01:08:29.871
+Mitigation:
+
+962
+01:08:30.151 --> 01:08:33.970
+Deadlines, per-shard limits, partial results, move to a read model.
+
+963
+01:08:34.250 --> 01:08:35.658
+Cross-shard write needed.
+
+964
+01:08:35.938 --> 01:08:37.133
+Detection signal:
+
+965
+01:08:37.413 --> 01:08:40.143
+Code review; transaction spans two shards.
+
+966
+01:08:40.423 --> 01:08:41.639
+Blast radius:
+
+967
+01:08:41.919 --> 01:08:44.053
+Inconsistency on partial failure.
+
+968
+01:08:44.333 --> 01:08:45.335
+Mitigation:
+
+969
+01:08:45.615 --> 01:08:49.967
+Co-locate by key; saga or outbox for the rest (Ch 13).
+
+970
+01:08:51.317 --> 01:08:53.664
+Bucket function changed by accident.
+
+971
+01:08:53.944 --> 01:08:55.139
+Detection signal:
+
+972
+01:08:55.419 --> 01:08:58.619
+Golden-value test fails; routing to wrong shards.
+
+973
+01:08:58.899 --> 01:09:00.115
+Blast radius:
+
+974
+01:09:00.395 --> 01:09:03.083
+Every key misrouted: data missing everywhere.
+
+975
+01:09:03.363 --> 01:09:04.365
+Mitigation:
+
+976
+01:09:04.645 --> 01:09:08.741
+Pin with golden tests; function lives in one versioned library.
+
+977
+01:09:09.021 --> 01:09:11.219
+Duplicate ids across partitions.
+
+978
+01:09:11.499 --> 01:09:12.693
+Detection signal:
+
+979
+01:09:12.973 --> 01:09:16.195
+Constraint can't catch it (PK includes partition key).
+
+980
+01:09:16.475 --> 01:09:17.691
+Blast radius:
+
+981
+01:09:17.971 --> 01:09:19.827
+Wrong order shown or updated.
+
+982
+01:09:20.107 --> 01:09:21.109
+Mitigation:
+
+983
+01:09:21.389 --> 01:09:25.741
+Globally unique id generator (Ch 20); id carries bucket.
+
+984
+01:09:26.021 --> 01:09:27.728
+Redis CROSSSLOT in production.
+
+985
+01:09:28.008 --> 01:09:29.203
+Detection signal:
+
+986
+01:09:29.483 --> 01:09:31.296
+Errors after moving to Cluster.
+
+987
+01:09:31.576 --> 01:09:32.792
+Blast radius:
+
+988
+01:09:33.072 --> 01:09:34.544
+Multi-key ops fail.
+
+989
+01:09:34.824 --> 01:09:35.827
+Mitigation:
+
+990
+01:09:36.107 --> 01:09:40.437
+Hash tags for keys used together; no multi-key ops across entities.
+
+991
+01:09:40.717 --> 01:09:41.912
+Read model lag.
+
+992
+01:09:42.192 --> 01:09:43.387
+Detection signal:
+
+993
+01:09:43.667 --> 01:09:44.691
+Consumer lag.
+
+994
+01:09:44.971 --> 01:09:46.187
+Blast radius:
+
+995
+01:09:46.467 --> 01:09:47.896
+Stale store dashboard.
+
+996
+01:09:48.176 --> 01:09:49.179
+Mitigation:
+
+997
+01:09:49.459 --> 01:09:52.360
+Show as of; alert on lag; replay from Kafka.
+
+998
+01:09:53.710 --> 01:09:54.798
+Observability.
+
+999
+01:09:55.078 --> 01:09:55.995
+Per shard:
+
+1000
+01:09:56.275 --> 01:10:05.278
+QPS, p50 or p99 latency, CPU, disk, connections, replication lag (each shard is a Ch 10 cluster).
+
+1001
+01:10:05.558 --> 01:10:11.702
+Skew: max or avg across shards for QPS and storage, alert when 1.5x.
+
+1002
+01:10:11.982 --> 01:10:18.318
+Top-N buckets and keys by QPS (sampled), which is how hot keys are found before they're incidents.
+
+1003
+01:10:18.598 --> 01:10:25.766
+Routing: shard map version per pod (a gauge), BUCKETMOVED or MOVED or ASK rates, retries after refusal.
+
+1004
+01:10:27.116 --> 01:10:37.292
+Moves: buckets in flight, bytes copied, catch-up rounds, final delta size, freeze time per bucket (histogram), checksum results, grace-period deletes pending.
+
+1005
+01:10:37.572 --> 01:10:41.860
+Fan-out: shards touched per request (a histogram, tagged by endpoint).
+
+1006
+01:10:42.140 --> 01:10:47.388
+A new endpoint that fans out to every shard shows up here before it shows up in latency.
+
+1007
+01:10:47.668 --> 01:10:51.017
+Read models: consumer lag in seconds per partition.
+
+1008
+01:10:52.367 --> 01:10:53.306
+Security.
+
+1009
+01:10:53.586 --> 01:11:05.639
+Shards are a tenant isolation tool too: a big B2B customer or a regulated region can get dedicated buckets on a dedicated shard (data residency, Ch 36).
+
+1010
+01:11:05.919 --> 01:11:07.925
+Each shard has its own credentials.
+
+1011
+01:11:08.205 --> 01:11:13.346
+The mover's account needs read on source, write on target and bucketfence, nothing more.
+
+1012
+01:11:13.626 --> 01:11:16.037
+Application pods never get DDL.
+
+1013
+01:11:16.317 --> 01:11:19.346
+Order ids that carry a bucket leak a little structure.
+
+1014
+01:11:19.626 --> 01:11:28.437
+Keep a random suffix (as OrderIds does) so ids can't be guessed, and always check ownership (customerid from the token) after routing.
+
+1015
+01:11:29.787 --> 01:11:35.909
+Scatter-gather admin endpoints are a data-exfiltration path: authorize, rate-limit, and audit them.
+
+1016
+01:11:36.189 --> 01:11:42.568
+Backups and PITR are per shard: a restore must be coordinated with the shard map version at that time.
+
+1017
+01:11:43.918 --> 01:11:45.582
+Performance and tuning knobs.
+
+1018
+01:11:45.862 --> 01:11:47.206
+Here is a quick table:
+
+1019
+01:11:47.486 --> 01:11:49.470
+Knob, and Default here, and Effect.
+
+1020
+01:11:49.750 --> 01:11:50.966
+Number of buckets.
+
+1021
+01:11:51.246 --> 01:11:52.163
+Default here:
+
+1022
+01:11:52.443 --> 01:11:53.937
+1,024.
+
+1023
+01:11:54.217 --> 01:12:00.339
+Effect: ≥ 10 times max shards; more buckets = finer moves, bigger map.
+
+1024
+01:12:00.619 --> 01:12:02.134
+Buckets moved in parallel.
+
+1025
+01:12:02.414 --> 01:12:03.331
+Default here:
+
+1026
+01:12:03.611 --> 01:12:04.891
+1 per shard pair.
+
+1027
+01:12:05.171 --> 01:12:05.961
+Effect:
+
+1028
+01:12:06.241 --> 01:12:09.889
+More = faster rebalance, more I or O on live shards.
+
+1029
+01:12:10.169 --> 01:12:11.427
+Catch-up threshold.
+
+1030
+01:12:11.707 --> 01:12:12.625
+Default here:
+
+1031
+01:12:12.905 --> 01:12:16.147
+20 rows (sim) / ~1 MB (prod).
+
+1032
+01:12:16.427 --> 01:12:17.217
+Effect:
+
+1033
+01:12:17.497 --> 01:12:20.035
+Smaller = shorter freeze, more rounds.
+
+1034
+01:12:20.315 --> 01:12:21.894
+Grace period before delete.
+
+1035
+01:12:22.174 --> 01:12:23.091
+Default here:
+
+1036
+01:12:23.371 --> 01:12:24.523
+24 h.
+
+1037
+01:12:24.803 --> 01:12:25.593
+Effect:
+
+1038
+01:12:25.873 --> 01:12:28.305
+Longer = safer rollback, more disk.
+
+1039
+01:12:28.585 --> 01:12:29.801
+Map poll interval.
+
+1040
+01:12:30.081 --> 01:12:30.998
+Default here:
+
+1041
+01:12:31.278 --> 01:12:32.217
+5 s.
+
+1042
+01:12:32.497 --> 01:12:33.286
+Effect:
+
+1043
+01:12:33.566 --> 01:12:36.702
+Shorter = fewer refusals, more config reads.
+
+1044
+01:12:38.052 --> 01:12:39.396
+Scatter-gather deadline.
+
+1045
+01:12:39.676 --> 01:12:40.593
+Default here:
+
+1046
+01:12:40.873 --> 01:12:42.196
+300 ms.
+
+1047
+01:12:42.476 --> 01:12:43.265
+Effect:
+
+1048
+01:12:43.545 --> 01:12:45.593
+Shorter = more partial results.
+
+1049
+01:12:45.873 --> 01:12:48.241
+PostgreSQL partitions per table.
+
+1050
+01:12:48.521 --> 01:12:49.439
+Default here:
+
+1051
+01:12:49.719 --> 01:12:51.041
+8 to 64.
+
+1052
+01:12:51.321 --> 01:12:52.111
+Effect:
+
+1053
+01:12:52.391 --> 01:12:56.273
+Too many = slower planning; too few = big partitions.
+
+1054
+01:12:56.553 --> 01:12:57.663
+Hot-key salts.
+
+1055
+01:12:57.943 --> 01:12:58.860
+Default here:
+
+1056
+01:12:59.140 --> 01:13:00.825
+4 to 8 for listed keys.
+
+1057
+01:13:01.105 --> 01:13:01.895
+Effect:
+
+1058
+01:13:02.175 --> 01:13:04.543
+More = flatter load, wider reads.
+
+1059
+01:13:04.823 --> 01:13:05.932
+Connection pools.
+
+1060
+01:13:06.212 --> 01:13:07.129
+Default here:
+
+1061
+01:13:07.409 --> 01:13:09.543
+One per shard, sized per shard.
+
+1062
+01:13:09.823 --> 01:13:10.612
+Effect:
+
+1063
+01:13:10.892 --> 01:13:18.871
+Total connections = pods times shards times pool size: watch the database's maxconnections, use PgBouncer.
+
+1064
+01:13:20.221 --> 01:13:20.946
+Cost.
+
+1065
+01:13:21.226 --> 01:13:22.975
+Shards multiply everything:
+
+1066
+01:13:23.255 --> 01:13:31.469
+4 shards times (primary + 2 standbys) = 12 database servers, plus monitoring, backups and on-call surface.
+
+1067
+01:13:31.749 --> 01:13:35.802
+Sharding too early is one of the most expensive mistakes in this handbook.
+
+1068
+01:13:36.082 --> 01:13:40.050
+Connections: pods times shards times pool size grows fast.
+
+1069
+01:13:40.330 --> 01:13:45.023
+A pooler (PgBouncer) per shard is usually needed past a few shards.
+
+1070
+01:13:45.303 --> 01:13:53.218
+Read models double storage for the data they copy and add a consumer, but they are much cheaper than making every store query a fan-out.
+
+1071
+01:13:53.498 --> 01:13:56.271
+Rebalancing costs I or O on live shards.
+
+1072
+01:13:56.551 --> 01:13:59.069
+Schedule moves off-peak and rate-limit them.
+
+1073
+01:14:00.419 --> 01:14:11.149
+Engineering: the router, mover, tooling, cross-shard reporting, per-shard migrations (schema changes must run on every shard, and be backwards-compatible while they roll).
+
+1074
+01:14:12.499 --> 01:14:13.438
+Part 7.
+
+1075
+01:14:13.718 --> 01:14:15.425
+Anti-Patterns and Pitfalls.
+
+1076
+01:14:16.675 --> 01:14:19.000
+1. hash(key) % numberofshards.
+
+1077
+01:14:19.280 --> 01:14:20.091
+Symptom:
+
+1078
+01:14:20.371 --> 01:14:27.560
+Adding a shard moves ~80 % of the data (L1), for days, with lost writes (§1.1).
+
+1079
+01:14:28.910 --> 01:14:38.339
+Here is the Java code. before: the shard count is part of the key's address. after: the address is a fixed bucket; only the small map changes.
+
+1080
+01:14:41.189 --> 01:14:41.893
+2.
+
+1081
+01:14:42.173 --> 01:14:43.923
+Moving data without a fence.
+
+1082
+01:14:44.203 --> 01:14:45.013
+Symptom:
+
+1083
+01:14:45.293 --> 01:14:50.200
+Writes that arrive between the copy and the map flip go to the old copy and vanish.
+
+1084
+01:14:50.480 --> 01:14:52.741
+No errors are raised (L4 naive:
+
+1085
+01:14:53.021 --> 01:14:54.195
+88 lost).
+
+1086
+01:14:54.475 --> 01:14:55.200
+Fix:
+
+1087
+01:14:55.480 --> 01:15:00.643
+Copy, catch up, fence the source, copy the final delta, verify, flip, delete later.
+
+1088
+01:15:00.923 --> 01:15:01.669
+3.
+
+1089
+01:15:01.949 --> 01:15:04.531
+Sharding by a low-cardinality or skewed key.
+
+1090
+01:15:04.811 --> 01:15:05.621
+Symptom:
+
+1091
+01:15:05.901 --> 01:15:10.488
+A few shards run hot forever, and adding shards makes it worse (L1 C:
+
+1092
+01:15:10.768 --> 01:15:14.267
+1.11x, then 3.90x).
+
+1093
+01:15:14.547 --> 01:15:15.272
+Fix:
+
+1094
+01:15:15.552 --> 01:15:17.771
+Pick a high-cardinality key (customer).
+
+1095
+01:15:18.051 --> 01:15:25.880
+Give store-level queries their own read model, and salt the hot keys (4.11x, then 1.68x).
+
+1096
+01:15:26.160 --> 01:15:26.864
+4.
+
+1097
+01:15:27.144 --> 01:15:28.765
+Using an unstable hash.
+
+1098
+01:15:30.115 --> 01:15:32.121
+Here is the Java code. before:
+
+1099
+01:15:32.401 --> 01:15:43.238
+Object.hashCode() of a record or entity, or a language whose string hash is randomized per process. after: a named hash over bytes, pinned by a golden test.
+
+1100
+01:15:46.088 --> 01:15:46.856
+5.
+
+1101
+01:15:47.136 --> 01:15:51.936
+A primary key that doesn't include the partition key, fixed by dropping the constraint.
+
+1102
+01:15:52.216 --> 01:15:53.027
+Symptom:
+
+1103
+01:15:53.307 --> 01:15:57.360
+PostgreSQL refuses a PK on id alone (lab A).
+
+1104
+01:15:57.640 --> 01:16:02.163
+Someone drops the constraint, and duplicate ids appear on different partitions.
+
+1105
+01:16:02.443 --> 01:16:03.168
+Fix:
+
+1106
+01:16:03.448 --> 01:16:09.208
+PRIMARY KEY (customerid, id) and a globally unique id generator (Ch 20).
+
+1107
+01:16:09.488 --> 01:16:10.235
+6.
+
+1108
+01:16:10.515 --> 01:16:12.115
+Scatter-gather on a hot path.
+
+1109
+01:16:12.395 --> 01:16:13.205
+Symptom:
+
+1110
+01:16:13.485 --> 01:16:23.021
+The store dashboard fans out to every shard every 10 seconds per open dashboard. p99 tracks the slowest shard, and load grows with the shard count.
+
+1111
+01:16:23.301 --> 01:16:24.027
+Fix:
+
+1112
+01:16:24.307 --> 01:16:27.528
+An event-fed read model partitioned by the query's key.
+
+1113
+01:16:27.808 --> 01:16:31.968
+Keep scatter-gather for rare, bounded, deadline-limited admin queries.
+
+1114
+01:16:33.318 --> 01:16:34.065
+7.
+
+1115
+01:16:34.345 --> 01:16:36.670
+Cross-shard transactions by accident.
+
+1116
+01:16:36.950 --> 01:16:37.761
+Symptom:
+
+1117
+01:16:38.041 --> 01:16:44.377
+Transfer wallet credit from customer A to B opens two connections and commits both, and one commit fails.
+
+1118
+01:16:44.657 --> 01:16:45.382
+Fix:
+
+1119
+01:16:45.662 --> 01:16:47.838
+Co-locate data that's written together.
+
+1120
+01:16:48.118 --> 01:16:54.347
+For truly cross-key operations, use a saga with an outbox (Ch 13), not two commits.
+
+1121
+01:16:54.627 --> 01:16:55.310
+8.
+
+1122
+01:16:55.590 --> 01:16:57.083
+Sharding before it's needed.
+
+1123
+01:16:57.363 --> 01:16:58.174
+Symptom:
+
+1124
+01:16:58.454 --> 01:17:05.302
+12 database servers, a routing library and a mover for 200 GB that one primary could handle.
+
+1125
+01:17:05.582 --> 01:17:06.307
+Fix:
+
+1126
+01:17:06.587 --> 01:17:14.737
+Ch 09's order: indexes and queries, caching, read replicas, partitioning inside one server, a bigger machine.
+
+1127
+01:17:15.017 --> 01:17:20.158
+Shard when writes or storage truly exceed one primary, with numbers (§4).
+
+1128
+01:17:21.508 --> 01:17:22.255
+9.
+
+1129
+01:17:22.535 --> 01:17:25.863
+Range-partitioning across servers by time or sequence.
+
+1130
+01:17:26.143 --> 01:17:26.953
+Symptom:
+
+1131
+01:17:27.233 --> 01:17:32.311
+Every insert goes to the newest shard (L1 D), so one shard does all the writes.
+
+1132
+01:17:32.591 --> 01:17:33.316
+Fix:
+
+1133
+01:17:33.596 --> 01:17:35.559
+Hash (or bucket) across servers.
+
+1134
+01:17:35.839 --> 01:17:39.593
+Range-partition by time inside each shard for retention.
+
+1135
+01:17:39.873 --> 01:17:40.577
+10.
+
+1136
+01:17:40.857 --> 01:17:43.332
+Redis multi-key commands without hash tags.
+
+1137
+01:17:44.682 --> 01:17:45.599
+On screen:
+
+1138
+01:17:45.879 --> 01:17:53.282
+MGET cust:42:name cust:77:name, then CROSSSLOT Keys in request don't hash to the same. slot.
+
+1139
+01:17:53.562 --> 01:18:01.221
+MGET cust-42:orders cust-42:cart, then 3 2 (same slot 3330, lab C).
+
+1140
+01:18:04.071 --> 01:18:09.105
+Don't overuse hash tags either: global: puts every key in one slot on one node.
+
+1141
+01:18:10.455 --> 01:18:11.330
+Part 8.
+
+1142
+01:18:11.610 --> 01:18:12.954
+Interview Q and A.
+
+1143
+01:18:14.204 --> 01:18:15.036
+Beginner.
+
+1144
+01:18:15.316 --> 01:18:16.340
+Question 1.
+
+1145
+01:18:16.620 --> 01:18:20.204
+What's the difference between partitioning, sharding and replication?
+
+1146
+01:18:20.484 --> 01:18:21.849
+Thirty-second answer:
+
+1147
+01:18:22.129 --> 01:18:25.372
+Partitioning splits a dataset into disjoint pieces.
+
+1148
+01:18:25.652 --> 01:18:31.135
+Sharding is partitioning across servers, so each server holds and writes only part of the data.
+
+1149
+01:18:31.415 --> 01:18:34.913
+Replication copies the same data to several servers.
+
+1150
+01:18:35.193 --> 01:18:41.145
+Replication scales reads and survives failures, and only partitioning scales writes and storage.
+
+1151
+01:18:41.425 --> 01:18:44.753
+Real systems do both: each shard is replicated.
+
+1152
+01:18:46.103 --> 01:18:47.106
+Question 2.
+
+1153
+01:18:47.386 --> 01:18:49.263
+Range versus hash partitioning?
+
+1154
+01:18:49.543 --> 01:18:50.909
+Thirty-second answer:
+
+1155
+01:18:51.189 --> 01:19:02.837
+Range partitioning keeps contiguous key ranges together, so range scans are cheap and old ranges drop easily, but monotonic keys (time) send all writes to one partition.
+
+1156
+01:19:03.117 --> 01:19:11.885
+Hash partitioning spreads keys evenly, including monotonic ones, but any range query or query without the key touches every partition.
+
+1157
+01:19:13.235 --> 01:19:14.280
+Question 3.
+
+1158
+01:19:14.560 --> 01:19:18.827
+Why does a query without the partition key get slower as you add partitions?
+
+1159
+01:19:19.107 --> 01:19:20.472
+Thirty-second answer:
+
+1160
+01:19:20.752 --> 01:19:26.939
+The router can't tell which partition holds matching rows, so it must ask all of them and merge (scatter-gather).
+
+1161
+01:19:27.219 --> 01:19:32.637
+The work grows with the partition count, and the response is as slow as the slowest partition.
+
+1162
+01:19:33.987 --> 01:19:35.054
+Question 4.
+
+1163
+01:19:35.334 --> 01:19:38.491
+What's a hot partition, and how can it happen with a good hash?
+
+1164
+01:19:38.771 --> 01:19:40.137
+Thirty-second answer:
+
+1165
+01:19:40.417 --> 01:19:43.105
+A partition that gets far more load than the others.
+
+1166
+01:19:43.385 --> 01:19:53.454
+A hash spreads keys evenly, but if one key (a mega store, a viral product) gets a large share of traffic, its partition is hot no matter how good the hash is.
+
+1167
+01:19:54.804 --> 01:19:55.807
+Intermediate.
+
+1168
+01:19:56.087 --> 01:19:57.196
+Question 5.
+
+1169
+01:19:57.476 --> 01:19:59.097
+How do you choose a shard key?
+
+1170
+01:19:59.377 --> 01:20:00.743
+Thirty-second answer:
+
+1171
+01:20:01.023 --> 01:20:02.367
+From access patterns.
+
+1172
+01:20:02.647 --> 01:20:13.612
+List queries and transactions by volume and latency need, and choose the key that keeps the most important ones on one shard, with high cardinality, low skew and spread-out writes.
+
+1173
+01:20:13.892 --> 01:20:17.071
+Then plan explicitly for every query that doesn't use it.
+
+1174
+01:20:18.421 --> 01:20:19.530
+Question 6.
+
+1175
+01:20:19.810 --> 01:20:22.349
+Why is hash mod N a bad sharding function?
+
+1176
+01:20:22.629 --> 01:20:23.994
+Thirty-second answer:
+
+1177
+01:20:24.274 --> 01:20:31.826
+Changing N remaps almost every key: a key stays only if h mod N == h mod (N+1).
+
+1178
+01:20:32.106 --> 01:20:36.821
+L1 measured 80.1 % of keys moving from 4 to 5 shards.
+
+1179
+01:20:37.101 --> 01:20:41.047
+Consistent hashing or fixed buckets move only ~1 or N.
+
+1180
+01:20:42.397 --> 01:20:43.485
+Question 7.
+
+1181
+01:20:43.765 --> 01:20:47.157
+Explain consistent hashing and why virtual nodes matter.
+
+1182
+01:20:47.437 --> 01:20:48.803
+Thirty-second answer:
+
+1183
+01:20:49.083 --> 01:20:54.011
+Keys and nodes are hashed onto a ring, and a key belongs to the next node clockwise.
+
+1184
+01:20:54.291 --> 01:21:00.029
+Adding or removing a node moves only the keys between it and its neighbour, ~1 or N.
+
+1185
+01:21:00.309 --> 01:21:05.451
+With one point per node, arcs are uneven and a new node takes load from just one neighbour.
+
+1186
+01:21:05.731 --> 01:21:11.277
+Virtual nodes (many points per node) even out the load and spread the moves across all nodes.
+
+1187
+01:21:12.627 --> 01:21:13.651
+Question 8.
+
+1188
+01:21:13.931 --> 01:21:18.326
+Why must a unique constraint on a partitioned table include the partition key?
+
+1189
+01:21:18.606 --> 01:21:19.971
+Thirty-second answer:
+
+1190
+01:21:20.251 --> 01:21:24.113
+Each partition enforces uniqueness with its own local index.
+
+1191
+01:21:24.393 --> 01:21:32.755
+Without the partition key in the constraint, two rows with the same id could sit in different partitions, and no single index would see both.
+
+1192
+01:21:33.035 --> 01:21:36.961
+PostgreSQL refuses to create it (lab A shows the error).
+
+1193
+01:21:38.311 --> 01:21:39.377
+Question 9.
+
+1194
+01:21:39.657 --> 01:21:42.345
+Local versus global secondary indexes?
+
+1195
+01:21:42.625 --> 01:21:43.991
+Thirty-second answer:
+
+1196
+01:21:44.271 --> 01:21:52.228
+A local index covers one partition's rows, so writes stay local but reads by the indexed column scatter to all partitions.
+
+1197
+01:21:52.508 --> 01:22:05.393
+A global index is partitioned by the indexed value, so reads hit one partition but writes touch another partition, usually asynchronously (eventual consistency) or with a distributed transaction.
+
+1198
+01:22:06.743 --> 01:22:07.511
+Senior.
+
+1199
+01:22:07.791 --> 01:22:08.837
+Question 10.
+
+1200
+01:22:09.117 --> 01:22:14.173
+Design sharding for an orders database that must grow from 4 to 16 shards.
+
+1201
+01:22:14.453 --> 01:22:15.818
+Thirty-second answer:
+
+1202
+01:22:16.098 --> 01:22:32.567
+Hash customerid into 1,024 fixed buckets, keep a versioned bucket, then shard map, co-locate orders or items or payments by bucket, put the bucket in order ids, and build an online mover (copy, catch up, fence, verify, flip, delete later).
+
+1203
+01:22:32.847 --> 01:22:35.386
+Store queries use an event-fed read model.
+
+1204
+01:22:35.666 --> 01:22:37.949
+Each shard is a replicated cluster.
+
+1205
+01:22:39.299 --> 01:22:40.429
+Question 11.
+
+1206
+01:22:40.709 --> 01:22:43.568
+How do you route a request that only has an order id?
+
+1207
+01:22:43.848 --> 01:22:45.213
+Thirty-second answer:
+
+1208
+01:22:45.493 --> 01:22:55.371
+Encode the bucket in the id at creation (ord214... then bucket 532), so any service can compute the shard without a lookup.
+
+1209
+01:22:55.651 --> 01:23:04.845
+Alternatives are a global id, then key lookup table (another store to keep consistent and highly available) or a scatter-gather (expensive).
+
+1210
+01:23:06.195 --> 01:23:07.283
+Question 12.
+
+1211
+01:23:07.563 --> 01:23:10.315
+How do you run a query across all shards safely?
+
+1212
+01:23:10.595 --> 01:23:11.961
+Thirty-second answer:
+
+1213
+01:23:12.241 --> 01:23:23.654
+Fan out in parallel with a deadline, push down filters and a per-shard limit (top-K), merge with a heap, and return partial results flagged as incomplete if a shard is slow or down.
+
+1214
+01:23:23.934 --> 01:23:27.774
+Keep it off hot paths, rate-limit it, and track fan-out per endpoint.
+
+1215
+01:23:29.124 --> 01:23:30.404
+Question 13.
+
+1216
+01:23:30.684 --> 01:23:34.673
+How do you handle a hot key like a mega store or a flash-sale product?
+
+1217
+01:23:34.953 --> 01:23:36.319
+Thirty-second answer:
+
+1218
+01:23:36.599 --> 01:23:38.839
+First identify it (per-key metrics).
+
+1219
+01:23:39.119 --> 01:23:43.684
+For write-heavy keys, split it into N salted sub-keys and read all salts.
+
+1220
+01:23:43.964 --> 01:23:46.524
+For read-heavy keys, cache and replicate it.
+
+1221
+01:23:46.804 --> 01:23:49.599
+For a hot bucket, move it to a dedicated shard.
+
+1222
+01:23:49.879 --> 01:23:51.969
+For counters, use sharded counters.
+
+1223
+01:23:53.319 --> 01:23:54.514
+Question 14.
+
+1224
+01:23:54.794 --> 01:23:58.549
+How does Redis Cluster route keys, and what are MOVED and ASK?
+
+1225
+01:23:58.829 --> 01:24:00.194
+Thirty-second answer:
+
+1226
+01:24:00.474 --> 01:24:11.695
+Keys map to one of 16,384 slots via CRC16 mod 16384, and each master owns ranges of slots.
+
+1227
+01:24:11.975 --> 01:24:17.309
+A node that doesn't own a slot replies MOVED slot node, and the client updates its slot map.
+
+1228
+01:24:17.589 --> 01:24:22.581
+During migration, the source replies ASK slot node for keys already moved.
+
+1229
+01:24:22.861 --> 01:24:27.959
+The client sends ASKING plus the command to the target, once, without updating its map.
+
+1230
+01:24:29.309 --> 01:24:30.205
+Architect.
+
+1231
+01:24:30.485 --> 01:24:31.680
+Question 15.
+
+1232
+01:24:31.960 --> 01:24:35.224
+How do you move a bucket to a new shard without losing writes?
+
+1233
+01:24:35.504 --> 01:24:36.869
+Thirty-second answer:
+
+1234
+01:24:37.149 --> 01:24:38.728
+Bulk copy while writable.
+
+1235
+01:24:39.008 --> 01:24:41.077
+Catch up deltas until they're small.
+
+1236
+01:24:41.357 --> 01:24:44.493
+Fence the source for the bucket so writes there are refused.
+
+1237
+01:24:44.773 --> 01:24:52.688
+Copy the final delta, verify with count + checksum, flip the versioned map, and delete from the source after a grace period.
+
+1238
+01:24:52.968 --> 01:24:56.381
+Stale writers get BUCKETMOVED, reload the map and retry.
+
+1239
+01:24:57.731 --> 01:24:58.926
+Question 16.
+
+1240
+01:24:59.206 --> 01:25:02.833
+How do sharding and replication interact during failures?
+
+1241
+01:25:03.113 --> 01:25:04.478
+Thirty-second answer:
+
+1242
+01:25:04.758 --> 01:25:16.513
+Each shard is its own replicated cluster, so a primary failure affects only that shard's buckets (~1 or N), with the Ch 10 guarantees (quorum sync, fenced failover).
+
+1243
+01:25:16.793 --> 01:25:23.129
+The shard map points at the shard's writer endpoint, not at node IPs, so failover doesn't change the map.
+
+1244
+01:25:24.479 --> 01:25:25.823
+Question 17.
+
+1245
+01:25:26.103 --> 01:25:31.948
+When would you choose Vitess, Citus or a distributed SQL database over app-level sharding?
+
+1246
+01:25:32.228 --> 01:25:33.593
+Thirty-second answer:
+
+1247
+01:25:33.873 --> 01:25:36.519
+When you'd rather operate a system than build one.
+
+1248
+01:25:36.799 --> 01:25:44.628
+Vitess (MySQL) and Citus (PostgreSQL) give routing, resharding and some cross-shard queries on familiar engines.
+
+1249
+01:25:44.908 --> 01:25:56.065
+Distributed SQL (Spanner, CockroachDB, YugabyteDB, TiDB) gives automatic range splitting, rebalancing, distributed transactions and global indexes.
+
+1250
+01:25:56.345 --> 01:26:00.804
+App-level sharding fits when there's one clear key and the team wants full control.
+
+1251
+01:26:02.154 --> 01:26:03.327
+Question 18.
+
+1252
+01:26:03.607 --> 01:26:06.402
+How do you run schema changes on 16 shards?
+
+1253
+01:26:06.682 --> 01:26:08.047
+Thirty-second answer:
+
+1254
+01:26:08.327 --> 01:26:18.759
+Every change is expand or contract and backwards-compatible, rolled to one canary shard first, then the rest, with a migration tool that tracks the version per shard.
+
+1255
+01:26:19.039 --> 01:26:24.330
+The application must work with any mix of old and new schema while the rollout is in progress.
+
+1256
+01:26:25.680 --> 01:26:26.917
+Question 19.
+
+1257
+01:26:27.197 --> 01:26:31.272
+Your busiest shard is at 90 % CPU during the evening peak.
+
+1258
+01:26:31.552 --> 01:26:32.619
+Walk me through it.
+
+1259
+01:26:32.899 --> 01:26:34.264
+Thirty-second answer:
+
+1260
+01:26:34.544 --> 01:26:36.720
+Confirm it's one shard (skew metric).
+
+1261
+01:26:37.000 --> 01:26:44.083
+Find whether it's a few hot buckets or keys (top-N) or an expensive query pattern (fan-out, missing index).
+
+1262
+01:26:44.363 --> 01:26:49.056
+Short term: cache or rate-limit the offender, move hot buckets to cooler shards.
+
+1263
+01:26:49.336 --> 01:26:54.072
+Long term: salt the hot key, move the query to a read model, or add a shard.
+
+1264
+01:26:55.422 --> 01:26:56.531
+Question 20.
+
+1265
+01:26:56.811 --> 01:27:00.523
+What are the long-term costs of sharding, and how do you keep them in check?
+
+1266
+01:27:00.803 --> 01:27:02.169
+Thirty-second answer:
+
+1267
+01:27:02.449 --> 01:27:15.035
+More infrastructure, more on-call, cross-shard queries, per-shard migrations and backups, a routing library in every service, rebalancing tooling, and analytics that can't just query the database.
+
+1268
+01:27:15.315 --> 01:27:26.601
+Keep them in check by delaying sharding, choosing a key that makes the main paths single-shard, pushing everything else to read models and a warehouse, and automating moves and migrations.
+
+1269
+01:27:27.951 --> 01:27:28.847
+Part 9.
+
+1270
+01:27:29.127 --> 01:27:30.535
+Summary and Practice.
+
+1271
+01:27:31.785 --> 01:27:32.873
+Key takeaways.
+
+1272
+01:27:33.153 --> 01:27:36.139
+Replication scales reads and survives failures.
+
+1273
+01:27:36.419 --> 01:27:38.489
+Partitioning scales writes and storage.
+
+1274
+01:27:38.769 --> 01:27:40.262
+Real systems do both.
+
+1275
+01:27:40.542 --> 01:27:44.275
+Range keeps scans local but concentrates monotonic writes.
+
+1276
+01:27:44.555 --> 01:27:47.969
+Hash spreads writes but scatters range and non-key queries.
+
+1277
+01:27:48.249 --> 01:27:53.027
+Never let the shard count be part of a key's address. mod N moved 80 %.
+
+1278
+01:27:53.307 --> 01:28:01.201
+Fixed buckets + a versioned map move ~1 or N (19.7 %), one verifiable bucket at a time.
+
+1279
+01:28:01.481 --> 01:28:08.969
+Choose the key from the dominant queries and transactions, co-locate what's written together, and plan every other query explicitly.
+
+1280
+01:28:10.319 --> 01:28:14.351
+Put the bucket in the id so by-id reads route with no lookup.
+
+1281
+01:28:14.631 --> 01:28:17.319
+Unique constraints include the partition key.
+
+1282
+01:28:17.599 --> 01:28:20.351
+Global uniqueness comes from the id generator.
+
+1283
+01:28:20.631 --> 01:28:25.687
+Scatter-gather is bounded: deadlines, per-shard limits, partial results, off hot paths.
+
+1284
+01:28:25.967 --> 01:28:28.633
+Use read models for frequent non-key queries.
+
+1285
+01:28:28.913 --> 01:28:30.684
+Hashing doesn't fix a hot key.
+
+1286
+01:28:30.964 --> 01:28:36.212
+Salt it (4.11x, then 1.68x), cache it, or isolate it.
+
+1287
+01:28:36.492 --> 01:28:42.892
+Moves need a fence: copy while writable, catch up, fence, final delta, verify, flip, delete later.
+
+1288
+01:28:43.172 --> 01:28:45.263
+Naive moves lost 88 writes.
+
+1289
+01:28:45.543 --> 01:28:47.143
+Fenced moves lost 0.
+
+1290
+01:28:48.493 --> 01:28:50.903
+Stale routing must fail safe and self-heal:
+
+1291
+01:28:51.183 --> 01:28:54.767
+MOVED, ASK, BUCKETMOVED, map versions that only increase.
+
+1292
+01:28:56.117 --> 01:28:57.440
+Decision cheat sheet.
+
+1293
+01:28:57.720 --> 01:28:59.064
+Here is a quick table:
+
+1294
+01:28:59.344 --> 01:29:00.453
+Need, and Choose.
+
+1295
+01:29:00.733 --> 01:29:02.739
+Big table, one server is enough:
+
+1296
+01:29:03.019 --> 01:29:06.645
+Declarative partitioning (hash or range) + indexes.
+
+1297
+01:29:06.925 --> 01:29:08.781
+Retention of time-series data:
+
+1298
+01:29:09.061 --> 01:29:11.728
+Range partitions by month, DROP old ones.
+
+1299
+01:29:12.008 --> 01:29:13.693
+Writes beyond one primary:
+
+1300
+01:29:13.973 --> 01:29:17.131
+Hash-based sharding with fixed buckets + versioned map.
+
+1301
+01:29:17.411 --> 01:29:20.205
+Nodes join or leave automatically (caches):
+
+1302
+01:29:20.485 --> 01:29:22.363
+Consistent hashing with vnodes.
+
+1303
+01:29:22.643 --> 01:29:24.776
+Frequent queries on a non-shard key:
+
+1304
+01:29:25.056 --> 01:29:27.509
+Event-fed read model (global index).
+
+1305
+01:29:27.789 --> 01:29:30.072
+Rare admin queries on a non-shard key:
+
+1306
+01:29:30.352 --> 01:29:31.675
+Bounded scatter-gather.
+
+1307
+01:29:31.955 --> 01:29:34.131
+By-id lookup without the shard key:
+
+1308
+01:29:34.411 --> 01:29:36.117
+Bucket encoded in the id.
+
+1309
+01:29:36.397 --> 01:29:37.699
+One very hot key:
+
+1310
+01:29:37.979 --> 01:29:41.115
+Salting (writes), caching (reads), dedicated shard.
+
+1311
+01:29:42.465 --> 01:29:43.894
+Adding a shard online:
+
+1312
+01:29:44.174 --> 01:29:49.955
+Copy, then catch up, then fence, then final delta, then verify, then flip, then delete later.
+
+1313
+01:29:50.235 --> 01:29:51.451
+Want it built for you:
+
+1314
+01:29:51.731 --> 01:29:56.233
+Vitess (MySQL), Citus (PostgreSQL), distributed SQL.
+
+1315
+01:29:57.583 --> 01:29:58.713
+Exercises.
+
+1316
+01:29:58.993 --> 01:30:00.337
+Here is a quick table:
+
+1317
+01:30:00.617 --> 01:30:02.473
+Band, and Exercise, and Hint.
+
+1318
+01:30:02.753 --> 01:30:03.585
+B1.
+
+1319
+01:30:03.865 --> 01:30:04.932
+Exercise:
+
+1320
+01:30:05.212 --> 01:30:07.708
+Run L1 with 8, then 9 shards.
+
+1321
+01:30:07.988 --> 01:30:09.609
+How much does each scheme move?
+
+1322
+01:30:09.889 --> 01:30:14.540
+Hint: ~89 % for mod N, ~11 % otherwise.
+
+1323
+01:30:14.820 --> 01:30:15.652
+B1.
+
+1324
+01:30:15.932 --> 01:30:16.999
+Exercise:
+
+1325
+01:30:17.279 --> 01:30:21.951
+Run lab A with partition by range (createdat) and query by customer.
+
+1326
+01:30:22.231 --> 01:30:22.913
+Hint:
+
+1327
+01:30:23.193 --> 01:30:24.644
+No pruning without the key.
+
+1328
+01:30:24.924 --> 01:30:25.799
+B2.
+
+1329
+01:30:26.079 --> 01:30:27.145
+Exercise:
+
+1330
+01:30:27.425 --> 01:30:32.247
+Add rendezvous (HRW) hashing to L1 and compare balance and movement.
+
+1331
+01:30:32.527 --> 01:30:35.364
+Hint: max over nodes of hash(key + node).
+
+1332
+01:30:35.644 --> 01:30:36.519
+B2.
+
+1333
+01:30:36.799 --> 01:30:37.865
+Exercise:
+
+1334
+01:30:38.145 --> 01:30:42.732
+Add a createdat range sub-partition under each hash partition in lab A.
+
+1335
+01:30:43.012 --> 01:30:43.695
+Hint:
+
+1336
+01:30:43.975 --> 01:30:45.617
+Multi-level partitioning.
+
+1337
+01:30:45.897 --> 01:30:46.772
+B3.
+
+1338
+01:30:47.052 --> 01:30:48.119
+Exercise:
+
+1339
+01:30:48.399 --> 01:30:52.175
+Add keyset pagination to ScatterGather (a cursor per shard).
+
+1340
+01:30:52.455 --> 01:30:53.137
+Hint:
+
+1341
+01:30:53.417 --> 01:30:55.871
+Last seen (createdat, id) per shard.
+
+1342
+01:30:57.221 --> 01:30:58.095
+B3.
+
+1343
+01:30:58.375 --> 01:30:59.442
+Exercise:
+
+1344
+01:30:59.722 --> 01:31:06.911
+In lab B, move buckets with the L4 protocol (copy while writable, fence last) and compare freeze times.
+
+1345
+01:31:07.191 --> 01:31:07.874
+Hint:
+
+1346
+01:31:08.154 --> 01:31:09.541
+Change sequence column.
+
+1347
+01:31:09.821 --> 01:31:10.695
+B4.
+
+1348
+01:31:10.975 --> 01:31:12.042
+Exercise:
+
+1349
+01:31:12.322 --> 01:31:15.245
+Break the mover on purpose: skip the final delta.
+
+1350
+01:31:15.525 --> 01:31:16.975
+Does the checksum catch it?
+
+1351
+01:31:17.255 --> 01:31:17.938
+Hint:
+
+1352
+01:31:18.218 --> 01:31:20.138
+It should: keep the fence, don't flip.
+
+1353
+01:31:20.418 --> 01:31:21.293
+B4.
+
+1354
+01:31:21.573 --> 01:31:22.639
+Exercise:
+
+1355
+01:31:22.919 --> 01:31:27.890
+Design the migration from one orders primary to 4 shards with zero downtime.
+
+1356
+01:31:28.170 --> 01:31:28.853
+Hint:
+
+1357
+01:31:29.133 --> 01:31:33.165
+Dual-write or CDC, backfill, verify, cut over per bucket.
+
+1358
+01:31:34.515 --> 01:31:35.517
+Further reading.
+
+1359
+01:31:35.797 --> 01:31:39.000
+Martin Kleppmann, Designing Data-Intensive Applications: ch.
+
+1360
+01:31:40.280 --> 01:31:41.539
+6 (partitioning).
+
+1361
+01:31:41.819 --> 01:31:42.907
+Karger et al.
+
+1362
+01:31:43.187 --> 01:31:47.581
+Consistent Hashing and Random Trees (STOC 1997).
+
+1363
+01:31:47.861 --> 01:31:49.056
+DeCandia et al.
+
+1364
+01:31:49.336 --> 01:31:50.189
+Dynamo:
+
+1365
+01:31:50.469 --> 01:31:54.779
+Amazon's Highly Available Key-value Store (SOSP 2007).
+
+1366
+01:31:55.059 --> 01:32:01.629
+Lamping and Veach, A Fast, Minimal Memory, Consistent Hash Algorithm (jump hash, 2014).
+
+1367
+01:32:01.909 --> 01:32:03.360
+Redis documentation:
+
+1368
+01:32:03.640 --> 01:32:09.165
+Scale with Redis Cluster and the Redis Cluster specification (hash slots, MOVED or ASK).
+
+1369
+01:32:10.515 --> 01:32:12.585
+PostgreSQL documentation:
+
+1370
+01:32:12.865 --> 01:32:16.470
+Table Partitioning, logical replication row filters.
+
+1371
+01:32:16.750 --> 01:32:26.499
+Vitess documentation: keyspaces, vindexes, resharding; Citus documentation: distributed tables, co-location, shard rebalancer.
+
+1372
+01:32:26.779 --> 01:32:31.494
+Instagram Engineering, Sharding and IDs at Instagram (2012).
+
+1373
+01:32:32.844 --> 01:32:34.081
+Related chapters.
+
+1374
+01:32:34.361 --> 01:32:54.735
+05, Relational Databases, 06, NoSQL, 07, Caching, 09, Scalability Fundamentals, 10, Replication, 12, Consistency, Time and Consensus, 13, Distributed Transactions, 14, Messaging and Event Streaming, 20, Idempotency, IDs and Locks.
+
+1375
+01:32:56.085 --> 01:32:57.685
+That's the end of this chapter.
+
+1376
+01:32:57.965 --> 01:33:04.002
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1377
+01:33:04.282 --> 01:33:05.733
+See you in the next chapter.
+

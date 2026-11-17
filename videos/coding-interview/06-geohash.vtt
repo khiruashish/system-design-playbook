@@ -1,0 +1,514 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.267
+Geohash:
+
+2
+00:00:01.547 --> 00:00:02.785
+Restaurants Near Me.
+
+3
+00:00:03.065 --> 00:00:07.033
+Chapter 6, from the Coding Interview part of the System Design Playbook.
+
+4
+00:00:08.783 --> 00:00:09.636
+Part 1.
+
+5
+00:00:09.916 --> 00:00:10.812
+Problem.
+
+6
+00:00:12.062 --> 00:00:16.073
+Given restaurant locations, find those within 1 km of a user.
+
+7
+00:00:16.353 --> 00:00:23.094
+Encode coordinates so that nearby points share a key prefix and can be indexed with an ordinary B-tree or hash.
+
+8
+00:00:23.374 --> 00:00:26.019
+Handle points just across a cell boundary.
+
+9
+00:00:27.369 --> 00:00:28.244
+Part 2.
+
+10
+00:00:28.524 --> 00:00:29.441
+Key idea.
+
+11
+00:00:30.691 --> 00:00:38.265
+Geohash repeatedly bisects longitude and latitude alternately, one bit per step, and writes the bits in base32.
+
+12
+00:00:38.545 --> 00:00:46.161
+Points that share a prefix are in the same cell (6 characters about 1.2 km times 0.6 km).
+
+13
+00:00:46.441 --> 00:00:57.406
+Two nearby points can sit on opposite sides of a boundary and share no prefix, so search the user's cell plus its 8 neighbours, then filter by real distance (haversine).
+
+14
+00:00:58.756 --> 00:01:00.100
+Here is the diagram.
+
+15
+00:01:03.950 --> 00:01:04.846
+Part 3.
+
+16
+00:01:05.126 --> 00:01:05.979
+Solution.
+
+17
+00:01:07.229 --> 00:01:09.917
+Here is the Java code, Geohash.java.
+
+18
+00:01:10.197 --> 00:01:14.187
+It runs to 104 lines; the full listing is in the chapter.
+
+19
+00:01:14.467 --> 00:01:22.253
+Problem: restaurants near me: encode lat or lon so that nearby points share a prefix; search the cell + its 8 neighbours.
+
+20
+00:01:22.533 --> 00:01:28.976
+Interleave longitude and latitude bisection bits (lon first), 5 bits per base32 char.
+
+21
+00:01:31.826 --> 00:01:32.743
+Part 4.
+
+22
+00:01:33.023 --> 00:01:33.855
+Walkthrough.
+
+23
+00:01:35.105 --> 00:01:36.471
+Here is a quick table:
+
+24
+00:01:36.751 --> 00:01:46.841
+Code, and Why. if (v = mid) ch = (ch 1) 1; r0 = mid; else ch = 1; r1 = mid;:
+
+25
+00:01:47.121 --> 00:01:48.871
+Each bit halves the current range.
+
+26
+00:01:49.151 --> 00:01:58.004
+Even bits are longitude, odd bits latitude. if (++bit == 5) hash.append(BASE32.charAt(ch));...:
+
+27
+00:01:58.284 --> 00:02:08.097
+Every 5 bits become one base32 character (no a, i, l, o). cellAndNeighbours: step ± one cell height or width from the centre:
+
+28
+00:02:08.377 --> 00:02:13.519
+Computing neighbours by re-encoding offset points is simple and handles wrap-around.
+
+29
+00:02:13.799 --> 00:02:16.273
+Lookup tables are faster but error-prone.
+
+30
+00:02:16.553 --> 00:02:22.505
+((lon + dx w + 540) % 360) - 180:
+
+31
+00:02:22.785 --> 00:02:36.012
+Wrap across the ±180 degrees antimeridian. encode(57.64911, 10.40744, 11).equals(u4pruydqqvj):
+
+32
+00:02:36.292 --> 00:02:39.535
+Checked against the reference example from the geohash spec.
+
+33
+00:02:40.885 --> 00:02:41.845
+Part 5.
+
+34
+00:02:42.125 --> 00:02:43.063
+Complexity.
+
+35
+00:02:44.313 --> 00:02:45.679
+Here is a quick table:
+
+36
+00:02:45.959 --> 00:02:48.561
+Approach, and Time, and Space. encode.
+
+37
+00:02:48.841 --> 00:02:49.588
+Time:
+
+38
+00:02:49.868 --> 00:02:50.913
+O(precision).
+
+39
+00:02:51.193 --> 00:02:52.047
+Space:
+
+40
+00:02:52.327 --> 00:02:53.969
+O(1). nearby search.
+
+41
+00:02:54.249 --> 00:02:54.996
+Time:
+
+42
+00:02:55.276 --> 00:02:57.900
+9 index lookups + O(candidates).
+
+43
+00:02:58.180 --> 00:02:59.033
+Space: -.
+
+44
+00:03:00.383 --> 00:03:01.322
+Part 6.
+
+45
+00:03:01.602 --> 00:03:02.327
+Run it.
+
+46
+00:03:03.577 --> 00:03:04.900
+Here is the shell code.
+
+47
+00:03:07.750 --> 00:03:28.187
+On screen: my geohash (p=6) = tdr1v9, search cells = tdr1v2, tdr1v3, tdr1v6, tdr1v8, tdr1v9. tdr1vb, tdr1vc, tdr1vd, tdr1vf. within 1 km:
+
+48
+00:03:28.467 --> 00:03:41.182
+Cafe A (0.15 km), Diner B (0.75 km). shared prefix of two nearby points: tdr1v9q versus tdr1v9m.
+
+49
+00:03:41.462 --> 00:03:42.209
+PASS.
+
+50
+00:03:45.059 --> 00:03:45.997
+Part 7.
+
+51
+00:03:46.277 --> 00:03:47.941
+Solve it with Spring Boot 4.
+
+52
+00:03:49.191 --> 00:03:56.061
+Redis GEO is the interview structure ready-made: a sorted set scored by a 52-bit interleaved geohash.
+
+53
+00:03:56.341 --> 00:04:04.575
+GEOSEARCH scans the centre cell and its neighbours, then filters by true distance, which is the same algorithm as the solution above.
+
+54
+00:04:05.925 --> 00:04:08.592
+The sequence diagram walks through it step by step.
+
+55
+00:04:08.872 --> 00:04:09.853
+C to G:
+
+56
+00:04:10.133 --> 00:04:15.595
+PUT or api or v1 or restaurants/id/location lat, lon.
+
+57
+00:04:15.875 --> 00:04:19.779
+G to S: upsert - GEOADD geo:restaurants lon lat id.
+
+58
+00:04:20.059 --> 00:04:21.040
+C to G:
+
+59
+00:04:21.320 --> 00:04:27.059
+GET or api or v1 or restaurants or near?lat and lon and km=3.
+
+60
+00:04:27.339 --> 00:04:28.640
+G to S: near(...).
+
+61
+00:04:28.920 --> 00:04:29.859
+S to R:
+
+62
+00:04:30.139 --> 00:04:35.344
+GEOSEARCH FROMLONLAT lon lat BYRADIUS 3 km ASC COUNT 5 WITHDIST.
+
+63
+00:04:35.624 --> 00:04:36.563
+S to R:
+
+64
+00:04:36.843 --> 00:04:38.357
+GEOHASH (for display).
+
+65
+00:04:38.637 --> 00:04:41.837
+S to C: id, km, geohash nearest first.
+
+66
+00:04:45.687 --> 00:04:46.519
+Service.
+
+67
+00:04:46.799 --> 00:04:50.362
+Here is the Java code, RestaurantGeoService.java.
+
+68
+00:04:50.642 --> 00:04:54.311
+It runs to 38 lines; the full listing is in the chapter.
+
+69
+00:04:54.591 --> 00:05:01.397
+Redis GEO is a sorted set scored by a 52-bit interleaved geohash: exactly the interview structure.
+
+70
+00:05:01.677 --> 00:05:07.650
+GEOSEARCH scans the centre cell + neighbours and filters by true (haversine) distance for you.
+
+71
+00:05:10.500 --> 00:05:11.375
+Controller.
+
+72
+00:05:11.655 --> 00:05:15.281
+Here is the Java code, RestaurantGeoController.java.
+
+73
+00:05:15.561 --> 00:05:19.209
+It runs to 28 lines; the full listing is in the chapter.
+
+74
+00:05:22.059 --> 00:05:23.403
+Run it as a service.
+
+75
+00:05:23.683 --> 00:05:29.230
+The integration test GeoIT.java drives the API against a real Redis.
+
+76
+00:05:29.510 --> 00:05:32.198
+This is its transcript ( request, response):
+
+77
+00:05:33.548 --> 00:05:34.465
+On screen:
+
+78
+00:05:34.745 --> 00:05:46.009
+PUT or api or v1 or restaurants or truffles-koramangala or location lat:12.9333,lon:77.6146.
+
+79
+00:05:46.289 --> 00:05:47.399
+204.
+
+80
+00:05:47.679 --> 00:05:59.476
+PUT or api or v1 or restaurants or meghana-residency-rd or location lat:12.9682,lon:77.6070.
+
+81
+00:05:59.756 --> 00:06:00.865
+204.
+
+82
+00:06:01.145 --> 00:06:12.281
+PUT or api or v1 or restaurants or vidyarthi-bhavan or location lat:12.9452,lon:77.5713.
+
+83
+00:06:12.561 --> 00:06:13.671
+204.
+
+84
+00:06:13.951 --> 00:06:24.980
+PUT or api or v1 or restaurants or mtr-lalbagh or location lat:12.9553,lon:77.5854.
+
+85
+00:06:25.260 --> 00:06:26.369
+204.
+
+86
+00:06:26.649 --> 00:06:38.041
+PUT or api or v1 or restaurants or toit-indiranagar or location lat:12.9791,lon:77.6408.
+
+87
+00:06:38.321 --> 00:06:39.431
+204.
+
+88
+00:06:39.711 --> 00:06:51.103
+PUT or api or v1 or restaurants or airport-food-court or location lat:13.1986,lon:77.7066.
+
+89
+00:06:51.383 --> 00:06:52.492
+204.
+
+90
+00:06:52.772 --> 00:07:05.935
+GET or api or v1 or restaurants or near?lat=12.9716 and lon=77.5946 and km=3 and limit=5.
+
+91
+00:07:06.215 --> 00:07:07.729
+The rest is in the chapter.
+
+92
+00:07:10.579 --> 00:07:12.670
+What changes from the interview version.
+
+93
+00:07:12.950 --> 00:07:14.315
+Here is a quick table:
+
+94
+00:07:14.595 --> 00:07:20.803
+Interview, and Production (Spring Boot 4). encode + 9 neighbour cells + haversine filter:
+
+95
+00:07:21.083 --> 00:07:22.107
+GEOSEARCH...
+
+96
+00:07:22.387 --> 00:07:25.779
+BYRADIUS does all three server-side. in-memory list:
+
+97
+00:07:26.059 --> 00:07:27.318
+Redis sorted set:
+
+98
+00:07:27.598 --> 00:07:42.595
+O(log n) moves when a restaurant (or a rider) updates its location. no validation: @DecimalMin/@DecimalMax on lat or lon via MVC method validation, giving a 400 ProblemDetail.
+
+99
+00:07:43.945 --> 00:07:56.020
+The geohashes in the output (tdr1v... and tdr1t...) share the prefix tdr1: nearby places share prefixes, which is the property that makes geohash work.
+
+100
+00:07:56.300 --> 00:08:04.044
+For polygons (delivers to this zone) or ranking by more than distance, move to PostGIS or Elasticsearch geoshape.
+
+101
+00:08:05.394 --> 00:08:06.269
+Part 8.
+
+102
+00:08:06.549 --> 00:08:07.658
+Common mistakes.
+
+103
+00:08:08.908 --> 00:08:13.985
+Searching only the user's own cell, which misses places 10 m away across the boundary.
+
+104
+00:08:14.265 --> 00:08:17.124
+Choosing the precision without considering the radius.
+
+105
+00:08:17.404 --> 00:08:22.289
+The cell must be at least as large as the search radius, or 9 cells won't cover it.
+
+106
+00:08:22.569 --> 00:08:24.447
+Comparing distances in degrees.
+
+107
+00:08:24.727 --> 00:08:28.631
+One degree of longitude shrinks with latitude, so use haversine.
+
+108
+00:08:28.911 --> 00:08:30.511
+Hot cells in dense cities.
+
+109
+00:08:30.791 --> 00:08:34.929
+Split adaptively (quadtree) or use precision that varies with density.
+
+110
+00:08:36.279 --> 00:08:37.175
+Part 9.
+
+111
+00:08:37.455 --> 00:08:38.799
+Follow-up questions.
+
+112
+00:08:40.049 --> 00:08:40.924
+Question.
+
+113
+00:08:41.204 --> 00:08:44.425
+Geohash versus quadtree versus S2 or H3?
+
+114
+00:08:44.705 --> 00:08:46.071
+Thirty-second answer:
+
+115
+00:08:46.351 --> 00:08:54.777
+Geohash is a string prefix that works with any key-value store or B-tree, but its cells are rectangles that are distorted near the poles.
+
+116
+00:08:55.057 --> 00:09:00.199
+A quadtree adapts to density (it splits busy areas) but is an in-memory structure.
+
+117
+00:09:00.479 --> 00:09:09.332
+S2 (Google) and H3 (Uber) use spherical or hexagonal cells with uniform neighbours, which is better for ride-hailing and analytics.
+
+118
+00:09:10.682 --> 00:09:11.557
+Question.
+
+119
+00:09:11.837 --> 00:09:14.482
+How would you do this in PostGIS or Redis?
+
+120
+00:09:14.762 --> 00:09:16.127
+Thirty-second answer:
+
+121
+00:09:16.407 --> 00:09:23.042
+PostGIS: a geography column, a GiST index, and STDWithin(location, me, 1000).
+
+122
+00:09:23.322 --> 00:09:24.111
+Redis:
+
+123
+00:09:24.391 --> 00:09:26.119
+GEOADD, then GEOSEARCH...
+
+124
+00:09:26.399 --> 00:09:27.957
+BYRADIUS 1 km.
+
+125
+00:09:28.237 --> 00:09:32.695
+Internally it's a 52-bit geohash stored as a sorted-set score.
+
+126
+00:09:34.045 --> 00:09:35.645
+That's the end of this chapter.
+
+127
+00:09:35.925 --> 00:09:42.048
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+128
+00:09:42.328 --> 00:09:43.779
+See you in the next chapter.
+

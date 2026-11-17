@@ -1,0 +1,2550 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.334
+Online Exams and Live Classes.
+
+2
+00:00:02.614 --> 00:00:07.265
+Chapter I13, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:09.015 --> 00:00:09.975
+At a glance:
+
+4
+00:00:10.255 --> 00:00:11.428
+Chapter at a glance.
+
+5
+00:00:11.708 --> 00:00:12.519
+Sector:
+
+6
+00:00:12.799 --> 00:00:19.263
+Education (EdTech and national testing), Format: system design walkthrough (no code), Reader bands:
+
+7
+00:00:19.543 --> 00:00:21.591
+B1, then B4, Builds on:
+
+8
+00:00:21.871 --> 00:00:30.617
+I06 (streaming), Ch 41 (chat), Ch 51 (top-K), Ch 59 L4 (spaced repetition).
+
+9
+00:00:30.897 --> 00:00:33.073
+What you get: two connected systems.
+
+10
+00:00:33.353 --> 00:00:33.993
+1.
+
+11
+00:00:34.273 --> 00:00:46.881
+A large EdTech platform: live classes where one teacher teaches up to 100,000 students with chat, polls, doubts and a shared whiteboard;. recorded lectures, courses and subscriptions;.
+
+12
+00:00:48.231 --> 00:00:58.151
+test series with timers, autosave, instant results and all-India ranks;. adaptive practice and doubt solving from a photo of a question;. parent reports.
+
+13
+00:00:58.431 --> 00:00:59.135
+2.
+
+14
+00:00:59.415 --> 00:01:09.826
+A national high-stakes computer-based test (CBT) in the style of large entrance exams: question paper security;. exam centres with local servers;.
+
+15
+00:01:11.176 --> 00:01:20.776
+response capture;. normalisation across multiple shifts (percentiles);. results for over a million candidates;. remote proctoring for online exams.
+
+16
+00:01:21.056 --> 00:01:22.123
+Also covered:
+
+17
+00:01:23.473 --> 00:01:43.291
+the algorithms: item response theory, computerised adaptive testing, knowledge tracing, paper assembly under a blueprint, percentile normalisation, collusion detection, proctoring anomaly detection, leaderboards at scale, live-class fan-out and aggregation;. the data platform (learning analytics) and tech stack.
+
+18
+00:01:43.571 --> 00:01:44.553
+Reading time:
+
+19
+00:01:44.833 --> 00:01:45.985
+85 min.
+
+20
+00:01:47.335 --> 00:01:48.081
+Warning:
+
+21
+00:01:48.361 --> 00:01:49.769
+Sources and honesty.
+
+22
+00:01:50.049 --> 00:01:57.921
+National testing agencies publish their normalisation methodology (for example, percentile scores for multi-shift exams).
+
+23
+00:01:58.201 --> 00:02:00.121
+Summaries here are marked VERIFY.
+
+24
+00:02:00.401 --> 00:02:05.052
+Details of exam centre operations and security are only partly public.
+
+25
+00:02:05.332 --> 00:02:08.191
+EdTech companies' internal systems aren't public.
+
+26
+00:02:08.471 --> 00:02:10.007
+This is a reference design.
+
+27
+00:02:10.287 --> 00:02:15.044
+Children's data needs special care under the DPDP Act (VERIFY rules).
+
+28
+00:02:16.394 --> 00:02:17.247
+Part 1.
+
+29
+00:02:17.527 --> 00:02:19.063
+The System in One Page.
+
+30
+00:02:20.313 --> 00:02:22.020
+Two very different load shapes.
+
+31
+00:02:22.300 --> 00:02:23.644
+Here is a quick table:
+
+32
+00:02:23.924 --> 00:02:28.276
+Live class, and Mock test at 10 am Sunday, and National CBT.
+
+33
+00:02:28.556 --> 00:02:29.559
+Concurrency.
+
+34
+00:02:29.839 --> 00:02:30.927
+Live class:
+
+35
+00:02:31.207 --> 00:02:35.196
+100k students in one class; thousands of classes a day.
+
+36
+00:02:35.476 --> 00:02:37.311
+Mock test at 10 am Sunday:
+
+37
+00:02:37.591 --> 00:02:40.620
+500k students start one test at once.
+
+38
+00:02:40.900 --> 00:02:45.828
+National CBT: ~1M candidates over several shifts at centres.
+
+39
+00:02:46.108 --> 00:02:47.068
+Hard part.
+
+40
+00:02:47.348 --> 00:02:48.436
+Live class:
+
+41
+00:02:48.716 --> 00:02:51.959
+Low latency to 100k, interaction at scale.
+
+42
+00:02:52.239 --> 00:02:54.073
+Mock test at 10 am Sunday:
+
+43
+00:02:54.353 --> 00:02:57.447
+Everyone starts, saves and submits at the same time.
+
+44
+00:02:57.727 --> 00:02:59.092
+National CBT:
+
+45
+00:02:59.372 --> 00:03:02.849
+Security, fairness, zero data loss, normalisation.
+
+46
+00:03:03.129 --> 00:03:04.324
+Failure impact.
+
+47
+00:03:04.604 --> 00:03:05.692
+Live class:
+
+48
+00:03:05.972 --> 00:03:07.103
+Poor experience.
+
+49
+00:03:07.383 --> 00:03:09.217
+Mock test at 10 am Sunday:
+
+50
+00:03:09.497 --> 00:03:10.799
+Anger, lost trust.
+
+51
+00:03:11.079 --> 00:03:12.444
+National CBT:
+
+52
+00:03:12.724 --> 00:03:14.793
+Legal challenges, re-exams.
+
+53
+00:03:16.143 --> 00:03:17.231
+Main systems.
+
+54
+00:03:17.511 --> 00:03:18.855
+Here is a quick table:
+
+55
+00:03:19.135 --> 00:03:20.650
+System, and What it does.
+
+56
+00:03:20.930 --> 00:03:22.487
+Identity and profiles:
+
+57
+00:03:22.767 --> 00:03:25.818
+Students (often minors), parents, teachers, roles.
+
+58
+00:03:26.098 --> 00:03:27.613
+Catalogue and enrolment:
+
+59
+00:03:27.893 --> 00:03:31.157
+Courses, batches, schedules, subscriptions, payments.
+
+60
+00:03:31.437 --> 00:03:32.845
+Live class platform:
+
+61
+00:03:33.125 --> 00:03:37.925
+Teacher broadcast, student viewing, chat, polls, doubts, whiteboard, recordings.
+
+62
+00:03:38.205 --> 00:03:39.570
+Content and VOD:
+
+63
+00:03:39.850 --> 00:03:43.861
+Lecture recordings, notes, PDFs; streaming (I06).
+
+64
+00:03:44.141 --> 00:03:45.186
+Question bank:
+
+65
+00:03:45.466 --> 00:03:50.927
+Questions with metadata (topic, difficulty, IRT parameters), versions, media.
+
+66
+00:03:51.207 --> 00:03:52.189
+Test engine:
+
+67
+00:03:52.469 --> 00:03:57.845
+Test assembly, delivery, timers, autosave, submission, evaluation, results, ranks.
+
+68
+00:03:58.125 --> 00:03:59.277
+Adaptive learning:
+
+69
+00:03:59.557 --> 00:04:03.077
+Learner model, practice recommendations, spaced revision.
+
+70
+00:04:04.427 --> 00:04:05.472
+Doubt solving:
+
+71
+00:04:05.752 --> 00:04:11.128
+Photo, then OCR, then search similar solved questions, then human tutor fallback.
+
+72
+00:04:11.408 --> 00:04:12.304
+Proctoring:
+
+73
+00:04:12.584 --> 00:04:17.064
+Webcam or mic monitoring, browser lockdown, anomaly flags, review.
+
+74
+00:04:17.344 --> 00:04:18.880
+CBT centre system:
+
+75
+00:04:19.160 --> 00:04:23.981
+Local servers, secure paper delivery, candidate verification, response sync.
+
+76
+00:04:24.261 --> 00:04:25.904
+Results and normalisation:
+
+77
+00:04:26.184 --> 00:04:29.341
+Scores, percentiles, ranks, answer key challenges.
+
+78
+00:04:29.621 --> 00:04:31.819
+Notifications and parent reports:
+
+79
+00:04:32.099 --> 00:04:34.659
+Class reminders, test results, progress.
+
+80
+00:04:34.939 --> 00:04:36.133
+Data platform:
+
+81
+00:04:36.413 --> 00:04:38.973
+Learning analytics, content quality, ML.
+
+82
+00:04:40.323 --> 00:04:42.478
+Scale for this design (assumptions).
+
+83
+00:04:42.758 --> 00:04:44.102
+Here is a quick table:
+
+84
+00:04:44.382 --> 00:04:45.705
+Quantity, and Value.
+
+85
+00:04:45.985 --> 00:04:47.265
+Registered learners:
+
+86
+00:04:47.545 --> 00:04:49.657
+30M; 3M daily active.
+
+87
+00:04:49.937 --> 00:04:51.366
+Live classes per day:
+
+88
+00:04:51.646 --> 00:04:55.123
+5,000; largest class 100k concurrent.
+
+89
+00:04:55.403 --> 00:04:57.238
+Chat messages in a big class:
+
+90
+00:04:57.518 --> 00:05:00.035
+Up to 5k per second at peak moments.
+
+91
+00:05:00.315 --> 00:05:01.745
+All-India mock test:
+
+92
+00:05:02.025 --> 00:05:06.334
+500k concurrent candidates, 3 hours, 90 questions.
+
+93
+00:05:06.614 --> 00:05:08.043
+Answer saves in a mock:
+
+94
+00:05:08.323 --> 00:05:15.278
+Each candidate saves ~2 times per minute, then ~17k saves per second average, higher bursts.
+
+95
+00:05:15.558 --> 00:05:16.667
+Test submissions:
+
+96
+00:05:16.947 --> 00:05:21.107
+500k within the last 5 minutes (auto-submit at time end).
+
+97
+00:05:21.387 --> 00:05:30.198
+National CBT: ~1M+ candidates across ~10 shifts at ~500 centres (VERIFY actual numbers).
+
+98
+00:05:31.548 --> 00:05:32.935
+Estimation highlights:
+
+99
+00:05:33.215 --> 00:05:34.495
+Live class video:
+
+100
+00:05:34.775 --> 00:05:41.153
+100k viewers times 1 Mbps = 100 Gbps from the CDN.
+
+101
+00:05:41.433 --> 00:05:49.177
+That is fine for CDNs, but only if the class is delivered as a stream (HLS or LL-HLS) to most viewers.
+
+102
+00:05:49.457 --> 00:05:56.689
+It cannot be done by making 100k WebRTC connections to an SFU cluster (§5.1).
+
+103
+00:05:56.969 --> 00:05:57.972
+Test start:
+
+104
+00:05:58.252 --> 00:06:04.673
+500k candidates fetching the paper at 10:00:00 is a flash crowd.
+
+105
+00:06:04.953 --> 00:06:07.876
+Pre-download encrypted papers before the start.
+
+106
+00:06:08.156 --> 00:06:14.577
+Release the decryption key at the start time, one small request each, or served by a signed time-based key.
+
+107
+00:06:15.927 --> 00:06:16.845
+Test end:
+
+108
+00:06:17.125 --> 00:06:22.586
+500k submissions in a few minutes, that is, ~2 to 5k per second.
+
+109
+00:06:22.866 --> 00:06:28.818
+Answers are already autosaved, so submit is just a marker, and evaluation is asynchronous.
+
+110
+00:06:30.168 --> 00:06:31.043
+Part 2.
+
+111
+00:06:31.323 --> 00:06:32.283
+Requirements.
+
+112
+00:06:33.533 --> 00:06:34.749
+EdTech functional.
+
+113
+00:06:35.029 --> 00:06:39.466
+Browse courses and batches; enrol; pay (subscriptions, EMIs, UPI).
+
+114
+00:06:39.746 --> 00:06:51.714
+Join live classes with ~2 to 5 s latency (interactive enough for polls and doubts); ask questions in chat; answer polls; raise hand (selected students go on stage).
+
+115
+00:06:51.994 --> 00:06:55.237
+Watch recordings shortly after class; download notes.
+
+116
+00:06:55.517 --> 00:07:08.786
+Take tests (practice, chapter tests, all-India mock tests) with timers, section rules, question palette, mark-for-review, autosave; get results, solutions and analysis; see all-India rank and percentile.
+
+117
+00:07:09.066 --> 00:07:13.247
+Adaptive practice: personalised question sets; revision reminders.
+
+118
+00:07:14.597 --> 00:07:20.976
+Doubt solving: photo of a question, then instant solution if similar exists, then tutor chat otherwise.
+
+119
+00:07:21.256 --> 00:07:24.648
+Parent dashboards; teacher dashboards for class engagement.
+
+120
+00:07:25.998 --> 00:07:27.790
+National CBT functional.
+
+121
+00:07:28.070 --> 00:07:31.889
+Registration, fee payment, admit cards with centre and shift.
+
+122
+00:07:32.169 --> 00:07:34.771
+Secure delivery of question papers to centres.
+
+123
+00:07:35.051 --> 00:07:38.955
+Candidate verification (biometrics or photo; VERIFY).
+
+124
+00:07:39.235 --> 00:07:44.697
+A reliable exam in centres with local servers, whatever the internet or power conditions.
+
+125
+00:07:44.977 --> 00:07:47.878
+Response capture with audit, and upload to central.
+
+126
+00:07:48.158 --> 00:07:54.686
+Provisional answer keys, challenges, final keys, scoring, normalisation across shifts, results, ranks.
+
+127
+00:07:56.036 --> 00:07:59.919
+Online (remote-proctored) variants for some exams, with proctoring.
+
+128
+00:08:01.269 --> 00:08:02.378
+Non-functional.
+
+129
+00:08:02.658 --> 00:08:04.002
+Here is a quick table:
+
+130
+00:08:04.282 --> 00:08:05.647
+Attribute, and Target.
+
+131
+00:08:05.927 --> 00:08:07.079
+Live latency:
+
+132
+00:08:07.359 --> 00:08:13.247
+2 to 5 s glass-to-glass for mass viewers; 500 ms for on-stage participants.
+
+133
+00:08:13.527 --> 00:08:14.743
+Test durability:
+
+134
+00:08:15.023 --> 00:08:18.031
+No answer ever lost once the candidate sees saved.
+
+135
+00:08:18.311 --> 00:08:19.527
+Timer integrity:
+
+136
+00:08:19.807 --> 00:08:24.095
+Server-authoritative timing; client clock manipulation can't add time.
+
+137
+00:08:24.375 --> 00:08:25.378
+Security:
+
+138
+00:08:25.658 --> 00:08:30.437
+Papers unseen before start; no tampering with responses; audit everything.
+
+139
+00:08:30.717 --> 00:08:31.591
+Fairness:
+
+140
+00:08:31.871 --> 00:08:37.269
+Equal conditions across shifts; normalisation methodology applied consistently.
+
+141
+00:08:37.549 --> 00:08:38.615
+Availability:
+
+142
+00:08:38.895 --> 00:08:43.205
+Test windows are fixed-time events; plan for zero downtime during them.
+
+143
+00:08:43.485 --> 00:08:44.402
+Privacy:
+
+144
+00:08:44.682 --> 00:08:49.759
+Minors' data protected; proctoring recordings with consent and limited retention.
+
+145
+00:08:51.109 --> 00:08:52.005
+Part 3.
+
+146
+00:08:52.285 --> 00:08:53.800
+High-Level Architecture.
+
+147
+00:08:55.050 --> 00:08:56.394
+Here is the diagram.
+
+148
+00:09:00.244 --> 00:09:01.311
+Key decisions:
+
+149
+00:09:02.661 --> 00:09:04.005
+Here is a quick table:
+
+150
+00:09:04.285 --> 00:09:06.055
+Decision, and Choice, and Why.
+
+151
+00:09:06.335 --> 00:09:07.445
+Live delivery.
+
+152
+00:09:07.725 --> 00:09:08.557
+Choice:
+
+153
+00:09:08.837 --> 00:09:09.647
+Hybrid:
+
+154
+00:09:09.927 --> 00:09:18.205
+WebRTC or SFU for the teacher and on-stage students; LL-HLS or CMAF via CDN for the mass audience.
+
+155
+00:09:18.485 --> 00:09:19.167
+Why:
+
+156
+00:09:19.447 --> 00:09:27.469
+WebRTC to 100k viewers is costly and hard to scale; streaming scales cheaply with 2 to 5 s latency.
+
+157
+00:09:27.749 --> 00:09:28.773
+Chat at scale.
+
+158
+00:09:29.053 --> 00:09:29.885
+Choice:
+
+159
+00:09:30.165 --> 00:09:34.090
+Sampled or aggregated fan-out, not every message to everyone.
+
+160
+00:09:34.370 --> 00:09:35.053
+Why:
+
+161
+00:09:35.333 --> 00:09:41.327
+5k msgs per second times 100k viewers is impossible and unreadable.
+
+162
+00:09:41.607 --> 00:09:42.653
+Test delivery.
+
+163
+00:09:42.933 --> 00:09:43.765
+Choice:
+
+164
+00:09:44.045 --> 00:09:50.146
+Pre-download encrypted paper; key release at start; autosave each answer; submit is a marker.
+
+165
+00:09:50.426 --> 00:09:51.109
+Why:
+
+166
+00:09:51.389 --> 00:09:54.823
+Removes start and end spikes, protects against disconnects.
+
+167
+00:09:55.103 --> 00:09:55.893
+Timing.
+
+168
+00:09:56.173 --> 00:09:57.005
+Choice:
+
+169
+00:09:57.285 --> 00:10:02.191
+Server-authoritative start and end; client shows a countdown synced to server time.
+
+170
+00:10:02.471 --> 00:10:03.154
+Why:
+
+171
+00:10:03.434 --> 00:10:06.271
+Prevents clock tampering (I02 L1).
+
+172
+00:10:06.551 --> 00:10:07.618
+Evaluation.
+
+173
+00:10:07.898 --> 00:10:08.730
+Choice:
+
+174
+00:10:09.010 --> 00:10:11.399
+Asynchronous, idempotent, per candidate.
+
+175
+00:10:11.679 --> 00:10:12.362
+Why:
+
+176
+00:10:12.642 --> 00:10:15.245
+Handles 500k submissions calmly.
+
+177
+00:10:16.595 --> 00:10:17.917
+CBT centres.
+
+178
+00:10:18.197 --> 00:10:19.029
+Choice:
+
+179
+00:10:19.309 --> 00:10:24.771
+Local server per centre with encrypted papers and local response storage, synced centrally.
+
+180
+00:10:25.051 --> 00:10:25.733
+Why:
+
+181
+00:10:26.013 --> 00:10:28.339
+Survive internet loss; security.
+
+182
+00:10:29.689 --> 00:10:30.606
+Part 4.
+
+183
+00:10:30.886 --> 00:10:32.763
+How It Works, Journeys End to End.
+
+184
+00:10:34.013 --> 00:10:37.661
+Journey 1: a live physics class for 60,000 students.
+
+185
+00:10:37.941 --> 00:10:51.040
+Before class: enrolled students get a reminder 15 minutes before;. the class page loads from the CDN;. the app fetches a join token (entitlement check: is the student in this batch or subscription?).
+
+186
+00:10:51.320 --> 00:10:59.171
+Teacher goes live: the teacher's studio app sends camera, screen or tablet and audio over WebRTC to an SFU;.
+
+187
+00:11:00.521 --> 00:11:15.369
+a composer mixes the teacher video and slides or whiteboard into one layout, or keeps them as separate tracks;. it encodes an ABR ladder and packages LL-HLS (CMAF chunks);. the CDN serves 60,000 students.
+
+188
+00:11:15.649 --> 00:11:23.969
+Latency is ~2 to 5 s, while mobile viewers on 3G get lower renditions (I06 §6.3).
+
+189
+00:11:24.249 --> 00:11:30.393
+Whiteboard: strokes are sent as vector events (not video) over WebSockets, and rendered on devices;.
+
+190
+00:11:31.743 --> 00:11:38.527
+this is crisp at any resolution and needs little bandwidth;. it is synced with the video timeline via timestamps.
+
+191
+00:11:38.807 --> 00:11:49.644
+Chat (§5.2): students send messages to the chat service through WebSocket gateways;. messages are moderated (profanity filters, rate limits per student);.
+
+192
+00:11:50.994 --> 00:12:07.015
+the service samples what to fan out: every student sees a manageable stream (for example, 5 messages per second), with teacher and moderator messages and top questions pinned;. all messages are stored for the teacher and moderators to see and search.
+
+193
+00:12:07.295 --> 00:12:09.877
+Doubts: students can mark a message as a doubt.
+
+194
+00:12:10.157 --> 00:12:16.237
+Similar doubts are clustered (text similarity), and moderators surface the top clusters to the teacher.
+
+195
+00:12:16.517 --> 00:12:20.357
+Polls: the teacher launches a poll (What is the SI unit of force?).
+
+196
+00:12:21.707 --> 00:12:36.192
+60,000 answers arrive in 20 seconds (~3k per second);. aggregated in memory per option, and the running result is broadcast every second;. individual answers are stored for analytics and student reports.
+
+197
+00:12:36.472 --> 00:12:39.651
+Hand raise: the teacher invites a student on stage.
+
+198
+00:12:39.931 --> 00:12:47.803
+That student joins the SFU with WebRTC for sub-second interaction, and their video is composed into the stream for everyone else.
+
+199
+00:12:49.153 --> 00:12:58.305
+After class: the recording (the composed stream, or tracks plus whiteboard events for interactive playback) is packaged as VOD within minutes.
+
+200
+00:12:58.585 --> 00:13:02.702
+Attendance, watch time, poll accuracy and doubts go to analytics.
+
+201
+00:13:04.052 --> 00:13:07.487
+Journey 2: an all-India mock test at 10 am Sunday.
+
+202
+00:13:07.767 --> 00:13:25.900
+Before the test: the test is assembled from the question bank according to a blueprint: sections, topics, difficulty distribution, marks scheme (§6.3);. variants may be created (shuffled order, different question sets of equal difficulty) to reduce copying;. from 9:30,
+
+203
+00:13:26.180 --> 00:13:33.391
+registered students' apps pre-download the encrypted test package from the CDN: questions, images, instructions.
+
+204
+00:13:33.671 --> 00:13:35.591
+Downloads spread over 30 minutes.
+
+205
+00:13:35.871 --> 00:13:36.660
+Start:
+
+206
+00:13:38.010 --> 00:13:44.623
+at 10:00:00 (server time), the app requests the decryption key and a start token.
+
+207
+00:13:44.903 --> 00:13:56.999
+The server records the start time for that candidate;. late joiners get the time remaining for their window, per test rules;. key requests are small, and served by a scaled, cached key service.
+
+208
+00:13:57.279 --> 00:14:00.373
+During the test: each answer change is autosaved:
+
+209
+00:14:00.653 --> 00:14:06.498
+(candidate, test, question, answer, client sequence, client time) goes to the autosave service.
+
+210
+00:14:06.778 --> 00:14:10.405
+It is written to a durable store and acknowledged, showing saved;.
+
+211
+00:14:11.755 --> 00:14:23.381
+if offline, answers queue locally and sync when the connection returns, with sequence numbers resolving order (§6.8);. the timer shows a countdown synced to server time.
+
+212
+00:14:23.661 --> 00:14:29.059
+The server's recorded start plus duration defines the end, regardless of the client clock.
+
+213
+00:14:29.339 --> 00:14:35.440
+End: at the end time the app auto-submits: a small submitted marker plus any unsynced answers.
+
+214
+00:14:35.720 --> 00:14:41.843
+The server rejects answers timestamped after the end (with tolerance for network delay, per rules);.
+
+215
+00:14:43.193 --> 00:14:47.609
+candidates who lost connectivity have their last synced answers evaluated.
+
+216
+00:14:47.889 --> 00:14:54.374
+Their buffered answers are accepted if their sequence and time prove they were answered before the end (policy).
+
+217
+00:14:54.654 --> 00:15:11.934
+Evaluation: asynchronous workers score each candidate per the marks scheme (+4 or minus 1, partial marks for multi-correct; VERIFY exam patterns), idempotently;. within minutes, results: score, section scores, time analysis, accuracy by topic.
+
+218
+00:15:13.284 --> 00:15:27.727
+Ranks: all-India rank and percentile among 500k candidates come from a score distribution (§6.6);. ranks become final after a cut-off time, when late submissions and re-evaluations are done.
+
+219
+00:15:29.077 --> 00:15:32.469
+Journey 3: a national CBT at an exam centre.
+
+220
+00:15:32.749 --> 00:15:50.242
+Weeks before: the question papers for each shift are set by experts, reviewed and stored encrypted;. centres are prepared: networked computers, a local server, power backup, CCTV, and a biometric or photo verification set-up (VERIFY specific procedures).
+
+221
+00:15:50.522 --> 00:15:56.090
+Day before or morning of: the encrypted paper for the shift is downloaded to the local server;.
+
+222
+00:15:57.440 --> 00:16:02.667
+the decryption key is released only shortly before the exam starts, through a secure channel.
+
+223
+00:16:02.947 --> 00:16:06.381
+Keys may be split among officials (VERIFY procedures).
+
+224
+00:16:06.661 --> 00:16:11.269
+Candidate entry: verified by admit card, photo and biometrics.
+
+225
+00:16:11.549 --> 00:16:17.928
+Each is assigned a computer, which boots into a locked-down exam client (no other apps, no internet).
+
+226
+00:16:18.208 --> 00:16:27.253
+During the exam: each candidate's responses are saved to the local server continuously, with a local audit log (every click with a timestamp);.
+
+227
+00:16:28.603 --> 00:16:40.934
+the local server replicates to a second local disk or server (VERIFY);. if a computer fails, the candidate moves to a spare, and the session resumes from the server with remaining time preserved.
+
+228
+00:16:41.214 --> 00:16:57.299
+After the shift: response files are encrypted and signed, then uploaded to central over the network (or physically transported if needed);. central verifies checksums and signatures, and reconciles counts: candidates present versus response files.
+
+229
+00:16:58.649 --> 00:17:12.004
+Keys and scoring: provisional answer keys and candidates' response sheets are published;. candidates can challenge keys, for a fee, within a window;. experts review; final keys are published;. scoring runs.
+
+230
+00:17:13.354 --> 00:17:22.570
+Normalisation: multiple shifts had different papers, so raw scores are converted to percentile scores within each shift (§6.5).
+
+231
+00:17:22.850 --> 00:17:30.786
+Merit lists are formed from the normalised scores per the methodology (VERIFY the agency's published rules, including tie-breaking).
+
+232
+00:17:31.066 --> 00:17:38.042
+Results: published for a million candidates on one day, via a CDN-cached results site with candidate login.
+
+233
+00:17:38.322 --> 00:17:44.295
+Expect traffic spikes of tens of thousands of requests per second (pre-generated result documents).
+
+234
+00:17:45.645 --> 00:17:48.120
+Journey 4: remote-proctored online exam.
+
+235
+00:17:48.400 --> 00:17:51.813
+Setup: the candidate installs a lockdown browser or app.
+
+236
+00:17:52.093 --> 00:17:59.112
+It checks the environment: a single screen, no virtual machines, no screen sharing or remote desktop tools.
+
+237
+00:17:59.392 --> 00:18:04.789
+Identity: face photo matched to the registration photo, and ID document capture.
+
+238
+00:18:05.069 --> 00:18:08.995
+Room scan: a 360 degrees camera sweep of the room.
+
+239
+00:18:09.275 --> 00:18:10.405
+During the exam:
+
+240
+00:18:11.755 --> 00:18:36.225
+AI proctoring analyses webcam and microphone streams at the edge or server (§6.7): face absent, multiple faces, gaze away repeatedly, voices, mobile phone detected, tab switching attempts;. events are flagged with timestamps and short clips;. live proctors monitor many candidates (for example, 1:20) with AI flags prioritised, and can message or terminate.
+
+241
+00:18:36.505 --> 00:18:41.689
+Review: flags are reviewed after the exam, and decisions are recorded with evidence.
+
+242
+00:18:41.969 --> 00:18:46.726
+Recordings are retained for a limited period per policy and consent (VERIFY).
+
+243
+00:18:48.076 --> 00:18:50.572
+Journey 5: adaptive practice and doubts.
+
+244
+00:18:50.852 --> 00:18:53.604
+Adaptive practice: a student opens Practice:
+
+245
+00:18:53.884 --> 00:18:54.865
+Kinematics.
+
+246
+00:18:55.145 --> 00:18:59.348
+The learner model estimates mastery per concept (§6.2).
+
+247
+00:18:59.628 --> 00:19:10.529
+The recommender picks questions near the student's ability, just hard enough, mixing weak concepts and spaced revision of earlier ones (Ch 59 L4 principle).
+
+248
+00:19:10.809 --> 00:19:13.156
+Each answer updates mastery immediately.
+
+249
+00:19:13.436 --> 00:19:16.913
+Doubt solving: the student photographs a question from a textbook.
+
+250
+00:19:17.193 --> 00:19:22.377
+OCR handles printed text and math notation (math OCR to LaTeX).
+
+251
+00:19:23.727 --> 00:19:29.295
+Math-aware text embeddings are used for semantic search over millions of solved questions.
+
+252
+00:19:29.575 --> 00:19:36.018
+If a near-duplicate exists with high confidence, the student sees the solution video and steps instantly.
+
+253
+00:19:36.298 --> 00:19:41.077
+Otherwise the doubt goes to a tutor queue (chat), with subject routing and SLA.
+
+254
+00:19:42.427 --> 00:19:43.387
+Part 5.
+
+255
+00:19:43.667 --> 00:19:45.203
+Core Subsystems in Depth.
+
+256
+00:19:46.453 --> 00:19:48.245
+Live class delivery at scale.
+
+257
+00:19:48.525 --> 00:19:49.506
+Why hybrid:
+
+258
+00:19:49.786 --> 00:19:57.253
+WebRTC via SFUs gives sub-second latency but needs server resources per viewer and complex scaling;.
+
+259
+00:19:57.533 --> 00:20:09.095
+LL-HLS via CDN gives 2 to 5 s latency and scales to millions at low cost;. classes need low latency only for the teacher and a few on-stage students.
+
+260
+00:20:09.375 --> 00:20:14.538
+Small classes (up to a few hundred) can be all-WebRTC for full interactivity.
+
+261
+00:20:14.818 --> 00:20:16.482
+Big classes use the hybrid.
+
+262
+00:20:17.832 --> 00:20:35.752
+Synchronising interaction with video delay: a poll the teacher launches at time T arrives at viewers' screens with the video at T + 3 s;. send poll events with a video timestamp, so clients show the poll when their playback reaches that moment;. the same applies to whiteboard events.
+
+263
+00:20:36.032 --> 00:20:40.832
+Teacher-side reliability: the teacher's upload is the single point of failure.
+
+264
+00:20:41.112 --> 00:20:49.347
+Use a backup encoder path, an internet quality check before class, and fallback to audio + whiteboard if the video uplink degrades.
+
+265
+00:20:50.697 --> 00:20:52.937
+Chat and interaction at 100k.
+
+266
+00:20:53.217 --> 00:20:54.027
+Ingest:
+
+267
+00:20:54.307 --> 00:21:02.009
+WebSocket gateways (sharded by connection), then chat service partitioned by class, then storage (append-only per class).
+
+268
+00:21:02.289 --> 00:21:22.385
+Fan-out: never broadcast every message to every viewer;. the class room service selects a stream per interval: teacher and moderator messages always; a sample of student messages (rate-limited per interval); highlighted doubts;. the selected stream is broadcast via gateways, one message per interval per connection batch.
+
+269
+00:21:23.735 --> 00:21:30.113
+Reactions and poll votes are aggregated as counts per interval (I06 §6.8).
+
+270
+00:21:30.393 --> 00:21:35.407
+Moderation: profanity and spam filters, per-user rate limits, slow mode, bans.
+
+271
+00:21:35.687 --> 00:21:44.519
+Doubt clustering: embed doubt messages, cluster them online (incremental clustering), and show the teacher a ranked list of clusters with counts.
+
+272
+00:21:45.869 --> 00:21:46.914
+Question bank.
+
+273
+00:21:47.194 --> 00:21:58.394
+Each question has: text (with LaTeX), images, options, correct answers;. solution (text or video);. topic tags (syllabus hierarchy);. difficulty labels;.
+
+274
+00:21:58.674 --> 00:22:02.663
+IRT parameters (§6.1);. exposure counts;.
+
+275
+00:22:04.013 --> 00:22:09.112
+version history;. review status (created, then reviewed, then approved, then retired).
+
+276
+00:22:09.392 --> 00:22:15.707
+Search and assembly: index by topic, difficulty, type and exposure, for assembly and practice.
+
+277
+00:22:15.987 --> 00:22:27.037
+Quality loop: item statistics from tests (difficulty, discrimination, distractor analysis) flag bad questions: ambiguous, wrong key, or too easy or hard.
+
+278
+00:22:28.387 --> 00:22:29.987
+Test engine and autosave.
+
+279
+00:22:30.267 --> 00:22:39.462
+Test definitions: sections, timers (overall and per section), navigation rules, marking schemes, question pools or fixed papers, variants.
+
+280
+00:22:39.742 --> 00:22:44.649
+Delivery package: encrypted per test (and per variant), downloadable in advance.
+
+281
+00:22:44.929 --> 00:22:46.529
+The key is released at start.
+
+282
+00:22:46.809 --> 00:22:50.435
+Optional per-candidate watermarking of content deters leaks.
+
+283
+00:22:50.715 --> 00:22:58.523
+Autosave store: writes keyed by (test, candidate, question) with the highest sequence number wins;. partitioned by candidate;.
+
+284
+00:22:59.873 --> 00:23:11.671
+a durable, replicated key-value store (for example, Cassandra or ScyllaDB or DynamoDB-style) handles high write rates;. acknowledgements only after a durable write.
+
+285
+00:23:11.951 --> 00:23:14.511
+Submission: a marker plus a final flush.
+
+286
+00:23:14.791 --> 00:23:17.159
+Evaluation is triggered via an event.
+
+287
+00:23:17.439 --> 00:23:20.084
+Evaluation: idempotent per candidate.
+
+288
+00:23:20.364 --> 00:23:27.745
+Recomputable if the answer key changes (§4.3 step 6), so keep responses separately from scores.
+
+289
+00:23:29.095 --> 00:23:30.930
+Results, ranks and analytics.
+
+290
+00:23:31.210 --> 00:23:40.298
+Per-candidate results: score, section-wise breakdown, time spent per question, accuracy by topic, comparison to toppers and averages.
+
+291
+00:23:40.578 --> 00:23:48.301
+Ranks: computed from the score distribution after the test window closes (§6.6), and published once stable.
+
+292
+00:23:48.581 --> 00:23:53.637
+Teacher and parent reports: batch performance, weak topics, attendance, engagement.
+
+293
+00:23:54.987 --> 00:23:56.523
+CBT centre system.
+
+294
+00:23:56.803 --> 00:24:12.995
+Local server: receives the encrypted paper;. holds decryption keys only at exam time;. serves the exam client to all terminals;. stores responses with an audit trail;. replicates locally;. uploads signed response packages after the shift.
+
+295
+00:24:14.345 --> 00:24:22.238
+Exam client: locked-down OS image, no internet, timer from the local server, and seamless resume on terminal failure.
+
+296
+00:24:22.518 --> 00:24:31.990
+Monitoring: central dashboards show centre readiness (downloads done, clocks synced, terminals up), candidates present, and upload status after shifts.
+
+297
+00:24:32.270 --> 00:24:36.131
+CCTV and observers are part of the process (VERIFY).
+
+298
+00:24:37.481 --> 00:24:38.420
+Part 6.
+
+299
+00:24:38.700 --> 00:24:39.660
+Algorithms.
+
+300
+00:24:40.910 --> 00:24:43.171
+Item response theory (IRT).
+
+301
+00:24:43.451 --> 00:24:48.870
+The model: the probability that a student with ability θ answers item i correctly.
+
+302
+00:24:49.150 --> 00:24:52.329
+In the 3-parameter logistic (3PL) model:
+
+303
+00:24:52.609 --> 00:25:11.745
+P(correct θ) = ci + (1 minus ci) / (1 + e^(minus ai(θ minus bi))). where: bi is difficulty;. ai is discrimination (how sharply the item separates abilities);. ci is the guessing floor (for example, ~0.25 for four options).
+
+304
+00:25:13.095 --> 00:25:23.441
+Calibration: estimate item parameters from many students' responses by maximum likelihood (EM or marginal maximum likelihood) or Bayesian methods.
+
+305
+00:25:23.721 --> 00:25:28.201
+Ability estimation: estimate θ for each student from their responses.
+
+306
+00:25:28.481 --> 00:25:36.695
+Uses: scores comparable across different question sets; question quality checks; adaptive testing; better practice recommendations.
+
+307
+00:25:38.045 --> 00:25:39.218
+Knowledge tracing.
+
+308
+00:25:39.498 --> 00:25:55.839
+Bayesian Knowledge Tracing (BKT): per concept, a hidden mastered or not state, with parameters for: initial knowledge;. learning rate (probability of learning after each attempt);. slip (wrong answer despite mastery);. guess (right answer without mastery).
+
+309
+00:25:56.119 --> 00:25:59.533
+After each answer, update P(mastered) by Bayes' rule.
+
+310
+00:26:00.883 --> 00:26:09.181
+Deep knowledge tracing: sequence models over the student's full interaction history predict the next answer's correctness across concepts.
+
+311
+00:26:09.461 --> 00:26:18.677
+Uses: mastery bars in the app; choosing the next question; deciding when to revise (spaced repetition, with intervals growing as mastery holds).
+
+312
+00:26:20.027 --> 00:26:21.819
+Test assembly under a blueprint.
+
+313
+00:26:22.099 --> 00:26:44.137
+Constraints: number of questions per topic and section;. difficulty distribution (for example, 30% easy, 50% medium, 20% hard, or a target test information curve with IRT);. question types;. no overlapping or duplicate concepts;. exposure limits (don't reuse recent questions);. variants with equal difficulty.
+
+314
+00:26:45.487 --> 00:26:56.196
+Methods: integer programming (select binary xi for each question to satisfy constraints and hit target information);. or greedy heuristics with repair.
+
+315
+00:26:56.476 --> 00:27:01.425
+Parallel forms (variants) are generated so their test characteristic curves match.
+
+316
+00:27:02.775 --> 00:27:05.463
+Computerised adaptive testing (CAT).
+
+317
+00:27:05.743 --> 00:27:06.447
+Loop:
+
+318
+00:27:06.727 --> 00:27:08.285
+Start with a medium item.
+
+319
+00:27:08.565 --> 00:27:10.591
+After each answer, update θ.
+
+320
+00:27:10.871 --> 00:27:20.087
+Choose the next item with maximum information at the current θ, subject to content constraints and exposure control (randomisation among top items).
+
+321
+00:27:20.367 --> 00:27:25.039
+Stop when the standard error is small enough, or after a maximum number of items.
+
+322
+00:27:26.389 --> 00:27:29.120
+Benefits: shorter tests with equal precision.
+
+323
+00:27:29.400 --> 00:27:32.557
+Used in some standardised exams (VERIFY which).
+
+324
+00:27:33.907 --> 00:27:36.126
+Percentile normalisation across shifts.
+
+325
+00:27:36.406 --> 00:27:40.395
+The problem: a multi-shift exam uses different papers per shift.
+
+326
+00:27:40.675 --> 00:27:43.939
+One shift may be harder, so raw scores aren't comparable.
+
+327
+00:27:44.219 --> 00:28:07.345
+Percentile method (as published by some national agencies; VERIFY details): within each shift, a candidate's percentile score = 100 times (number of candidates in that shift with raw score at most the candidate's score) / (total candidates in the shift);. computed to several decimal places;. merit is based on percentile scores, with tie-breaking rules;.
+
+328
+00:28:08.695 --> 00:28:15.927
+the assumption is that ability distributions are similar across shifts, so candidates are randomly allocated to shifts.
+
+329
+00:28:16.207 --> 00:28:25.849
+Alternatives: equipercentile equating, and IRT-based equating using common (anchor) items, which is more robust if shift populations differ.
+
+330
+00:28:26.129 --> 00:28:32.764
+Systems view: sort each shift's scores;. compute the cumulative distribution;. map each candidate's score;.
+
+331
+00:28:34.114 --> 00:28:40.194
+publish with full precision and audit;. make it reproducible from stored responses and final keys.
+
+332
+00:28:41.544 --> 00:28:43.464
+Ranking half a million candidates.
+
+333
+00:28:43.744 --> 00:28:55.115
+Scores are discrete (for example, minus 90 to 360), so ranks come from a count histogram: rank(score) = 1 + number of candidates with a higher score.
+
+334
+00:28:55.395 --> 00:29:00.045
+This is O(number of distinct scores) and trivially fast, even for millions.
+
+335
+00:29:00.325 --> 00:29:15.280
+Live leaderboard during a test window: maintain counts per score bucket in a sharded counter store (Ch 51);. a candidate's provisional rank = the sum of counts above their score;. top-100 lists from a sorted set.
+
+336
+00:29:15.560 --> 00:29:20.467
+Ties: break by time taken, accuracy, or sectional scores per test rules.
+
+337
+00:29:21.817 --> 00:29:23.545
+Proctoring anomaly detection.
+
+338
+00:29:23.825 --> 00:29:42.043
+Signals: face detection (none, multiple);. face match drift (a different person);. head pose and gaze away (away for longer than N seconds, repeatedly);. object detection (phone, book);. audio (speech detection, multiple voices);. screen events (focus loss, attempts to open apps).
+
+339
+00:29:43.393 --> 00:29:51.479
+Scoring: a weighted sum of events over time windows with decay; thresholds for a live proctor alert versus a post-exam review.
+
+340
+00:29:51.759 --> 00:29:57.540
+Fairness: tune for lighting and skin tone variations, network conditions and disabilities.
+
+341
+00:29:57.820 --> 00:30:00.273
+Always have human review before penalties.
+
+342
+00:30:01.623 --> 00:30:02.946
+Autosave ordering.
+
+343
+00:30:03.226 --> 00:30:07.002
+Per question, the client increments a sequence number for each change.
+
+344
+00:30:07.282 --> 00:30:13.191
+The server stores the answer with the highest sequence (last write by sequence, not by arrival order).
+
+345
+00:30:13.471 --> 00:30:16.223
+Offline queue replay sends changes in order.
+
+346
+00:30:16.503 --> 00:30:18.210
+The server ignores stale ones.
+
+347
+00:30:18.490 --> 00:30:26.895
+The end-time rule: changes with client sequence after the recorded end, or arriving after end + grace, are rejected (policy).
+
+348
+00:30:27.175 --> 00:30:30.546
+Evidence: the audit log stores every change for disputes.
+
+349
+00:30:31.896 --> 00:30:33.752
+Collusion and cheating detection.
+
+350
+00:30:34.032 --> 00:30:43.632
+Answer similarity: pairs of candidates with unusually many identical wrong answers (shared wrong answers are much stronger evidence than shared right ones).
+
+351
+00:30:43.912 --> 00:30:48.520
+Statistical indices compare to the expected overlap given their abilities.
+
+352
+00:30:48.800 --> 00:30:53.045
+Compute within centres, labs, or IP subnets to limit pair counts.
+
+353
+00:30:53.325 --> 00:31:02.349
+Timing patterns: answers entered at identical times across candidates, or extremely fast correct answers on hard items (possible leak).
+
+354
+00:31:02.629 --> 00:31:07.685
+Score jumps: sudden large improvements versus history (EdTech mock tests).
+
+355
+00:31:09.035 --> 00:31:12.065
+Outcome: flags, then review, then action per rules.
+
+356
+00:31:12.345 --> 00:31:16.441
+Evidence only, never automatic penalties for high-stakes exams.
+
+357
+00:31:17.791 --> 00:31:18.729
+Part 7.
+
+358
+00:31:19.009 --> 00:31:20.332
+Data Architecture.
+
+359
+00:31:21.582 --> 00:31:22.969
+Operational stores.
+
+360
+00:31:23.249 --> 00:31:24.593
+Here is a quick table:
+
+361
+00:31:24.873 --> 00:31:27.049
+Data, and Store (reference), and Notes.
+
+362
+00:31:27.329 --> 00:31:29.206
+Users, enrolments, payments.
+
+363
+00:31:29.486 --> 00:31:30.723
+Store (reference):
+
+364
+00:31:31.003 --> 00:31:32.241
+PostgreSQL.
+
+365
+00:31:32.521 --> 00:31:33.331
+Notes:
+
+366
+00:31:33.611 --> 00:31:35.745
+Minors: guardian consent records.
+
+367
+00:31:36.025 --> 00:31:38.329
+Live class state (rooms, participants).
+
+368
+00:31:38.609 --> 00:31:39.846
+Store (reference):
+
+369
+00:31:40.126 --> 00:31:41.513
+In-memory + Redis.
+
+370
+00:31:41.793 --> 00:31:42.603
+Notes:
+
+371
+00:31:42.883 --> 00:31:43.715
+Ephemeral.
+
+372
+00:31:43.995 --> 00:31:45.105
+Chat and doubts.
+
+373
+00:31:45.385 --> 00:31:46.622
+Store (reference):
+
+374
+00:31:46.902 --> 00:31:49.718
+Append-only per class (Kafka + Cassandra).
+
+375
+00:31:49.998 --> 00:31:50.809
+Notes:
+
+376
+00:31:51.089 --> 00:31:52.689
+Searchable for moderators.
+
+377
+00:31:52.969 --> 00:31:54.014
+Question bank.
+
+378
+00:31:54.294 --> 00:31:55.531
+Store (reference):
+
+379
+00:31:55.811 --> 00:32:00.718
+PostgreSQL + object storage (images, videos) + OpenSearch.
+
+380
+00:32:00.998 --> 00:32:01.809
+Notes:
+
+381
+00:32:02.089 --> 00:32:02.942
+Versioned.
+
+382
+00:32:03.222 --> 00:32:04.353
+Test packages.
+
+383
+00:32:04.633 --> 00:32:05.870
+Store (reference):
+
+384
+00:32:06.150 --> 00:32:08.774
+Object storage + CDN (encrypted).
+
+385
+00:32:09.054 --> 00:32:09.865
+Notes:
+
+386
+00:32:10.145 --> 00:32:11.382
+Keys in KMS.
+
+387
+00:32:12.732 --> 00:32:14.055
+Autosaved answers.
+
+388
+00:32:14.335 --> 00:32:15.572
+Store (reference):
+
+389
+00:32:15.852 --> 00:32:22.039
+Distributed KV (Cassandra or ScyllaDB or DynamoDB) partitioned by candidate.
+
+390
+00:32:22.319 --> 00:32:23.129
+Notes:
+
+391
+00:32:23.409 --> 00:32:24.625
+High write rates.
+
+392
+00:32:24.905 --> 00:32:26.100
+Results and ranks.
+
+393
+00:32:26.380 --> 00:32:27.617
+Store (reference):
+
+394
+00:32:27.897 --> 00:32:30.777
+PostgreSQL + cached result pages.
+
+395
+00:32:31.057 --> 00:32:31.868
+Notes:
+
+396
+00:32:32.148 --> 00:32:33.215
+Read spikes.
+
+397
+00:32:33.495 --> 00:32:34.689
+Proctoring media.
+
+398
+00:32:34.969 --> 00:32:36.207
+Store (reference):
+
+399
+00:32:36.487 --> 00:32:38.620
+Object storage with short retention.
+
+400
+00:32:38.900 --> 00:32:39.711
+Notes:
+
+401
+00:32:39.991 --> 00:32:41.249
+Access-controlled.
+
+402
+00:32:41.529 --> 00:32:42.980
+CBT centre data.
+
+403
+00:32:43.260 --> 00:32:44.497
+Store (reference):
+
+404
+00:32:44.777 --> 00:32:47.913
+Local server DB + signed packages centrally.
+
+405
+00:32:48.193 --> 00:32:49.004
+Notes:
+
+406
+00:32:49.284 --> 00:32:50.457
+Chain of custody.
+
+407
+00:32:51.807 --> 00:32:53.023
+Learning analytics.
+
+408
+00:32:53.303 --> 00:33:03.565
+Events (video watched, pauses and rewinds, attempts, answers with time taken, doubts, poll responses, test results), then Kafka, then lakehouse, then warehouse.
+
+409
+00:33:03.845 --> 00:33:04.634
+Models:
+
+410
+00:33:04.914 --> 00:33:18.354
+IRT calibration jobs, knowledge tracing training, dropout or churn prediction, content quality analytics (which lecture segments cause rewinds), teacher effectiveness metrics (engagement, outcomes).
+
+411
+00:33:18.634 --> 00:33:25.823
+Dashboards: for teachers (batch), parents (child), content teams (question quality) and business (retention, conversion).
+
+412
+00:33:27.173 --> 00:33:28.155
+Data flow.
+
+413
+00:33:28.435 --> 00:33:29.779
+Here is the diagram.
+
+414
+00:33:33.629 --> 00:33:34.503
+Part 8.
+
+415
+00:33:34.783 --> 00:33:36.469
+Tech Stack (reference choice).
+
+416
+00:33:37.719 --> 00:33:39.063
+Here is a quick table:
+
+417
+00:33:39.343 --> 00:33:41.007
+Layer, and Choice, and Notes.
+
+418
+00:33:41.287 --> 00:33:42.268
+Live media.
+
+419
+00:33:42.548 --> 00:33:43.380
+Choice:
+
+420
+00:33:43.660 --> 00:33:51.361
+WebRTC SFU (LiveKit, mediasoup, Janus) + encoder or packager for LL-HLS; CDN.
+
+421
+00:33:51.641 --> 00:33:52.452
+Notes:
+
+422
+00:33:52.732 --> 00:33:53.905
+Hybrid delivery.
+
+423
+00:33:54.185 --> 00:33:55.103
+Realtime.
+
+424
+00:33:55.383 --> 00:33:56.215
+Choice:
+
+425
+00:33:56.495 --> 00:34:01.743
+WebSocket gateways (Go or Elixir or Node) + Redis pub or sub or NATS.
+
+426
+00:34:02.023 --> 00:34:02.833
+Notes:
+
+427
+00:34:03.113 --> 00:34:04.628
+Chat, polls, whiteboard.
+
+428
+00:34:04.908 --> 00:34:05.825
+Services.
+
+429
+00:34:06.105 --> 00:34:06.937
+Choice:
+
+430
+00:34:07.217 --> 00:34:09.756
+Java or Kotlin (Spring Boot) or Go.
+
+431
+00:34:10.036 --> 00:34:10.847
+Notes:
+
+432
+00:34:11.127 --> 00:34:12.641
+Test engine, catalogue.
+
+433
+00:34:12.921 --> 00:34:14.095
+Autosave store.
+
+434
+00:34:14.375 --> 00:34:15.207
+Choice:
+
+435
+00:34:15.487 --> 00:34:18.516
+Cassandra or ScyllaDB or DynamoDB.
+
+436
+00:34:18.796 --> 00:34:19.607
+Notes:
+
+437
+00:34:19.887 --> 00:34:21.401
+Write-heavy, partitioned.
+
+438
+00:34:21.681 --> 00:34:22.812
+Databases.
+
+439
+00:34:23.092 --> 00:34:23.924
+Choice:
+
+440
+00:34:24.204 --> 00:34:25.804
+PostgreSQL, Redis.
+
+441
+00:34:26.084 --> 00:34:26.895
+Notes:
+
+442
+00:34:27.175 --> 00:34:28.092
+Core data.
+
+443
+00:34:28.372 --> 00:34:29.140
+Search.
+
+444
+00:34:29.420 --> 00:34:30.252
+Choice:
+
+445
+00:34:30.532 --> 00:34:32.345
+OpenSearch with vector search.
+
+446
+00:34:32.625 --> 00:34:33.436
+Notes:
+
+447
+00:34:33.716 --> 00:34:35.039
+Questions and doubts.
+
+448
+00:34:36.389 --> 00:34:37.690
+OCR and ML.
+
+449
+00:34:37.970 --> 00:34:38.802
+Choice:
+
+450
+00:34:39.082 --> 00:34:43.839
+Math OCR models, embeddings (Python or PyTorch), model serving.
+
+451
+00:34:44.119 --> 00:34:44.930
+Notes:
+
+452
+00:34:45.210 --> 00:34:46.426
+Doubts, proctoring.
+
+453
+00:34:46.706 --> 00:34:47.559
+Streaming.
+
+454
+00:34:47.839 --> 00:34:48.671
+Choice:
+
+455
+00:34:48.951 --> 00:34:50.018
+Kafka, Flink.
+
+456
+00:34:50.298 --> 00:34:51.109
+Notes:
+
+457
+00:34:51.389 --> 00:34:52.477
+Aggregations.
+
+458
+00:34:52.757 --> 00:34:53.717
+Lakehouse.
+
+459
+00:34:53.997 --> 00:34:54.829
+Choice:
+
+460
+00:34:55.109 --> 00:34:57.093
+Iceberg + Spark + Trino.
+
+461
+00:34:57.373 --> 00:34:58.183
+Notes:
+
+462
+00:34:58.463 --> 00:34:59.423
+Analytics.
+
+463
+00:34:59.703 --> 00:35:00.855
+Psychometrics.
+
+464
+00:35:01.135 --> 00:35:01.967
+Choice:
+
+465
+00:35:02.247 --> 00:35:06.471
+IRT libraries (Python or R), custom calibration jobs.
+
+466
+00:35:06.751 --> 00:35:07.562
+Notes:
+
+467
+00:35:07.842 --> 00:35:09.271
+Question calibration.
+
+468
+00:35:09.551 --> 00:35:10.255
+Apps.
+
+469
+00:35:10.535 --> 00:35:11.367
+Choice:
+
+470
+00:35:11.647 --> 00:35:14.165
+Native Android (low-end friendly), web.
+
+471
+00:35:14.445 --> 00:35:15.255
+Notes:
+
+472
+00:35:15.535 --> 00:35:16.922
+India's device mix.
+
+473
+00:35:17.202 --> 00:35:18.525
+CBT centres.
+
+474
+00:35:18.805 --> 00:35:19.637
+Choice:
+
+475
+00:35:19.917 --> 00:35:23.437
+Hardened Linux images, local servers, signed packages.
+
+476
+00:35:23.717 --> 00:35:24.527
+Notes:
+
+477
+00:35:24.807 --> 00:35:25.746
+Security.
+
+478
+00:35:27.096 --> 00:35:27.992
+Part 9.
+
+479
+00:35:28.272 --> 00:35:30.512
+Security, Privacy and Compliance.
+
+480
+00:35:31.762 --> 00:35:44.071
+Children's data: verifiable parental consent, no tracking-based advertising to children, and limits on behavioural monitoring under the DPDP Act (VERIFY rules for children's data).
+
+481
+00:35:44.351 --> 00:35:50.239
+Exam integrity: encrypted papers;. just-in-time keys;. access logs;. watermarking;.
+
+482
+00:35:51.589 --> 00:35:52.869
+lockdown clients;.
+
+483
+00:35:53.149 --> 00:36:06.333
+CCTV at centres;. chain-of-custody for response data;. penalties for leaks under applicable public examination laws (for example, anti-cheating legislation for public exams; VERIFY).
+
+484
+00:36:06.613 --> 00:36:14.869
+Proctoring: transparent disclosure and consent, minimal data, short retention, human review, and accommodations for disabilities.
+
+485
+00:36:16.219 --> 00:36:25.841
+Payments and refunds: clear refund policies for courses (consumer protection; VERIFY), and EMI and loan disclosures when financing courses.
+
+486
+00:36:27.191 --> 00:36:28.044
+Part 10.
+
+487
+00:36:28.324 --> 00:36:30.244
+Reliability and Operations.
+
+488
+00:36:31.494 --> 00:36:42.886
+Fixed-time events: mock tests and national exams are scheduled, so pre-scale and pre-download;. rehearse with load tests at full concurrency;. freeze changes on test days.
+
+489
+00:36:43.166 --> 00:36:50.697
+Graceful handling of disconnects: autosave and local queues, resume with remaining time, and server-authoritative timers.
+
+490
+00:36:50.977 --> 00:36:52.171
+Live classes:
+
+491
+00:36:53.521 --> 00:36:59.964
+pre-class teacher connectivity checks;. backup encoder paths;. a degraded mode (audio + whiteboard);.
+
+492
+00:37:00.244 --> 00:37:02.633
+CDN capacity for the day's schedule.
+
+493
+00:37:02.913 --> 00:37:09.889
+Results day: pre-generate result pages; serve via CDN with login tokens; queue traffic if needed.
+
+494
+00:37:11.239 --> 00:37:21.650
+CBT centres: readiness dashboards, spare terminals, power backups, and contingency plans for centre failures (rescheduling candidates; VERIFY policies).
+
+495
+00:37:23.000 --> 00:37:24.003
+Part 11.
+
+496
+00:37:24.283 --> 00:37:25.328
+Key Trade-offs.
+
+497
+00:37:26.578 --> 00:37:27.922
+Here is a quick table:
+
+498
+00:37:28.202 --> 00:37:30.719
+Decision, and Chosen, and Accepted cost.
+
+499
+00:37:30.999 --> 00:37:32.109
+Live delivery.
+
+500
+00:37:32.389 --> 00:37:33.221
+Chosen:
+
+501
+00:37:33.501 --> 00:37:36.871
+WebRTC for stage, LL-HLS for audience.
+
+502
+00:37:37.151 --> 00:37:38.325
+Accepted cost:
+
+503
+00:37:38.605 --> 00:37:40.909
+2 to 5 s delay for most viewers.
+
+504
+00:37:41.189 --> 00:37:41.893
+Chat.
+
+505
+00:37:42.173 --> 00:37:43.005
+Chosen:
+
+506
+00:37:43.285 --> 00:37:44.479
+Sampled fan-out.
+
+507
+00:37:44.759 --> 00:37:45.933
+Accepted cost:
+
+508
+00:37:46.213 --> 00:37:48.581
+Not every message visible to everyone.
+
+509
+00:37:48.861 --> 00:37:49.842
+Test start.
+
+510
+00:37:50.122 --> 00:37:50.954
+Chosen:
+
+511
+00:37:51.234 --> 00:37:52.898
+Pre-download + key release.
+
+512
+00:37:53.178 --> 00:37:54.351
+Accepted cost:
+
+513
+00:37:54.631 --> 00:37:57.554
+Complexity; security of pre-positioned content.
+
+514
+00:37:57.834 --> 00:37:58.794
+Autosave.
+
+515
+00:37:59.074 --> 00:37:59.906
+Chosen:
+
+516
+00:38:00.186 --> 00:38:01.743
+Per-answer durable writes.
+
+517
+00:38:02.023 --> 00:38:03.197
+Accepted cost:
+
+518
+00:38:03.477 --> 00:38:04.693
+Higher write load.
+
+519
+00:38:04.973 --> 00:38:06.103
+Normalisation.
+
+520
+00:38:06.383 --> 00:38:07.215
+Chosen:
+
+521
+00:38:07.495 --> 00:38:09.970
+Percentiles within shifts (as mandated).
+
+522
+00:38:10.250 --> 00:38:11.423
+Accepted cost:
+
+523
+00:38:11.703 --> 00:38:13.901
+Assumes comparable shift populations.
+
+524
+00:38:14.181 --> 00:38:15.375
+Adaptive learning.
+
+525
+00:38:15.655 --> 00:38:16.487
+Chosen:
+
+526
+00:38:16.767 --> 00:38:18.687
+IRT + knowledge tracing.
+
+527
+00:38:18.967 --> 00:38:20.141
+Accepted cost:
+
+528
+00:38:20.421 --> 00:38:21.999
+Calibration data needed.
+
+529
+00:38:22.279 --> 00:38:23.197
+Proctoring.
+
+530
+00:38:23.477 --> 00:38:24.309
+Chosen:
+
+531
+00:38:24.589 --> 00:38:26.573
+AI flags + human review.
+
+532
+00:38:26.853 --> 00:38:28.026
+Accepted cost:
+
+533
+00:38:28.306 --> 00:38:29.991
+Cost; privacy concerns.
+
+534
+00:38:31.341 --> 00:38:32.280
+Part 12.
+
+535
+00:38:32.560 --> 00:38:33.904
+Interview Q and A.
+
+536
+00:38:35.154 --> 00:38:35.986
+Beginner.
+
+537
+00:38:36.266 --> 00:38:37.290
+Question 1.
+
+538
+00:38:37.570 --> 00:38:40.962
+How would you stream a live class to 100,000 students?
+
+539
+00:38:41.242 --> 00:38:42.607
+Thirty-second answer:
+
+540
+00:38:42.887 --> 00:39:03.794
+The teacher sends video over WebRTC to an SFU; it's composed, encoded into an ABR ladder and packaged as low-latency HLS served by a CDN to the audience with 2 to 5 s latency; only on-stage students use WebRTC; whiteboard and polls travel as small events over WebSockets.
+
+541
+00:39:05.144 --> 00:39:06.147
+Question 2.
+
+542
+00:39:06.427 --> 00:39:10.139
+How do you make sure a student's answers aren't lost in an online test?
+
+543
+00:39:10.419 --> 00:39:11.784
+Thirty-second answer:
+
+544
+00:39:12.064 --> 00:39:24.331
+Autosave each answer change to a durable, replicated store with a sequence number; show saved only after acknowledgement; queue locally when offline and sync later; submission just marks the end.
+
+545
+00:39:25.681 --> 00:39:26.726
+Question 3.
+
+546
+00:39:27.006 --> 00:39:29.737
+Why should test timers be server-authoritative?
+
+547
+00:39:30.017 --> 00:39:31.382
+Thirty-second answer:
+
+548
+00:39:31.662 --> 00:39:44.185
+Client clocks can be wrong or manipulated; the server records each candidate's start and computes the end, while the client shows a countdown synced to server time; late answers are rejected per rules.
+
+549
+00:39:45.535 --> 00:39:46.601
+Question 4.
+
+550
+00:39:46.881 --> 00:39:48.823
+How is an all-India rank computed?
+
+551
+00:39:49.103 --> 00:39:50.468
+Thirty-second answer:
+
+552
+00:39:50.748 --> 00:40:04.551
+After the test window closes, count how many candidates scored higher using a histogram of scores (scores are discrete), apply tie-break rules, and compute percentiles; provisional ranks can update live from bucket counts.
+
+553
+00:40:05.901 --> 00:40:06.903
+Intermediate.
+
+554
+00:40:07.183 --> 00:40:08.293
+Question 5.
+
+555
+00:40:08.573 --> 00:40:13.181
+How do you handle 500,000 students starting a test at the same second?
+
+556
+00:40:13.461 --> 00:40:14.826
+Thirty-second answer:
+
+557
+00:40:15.106 --> 00:40:29.698
+Pre-download the encrypted paper from the CDN over the preceding 30 minutes, then release a small decryption key and start token at start time from a scaled key service; record server-side start times; late joiners get remaining time.
+
+558
+00:40:31.048 --> 00:40:32.157
+Question 6.
+
+559
+00:40:32.437 --> 00:40:35.509
+How would you design chat for a class of 100k?
+
+560
+00:40:35.789 --> 00:40:37.155
+Thirty-second answer:
+
+561
+00:40:37.435 --> 00:40:53.733
+WebSocket gateways, then chat service partitioned by class, then append-only storage; moderation and rate limits; fan out only a sampled stream plus teacher and moderator messages and pinned doubts; aggregate reactions; cluster doubts for the teacher.
+
+562
+00:40:55.083 --> 00:40:56.171
+Question 7.
+
+563
+00:40:56.451 --> 00:40:59.054
+What is item response theory and why use it?
+
+564
+00:40:59.334 --> 00:41:00.699
+Thirty-second answer:
+
+565
+00:41:00.979 --> 00:41:17.897
+A model of the probability of a correct answer as a function of student ability and item parameters (difficulty, discrimination, guessing); it makes scores comparable across different question sets, reveals bad questions, and powers adaptive testing and practice.
+
+566
+00:41:19.247 --> 00:41:20.271
+Question 8.
+
+567
+00:41:20.551 --> 00:41:22.748
+How does doubt solving from a photo work?
+
+568
+00:41:23.028 --> 00:41:24.393
+Thirty-second answer:
+
+569
+00:41:24.673 --> 00:41:40.375
+Math-aware OCR turns the photo into text and LaTeX, an embedding model searches millions of solved questions for near-duplicates, high-confidence matches return solutions instantly, and others go to a tutor queue routed by subject.
+
+570
+00:41:41.725 --> 00:41:42.791
+Question 9.
+
+571
+00:41:43.071 --> 00:41:45.781
+How do you assemble a fair test from a question bank?
+
+572
+00:41:46.061 --> 00:41:47.426
+Thirty-second answer:
+
+573
+00:41:47.706 --> 00:42:02.319
+Define a blueprint (topics, sections, difficulty or target information curve, question types, exposure limits) and select questions via integer programming or heuristics, generating equal-difficulty variants when needed.
+
+574
+00:42:03.669 --> 00:42:04.437
+Senior.
+
+575
+00:42:04.717 --> 00:42:05.763
+Question 10.
+
+576
+00:42:06.043 --> 00:42:09.435
+How do you normalise scores across multiple exam shifts?
+
+577
+00:42:09.715 --> 00:42:11.080
+Thirty-second answer:
+
+578
+00:42:11.360 --> 00:42:32.821
+Compute percentile scores within each shift, 100 times candidates with score at most yours ÷ total in shift, to high precision and rank on those, as some national agencies do (VERIFY); alternatives are equipercentile or IRT equating with anchor items; make it reproducible from stored responses and final keys.
+
+579
+00:42:34.171 --> 00:42:35.302
+Question 11.
+
+580
+00:42:35.582 --> 00:42:37.545
+How would you build adaptive practice?
+
+581
+00:42:37.825 --> 00:42:39.190
+Thirty-second answer:
+
+582
+00:42:39.470 --> 00:42:57.283
+Estimate mastery per concept with knowledge tracing (BKT or deep models) and ability with IRT; choose next questions near the learner's ability, mixing weak concepts and spaced revision; update after each answer; evaluate by learning gains, not engagement alone.
+
+583
+00:42:58.633 --> 00:42:59.721
+Question 12.
+
+584
+00:43:00.001 --> 00:43:02.391
+How do you detect collusion in online tests?
+
+585
+00:43:02.671 --> 00:43:04.036
+Thirty-second answer:
+
+586
+00:43:04.316 --> 00:43:20.935
+Compare answer patterns within centres, labs or networks, focusing on shared wrong answers relative to expected overlap given abilities; look at synchronised timing and implausibly fast correct answers on hard items; flag for human review with evidence.
+
+587
+00:43:22.285 --> 00:43:23.565
+Question 13.
+
+588
+00:43:23.845 --> 00:43:25.423
+Design remote proctoring.
+
+589
+00:43:25.703 --> 00:43:27.069
+Thirty-second answer:
+
+590
+00:43:27.349 --> 00:43:47.253
+Lockdown client with environment checks, identity verification and room scan, on-device or server AI detecting absence, multiple faces, gaze, objects and voices, weighted scoring with live proctor alerts and post-exam review, consent and short retention, fairness tuning and human decisions.
+
+591
+00:43:48.603 --> 00:43:49.797
+Question 14.
+
+592
+00:43:50.077 --> 00:43:53.960
+How do you keep polls and whiteboard in sync with a delayed video stream?
+
+593
+00:43:54.240 --> 00:43:55.605
+Thirty-second answer:
+
+594
+00:43:55.885 --> 00:44:08.536
+Timestamp interactive events with the video timeline (not wall clock) and have clients display them when playback reaches that timestamp; aggregate poll results server-side and broadcast periodically.
+
+595
+00:44:09.886 --> 00:44:10.782
+Architect.
+
+596
+00:44:11.062 --> 00:44:12.257
+Question 15.
+
+597
+00:44:12.537 --> 00:44:15.161
+Design a national computer-based test system.
+
+598
+00:44:15.441 --> 00:44:16.806
+Thirty-second answer:
+
+599
+00:44:17.086 --> 00:44:39.678
+Encrypted papers pre-positioned on hardened local centre servers with just-in-time key release, locked-down terminals, continuous local response saving with audit and replication, signed upload after shifts, provisional keys and challenges, scoring, percentile normalisation across shifts, and CDN-served results, with readiness monitoring and contingencies.
+
+600
+00:44:41.028 --> 00:44:42.223
+Question 16.
+
+601
+00:44:42.503 --> 00:44:45.468
+How would you scale an EdTech platform for exam season?
+
+602
+00:44:45.748 --> 00:44:47.113
+Thirty-second answer:
+
+603
+00:44:47.393 --> 00:45:02.903
+Forecast concurrency for tests and classes, pre-scale APIs, autosave stores and realtime gateways, pre-position test packages and schedule CDN capacity, stagger non-essential jobs, and rehearse with full-concurrency load tests.
+
+604
+00:45:04.253 --> 00:45:05.597
+Question 17.
+
+605
+00:45:05.877 --> 00:45:08.991
+What data platform would you build for learning analytics?
+
+606
+00:45:09.271 --> 00:45:10.637
+Thirty-second answer:
+
+607
+00:45:10.917 --> 00:45:29.370
+Events from classes, videos, practice and tests into Kafka and a lakehouse; IRT calibration and knowledge tracing training jobs feeding the question bank and adaptive service; warehouse marts for teacher, parent and business dashboards; content quality analytics; strict handling of minors' data.
+
+608
+00:45:30.720 --> 00:45:31.893
+Question 18.
+
+609
+00:45:32.173 --> 00:45:35.395
+How would you evaluate whether adaptive learning actually works?
+
+610
+00:45:35.675 --> 00:45:37.040
+Thirty-second answer:
+
+611
+00:45:37.320 --> 00:45:52.573
+Randomised experiments comparing learning outcomes (post-test gains, exam results), not just engagement; control for prior ability; measure retention over time; watch for unintended effects like frustration or dropout.
+
+612
+00:45:53.923 --> 00:45:55.161
+Question 19.
+
+613
+00:45:55.441 --> 00:45:59.174
+What are the security risks of online exams, and the countermeasures?
+
+614
+00:45:59.454 --> 00:46:00.819
+Thirty-second answer:
+
+615
+00:46:01.099 --> 00:46:20.449
+Paper leaks (encryption, JIT keys, access logs, watermarking), impersonation (identity checks, face match), device cheating (lockdown clients, proctoring), collusion (answer similarity analytics), tampering with responses (signed packages, audit logs), and insider risk (separation of duties).
+
+616
+00:46:21.799 --> 00:46:22.908
+Question 20.
+
+617
+00:46:23.188 --> 00:46:25.769
+Compare live classes with live sports streaming.
+
+618
+00:46:26.049 --> 00:46:27.415
+Thirty-second answer:
+
+619
+00:46:27.695 --> 00:46:46.852
+Both use ABR streaming via CDNs; classes need two-way interaction (polls, doubts, on-stage students) synced to a delayed stream, smaller audiences per stream but many concurrent streams, and teacher-side uplink reliability, sports needs extreme single-event scale, ads and rights.
+
+620
+00:46:48.202 --> 00:46:49.247
+Part 13.
+
+621
+00:46:49.527 --> 00:46:50.295
+Summary.
+
+622
+00:46:51.545 --> 00:46:53.167
+Live classes are hybrid:
+
+623
+00:46:53.447 --> 00:46:59.655
+WebRTC for the teacher and on-stage students, LL-HLS via CDN for the audience.
+
+624
+00:46:59.935 --> 00:47:04.009
+Chat is sampled; polls and whiteboard are events synced to video time.
+
+625
+00:47:04.289 --> 00:47:14.337
+Online tests remove the start and end spikes with pre-downloaded encrypted papers, key release at start, per-answer autosave and asynchronous evaluation.
+
+626
+00:47:14.617 --> 00:47:16.473
+Timers are server-authoritative.
+
+627
+00:47:16.753 --> 00:47:27.889
+High-stakes CBTs rely on local centre servers, just-in-time keys, audit trails, signed uploads, answer key challenges and percentile normalisation across shifts.
+
+628
+00:47:29.239 --> 00:47:36.663
+Psychometrics and ML (IRT, CAT, knowledge tracing, blueprint assembly) make tests fair and practice adaptive.
+
+629
+00:47:36.943 --> 00:47:41.061
+Integrity uses collusion analytics and proctoring with human review.
+
+630
+00:47:41.341 --> 00:47:46.034
+Children's privacy and exam integrity are design constraints, not add-ons.
+
+631
+00:47:47.384 --> 00:47:48.621
+Related chapters.
+
+632
+00:47:48.901 --> 00:48:00.784
+I06, Video Streaming, Ch 41, Chat, Ch 51, Real-time Analytics, Ch 59, Interview Q and A Bank, I07, Messaging and Social.
+
+633
+00:48:01.064 --> 00:48:02.259
+Next in this tab:
+
+634
+00:48:02.539 --> 00:48:07.253
+I14, National Digital ID and Vaccination-Scale Registration.
+
+635
+00:48:08.603 --> 00:48:10.203
+That's the end of this chapter.
+
+636
+00:48:10.483 --> 00:48:16.521
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+637
+00:48:16.801 --> 00:48:18.251
+See you in the next chapter.
+

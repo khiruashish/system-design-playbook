@@ -1,0 +1,2894 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.270
+Video Streaming and Live Cricket.
+
+2
+00:00:02.550 --> 00:00:07.457
+Chapter I06, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:09.207 --> 00:00:10.167
+At a glance:
+
+4
+00:00:10.447 --> 00:00:11.620
+Chapter at a glance.
+
+5
+00:00:11.900 --> 00:00:12.711
+Sector:
+
+6
+00:00:12.991 --> 00:00:18.303
+Media and entertainment, Format: system design walkthrough (no code), Reader bands:
+
+7
+00:00:18.583 --> 00:00:20.631
+B1, then B4, Builds on:
+
+8
+00:00:20.911 --> 00:00:27.780
+Ch 52 (object storage, CDN), Ch 25, Ch 43, Ch 51.
+
+9
+00:00:28.060 --> 00:00:46.855
+What you get: the design of a streaming platform that does two very different things: video on demand (VOD): films and series, Netflix-style;. live sport at extreme concurrency: a cricket final watched by tens of millions of people at the same moment, Hotstar or JioCinema-style.
+
+10
+00:00:47.135 --> 00:00:48.031
+It covers:
+
+11
+00:00:49.381 --> 00:01:07.557
+the VOD pipeline: ingest, per-title encoding, quality measurement, packaging, DRM, CDN placement, playback, adaptive bitrate;. the live pipeline: camera to phone in seconds, redundant encoders, low-latency packaging, multi-CDN, ads inserted into the stream,
+
+12
+00:01:07.837 --> 00:01:28.978
+and the everyone joins at the toss problem;. the product around the video: catalogue, personalisation (including artwork), search, subscriptions and entitlements, ads, downloads, reactions and live scores;. the algorithms: bitrate ladders, VMAF, ABR, CDN steering and cache fill, recommendations, concurrency forecasting, ad decisioning;.
+
+13
+00:01:30.328 --> 00:01:44.941
+the data platform: playback telemetry at millions of events per second, real-time quality-of-experience dashboards, the lakehouse, experimentation;. the tech stack: what Netflix and Hotstar have published, and a reference choice.
+
+14
+00:01:45.221 --> 00:01:46.203
+Reading time:
+
+15
+00:01:46.483 --> 00:01:47.635
+85 min.
+
+16
+00:01:48.985 --> 00:01:49.731
+Warning:
+
+17
+00:01:50.011 --> 00:01:51.419
+Sources and honesty.
+
+18
+00:01:51.699 --> 00:02:05.566
+Netflix has published extensively about Open Connect, per-title and shot-based encoding, VMAF, Zuul, Eureka, Hystrix, EVCache, Chaos Monkey, Spinnaker, Keystone, Maestro and Apache Iceberg.
+
+19
+00:02:05.846 --> 00:02:08.555
+These are marked publicly described (VERIFY).
+
+20
+00:02:08.835 --> 00:02:14.510
+Disney+ Hotstar engineers have given public talks about scaling for IPL concurrency.
+
+21
+00:02:14.790 --> 00:02:19.078
+Concurrency records quoted in the press vary by source and year (VERIFY).
+
+22
+00:02:19.358 --> 00:02:21.598
+Everything else is a reference design.
+
+23
+00:02:21.878 --> 00:02:25.377
+Broadcasting and content regulations are marked VERIFY.
+
+24
+00:02:26.727 --> 00:02:27.580
+Part 1.
+
+25
+00:02:27.860 --> 00:02:29.396
+The System in One Page.
+
+26
+00:02:30.646 --> 00:02:32.331
+Two products on one platform.
+
+27
+00:02:32.611 --> 00:02:33.955
+Here is a quick table:
+
+28
+00:02:34.235 --> 00:02:37.009
+VOD (films, series), and Live (cricket match).
+
+29
+00:02:37.289 --> 00:02:38.121
+Content.
+
+30
+00:02:38.401 --> 00:02:39.915
+VOD (films, series):
+
+31
+00:02:40.195 --> 00:02:42.307
+Known in advance, watched over months.
+
+32
+00:02:42.587 --> 00:02:43.931
+Live (cricket match):
+
+33
+00:02:44.211 --> 00:02:45.939
+Created now, watched now.
+
+34
+00:02:46.219 --> 00:02:47.073
+Encoding.
+
+35
+00:02:47.353 --> 00:02:48.867
+VOD (films, series):
+
+36
+00:02:49.147 --> 00:02:52.966
+Hours of compute per title is fine; optimise quality per bit.
+
+37
+00:02:53.246 --> 00:02:54.590
+Live (cricket match):
+
+38
+00:02:54.870 --> 00:02:58.177
+Must keep up with real time; seconds of delay budget.
+
+39
+00:02:58.457 --> 00:02:59.417
+Traffic shape.
+
+40
+00:02:59.697 --> 00:03:01.211
+VOD (films, series):
+
+41
+00:03:01.491 --> 00:03:03.518
+Smooth daily curve, evening peak.
+
+42
+00:03:03.798 --> 00:03:05.142
+Live (cricket match):
+
+43
+00:03:05.422 --> 00:03:10.393
+A cliff: millions join within minutes at the toss, spikes at wickets and the last over.
+
+44
+00:03:10.673 --> 00:03:12.102
+CDN strategy.
+
+45
+00:03:12.382 --> 00:03:13.897
+VOD (films, series):
+
+46
+00:03:14.177 --> 00:03:17.249
+Pre-position popular titles in caches overnight.
+
+47
+00:03:17.529 --> 00:03:18.873
+Live (cricket match):
+
+48
+00:03:19.153 --> 00:03:24.081
+Every viewer wants the same few seconds of video at once; the origin must be shielded.
+
+49
+00:03:24.361 --> 00:03:25.555
+Failure impact.
+
+50
+00:03:25.835 --> 00:03:27.350
+VOD (films, series):
+
+51
+00:03:27.630 --> 00:03:29.742
+One title or region degraded.
+
+52
+00:03:30.022 --> 00:03:31.366
+Live (cricket match):
+
+53
+00:03:31.646 --> 00:03:34.441
+Everyone, during the most valuable minutes of the year.
+
+54
+00:03:35.791 --> 00:03:36.879
+Main systems.
+
+55
+00:03:37.159 --> 00:03:38.503
+Here is a quick table:
+
+56
+00:03:38.783 --> 00:03:40.297
+System, and What it does.
+
+57
+00:03:40.577 --> 00:03:41.751
+Content ingest:
+
+58
+00:03:42.031 --> 00:03:45.273
+Receives masters (mezzanine files) and live feeds.
+
+59
+00:03:45.553 --> 00:03:47.089
+Encoding and transcoding:
+
+60
+00:03:47.369 --> 00:03:50.697
+Produces renditions at many resolutions and bitrates.
+
+61
+00:03:50.977 --> 00:03:52.492
+Packaging and DRM:
+
+62
+00:03:52.772 --> 00:03:57.465
+HLS or DASH manifests, CMAF segments, encryption, licences.
+
+63
+00:03:57.745 --> 00:03:59.260
+Origin and CDN:
+
+64
+00:03:59.540 --> 00:04:02.036
+Stores and delivers segments close to viewers.
+
+65
+00:04:02.316 --> 00:04:03.468
+Playback service:
+
+66
+00:04:03.748 --> 00:04:10.404
+Decides what a device may play and where to fetch it; issues manifests, licence tokens, CDN choice.
+
+67
+00:04:10.684 --> 00:04:11.815
+Player (client):
+
+68
+00:04:12.095 --> 00:04:16.041
+Downloads segments, adapts bitrate (ABR), reports telemetry.
+
+69
+00:04:16.321 --> 00:04:17.793
+Catalogue and metadata:
+
+70
+00:04:18.073 --> 00:04:21.508
+Titles, episodes, rights windows, languages, artwork.
+
+71
+00:04:21.788 --> 00:04:23.409
+Personalisation and search:
+
+72
+00:04:23.689 --> 00:04:26.484
+Home rows, recommendations, artwork, search.
+
+73
+00:04:27.834 --> 00:04:30.245
+Identity, subscriptions, entitlements:
+
+74
+00:04:30.525 --> 00:04:33.682
+Accounts, profiles, plans, payments, device limits.
+
+75
+00:04:33.962 --> 00:04:34.687
+Ads:
+
+76
+00:04:34.967 --> 00:04:37.677
+Ad decisioning and server-side ad insertion.
+
+77
+00:04:37.957 --> 00:04:39.151
+Live experience:
+
+78
+00:04:39.431 --> 00:04:43.826
+Scores, key moments, reactions, multi-language commentary feeds.
+
+79
+00:04:44.106 --> 00:04:45.450
+Telemetry and QoE:
+
+80
+00:04:45.730 --> 00:04:49.591
+Start time, rebuffering, bitrate, errors, per viewer, in real time.
+
+81
+00:04:49.871 --> 00:04:51.066
+Data platform:
+
+82
+00:04:51.346 --> 00:04:54.205
+Lakehouse, warehouse, ML, experimentation.
+
+83
+00:04:55.555 --> 00:04:57.709
+Scale for this design (assumptions).
+
+84
+00:04:57.989 --> 00:04:59.333
+Here is a quick table:
+
+85
+00:04:59.613 --> 00:05:00.936
+Quantity, and Value.
+
+86
+00:05:01.216 --> 00:05:03.563
+Subscribers or monthly active users:
+
+87
+00:05:03.843 --> 00:05:07.043
+60M or 150M (with a free tier).
+
+88
+00:05:07.323 --> 00:05:08.560
+VOD catalogue:
+
+89
+00:05:08.840 --> 00:05:12.680
+100k titles, ~1M hours after episodes.
+
+90
+00:05:12.960 --> 00:05:14.773
+VOD peak concurrent streams:
+
+91
+00:05:15.053 --> 00:05:15.885
+8M.
+
+92
+00:05:16.165 --> 00:05:18.064
+Live final peak concurrency:
+
+93
+00:05:18.344 --> 00:05:26.536
+40M+ concurrent viewers (records reported for Indian cricket streams have been in the tens of millions; VERIFY current records).
+
+94
+00:05:26.816 --> 00:05:32.171
+Average live bitrate delivered: ~1.5 Mbps (mostly mobile).
+
+95
+00:05:33.521 --> 00:05:36.166
+Estimation, why live cricket is extreme:
+
+96
+00:05:36.446 --> 00:05:37.299
+Egress:
+
+97
+00:05:37.579 --> 00:05:43.318
+40M times 1.5 Mbps about 60 Tbps of delivery at the peak.
+
+98
+00:05:43.598 --> 00:05:47.843
+That only works with multiple CDNs and ISP-embedded caches.
+
+99
+00:05:48.123 --> 00:05:56.721
+Segment requests: with 4-second segments, each viewer requests a new video segment every 4 s, plus audio and manifest refreshes.
+
+100
+00:05:57.001 --> 00:06:02.675
+That is roughly 20 to 30M HTTP requests per second at the CDN edges.
+
+101
+00:06:02.955 --> 00:06:06.987
+Origin load: the origin must see only a tiny fraction of that.
+
+102
+00:06:07.267 --> 00:06:11.833
+Shielding and request coalescing are mandatory (§5.6).
+
+103
+00:06:13.183 --> 00:06:14.121
+Telemetry:
+
+104
+00:06:14.401 --> 00:06:22.273
+40M players sending a heartbeat every 30 s is ~1.3M events per second, more with per-segment events.
+
+105
+00:06:22.553 --> 00:06:29.337
+Joins: if 20M people join within 10 minutes of the toss, that is ~33k joins per second.
+
+106
+00:06:29.617 --> 00:06:35.761
+Each join means login or token checks, entitlement, playback session creation and a manifest.
+
+107
+00:06:36.041 --> 00:06:39.732
+The API tier, not the video, is usually what breaks first.
+
+108
+00:06:41.082 --> 00:06:41.957
+Part 2.
+
+109
+00:06:42.237 --> 00:06:43.197
+Requirements.
+
+110
+00:06:44.447 --> 00:06:45.300
+Functional.
+
+111
+00:06:45.580 --> 00:06:54.561
+Browse, search and get recommendations; watch VOD with resume across devices; download for offline viewing (within licence rules).
+
+112
+00:06:54.841 --> 00:07:03.695
+Watch live matches with multiple feeds: languages, camera angles, commentary; with DVR (pause, rewind within a window) and go live.
+
+113
+00:07:03.975 --> 00:07:13.596
+Subscriptions and free tiers with ads; plans by device count and quality; payments including UPI autopay mandates (VERIFY mandate rules).
+
+114
+00:07:13.876 --> 00:07:16.735
+Profiles, parental controls, content ratings.
+
+115
+00:07:17.015 --> 00:07:23.863
+Ads: pre-roll for VOD on ad tiers; ad breaks in live matches (between overs), targeted per viewer.
+
+116
+00:07:25.213 --> 00:07:29.629
+Live companion features: scorecard, key moments, reactions, polls.
+
+117
+00:07:29.909 --> 00:07:34.453
+Rights enforcement: territories, windows, device types, concurrent streams.
+
+118
+00:07:35.803 --> 00:07:36.912
+Non-functional.
+
+119
+00:07:37.192 --> 00:07:38.536
+Here is a quick table:
+
+120
+00:07:38.816 --> 00:07:40.181
+Attribute, and Target.
+
+121
+00:07:40.461 --> 00:07:41.421
+Start time:
+
+122
+00:07:41.701 --> 00:07:47.205
+Video starts in 2 s (p50) and 5 s (p95) on mobile networks.
+
+123
+00:07:47.485 --> 00:07:48.381
+Rebuffering:
+
+124
+00:07:48.661 --> 00:07:52.139
+Rebuffer ratio 0.5% of watch time.
+
+125
+00:07:52.419 --> 00:07:53.571
+Live latency:
+
+126
+00:07:53.851 --> 00:08:00.827
+Glass-to-glass 10 to 30 s standard, 3 to 8 s low-latency mode (TV broadcast is also delayed).
+
+127
+00:08:01.107 --> 00:08:02.173
+Availability:
+
+128
+00:08:02.453 --> 00:08:10.987
+Live playback ≥ 99.99% during matches; no single point of failure from camera to CDN.
+
+129
+00:08:11.267 --> 00:08:12.013
+Scale:
+
+130
+00:08:12.293 --> 00:08:17.328
+Absorb 40M concurrent viewers and joins of tens of thousands per second.
+
+131
+00:08:17.608 --> 00:08:18.611
+Security:
+
+132
+00:08:18.891 --> 00:08:25.781
+DRM for premium content; token-authenticated URLs; forensic watermarking for high-value live.
+
+133
+00:08:26.061 --> 00:08:27.064
+Efficiency:
+
+134
+00:08:27.344 --> 00:08:31.376
+Minimise bits per quality (encoding) and origin egress (caching).
+
+135
+00:08:32.726 --> 00:08:33.622
+Part 3.
+
+136
+00:08:33.902 --> 00:08:35.417
+High-Level Architecture.
+
+137
+00:08:36.667 --> 00:08:38.011
+Here is the diagram.
+
+138
+00:08:41.861 --> 00:08:42.821
+Two planes:
+
+139
+00:08:43.101 --> 00:08:51.762
+The data plane (video bytes: encoders, then packager, then origin, then CDN, then player) must be simple, redundant and cacheable.
+
+140
+00:08:52.042 --> 00:08:59.445
+The control plane (who can watch what, from where, at what quality, with which ads) is where most application logic lives.
+
+141
+00:08:59.725 --> 00:09:04.546
+At join time it must scale like an e-commerce flash sale (Ch 46).
+
+142
+00:09:05.896 --> 00:09:06.813
+Part 4.
+
+143
+00:09:07.093 --> 00:09:08.971
+How It Works, Journeys End to End.
+
+144
+00:09:10.221 --> 00:09:13.698
+Journey 1: a new series goes from master file to playable.
+
+145
+00:09:13.978 --> 00:09:22.362
+Ingest: the studio delivers a mezzanine master: very high bitrate video, multichannel audio, subtitle files and artwork.
+
+146
+00:09:22.642 --> 00:09:28.039
+Automated checks: format, corrupt frames, audio sync, loudness, subtitle timing.
+
+147
+00:09:28.319 --> 00:09:30.175
+Failures return to the studio.
+
+148
+00:09:30.455 --> 00:09:34.807
+Analysis: the video is split into shots, using scene-change detection.
+
+149
+00:09:35.087 --> 00:09:42.170
+Complexity is measured per shot, because a dark, static dialogue scene needs far fewer bits than a stadium crowd.
+
+150
+00:09:42.450 --> 00:09:43.303
+Encoding:
+
+151
+00:09:44.653 --> 00:10:02.659
+each shot is encoded at many resolution times bitrate (or quality) points, in parallel on a large compute farm;. the per-title or shot-based optimisation picks the most efficient combinations (§6.1);. multiple codecs are produced for different devices:
+
+152
+00:10:02.939 --> 00:10:11.045
+H.264 for compatibility, HEVC or VP9 or AV1 for efficiency on supporting devices.
+
+153
+00:10:11.325 --> 00:10:21.011
+Netflix has described per-title encoding (2015) and shot-based dynamic optimisation (2018) publicly (VERIFY).
+
+154
+00:10:22.361 --> 00:10:34.051
+Quality measurement: every encode is scored with VMAF, a perceptual quality metric Netflix open-sourced (VERIFY), so the ladder is chosen by perceived quality, not bitrate alone.
+
+155
+00:10:34.331 --> 00:10:40.753
+Packaging: encodes are cut into segments of a few seconds each, in CMAF (fragmented MP4);.
+
+156
+00:10:41.033 --> 00:10:48.030
+HLS and DASH manifests list the renditions;. audio tracks per language, and subtitles as separate tracks.
+
+157
+00:10:49.380 --> 00:10:55.908
+DRM: segments are encrypted (common encryption) with content keys stored in a key management service.
+
+158
+00:10:56.188 --> 00:11:00.753
+Licences are issued at playback by the right DRM system per device:
+
+159
+00:11:01.033 --> 00:11:05.300
+Widevine (Android, Chrome), FairPlay (Apple), PlayReady (Windows, TVs).
+
+160
+00:11:05.580 --> 00:11:19.703
+Publishing: packaged files go to the origin (object storage);. the catalogue record goes live when the rights window opens, per territory;. artwork variants are generated for personalisation (§6.6).
+
+161
+00:11:21.053 --> 00:11:33.789
+Pre-positioning: popularity is predicted per region;. popular titles are filled into ISP-embedded caches overnight, during off-peak hours, so peak-time viewing rarely touches the backbone;.
+
+162
+00:11:34.069 --> 00:11:39.999
+Netflix's Open Connect appliances in ISP networks are the public example (VERIFY).
+
+163
+00:11:41.349 --> 00:11:43.504
+Journey 2: pressing Play on VOD.
+
+164
+00:11:43.784 --> 00:11:52.765
+Request: the app calls the playback service with the title, device capabilities (codecs, DRM, resolution, HDR) and network hints.
+
+165
+00:11:53.045 --> 00:12:05.163
+Checks: entitlement: is the subscription active, and does the plan allow this quality and the number of concurrent streams? rights: is the title available in this territory now? device limits.
+
+166
+00:12:05.443 --> 00:12:07.064
+The playback service returns:
+
+167
+00:12:08.414 --> 00:12:16.606
+a manifest, tailored to the device: only playable codecs and resolutions, possibly personalised to start at a sensible bitrate;.
+
+168
+00:12:16.886 --> 00:12:22.795
+CDN URLs: the best cache for this client, chosen by steering (§6.4).
+
+169
+00:12:23.075 --> 00:12:29.006
+The URLs are token-authenticated and expire;. a licence request token for DRM.
+
+170
+00:12:29.286 --> 00:12:37.201
+Licence: the player requests a DRM licence from the licence service, which checks the token and policy (offline allowed?
+
+171
+00:12:37.481 --> 00:12:39.827
+HDCP required for 4K?).
+
+172
+00:12:40.107 --> 00:12:49.985
+Buffering: the player fetches the first segments at a conservative bitrate, starts playback once a small buffer is built, then adapts bitrate (§6.3).
+
+173
+00:12:51.335 --> 00:12:57.649
+Resume: the playback position is saved every few seconds, so another device resumes from the same point.
+
+174
+00:12:57.929 --> 00:13:06.655
+Telemetry: start time, bitrate switches, rebuffer events, errors and CDN used are sent to the telemetry pipeline (§7).
+
+175
+00:13:08.005 --> 00:13:12.271
+Journey 3: a cricket final, from the stadium to 40 million phones.
+
+176
+00:13:12.551 --> 00:13:24.839
+Production: the broadcaster's production (tens of cameras, graphics, commentary) outputs program feeds: a world feed plus language commentary feeds, and sometimes extra camera angles.
+
+177
+00:13:25.119 --> 00:13:41.077
+Contribution: feeds are encoded at high quality and sent over two independent paths (fibre and satellite, or two ISPs) to two cloud regions;. reliable streaming protocols (SRT, RIST, or dedicated links) survive packet loss.
+
+178
+00:13:41.357 --> 00:13:43.618
+The 1 plus1 redundancy starts here.
+
+179
+00:13:44.968 --> 00:13:59.752
+Live transcoding: in each region, live transcoders produce the ABR ladder, for example, 240p at 200 kbps up to 1080p at 6 Mbps, plus audio per language.
+
+180
+00:14:00.032 --> 00:14:03.509
+Encoding runs with a latency budget of a second or two.
+
+181
+00:14:03.789 --> 00:14:09.848
+Transcoders run in pairs, time-aligned, so the packager can switch between them without a visible glitch.
+
+182
+00:14:10.128 --> 00:14:24.933
+Packaging: the live packager produces CMAF segments (for example, 4 s, or 2 s with partial segments for low latency), updates manifests every segment, encrypts with DRM if required, and writes to the origin.
+
+183
+00:14:25.213 --> 00:14:29.757
+A DVR window (for example, the whole match) stays available for rewind.
+
+184
+00:14:31.107 --> 00:14:33.006
+Origin shield and CDNs:
+
+185
+00:14:33.286 --> 00:14:44.913
+CDNs fetch from an origin shield layer, a tier of caches in front of the origin, not from the origin directly;. every segment is requested from the origin once per shield node.
+
+186
+00:14:45.193 --> 00:14:57.438
+Millions of viewer requests collapse into a handful of origin fetches through request coalescing (§5.6);. multiple CDNs and ISP-embedded caches share the load.
+
+187
+00:14:57.718 --> 00:15:00.897
+Joining: millions of viewers open the app before the toss.
+
+188
+00:15:01.177 --> 00:15:02.371
+The join path is:
+
+189
+00:15:03.721 --> 00:15:13.940
+home page (cached, mostly static);. match page;. playback session: entitlement, device check, ad profile, CDN assignment;. manifest;. segments.
+
+190
+00:15:14.220 --> 00:15:17.761
+The control plane is pre-scaled for the expected join rate.
+
+191
+00:15:18.041 --> 00:15:21.433
+Non-essential calls are deferred (§5.7).
+
+192
+00:15:22.783 --> 00:15:25.983
+Watching: the player fetches segments and adapts bitrate.
+
+193
+00:15:26.263 --> 00:15:31.767
+On congested mobile networks it may settle at 360p, 480p.
+
+194
+00:15:32.047 --> 00:15:34.309
+Telemetry flows every few seconds.
+
+195
+00:15:34.589 --> 00:15:52.039
+Ad breaks between overs: the production signals an ad break with SCTE-35 markers in the stream;. the server-side ad insertion (SSAI) service asks ad decisioning which ads to show each viewer or viewer segment, then splices ad segments into the manifest;.
+
+196
+00:15:53.389 --> 00:16:00.024
+viewers see personalised ads seamlessly, and ad blockers can't easily strip them (§5.8).
+
+197
+00:16:00.304 --> 00:16:04.059
+Spikes: at a wicket, social media sends a wave of new joins.
+
+198
+00:16:04.339 --> 00:16:06.408
+At the last over, concurrency peaks.
+
+199
+00:16:06.688 --> 00:16:12.256
+Real-time QoE dashboards watch rebuffer ratio per CDN, ISP and region.
+
+200
+00:16:12.536 --> 00:16:16.461
+Steering shifts new sessions away from a struggling CDN within a minute.
+
+201
+00:16:17.811 --> 00:16:20.265
+After the match: viewers leave within minutes.
+
+202
+00:16:20.545 --> 00:16:26.603
+Highlights (auto-clipped key moments, §5.9) are published as VOD within minutes.
+
+203
+00:16:26.883 --> 00:16:28.462
+Capacity is scaled down.
+
+204
+00:16:29.812 --> 00:16:32.777
+Journey 4: subscribing with UPI autopay.
+
+205
+00:16:33.057 --> 00:16:37.089
+Plan choice: the user picks a plan (mobile-only, super, premium).
+
+206
+00:16:37.369 --> 00:16:49.572
+Mandate: the payment service creates a recurring mandate (UPI AutoPay or card e-mandate), subject to RBI rules on recurring payments and pre-debit notifications (VERIFY).
+
+207
+00:16:49.852 --> 00:16:59.388
+Entitlement: on success, the entitlements service grants the plan's rights: device count, max resolution, ad-free or not, live sports access.
+
+208
+00:16:59.668 --> 00:17:02.207
+The rights are cached at the edge for playback checks.
+
+209
+00:17:03.557 --> 00:17:07.802
+Renewals run on a schedule, with pre-debit notifications as required.
+
+210
+00:17:08.082 --> 00:17:15.762
+Failed renewals get retries and a grace period before downgrade, so dunning never cuts a viewer off mid-match (a policy choice).
+
+211
+00:17:16.042 --> 00:17:21.119
+Password sharing: concurrent stream limits are enforced per account by a session counter.
+
+212
+00:17:21.399 --> 00:17:26.434
+Sharing detection uses devices and locations (VERIFY policies per market).
+
+213
+00:17:27.784 --> 00:17:30.963
+Journey 5: downloading an episode for a train journey.
+
+214
+00:17:31.243 --> 00:17:34.869
+Request: the user downloads an episode at a chosen quality.
+
+215
+00:17:35.149 --> 00:17:41.869
+The licence service issues an offline licence with an expiry, and download count limits per the content licence.
+
+216
+00:17:42.149 --> 00:17:46.288
+Download: the device downloads encrypted segments for one rendition.
+
+217
+00:17:46.568 --> 00:17:49.597
+Playback works offline until the licence expires.
+
+218
+00:17:49.877 --> 00:17:52.693
+The licence renews when the device is online.
+
+219
+00:17:54.043 --> 00:17:55.003
+Part 5.
+
+220
+00:17:55.283 --> 00:17:56.819
+Core Subsystems in Depth.
+
+221
+00:17:58.069 --> 00:17:59.840
+The VOD encoding pipeline.
+
+222
+00:18:00.120 --> 00:18:17.485
+A workflow of many small tasks: split into chunks or shots;. encode each chunk times each ladder point times each codec, in parallel on thousands of machines (spot capacity is fine, because a lost task just retries);. measure quality;. assemble;. package.
+
+223
+00:18:18.835 --> 00:18:24.489
+It is orchestrated by a workflow engine with retries and idempotent tasks (Ch 50).
+
+224
+00:18:24.769 --> 00:18:29.206
+Netflix has described its media pipeline platform publicly (VERIFY).
+
+225
+00:18:29.486 --> 00:18:30.467
+Economics:
+
+226
+00:18:30.747 --> 00:18:38.513
+AV1 or HEVC encoding costs far more compute than H.264, but saves bandwidth on every view.
+
+227
+00:18:38.793 --> 00:18:44.361
+So it pays for popular titles first, and the codec set per title depends on predicted views.
+
+228
+00:18:44.641 --> 00:18:52.449
+Re-encoding: when better encoders arrive, the back catalogue is re-encoded in priority order of expected bandwidth savings.
+
+229
+00:18:53.799 --> 00:18:56.081
+Packaging, manifests and DRM.
+
+230
+00:18:56.361 --> 00:19:02.484
+CMAF lets HLS and DASH share the same media segments, which halves storage and cache footprint.
+
+231
+00:19:02.764 --> 00:19:13.580
+Manifests are generated per request (or per device class) from templates, so they can: filter renditions by device;. add CDN tokens;. insert ads (SSAI).
+
+232
+00:19:13.860 --> 00:19:17.956
+Manifest generation must be very fast and cacheable per class.
+
+233
+00:19:19.306 --> 00:19:39.850
+DRM: one set of encrypted segments (CENC; CBCS mode covers all modern DRMs);. licence servers per DRM system;. keys in an HSM-backed key service;. key rotation for live;. licence policies (HDCP, offline, security level) enforce studio and sports-rights requirements.
+
+234
+00:19:41.200 --> 00:19:42.331
+Playback service.
+
+235
+00:19:42.611 --> 00:19:46.877
+One decision point for may this viewer watch this now, how, and from where.
+
+236
+00:19:47.157 --> 00:19:57.739
+It combines: entitlements and rights (territory, window);. device capabilities;. concurrent-stream counts;. experiment assignments (for example, a new ABR);.
+
+237
+00:19:58.019 --> 00:20:00.707
+CDN steering (§6.4).
+
+238
+00:20:02.057 --> 00:20:05.513
+It is the most critical control-plane service during live events.
+
+239
+00:20:05.793 --> 00:20:14.113
+Precompute and cache what can be cached, for example, rights per title per territory, and keep the per-request work to token signing and steering.
+
+240
+00:20:15.463 --> 00:20:16.892
+CDN strategy.
+
+241
+00:20:17.172 --> 00:20:18.516
+Here is a quick table:
+
+242
+00:20:18.796 --> 00:20:20.012
+Option, and Role.
+
+243
+00:20:20.292 --> 00:20:24.239
+ISP-embedded caches (own appliances inside ISPs):
+
+244
+00:20:24.519 --> 00:20:30.001
+Serve most VOD peak traffic locally; filled off-peak; cheapest per GB at scale.
+
+245
+00:20:30.281 --> 00:20:32.073
+Commercial CDNs (several):
+
+246
+00:20:32.353 --> 00:20:36.044
+Burst capacity for live, geographic coverage, redundancy.
+
+247
+00:20:36.324 --> 00:20:37.497
+Origin shield:
+
+248
+00:20:37.777 --> 00:20:41.873
+Collapses cache misses from many edges into few origin fetches.
+
+249
+00:20:42.153 --> 00:20:43.327
+Steering service:
+
+250
+00:20:43.607 --> 00:20:49.431
+Chooses a CDN per session (and can switch mid-session) based on real-time QoE and cost.
+
+251
+00:20:50.781 --> 00:20:53.213
+VOD: the cache holds a popular subset.
+
+252
+00:20:53.493 --> 00:20:59.594
+Fill is planned: which titles and renditions go to which cache, overnight, from popularity forecasts.
+
+253
+00:20:59.874 --> 00:21:15.789
+Live: every edge needs the same newest segment at the same time;. edges must coalesce concurrent misses into one upstream request;. manifests have short TTLs ( about the segment duration);. segments have long TTLs once published.
+
+254
+00:21:17.139 --> 00:21:18.611
+The player and ABR.
+
+255
+00:21:18.891 --> 00:21:30.475
+The player's control loop: estimate bandwidth;. track buffer level;. choose the next segment's rendition;. handle errors: retry on another CDN URL, skip a bad segment.
+
+256
+00:21:30.755 --> 00:21:38.307
+The ABR algorithm (§6.3) balances three goals: high quality, no rebuffering, and few switches.
+
+257
+00:21:39.657 --> 00:21:51.881
+Live players also manage latency: they target a buffer that keeps them close to the live edge, speeding playback slightly (for example, 1.05 times ) to catch up after stalls.
+
+258
+00:21:52.161 --> 00:21:58.113
+Telemetry: the player reports every session's key events, which feeds QoE analytics and steering.
+
+259
+00:21:59.463 --> 00:22:01.937
+Handling live concurrency, the data plane.
+
+260
+00:22:02.217 --> 00:22:16.041
+Segment request coalescing: when 100k viewers on one edge ask for segment 1832 at the same second, the edge sends one request upstream and serves all waiters from the result.
+
+261
+00:22:16.321 --> 00:22:21.569
+The shield does the same towards the origin (Ch 07 stampede protection).
+
+262
+00:22:21.849 --> 00:22:25.519
+Manifest caching: live manifests change every segment.
+
+263
+00:22:25.799 --> 00:22:32.049
+Cache them for about half a segment duration at the edge, so manifest requests don't all hit the origin.
+
+264
+00:22:32.329 --> 00:22:33.759
+Capacity reservation:
+
+265
+00:22:35.109 --> 00:22:41.381
+CDN capacity is reserved per match, per region, weeks in advance, from concurrency forecasts;.
+
+266
+00:22:41.661 --> 00:22:45.010
+ISP caches are pre-warmed;. peering links are checked.
+
+267
+00:22:45.290 --> 00:22:54.997
+Bitrate capping under stress: if total demand approaches delivery capacity, the steering service caps the maximum bitrate for new sessions or for mobile.
+
+268
+00:22:55.277 --> 00:22:58.775
+A little less quality for everyone beats rebuffering for many.
+
+269
+00:23:00.125 --> 00:23:02.749
+Handling live concurrency, the control plane.
+
+270
+00:23:03.029 --> 00:23:09.216
+Public talks from Hotstar engineers on IPL-scale traffic describe these patterns (VERIFY):
+
+271
+00:23:09.496 --> 00:23:11.971
+Pre-scaling, not reactive autoscaling.
+
+272
+00:23:12.251 --> 00:23:20.549
+Capacity is scaled ahead of the toss from concurrency forecasts, because autoscaling can't add capacity fast enough for the join spike.
+
+273
+00:23:20.829 --> 00:23:33.523
+Degradation switches (panic mode): under extreme load, turn off non-essential features, such as: personalised recommendations (serve a static popular row);. watch history writes (batch them later);.
+
+274
+00:23:34.873 --> 00:23:37.731
+some API calls (serve cached responses).
+
+275
+00:23:38.011 --> 00:23:40.123
+This protects the join and playback path.
+
+276
+00:23:40.403 --> 00:23:46.526
+Static, cacheable responses for the match page and home page during the event, served from the CDN.
+
+277
+00:23:46.806 --> 00:23:55.489
+Authentication: token validation at the edge without calling the identity service per request; long-lived tokens refreshed lazily.
+
+278
+00:23:55.769 --> 00:24:01.870
+Retry discipline in clients: exponential backoff with jitter, and server-provided retry-after.
+
+279
+00:24:02.150 --> 00:24:07.526
+A synchronised retry storm from 30M apps can take down anything (Ch 18).
+
+280
+00:24:08.876 --> 00:24:14.892
+Load testing at the expected peak with realistic join curves before the season, and game days.
+
+281
+00:24:16.242 --> 00:24:18.119
+Ads: server-side insertion.
+
+282
+00:24:18.399 --> 00:24:19.231
+Signals:
+
+283
+00:24:19.511 --> 00:24:24.802
+SCTE-35 markers in the live stream mark ad break start and duration.
+
+284
+00:24:25.082 --> 00:24:26.127
+SSAI flow:
+
+285
+00:24:26.407 --> 00:24:35.602
+When a viewer's manifest reaches a break, the SSAI service calls ad decisioning with the viewer's profile (segment, location, device, frequency caps).
+
+286
+00:24:35.882 --> 00:24:38.634
+It receives ads (standard VAST responses).
+
+287
+00:24:38.914 --> 00:24:41.943
+It stitches ad segments into that viewer's manifest.
+
+288
+00:24:43.293 --> 00:24:47.624
+Ads are pre-transcoded to match the content ladder, so switching is seamless.
+
+289
+00:24:47.904 --> 00:25:03.200
+Scale trick: personalising every manifest for 40M viewers at the same break is expensive;. so viewers are grouped into cohorts (hundreds to thousands of cohorts), each with a personalised ad pod;. manifests are then cached per cohort.
+
+290
+00:25:04.550 --> 00:25:19.419
+Ad decisioning: campaigns with targeting, budgets and pacing;. frequency caps (the same ad not more than N times per match);. competitive separation (no two competing brands back-to-back);. an auction for programmatic demand.
+
+291
+00:25:19.699 --> 00:25:25.459
+Measurement: impression beacons from the player, or server-side beacons, reconciled for billing.
+
+292
+00:25:25.739 --> 00:25:27.681
+Viewability and completion rates.
+
+293
+00:25:29.031 --> 00:25:30.609
+Live experience features.
+
+294
+00:25:30.889 --> 00:25:36.415
+Scorecard and ball-by-ball data come from a sports data provider or official scoring feed.
+
+295
+00:25:36.695 --> 00:25:46.551
+A low-latency pub or sub fan-out pushes updates to apps over persistent connections, or apps poll a CDN-cached JSON with a short TTL.
+
+296
+00:25:46.831 --> 00:25:49.689
+The cached approach scales trivially to tens of millions.
+
+297
+00:25:49.969 --> 00:26:01.383
+Key moments: wickets, sixes and milestones from the scoring feed trigger auto-clipping (cut the live DVR around the moment, package it as a clip) for highlights and notifications.
+
+298
+00:26:02.733 --> 00:26:20.034
+Reactions and polls: millions of emoji taps per second;. aggregate them at the edge or ingestion tier into counts per second per emoji;. broadcast only aggregated counts back;. never store every tap individually for real-time display (§6.8).
+
+299
+00:26:20.314 --> 00:26:27.631
+Multi-language commentary as separate audio tracks or separate streams, with language chosen at the start and switchable.
+
+300
+00:26:28.981 --> 00:26:31.328
+Catalogue, personalisation and search.
+
+301
+00:26:31.608 --> 00:26:40.355
+Catalogue: titles, seasons and episodes, cast, genres, languages, maturity ratings, and rights windows per territory and platform.
+
+302
+00:26:40.635 --> 00:26:45.051
+Its change events feed search indexes and the playback service's rights cache.
+
+303
+00:26:45.331 --> 00:26:48.851
+Home page: rows (Continue watching, Because you watched...
+
+304
+00:26:49.131 --> 00:26:53.269
+Top 10 in India today, Live now) chosen and ordered per profile.
+
+305
+00:26:53.549 --> 00:26:57.219
+Row selection and ranking are learned (§6.6).
+
+306
+00:26:57.499 --> 00:27:03.216
+Artwork per title is personalised: the same film shown with a different image to different viewers.
+
+307
+00:27:03.496 --> 00:27:05.779
+Netflix has written about this (VERIFY).
+
+308
+00:27:07.129 --> 00:27:18.670
+Search: titles, people and genres, with multilingual and transliterated queries (Ch 22, Ch 42), and not available handling for titles outside the catalogue.
+
+309
+00:27:20.020 --> 00:27:21.961
+Content protection and piracy.
+
+310
+00:27:22.241 --> 00:27:25.121
+DRM for encryption and licence policies.
+
+311
+00:27:25.401 --> 00:27:32.228
+Token-authenticated URLs with short expiry and binding to session or IP ranges where feasible.
+
+312
+00:27:32.508 --> 00:27:41.084
+Forensic watermarking for live sport: invisible per-session marks let the platform identify the leaking account of a pirated restream.
+
+313
+00:27:41.364 --> 00:27:48.617
+It is implemented by A or B segment variants: each viewer's manifest selects a unique sequence of variant segments.
+
+314
+00:27:48.897 --> 00:27:51.927
+Monitoring of piracy sites, and takedown workflows.
+
+315
+00:27:53.277 --> 00:27:54.215
+Part 6.
+
+316
+00:27:54.495 --> 00:27:55.455
+Algorithms.
+
+317
+00:27:56.705 --> 00:27:58.561
+Encoding ladder optimisation.
+
+318
+00:27:58.841 --> 00:28:07.439
+The problem: choose the set of (resolution, bitrate) renditions that give the best quality for each bandwidth level, per title or per shot.
+
+319
+00:28:07.719 --> 00:28:08.465
+Method:
+
+320
+00:28:08.745 --> 00:28:12.137
+Encode sample points across resolutions and bitrates.
+
+321
+00:28:12.417 --> 00:28:16.087
+Measure quality (VMAF) versus bitrate for each resolution.
+
+322
+00:28:16.367 --> 00:28:22.639
+The convex hull of the quality, bitrate points across all resolutions gives the most efficient choices.
+
+323
+00:28:22.919 --> 00:28:26.801
+Pick ladder rungs along the hull at target bitrate or quality steps.
+
+324
+00:28:28.151 --> 00:28:31.906
+Easy content (animation) reaches high quality at low bitrate.
+
+325
+00:28:32.186 --> 00:28:34.938
+Complex content (sport, grain) needs more.
+
+326
+00:28:35.218 --> 00:28:48.829
+Shot-based optimisation: choose encoding parameters per shot along the hull to minimise total bits for a target quality, or to maximise quality for a bit budget (a Lagrangian-style trade-off across shots).
+
+327
+00:28:50.179 --> 00:28:51.971
+Perceptual quality (VMAF).
+
+328
+00:28:52.251 --> 00:28:56.752
+Why not PSNR or SSIM: they correlate poorly with what viewers perceive.
+
+329
+00:28:57.032 --> 00:29:09.171
+VMAF fuses several elementary metrics (visual information fidelity, detail loss, motion) with a machine-learned model trained on human ratings, producing a 0 to 100 score.
+
+330
+00:29:09.451 --> 00:29:15.125
+Uses: ladder selection, encoder comparisons, and regression tests for encoder changes.
+
+331
+00:29:16.475 --> 00:29:18.395
+Adaptive bitrate (ABR).
+
+332
+00:29:18.675 --> 00:29:20.019
+Here is a quick table:
+
+333
+00:29:20.299 --> 00:29:22.305
+Family, and Idea, and Weakness.
+
+334
+00:29:22.585 --> 00:29:23.673
+Throughput-based.
+
+335
+00:29:23.953 --> 00:29:24.742
+Idea:
+
+336
+00:29:25.022 --> 00:29:29.545
+Pick the highest bitrate below the estimated bandwidth times safety factor.
+
+337
+00:29:29.825 --> 00:29:30.678
+Weakness:
+
+338
+00:29:30.958 --> 00:29:33.433
+Noisy estimates on mobile; oscillation.
+
+339
+00:29:33.713 --> 00:29:35.313
+Buffer-based (BBA).
+
+340
+00:29:35.593 --> 00:29:36.382
+Idea:
+
+341
+00:29:36.662 --> 00:29:41.718
+Map buffer level to bitrate: low buffer, then low bitrate, high buffer, then high.
+
+342
+00:29:41.998 --> 00:29:42.851
+Weakness:
+
+343
+00:29:43.131 --> 00:29:45.435
+Slow start; ignores throughput info.
+
+344
+00:29:45.715 --> 00:29:46.462
+BOLA.
+
+345
+00:29:46.742 --> 00:29:47.531
+Idea:
+
+346
+00:29:47.811 --> 00:29:54.041
+Lyapunov optimisation on buffer, maximising a utility of quality minus rebuffer risk.
+
+347
+00:29:54.321 --> 00:29:55.174
+Weakness:
+
+348
+00:29:55.454 --> 00:29:57.011
+Tuning for live latency.
+
+349
+00:29:57.291 --> 00:29:59.275
+Model predictive (MPC).
+
+350
+00:29:59.555 --> 00:30:00.345
+Idea:
+
+351
+00:30:00.625 --> 00:30:08.475
+Predict throughput over the next few segments, choose the plan maximising quality minus rebuffer penalty minus switch penalty.
+
+352
+00:30:08.755 --> 00:30:09.609
+Weakness:
+
+353
+00:30:09.889 --> 00:30:12.022
+More compute; depends on predictions.
+
+354
+00:30:12.302 --> 00:30:13.753
+Learned (RL-based).
+
+355
+00:30:14.033 --> 00:30:14.822
+Idea:
+
+356
+00:30:15.102 --> 00:30:17.171
+Train a policy on network traces.
+
+357
+00:30:17.451 --> 00:30:18.305
+Weakness:
+
+358
+00:30:18.585 --> 00:30:20.782
+Generalisation, explainability.
+
+359
+00:30:22.132 --> 00:30:27.935
+Practice: a hybrid, with throughput estimates for the start and buffer-based control in steady state.
+
+360
+00:30:28.215 --> 00:30:36.620
+It is tuned per device class and network type through A or B tests, measuring start time, rebuffer ratio, average bitrate and switches.
+
+361
+00:30:37.970 --> 00:30:40.295
+CDN steering and request routing.
+
+362
+00:30:40.575 --> 00:30:41.578
+Mechanisms:
+
+363
+00:30:41.858 --> 00:30:43.586
+DNS-based routing (coarse);.
+
+364
+00:30:43.866 --> 00:30:51.653
+HTTP redirect or manifest URL choice by the playback service (per session);. client-side switching on errors.
+
+365
+00:30:51.933 --> 00:31:02.237
+Decision: for each (ISP, region, device) group, maintain real-time QoE per CDN (rebuffer ratio, start time, error rate, throughput) from telemetry.
+
+366
+00:31:02.517 --> 00:31:05.589
+Assign new sessions to the best CDN subject to:
+
+367
+00:31:06.939 --> 00:31:17.776
+capacity commitments;. cost (committed volumes per CDN);. exploration: send a small share to each CDN to keep measurements fresh, a multi-armed bandit approach.
+
+368
+00:31:18.056 --> 00:31:19.165
+Reaction time:
+
+369
+00:31:19.445 --> 00:31:25.355
+QoE is aggregated per minute, and bad CDNs are drained from new sessions within a minute or two.
+
+370
+00:31:26.705 --> 00:31:28.134
+Cache fill and eviction.
+
+371
+00:31:28.414 --> 00:31:35.198
+VOD fill: predict per-title, per-region popularity for the next day (time series + release calendars).
+
+372
+00:31:35.478 --> 00:31:43.841
+Solve a knapsack-like selection of title renditions to maximise the expected bytes served from cache, subject to cache capacity.
+
+373
+00:31:44.121 --> 00:31:44.995
+Eviction:
+
+374
+00:31:45.275 --> 00:31:49.414
+LRU is often worse than popularity-aware policies for video.
+
+375
+00:31:49.694 --> 00:31:59.827
+Use frequency-aware policies (for example, LFU with aging, or admission filters such as TinyLFU) so one-off views don't evict popular content.
+
+376
+00:32:00.107 --> 00:32:07.894
+Live: tiny working sets (the latest segments); correctness of TTLs and coalescing matters more than eviction policy.
+
+377
+00:32:09.244 --> 00:32:11.036
+Recommendations and artwork.
+
+378
+00:32:11.316 --> 00:32:22.089
+Candidate generation: collaborative filtering (matrix factorisation of viewing), content similarity (genre, cast, language embeddings), trending, continue watching.
+
+379
+00:32:22.369 --> 00:32:30.391
+Ranking: gradient-boosted or neural models predicting the probability that a profile plays and keeps watching (not just clicks).
+
+380
+00:32:30.671 --> 00:32:33.487
+Features: history, time, device, language.
+
+381
+00:32:33.767 --> 00:32:38.033
+Page construction: choose rows and order them with diversity constraints.
+
+382
+00:32:38.313 --> 00:32:40.340
+Row-level and page-level models.
+
+383
+00:32:41.690 --> 00:32:44.613
+Artwork personalisation: a contextual bandit.
+
+384
+00:32:44.893 --> 00:32:49.245
+For each title, choose among artwork variants using the profile context.
+
+385
+00:32:49.525 --> 00:32:54.453
+Explore occasionally and learn from plays (VERIFY Netflix's published approach).
+
+386
+00:32:54.733 --> 00:33:00.621
+Evaluation: offline metrics plus online A or B tests on retention and hours streamed.
+
+387
+00:33:01.971 --> 00:33:04.253
+Concurrency forecasting for live events.
+
+388
+00:33:04.533 --> 00:33:14.347
+Inputs: teams playing, stage of tournament, time slot, day of week, match closeness, star players, competing events, historical curves for similar matches.
+
+389
+00:33:14.627 --> 00:33:23.011
+Output: peak concurrency and join-rate curves (joins per second around toss, innings break, last overs), with confidence intervals.
+
+390
+00:33:23.291 --> 00:33:24.144
+Uses:
+
+391
+00:33:24.424 --> 00:33:30.696
+CDN reservation, control-plane pre-scaling, ad inventory estimates, operations staffing.
+
+392
+00:33:30.976 --> 00:33:40.512
+In-match updating: the forecast is re-estimated during the match as real concurrency arrives, for example, a close finish raises the expected peak.
+
+393
+00:33:41.862 --> 00:33:45.361
+Real-time aggregation at scale (reactions, telemetry).
+
+394
+00:33:45.641 --> 00:33:54.729
+Reactions: clients batch taps (for example, send once per second with counts), and ingestion nodes aggregate per emoji per second locally.
+
+395
+00:33:55.009 --> 00:33:58.486
+A second tier sums across nodes, and results are broadcast.
+
+396
+00:33:58.766 --> 00:34:04.675
+Counts can be approximate, but the aggregation must never create hot keys (Ch 51).
+
+397
+00:34:04.955 --> 00:34:20.422
+Telemetry QoE: streaming aggregations per (CDN, ISP, region, device) per minute, using approximate distinct counts (HyperLogLog) for viewers and percentile sketches (t-digest or DDSketch) for start times.
+
+398
+00:34:21.772 --> 00:34:23.372
+Ad decisioning and pacing.
+
+399
+00:34:23.652 --> 00:34:34.084
+Selection: eligible campaigns filtered by targeting and frequency caps, ranked by price times predicted completion or relevance, with competitive separation.
+
+400
+00:34:34.364 --> 00:34:39.015
+Pacing: throttle each campaign so its budget is spent evenly across the match.
+
+401
+00:34:39.295 --> 00:34:45.481
+A PID-style controller adjusts participation probability (Ch 49 L3).
+
+402
+00:34:45.761 --> 00:34:53.185
+Forecasting: inventory (impressions per break) estimated from the concurrency forecast, to sell guaranteed campaigns.
+
+403
+00:34:54.535 --> 00:34:55.815
+Anomaly detection.
+
+404
+00:34:56.095 --> 00:35:03.690
+QoE anomalies: rebuffer spikes per ISP or CDN, detected by seasonal baselines and control charts.
+
+405
+00:35:03.970 --> 00:35:09.666
+Fraud: credential stuffing, account sharing beyond plan rules, ad fraud (invalid traffic).
+
+406
+00:35:11.016 --> 00:35:11.955
+Part 7.
+
+407
+00:35:12.235 --> 00:35:13.557
+Data Architecture.
+
+408
+00:35:14.807 --> 00:35:16.194
+Operational stores.
+
+409
+00:35:16.474 --> 00:35:17.818
+Here is a quick table:
+
+410
+00:35:18.098 --> 00:35:20.274
+Data, and Store (reference), and Notes.
+
+411
+00:35:20.554 --> 00:35:22.666
+Accounts, profiles, subscriptions.
+
+412
+00:35:22.946 --> 00:35:24.183
+Store (reference):
+
+413
+00:35:24.463 --> 00:35:27.962
+Relational (PostgreSQL or MySQL, sharded).
+
+414
+00:35:28.242 --> 00:35:29.053
+Notes:
+
+415
+00:35:29.333 --> 00:35:30.826
+Transactions for billing.
+
+416
+00:35:31.106 --> 00:35:32.791
+Entitlements (read path).
+
+417
+00:35:33.071 --> 00:35:34.309
+Store (reference):
+
+418
+00:35:34.589 --> 00:35:38.407
+Key-value cache (Redis or EVCache) replicated to edges.
+
+419
+00:35:38.687 --> 00:35:39.498
+Notes:
+
+420
+00:35:39.778 --> 00:35:41.655
+Read-heavy, latency-critical.
+
+421
+00:35:41.935 --> 00:35:43.855
+Viewing history, resume points.
+
+422
+00:35:44.135 --> 00:35:45.373
+Store (reference):
+
+423
+00:35:45.653 --> 00:35:47.359
+Wide-column (Cassandra).
+
+424
+00:35:47.639 --> 00:35:48.450
+Notes:
+
+425
+00:35:48.730 --> 00:35:51.290
+High write volume, per-profile partitions.
+
+426
+00:35:51.570 --> 00:35:53.042
+Catalogue and metadata.
+
+427
+00:35:53.322 --> 00:35:54.559
+Store (reference):
+
+428
+00:35:54.839 --> 00:35:56.781
+Document store + search index.
+
+429
+00:35:57.061 --> 00:35:57.871
+Notes:
+
+430
+00:35:58.151 --> 00:36:00.114
+Versioned; events to downstream.
+
+431
+00:36:00.394 --> 00:36:01.823
+Live session counters.
+
+432
+00:36:02.103 --> 00:36:03.341
+Store (reference):
+
+433
+00:36:03.621 --> 00:36:05.285
+Sharded in-memory counters.
+
+434
+00:36:05.565 --> 00:36:06.375
+Notes:
+
+435
+00:36:06.655 --> 00:36:09.279
+Concurrent stream limits, concurrency metrics.
+
+436
+00:36:10.629 --> 00:36:11.760
+Media assets.
+
+437
+00:36:12.040 --> 00:36:13.277
+Store (reference):
+
+438
+00:36:13.557 --> 00:36:16.501
+Object storage (origin), CDN caches.
+
+439
+00:36:16.781 --> 00:36:17.592
+Notes:
+
+440
+00:36:17.872 --> 00:36:18.789
+Petabytes.
+
+441
+00:36:19.069 --> 00:36:19.880
+Keys.
+
+442
+00:36:20.160 --> 00:36:21.397
+Store (reference):
+
+443
+00:36:21.677 --> 00:36:23.384
+HSM-backed key service.
+
+444
+00:36:23.664 --> 00:36:24.475
+Notes:
+
+445
+00:36:24.755 --> 00:36:26.291
+DRM content keys.
+
+446
+00:36:27.641 --> 00:36:29.646
+Publicly described (VERIFY):
+
+447
+00:36:29.926 --> 00:36:34.705
+Netflix uses Cassandra widely, and EVCache (memcached-based) for caching.
+
+448
+00:36:36.055 --> 00:36:37.484
+Telemetry and streaming.
+
+449
+00:36:37.764 --> 00:36:44.377
+Players send session start, heartbeats, bitrate switches, rebuffers, errors, CDN used and ad beacons.
+
+450
+00:36:44.657 --> 00:36:47.004
+Events are batched on the device and compressed.
+
+451
+00:36:47.284 --> 00:36:52.127
+Ingestion: edge collectors, then Kafka, then Flink for real-time aggregates.
+
+452
+00:36:52.407 --> 00:36:56.503
+Netflix has described its Keystone real-time pipeline (VERIFY).
+
+453
+00:36:56.783 --> 00:36:58.063
+Real-time stores:
+
+454
+00:36:58.343 --> 00:37:04.337
+Druid, Pinot or ClickHouse hold per-minute QoE dimensions for dashboards and steering decisions.
+
+455
+00:37:05.687 --> 00:37:07.074
+Lakehouse and warehouse.
+
+456
+00:37:07.354 --> 00:37:13.114
+Storage: all events and CDC land in Apache Iceberg tables on object storage.
+
+457
+00:37:13.394 --> 00:37:17.362
+Iceberg was created at Netflix (publicly described; VERIFY).
+
+458
+00:37:17.642 --> 00:37:18.986
+Processing and query:
+
+459
+00:37:19.266 --> 00:37:23.981
+Spark for batch, Trino or Presto for SQL, and a workflow orchestrator.
+
+460
+00:37:24.261 --> 00:37:28.421
+Netflix open-sourced Maestro (VERIFY); Airflow is the reference.
+
+461
+00:37:28.701 --> 00:37:41.138
+Models: facts: playback sessions (start time, watch duration, bitrate, rebuffer), viewing (title, profile, completion), subscriptions and payments, ad impressions, live concurrency per minute;.
+
+462
+00:37:42.488 --> 00:37:49.357
+dimensions: title or episode, profile (pseudonymised), device, ISP, region, CDN, plan, date.
+
+463
+00:37:49.637 --> 00:37:52.837
+Key metrics: hours streamed, and retention cohorts;.
+
+464
+00:37:53.117 --> 00:38:01.331
+QoE: start time, rebuffer ratio, bitrate;. peak concurrency;. ad fill rate and completion;. churn prediction inputs;.
+
+465
+00:38:02.681 --> 00:38:05.881
+content performance (completion rates, value per title).
+
+466
+00:38:07.231 --> 00:38:09.385
+ML platform and experimentation.
+
+467
+00:38:09.665 --> 00:38:14.423
+Feature pipelines in the lake; online features for ranking in a low-latency store.
+
+468
+00:38:14.703 --> 00:38:23.449
+Models: recommendations, artwork, search ranking, ABR tuning, concurrency forecasts, CDN steering, churn, ad targeting, fraud.
+
+469
+00:38:23.729 --> 00:38:24.967
+Experimentation:
+
+470
+00:38:25.247 --> 00:38:29.855
+A or B testing across UI, recommendations, ABR and encoding;.
+
+471
+00:38:30.135 --> 00:38:34.935
+Netflix has written extensively about its experimentation platform (VERIFY);.
+
+472
+00:38:36.285 --> 00:38:41.597
+live events need care, because treatment and control share CDNs and match dynamics.
+
+473
+00:38:42.947 --> 00:38:43.928
+Data flow.
+
+474
+00:38:44.208 --> 00:38:45.552
+Here is the diagram.
+
+475
+00:38:49.402 --> 00:38:50.277
+Part 8.
+
+476
+00:38:50.557 --> 00:38:51.474
+Tech Stack.
+
+477
+00:38:52.724 --> 00:38:54.068
+Here is a quick table:
+
+478
+00:38:54.348 --> 00:38:58.401
+Layer, and Publicly described (VERIFY each), and Reference choice.
+
+479
+00:38:58.681 --> 00:38:59.663
+Edge gateway.
+
+480
+00:38:59.943 --> 00:39:02.225
+Publicly described (VERIFY each):
+
+481
+00:39:02.505 --> 00:39:03.593
+Netflix Zuul.
+
+482
+00:39:03.873 --> 00:39:04.983
+Reference choice:
+
+483
+00:39:05.263 --> 00:39:07.545
+Envoy, Kong or Spring Cloud Gateway.
+
+484
+00:39:07.825 --> 00:39:09.895
+Service discovery or resilience.
+
+485
+00:39:10.175 --> 00:39:12.457
+Publicly described (VERIFY each):
+
+486
+00:39:12.737 --> 00:39:17.815
+Netflix Eureka, Hystrix (now in maintenance; Resilience4j recommended).
+
+487
+00:39:18.095 --> 00:39:19.204
+Reference choice:
+
+488
+00:39:19.484 --> 00:39:22.215
+Kubernetes services, Resilience4j.
+
+489
+00:39:22.495 --> 00:39:23.412
+Services.
+
+490
+00:39:23.692 --> 00:39:25.975
+Publicly described (VERIFY each):
+
+491
+00:39:26.255 --> 00:39:28.473
+Java (Spring Boot at Netflix), Go.
+
+492
+00:39:28.753 --> 00:39:29.863
+Reference choice:
+
+493
+00:39:30.143 --> 00:39:32.980
+Java or Kotlin or Go microservices.
+
+494
+00:39:33.260 --> 00:39:34.092
+Caching.
+
+495
+00:39:34.372 --> 00:39:36.655
+Publicly described (VERIFY each):
+
+496
+00:39:36.935 --> 00:39:37.937
+EVCache.
+
+497
+00:39:38.217 --> 00:39:39.327
+Reference choice:
+
+498
+00:39:39.607 --> 00:39:40.887
+Redis or memcached.
+
+499
+00:39:41.167 --> 00:39:42.297
+Databases.
+
+500
+00:39:42.577 --> 00:39:44.860
+Publicly described (VERIFY each):
+
+501
+00:39:45.140 --> 00:39:48.340
+Cassandra, MySQL or CockroachDB for some.
+
+502
+00:39:48.620 --> 00:39:49.729
+Reference choice:
+
+503
+00:39:50.009 --> 00:39:52.975
+Cassandra or ScyllaDB, PostgreSQL.
+
+504
+00:39:53.255 --> 00:39:54.108
+Streaming.
+
+505
+00:39:54.388 --> 00:39:56.671
+Publicly described (VERIFY each):
+
+506
+00:39:56.951 --> 00:39:58.444
+Kafka (Keystone), Flink.
+
+507
+00:39:58.724 --> 00:39:59.833
+Reference choice:
+
+508
+00:40:00.113 --> 00:40:01.180
+Kafka, Flink.
+
+509
+00:40:02.530 --> 00:40:03.490
+Lakehouse.
+
+510
+00:40:03.770 --> 00:40:06.053
+Publicly described (VERIFY each):
+
+511
+00:40:06.333 --> 00:40:09.106
+Apache Iceberg, Spark, Trino or Presto.
+
+512
+00:40:09.386 --> 00:40:10.495
+Reference choice:
+
+513
+00:40:10.775 --> 00:40:12.333
+Iceberg, Spark, Trino.
+
+514
+00:40:12.613 --> 00:40:13.679
+Orchestration.
+
+515
+00:40:13.959 --> 00:40:16.242
+Publicly described (VERIFY each):
+
+516
+00:40:16.522 --> 00:40:18.421
+Maestro; previously Meson.
+
+517
+00:40:18.701 --> 00:40:19.810
+Reference choice:
+
+518
+00:40:20.090 --> 00:40:22.330
+Airflow, Temporal for media workflows.
+
+519
+00:40:22.610 --> 00:40:23.527
+Deployment.
+
+520
+00:40:23.807 --> 00:40:26.090
+Publicly described (VERIFY each):
+
+521
+00:40:26.370 --> 00:40:27.309
+Spinnaker.
+
+522
+00:40:27.589 --> 00:40:28.698
+Reference choice:
+
+523
+00:40:28.978 --> 00:40:30.663
+Argo CD or Spinnaker.
+
+524
+00:40:30.943 --> 00:40:31.797
+Chaos.
+
+525
+00:40:32.077 --> 00:40:34.359
+Publicly described (VERIFY each):
+
+526
+00:40:34.639 --> 00:40:36.730
+Chaos Monkey or Simian Army.
+
+527
+00:40:37.010 --> 00:40:38.119
+Reference choice:
+
+528
+00:40:38.399 --> 00:40:40.533
+Chaos Mesh, Litmus, game days.
+
+529
+00:40:40.813 --> 00:40:41.751
+CDN.
+
+530
+00:40:42.031 --> 00:40:44.314
+Publicly described (VERIFY each):
+
+531
+00:40:44.594 --> 00:40:46.514
+Open Connect (own appliances).
+
+532
+00:40:46.794 --> 00:40:47.903
+Reference choice:
+
+533
+00:40:48.183 --> 00:40:51.213
+Multi-CDN + ISP cache partnerships.
+
+534
+00:40:51.493 --> 00:40:52.346
+Encoding.
+
+535
+00:40:52.626 --> 00:40:54.909
+Publicly described (VERIFY each):
+
+536
+00:40:55.189 --> 00:40:57.770
+FFmpeg-based pipelines; VMAF.
+
+537
+00:40:58.050 --> 00:40:59.159
+Reference choice:
+
+538
+00:40:59.439 --> 00:41:05.882
+FFmpeg, x264 or x265 or SVT-AV1, VMAF.
+
+539
+00:41:07.232 --> 00:41:08.811
+Packaging and DRM.
+
+540
+00:41:09.091 --> 00:41:10.200
+Reference choice:
+
+541
+00:41:10.480 --> 00:41:17.008
+Shaka Packager or Bento4; Widevine, FairPlay, PlayReady via a multi-DRM provider.
+
+542
+00:41:17.288 --> 00:41:18.568
+Live contribution.
+
+543
+00:41:18.848 --> 00:41:19.957
+Reference choice:
+
+544
+00:41:20.237 --> 00:41:28.429
+SRT or RIST, redundant cloud live encoders (for example, AWS Elemental MediaLive or open-source).
+
+545
+00:41:28.709 --> 00:41:29.947
+Real-time OLAP.
+
+546
+00:41:30.227 --> 00:41:32.509
+Publicly described (VERIFY each):
+
+547
+00:41:32.789 --> 00:41:34.923
+Druid (Netflix has described use).
+
+548
+00:41:35.203 --> 00:41:36.312
+Reference choice:
+
+549
+00:41:36.592 --> 00:41:38.213
+Druid, Pinot, ClickHouse.
+
+550
+00:41:38.493 --> 00:41:39.368
+Players.
+
+551
+00:41:39.648 --> 00:41:41.931
+Publicly described (VERIFY each):
+
+552
+00:41:42.211 --> 00:41:49.635
+ExoPlayer or Media3 on Android, AVPlayer on iOS, Shaka or hls.js on web.
+
+553
+00:41:49.915 --> 00:41:51.024
+Reference choice:
+
+554
+00:41:51.304 --> 00:41:52.008
+Same.
+
+555
+00:41:53.358 --> 00:42:04.366
+Disney+ Hotstar has spoken publicly about Kubernetes-based scaling, custom autoscaling ahead of events, and load testing at extreme concurrency (VERIFY details).
+
+556
+00:42:05.716 --> 00:42:06.612
+Part 9.
+
+557
+00:42:06.892 --> 00:42:09.004
+Security, Rights and Compliance.
+
+558
+00:42:10.254 --> 00:42:15.758
+Rights: territorial and time windows per title and platform, enforced in the playback service.
+
+559
+00:42:16.038 --> 00:42:18.747
+Sports rights may differ for TV and digital.
+
+560
+00:42:19.027 --> 00:42:22.739
+DRM and watermarking: as §5.11.
+
+561
+00:42:23.019 --> 00:42:26.262
+Studio and league security requirements are contractual.
+
+562
+00:42:26.542 --> 00:42:35.459
+Privacy: viewing history is personal data;. profiles for children have restrictions;. ad targeting needs consent and choice where required;.
+
+563
+00:42:36.809 --> 00:42:40.137
+DPDP Act obligations in India (VERIFY).
+
+564
+00:42:40.417 --> 00:42:52.215
+Content regulation: age ratings and content codes for online curated content (India's IT Rules 2021 digital media ethics code; VERIFY current status).
+
+565
+00:42:52.495 --> 00:42:55.737
+Broadcasting rules for live sport may apply (VERIFY).
+
+566
+00:42:56.017 --> 00:43:01.820
+Payments: recurring payment rules (RBI e-mandate framework, VERIFY), tokenised cards.
+
+567
+00:43:03.170 --> 00:43:04.023
+Part 10.
+
+568
+00:43:04.303 --> 00:43:06.223
+Reliability and Operations.
+
+569
+00:43:07.473 --> 00:43:20.401
+Live data plane redundancy: two contribution paths, two cloud regions, paired encoders, redundant packagers;. multiple CDNs;. automatic failover at each hop, rehearsed before the season.
+
+570
+00:43:20.681 --> 00:43:24.756
+Control plane: multi-region active-active for stateless services.
+
+571
+00:43:25.036 --> 00:43:31.073
+Netflix has described running active-active across regions and evacuating regions (VERIFY).
+
+572
+00:43:31.353 --> 00:43:37.881
+Entitlements are cached at the edge, so an identity outage doesn't stop playback for already-authenticated viewers.
+
+573
+00:43:39.231 --> 00:43:48.917
+Chaos engineering: kill instances and dependencies in production in controlled ways;. regional evacuation drills;. game days before big matches.
+
+574
+00:43:49.197 --> 00:43:50.221
+Event runbook:
+
+575
+00:43:50.501 --> 00:43:52.357
+Pre-scale at Tminus 2 h.
+
+576
+00:43:52.637 --> 00:43:53.853
+Freeze changes.
+
+577
+00:43:55.203 --> 00:43:58.808
+A war room with QoE dashboards per CDN or ISP.
+
+578
+00:43:59.088 --> 00:44:00.795
+Degradation switches ready.
+
+579
+00:44:01.075 --> 00:44:04.104
+Decision owners for bitrate caps and CDN shifts.
+
+580
+00:44:04.384 --> 00:44:05.899
+Communication templates.
+
+581
+00:44:06.179 --> 00:44:12.877
+Graceful degradation order: recommendations, then watch-history writes, then reactions, then high bitrates.
+
+582
+00:44:13.157 --> 00:44:15.675
+Never the join path or segment delivery.
+
+583
+00:44:15.955 --> 00:44:26.045
+Observability: per-minute QoE, join success rate and latency, playback errors by code, CDN health, ad decisioning latency, licence server errors.
+
+584
+00:44:27.395 --> 00:44:28.398
+Part 11.
+
+585
+00:44:28.678 --> 00:44:29.723
+Key Trade-offs.
+
+586
+00:44:30.973 --> 00:44:32.317
+Here is a quick table:
+
+587
+00:44:32.597 --> 00:44:35.115
+Decision, and Chosen, and Accepted cost.
+
+588
+00:44:35.395 --> 00:44:36.248
+Encoding.
+
+589
+00:44:36.528 --> 00:44:37.360
+Chosen:
+
+590
+00:44:37.640 --> 00:44:41.672
+Per-title or shot-based, multiple codecs for popular titles.
+
+591
+00:44:41.952 --> 00:44:43.125
+Accepted cost:
+
+592
+00:44:43.405 --> 00:44:45.005
+Much more compute per title.
+
+593
+00:44:45.285 --> 00:44:46.224
+Packaging.
+
+594
+00:44:46.504 --> 00:44:47.336
+Chosen:
+
+595
+00:44:47.616 --> 00:44:49.813
+CMAF shared by HLS and DASH.
+
+596
+00:44:50.093 --> 00:44:51.267
+Accepted cost:
+
+597
+00:44:51.547 --> 00:44:53.445
+Older devices need fallbacks.
+
+598
+00:44:53.725 --> 00:44:54.600
+Delivery.
+
+599
+00:44:54.880 --> 00:44:55.712
+Chosen:
+
+600
+00:44:55.992 --> 00:44:59.640
+ISP caches for VOD + multi-CDN for live.
+
+601
+00:44:59.920 --> 00:45:01.093
+Accepted cost:
+
+602
+00:45:01.373 --> 00:45:04.467
+Operating appliances; multi-vendor complexity.
+
+603
+00:45:04.747 --> 00:45:05.877
+Live latency.
+
+604
+00:45:06.157 --> 00:45:06.989
+Chosen:
+
+605
+00:45:07.269 --> 00:45:10.597
+10 to 30 s default, low-latency mode optional.
+
+606
+00:45:10.877 --> 00:45:12.051
+Accepted cost:
+
+607
+00:45:12.331 --> 00:45:14.720
+Not as live as broadcast for some users.
+
+608
+00:45:15.000 --> 00:45:16.088
+Ads in live.
+
+609
+00:45:16.368 --> 00:45:17.200
+Chosen:
+
+610
+00:45:17.480 --> 00:45:19.613
+SSAI with cohort personalisation.
+
+611
+00:45:19.893 --> 00:45:21.067
+Accepted cost:
+
+612
+00:45:21.347 --> 00:45:23.480
+Less precise targeting than per-viewer.
+
+613
+00:45:23.760 --> 00:45:24.805
+Control plane.
+
+614
+00:45:25.085 --> 00:45:25.917
+Chosen:
+
+615
+00:45:26.197 --> 00:45:29.269
+Pre-scaled, static fallbacks, degradation switches.
+
+616
+00:45:29.549 --> 00:45:30.723
+Accepted cost:
+
+617
+00:45:31.003 --> 00:45:33.307
+Idle capacity cost before matches.
+
+618
+00:45:34.657 --> 00:45:35.617
+Reactions.
+
+619
+00:45:35.897 --> 00:45:36.729
+Chosen:
+
+620
+00:45:37.009 --> 00:45:38.907
+Approximate aggregated counts.
+
+621
+00:45:39.187 --> 00:45:40.361
+Accepted cost:
+
+622
+00:45:40.641 --> 00:45:41.665
+Not exact.
+
+623
+00:45:43.015 --> 00:45:43.953
+Part 12.
+
+624
+00:45:44.233 --> 00:45:45.577
+Interview Q and A.
+
+625
+00:45:46.827 --> 00:45:47.659
+Beginner.
+
+626
+00:45:47.939 --> 00:45:48.963
+Question 1.
+
+627
+00:45:49.243 --> 00:45:51.995
+What happens between pressing Play and seeing video?
+
+628
+00:45:52.275 --> 00:45:53.641
+Thirty-second answer:
+
+629
+00:45:53.921 --> 00:46:13.270
+The app asks the playback service, which checks entitlement, rights and device; returns a device-specific manifest, signed CDN URLs and a DRM licence token; the player gets a licence, downloads the first segments at a safe bitrate, starts playback, and adapts bitrate while sending telemetry.
+
+630
+00:46:14.620 --> 00:46:15.623
+Question 2.
+
+631
+00:46:15.903 --> 00:46:17.780
+What is adaptive bitrate streaming?
+
+632
+00:46:18.060 --> 00:46:19.425
+Thirty-second answer:
+
+633
+00:46:19.705 --> 00:46:30.884
+Video is encoded at several quality levels and cut into short segments; the player picks each segment's quality based on measured bandwidth and buffer, so it can switch down instead of stalling.
+
+634
+00:46:32.234 --> 00:46:33.279
+Question 3.
+
+635
+00:46:33.559 --> 00:46:36.055
+Why do streaming services use CDNs?
+
+636
+00:46:36.335 --> 00:46:37.701
+Thirty-second answer:
+
+637
+00:46:37.981 --> 00:46:50.973
+Video is huge; serving it from one place would overload the origin and add latency; CDNs cache segments near viewers, and ISP-embedded caches keep traffic inside the viewer's network.
+
+638
+00:46:52.323 --> 00:46:53.389
+Question 4.
+
+639
+00:46:53.669 --> 00:46:56.485
+How do live streams differ from VOD technically?
+
+640
+00:46:56.765 --> 00:46:58.131
+Thirty-second answer:
+
+641
+00:46:58.411 --> 00:47:14.325
+Live is encoded and packaged in real time with a seconds-level delay budget, manifests change every segment, everyone watches the same moment (so caching must coalesce requests), and traffic arrives in sudden spikes rather than a smooth curve.
+
+642
+00:47:15.675 --> 00:47:16.678
+Intermediate.
+
+643
+00:47:16.958 --> 00:47:18.067
+Question 5.
+
+644
+00:47:18.347 --> 00:47:20.801
+How do you build the encoding ladder for a title?
+
+645
+00:47:21.081 --> 00:47:22.446
+Thirty-second answer:
+
+646
+00:47:22.726 --> 00:47:37.702
+Encode sample points across resolutions and bitrates, score them with a perceptual metric like VMAF, take the convex hull of quality versus bitrate, and pick rungs along it, per title or per shot, so simple content uses fewer bits.
+
+647
+00:47:39.052 --> 00:47:40.161
+Question 6.
+
+648
+00:47:40.441 --> 00:47:43.151
+How do you protect premium content from piracy?
+
+649
+00:47:43.431 --> 00:47:44.796
+Thirty-second answer:
+
+650
+00:47:45.076 --> 00:47:57.428
+DRM encryption with device-appropriate licence servers and policies, short-lived token-authenticated URLs, forensic watermarking per session for live sport, and monitoring with takedowns.
+
+651
+00:47:58.778 --> 00:47:59.866
+Question 7.
+
+652
+00:48:00.146 --> 00:48:02.386
+How are ads inserted into a live match?
+
+653
+00:48:02.666 --> 00:48:04.031
+Thirty-second answer:
+
+654
+00:48:04.311 --> 00:48:21.250
+SCTE-35 markers signal breaks; at each break the SSAI service asks ad decisioning for each viewer cohort's ad pod and stitches pre-transcoded ad segments into the manifest; the player plays them seamlessly; impressions are beaconed and reconciled.
+
+655
+00:48:22.600 --> 00:48:23.624
+Question 8.
+
+656
+00:48:23.904 --> 00:48:27.104
+How are subscriptions and entitlements enforced at playback?
+
+657
+00:48:27.384 --> 00:48:28.749
+Thirty-second answer:
+
+658
+00:48:29.029 --> 00:48:43.685
+Payments create or renew subscriptions; the entitlements service maps plans to rights (quality, devices, ad-free, sports); the playback service checks cached entitlements, rights windows and concurrent-stream counters on every play.
+
+659
+00:48:45.035 --> 00:48:46.102
+Question 9.
+
+660
+00:48:46.382 --> 00:48:49.923
+How would you show live scores and reactions to 40M viewers?
+
+661
+00:48:50.203 --> 00:48:51.569
+Thirty-second answer:
+
+662
+00:48:51.849 --> 00:49:07.657
+Scores from the official feed published as small CDN-cached JSON with short TTL (or pushed over persistent connections); reactions batched on clients, aggregated per second at ingestion tiers, and only aggregated counts broadcast.
+
+663
+00:49:09.007 --> 00:49:09.775
+Senior.
+
+664
+00:49:10.055 --> 00:49:11.100
+Question 10.
+
+665
+00:49:11.380 --> 00:49:15.412
+How would you handle 40 million concurrent viewers for a cricket final?
+
+666
+00:49:15.692 --> 00:49:17.057
+Thirty-second answer:
+
+667
+00:49:17.337 --> 00:49:30.457
+Data plane: redundant contribution and encoding, CMAF packaging, origin shield with request coalescing, multi-CDN plus ISP caches with reserved capacity, bitrate caps under stress.
+
+668
+00:49:30.737 --> 00:49:44.028
+Control plane: forecast joins, pre-scale, static cacheable pages, edge token validation, degradation switches, client backoff with jitter, and a war room steering CDNs by real-time QoE.
+
+669
+00:49:45.378 --> 00:49:46.509
+Question 11.
+
+670
+00:49:46.789 --> 00:49:48.581
+Compare ABR algorithms.
+
+671
+00:49:48.861 --> 00:49:50.226
+Thirty-second answer:
+
+672
+00:49:50.506 --> 00:50:11.306
+Throughput-based reacts to bandwidth but oscillates; buffer-based is stable but slow to start; BOLA optimises utility with buffer; MPC plans a few segments ahead with predicted throughput; learned policies adapt but are harder to explain, production players blend throughput at start with buffer-based control and tune by A or B tests.
+
+673
+00:50:12.656 --> 00:50:13.744
+Question 12.
+
+674
+00:50:14.024 --> 00:50:15.667
+How does CDN steering work?
+
+675
+00:50:15.947 --> 00:50:17.312
+Thirty-second answer:
+
+676
+00:50:17.592 --> 00:50:34.744
+Aggregate per-minute QoE per CDN, ISP and region from player telemetry; assign new sessions to the best CDN subject to capacity and cost commitments, keep a small exploration share per CDN (bandit), and let players switch on errors mid-session.
+
+677
+00:50:36.094 --> 00:50:37.374
+Question 13.
+
+678
+00:50:37.654 --> 00:50:40.150
+How do you make the live pipeline fault-tolerant?
+
+679
+00:50:40.430 --> 00:50:41.795
+Thirty-second answer:
+
+680
+00:50:42.075 --> 00:50:55.985
+1 plus1 at every hop, two contribution paths, two regions, time-aligned paired encoders, redundant packagers and origins, multiple CDNs, with automatic switchover and rehearsed failovers before the season.
+
+681
+00:50:57.335 --> 00:50:58.529
+Question 14.
+
+682
+00:50:58.809 --> 00:51:01.369
+How do you design the recommendation home page?
+
+683
+00:51:01.649 --> 00:51:03.015
+Thirty-second answer:
+
+684
+00:51:03.295 --> 00:51:22.239
+Candidate sources (collaborative filtering, content similarity, trending, continue watching), a ranking model predicting play-and-keep-watching, page construction with row selection and diversity, personalised artwork via contextual bandits, and A or B testing on retention and hours.
+
+685
+00:51:23.589 --> 00:51:24.485
+Architect.
+
+686
+00:51:24.765 --> 00:51:25.959
+Question 15.
+
+687
+00:51:26.239 --> 00:51:29.439
+Design the telemetry and QoE analytics platform.
+
+688
+00:51:29.719 --> 00:51:31.085
+Thirty-second answer:
+
+689
+00:51:31.365 --> 00:51:52.485
+Players batch events to edge collectors, then Kafka, then Flink computing per-minute QoE aggregates with sketches (HLL, t-digest) into a real-time OLAP store for dashboards and CDN steering; raw events into an Iceberg lakehouse for analysis, ML and experiments; sampling and retention tiers to control cost.
+
+690
+00:51:53.835 --> 00:51:55.029
+Question 16.
+
+691
+00:51:55.309 --> 00:51:59.064
+Build your own CDN appliances or use commercial CDNs?
+
+692
+00:51:59.344 --> 00:52:00.709
+Thirty-second answer:
+
+693
+00:52:00.989 --> 00:52:16.541
+At very large VOD scale, ISP-embedded caches filled off-peak cut cost and improve quality; commercial CDNs add burst capacity and coverage, especially for live; most large services combine both with a steering layer.
+
+694
+00:52:17.891 --> 00:52:19.235
+Question 17.
+
+695
+00:52:19.515 --> 00:52:22.758
+How would you forecast and prepare capacity for a tournament?
+
+696
+00:52:23.038 --> 00:52:24.403
+Thirty-second answer:
+
+697
+00:52:24.683 --> 00:52:42.198
+Model peak concurrency and join curves per match from teams, stage, slot and history; reserve CDN capacity and pre-scale control planes per match; load test the join curve; update forecasts in-match; align ad inventory and ops staffing to the forecast.
+
+698
+00:52:43.548 --> 00:52:44.721
+Question 18.
+
+699
+00:52:45.001 --> 00:52:47.433
+What is the economics of encoding choices?
+
+700
+00:52:47.713 --> 00:52:49.079
+Thirty-second answer:
+
+701
+00:52:49.359 --> 00:53:05.359
+Better codecs and per-title optimisation cost compute once but save bandwidth on every view; prioritise by expected views and device support, re-encode the back catalogue by expected savings, and measure quality with VMAF to avoid regressions.
+
+702
+00:53:06.709 --> 00:53:07.946
+Question 19.
+
+703
+00:53:08.226 --> 00:53:11.341
+How do you use chaos engineering for a streaming platform?
+
+704
+00:53:11.621 --> 00:53:12.986
+Thirty-second answer:
+
+705
+00:53:13.266 --> 00:53:29.138
+Randomly terminate instances and inject dependency failures in production under controls, rehearse regional evacuation, verify degradation switches and fallbacks, and run game days before major events, with abort criteria and observability.
+
+706
+00:53:30.488 --> 00:53:31.597
+Question 20.
+
+707
+00:53:31.877 --> 00:53:36.933
+What are the main differences between designing a VOD service and a live sports service?
+
+708
+00:53:37.213 --> 00:53:38.579
+Thirty-second answer:
+
+709
+00:53:38.859 --> 00:53:59.125
+VOD optimises bits per quality and caches pre-positioned popular content with smooth demand; live optimises real-time redundancy, latency, request coalescing and survives synchronised join spikes, so live's hardest problems are the control plane and delivery capacity, not encoding efficiency.
+
+710
+00:54:00.475 --> 00:54:01.521
+Part 13.
+
+711
+00:54:01.801 --> 00:54:02.569
+Summary.
+
+712
+00:54:03.819 --> 00:54:15.125
+Two planes: a simple, redundant, cacheable data plane for video, and a control plane for rights, entitlements, ads and steering that must survive flash-sale-like join spikes.
+
+713
+00:54:15.405 --> 00:54:24.771
+VOD wins on encoding efficiency (per-title and shot-based ladders, VMAF, modern codecs) and on pre-positioning in ISP caches.
+
+714
+00:54:25.051 --> 00:54:35.483
+Live wins on redundancy (1 plus1 everywhere), request coalescing, multi-CDN steering by real-time QoE, pre-scaling and degradation switches.
+
+715
+00:54:36.833 --> 00:54:48.097
+Algorithms run everything: convex-hull ladders, ABR control, bandit-based CDN and artwork choice, popularity-aware caching, concurrency forecasting, ad pacing.
+
+716
+00:54:48.377 --> 00:54:58.830
+Telemetry is the nervous system: millions of events per second, turned into per-minute QoE for steering, and into the lakehouse for product, content and ML decisions.
+
+717
+00:55:00.180 --> 00:55:01.417
+Related chapters.
+
+718
+00:55:01.697 --> 00:55:15.777
+Ch 52, Object Storage and Media Pipeline, Ch 43, Home Feed and Recommendations, Ch 51, Real-time Analytics, Ch 18, Resilience, Ch 46, Flash-sale admission.
+
+719
+00:55:16.057 --> 00:55:17.252
+Next in this tab:
+
+720
+00:55:17.532 --> 00:55:20.305
+I07, Messaging and Social Feed.
+
+721
+00:55:21.655 --> 00:55:23.255
+That's the end of this chapter.
+
+722
+00:55:23.535 --> 00:55:29.573
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+723
+00:55:29.853 --> 00:55:31.303
+See you in the next chapter.
+

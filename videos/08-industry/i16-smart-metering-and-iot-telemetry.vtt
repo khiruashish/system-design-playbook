@@ -1,0 +1,3014 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.654
+Smart Metering and IoT Telemetry.
+
+2
+00:00:02.934 --> 00:00:07.649
+Chapter I16, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:09.399 --> 00:00:10.359
+At a glance:
+
+4
+00:00:10.639 --> 00:00:11.812
+Chapter at a glance.
+
+5
+00:00:12.092 --> 00:00:18.385
+Sector: energy and utilities (electricity distribution), and IoT telemetry more generally.
+
+6
+00:00:18.665 --> 00:00:21.567
+Format: a system design walkthrough with no code.
+
+7
+00:00:21.847 --> 00:00:22.849
+Reader bands:
+
+8
+00:00:23.129 --> 00:00:24.644
+B1, then B4.
+
+9
+00:00:24.924 --> 00:00:25.820
+Builds on:
+
+10
+00:00:26.100 --> 00:00:29.428
+I11: rating, charging and prepaid balances.
+
+11
+00:00:29.708 --> 00:00:31.287
+I12: forecasting.
+
+12
+00:00:31.567 --> 00:00:34.255
+Ch 51: streaming aggregation.
+
+13
+00:00:34.535 --> 00:00:36.369
+Ch 50: schedulers.
+
+14
+00:00:37.719 --> 00:00:48.898
+What you get: an Advanced Metering Infrastructure (AMI) platform for a power distribution company (DISCOM) with 25 million smart meters, most of them prepaid.
+
+15
+00:00:49.178 --> 00:00:51.567
+The chapter covers: meter connectivity:
+
+16
+00:00:51.847 --> 00:01:11.687
+RF mesh, cellular NB-IoT or 4G and PLC;. the Head-End System (HES), which talks DLMS or COSEM to meters;. the Meter Data Management (MDM) system, with validation, estimation and editing (VEE);. billing and prepaid balance with remote disconnect and reconnect;.
+
+17
+00:01:13.037 --> 00:01:23.896
+outage detection, power quality and theft detection;. firmware-over-the-air (FOTA) updates;. load forecasting and demand response;. an energy-accounting data platform.
+
+18
+00:01:24.176 --> 00:01:42.096
+It also explains the algorithms: interval data validation and gap estimation, time-of-day tariff rating, prepaid balance projection, outage inference, theft and anomaly detection, transformer energy balancing, load forecasting, staged OTA rollout and read scheduling.
+
+19
+00:01:42.376 --> 00:01:43.976
+It closes with the tech stack.
+
+20
+00:01:45.326 --> 00:01:46.307
+Reading time:
+
+21
+00:01:46.587 --> 00:01:47.483
+80 min.
+
+22
+00:01:48.833 --> 00:01:49.580
+Warning:
+
+23
+00:01:49.860 --> 00:01:51.268
+Sources and honesty.
+
+24
+00:01:51.548 --> 00:01:57.585
+The following are marked VERIFY and should be checked against current official documents before you rely on them:
+
+25
+00:01:57.865 --> 00:02:06.441
+India's smart meter programme under the Revamped Distribution Sector Scheme (RDSS) and the AMISP (AMI Service Provider) model.
+
+26
+00:02:06.721 --> 00:02:16.407
+Standards such as IS 16444 (smart meters) and IS 15959 (DLMS companion spec).
+
+27
+00:02:16.687 --> 00:02:25.647
+CEA regulations and state electricity regulatory commission (SERC) supply codes, which set rules on prepaid disconnection timing.
+
+28
+00:02:25.927 --> 00:02:28.167
+Everything else is a reference design.
+
+29
+00:02:29.517 --> 00:02:30.370
+Part 1.
+
+30
+00:02:30.650 --> 00:02:32.186
+The System in One Page.
+
+31
+00:02:33.436 --> 00:02:35.185
+What a smart meter platform does.
+
+32
+00:02:35.465 --> 00:02:38.559
+A traditional meter is read by a person once a month.
+
+33
+00:02:38.839 --> 00:02:56.865
+A smart meter: records energy every 15 or 30 minutes (load profile);. records voltage, current, power factor and events (tamper, power fail, cover open);. sends all of this to the utility automatically;. can be disconnected or reconnected remotely through a built-in relay;.
+
+34
+00:02:58.215 --> 00:03:07.154
+supports prepaid mode, where the consumer recharges like a mobile SIM and supply is cut when the balance runs out (with rules about when).
+
+35
+00:03:07.434 --> 00:03:17.546
+For the utility this means: accurate billing without meter readers;. fewer billing disputes;. faster detection of outages and theft;. better collections through prepaid;.
+
+36
+00:03:18.896 --> 00:03:25.765
+energy accounting per transformer and feeder to find AT and C losses (aggregate technical and commercial losses).
+
+37
+00:03:27.115 --> 00:03:28.203
+Main systems.
+
+38
+00:03:28.483 --> 00:03:29.827
+Here is a quick table:
+
+39
+00:03:30.107 --> 00:03:31.622
+System, and What it does.
+
+40
+00:03:31.902 --> 00:03:32.969
+Smart meters:
+
+41
+00:03:33.249 --> 00:03:35.638
+Measure and store interval data and events.
+
+42
+00:03:35.918 --> 00:03:37.795
+Relay for connect or disconnect.
+
+43
+00:03:38.075 --> 00:03:39.547
+Communication module.
+
+44
+00:03:39.827 --> 00:03:40.638
+Network:
+
+45
+00:03:40.918 --> 00:03:49.963
+RF mesh with data concentrator units (DCUs)/gateways, or direct cellular (NB-IoT or 4G), or PLC.
+
+46
+00:03:50.243 --> 00:03:52.035
+Head-End System (HES):
+
+47
+00:03:52.315 --> 00:04:01.617
+Manages meter communications: schedules reads, sends commands (disconnect, tariff update, time sync), receives pushed events, manages keys.
+
+48
+00:04:01.897 --> 00:04:04.222
+Meter Data Management (MDM):
+
+49
+00:04:04.502 --> 00:04:12.630
+Stores and validates interval data, estimates gaps, aggregates for billing, maintains meter, consumer, transformer relationships.
+
+50
+00:04:12.910 --> 00:04:14.233
+Billing and CIS:
+
+51
+00:04:14.513 --> 00:04:19.057
+Customer information system: accounts, tariffs, postpaid bills, payments.
+
+52
+00:04:20.407 --> 00:04:21.473
+Prepaid engine:
+
+53
+00:04:21.753 --> 00:04:27.087
+Real-time balance, deductions, low-balance alerts, disconnect or reconnect decisions.
+
+54
+00:04:27.367 --> 00:04:28.647
+Recharge channels:
+
+55
+00:04:28.927 --> 00:04:31.572
+App, UPI, wallets, BBPS, counters.
+
+56
+00:04:31.852 --> 00:04:33.793
+Outage management (OMS):
+
+57
+00:04:34.073 --> 00:04:38.383
+Detects outages from last gasp events, groups them, dispatches crews.
+
+58
+00:04:38.663 --> 00:04:40.433
+Network model (GIS):
+
+59
+00:04:40.713 --> 00:04:42.847
+Feeders, transformers, consumers.
+
+60
+00:04:43.127 --> 00:04:45.665
+The connectivity used for energy accounting.
+
+61
+00:04:45.945 --> 00:04:46.884
+Analytics:
+
+62
+00:04:47.164 --> 00:04:51.580
+Losses, theft, forecasting, consumer insights, regulatory reports.
+
+63
+00:04:51.860 --> 00:04:53.076
+Device management:
+
+64
+00:04:53.356 --> 00:04:57.559
+Firmware versions, OTA campaigns, configuration, inventory.
+
+65
+00:04:58.909 --> 00:04:59.911
+Consumer app:
+
+66
+00:05:00.191 --> 00:05:03.498
+Daily usage, balance, recharge, alerts, complaints.
+
+67
+00:05:04.848 --> 00:05:07.003
+Scale for this design (assumptions).
+
+68
+00:05:07.283 --> 00:05:08.627
+Here is a quick table:
+
+69
+00:05:08.907 --> 00:05:10.229
+Quantity, and Value.
+
+70
+00:05:10.509 --> 00:05:11.341
+Meters:
+
+71
+00:05:11.621 --> 00:05:22.309
+25M (mostly single-phase residential); 50k DCUs; 200k distribution transformers (DT meters); 5k feeder meters.
+
+72
+00:05:22.589 --> 00:05:23.635
+Interval data:
+
+73
+00:05:23.915 --> 00:05:33.643
+15-minute load profile, then 96 intervals per day per meter, several channels each (kWh import or export, voltage, current).
+
+74
+00:05:33.923 --> 00:05:35.011
+Daily readings:
+
+75
+00:05:35.291 --> 00:05:40.987
+25M times 96 times ~4 channels about 10B values per day.
+
+76
+00:05:41.267 --> 00:05:42.781
+Daily billing snapshots:
+
+77
+00:05:43.061 --> 00:05:45.259
+25M midnight registers.
+
+78
+00:05:45.539 --> 00:05:46.328
+Events:
+
+79
+00:05:46.608 --> 00:05:53.200
+Power fail or restore, tamper, relay operations: tens of millions per day, with bursts during storms.
+
+80
+00:05:53.480 --> 00:05:58.771
+Prepaid recharges: ~1M per day, with peaks around month start and evenings.
+
+81
+00:06:00.121 --> 00:06:00.953
+Commands:
+
+82
+00:06:01.233 --> 00:06:06.779
+Disconnect or reconnect: hundreds of thousands a day at peak (VERIFY rules on timing).
+
+83
+00:06:08.129 --> 00:06:09.516
+Estimation highlights:
+
+84
+00:06:09.796 --> 00:06:10.841
+Ingest rate.
+
+85
+00:06:11.121 --> 00:06:16.348
+10B values per day is about 115k values per second on average.
+
+86
+00:06:16.628 --> 00:06:23.775
+Reads are scheduled in batches (for example, hourly or four times a day), so peaks are 5 to 10 times higher.
+
+87
+00:06:24.055 --> 00:06:24.929
+Storage.
+
+88
+00:06:25.209 --> 00:06:35.001
+At ~12 bytes per compressed value, the raw volume is ~120 GB per day, or ~44 TB per year before replication.
+
+89
+00:06:35.281 --> 00:06:39.889
+Time-series compression (delta-of-delta, Gorilla-style) reduces this further.
+
+90
+00:06:41.239 --> 00:06:46.722
+Retain detailed data for several years, because regulators often require it (VERIFY).
+
+91
+00:06:47.002 --> 00:06:48.026
+Storm events.
+
+92
+00:06:48.306 --> 00:06:53.661
+When a feeder trips, every meter on it sends a last gasp power-fail event at the same instant:
+
+93
+00:06:53.941 --> 00:06:56.415
+10k events in a second from one feeder.
+
+94
+00:06:56.695 --> 00:07:00.066
+A regional storm can produce millions of events in minutes.
+
+95
+00:07:00.346 --> 00:07:06.341
+The event pipeline must absorb these bursts and correlate them rather than create a million outage tickets.
+
+96
+00:07:07.691 --> 00:07:09.013
+Network constraints.
+
+97
+00:07:09.293 --> 00:07:15.245
+RF mesh bandwidth is small, often tens of kbps shared across a DCU's meters.
+
+98
+00:07:15.525 --> 00:07:21.328
+Reading 1,000 meters' full load profile through one DCU must be scheduled carefully.
+
+99
+00:07:21.608 --> 00:07:23.699
+You cannot poll everything every minute.
+
+100
+00:07:25.049 --> 00:07:25.923
+Part 2.
+
+101
+00:07:26.203 --> 00:07:27.163
+Requirements.
+
+102
+00:07:28.413 --> 00:07:29.267
+Functional.
+
+103
+00:07:29.547 --> 00:07:30.976
+Meter data collection.
+
+104
+00:07:31.256 --> 00:07:33.837
+Daily billing profile (midnight registers).
+
+105
+00:07:34.117 --> 00:07:36.443
+Load profile (15 or 30 min).
+
+106
+00:07:36.723 --> 00:07:38.877
+Instantaneous parameters on demand.
+
+107
+00:07:39.157 --> 00:07:42.229
+Events pushed in near real time (power fail, tamper).
+
+108
+00:07:42.509 --> 00:07:43.363
+Commands.
+
+109
+00:07:43.643 --> 00:07:45.605
+Remote disconnect or reconnect.
+
+110
+00:07:46.955 --> 00:07:47.873
+Time sync.
+
+111
+00:07:48.153 --> 00:07:50.286
+Tariff or TOD schedule updates.
+
+112
+00:07:50.566 --> 00:07:51.846
+Load limit settings.
+
+113
+00:07:52.126 --> 00:07:54.451
+Mode change (prepaid or postpaid).
+
+114
+00:07:54.731 --> 00:07:55.926
+Firmware updates.
+
+115
+00:07:56.206 --> 00:07:56.910
+VEE.
+
+116
+00:07:57.190 --> 00:08:02.566
+Validate readings, estimate missing or invalid data, allow audited manual edits.
+
+117
+00:08:02.846 --> 00:08:03.571
+Billing.
+
+118
+00:08:04.921 --> 00:08:10.596
+Postpaid bills with slab and time-of-day tariffs, fixed charges, taxes and subsidies.
+
+119
+00:08:10.876 --> 00:08:14.204
+Net metering for rooftop solar (import or export).
+
+120
+00:08:14.484 --> 00:08:15.359
+Prepaid.
+
+121
+00:08:15.639 --> 00:08:18.796
+Recharge through many channels, credited in real time.
+
+122
+00:08:19.076 --> 00:08:20.292
+Daily deductions.
+
+123
+00:08:20.572 --> 00:08:22.727
+Balance and days-remaining projection.
+
+124
+00:08:23.007 --> 00:08:24.308
+Low-balance alerts.
+
+125
+00:08:25.658 --> 00:08:34.362
+Disconnect after grace, under regulatory rules (no disconnection at night or on holidays, and emergency credit where mandated; VERIFY).
+
+126
+00:08:34.642 --> 00:08:37.351
+Automatic reconnect on recharge within minutes.
+
+127
+00:08:37.631 --> 00:08:38.506
+Outages.
+
+128
+00:08:38.786 --> 00:08:50.285
+Detect outages from meter events, identify the affected transformer or feeder, notify consumers, track restoration and compute reliability indices (SAIFI or SAIDI).
+
+129
+00:08:50.565 --> 00:08:51.802
+Energy accounting.
+
+130
+00:08:52.082 --> 00:09:00.743
+Compare the energy input at the feeder and DT against the sum of consumer meters, to compute losses by area and flag theft hotspots.
+
+131
+00:09:02.093 --> 00:09:03.096
+Consumer app.
+
+132
+00:09:03.376 --> 00:09:07.173
+Usage graphs, bill and balance, recharge, alerts, complaints.
+
+133
+00:09:07.453 --> 00:09:08.691
+Device management.
+
+134
+00:09:08.971 --> 00:09:16.907
+Inventory, installation workflows (meter swap, mapping to consumer and DT), FOTA campaigns, configuration audits.
+
+135
+00:09:18.257 --> 00:09:19.366
+Non-functional.
+
+136
+00:09:19.646 --> 00:09:20.990
+Here is a quick table:
+
+137
+00:09:21.270 --> 00:09:22.635
+Attribute, and Target.
+
+138
+00:09:22.915 --> 00:09:35.609
+Data completeness: for example, 98 to 99% of meters with daily data delivered within 24 h, and load profile similar (SLA-driven in AMISP contracts; VERIFY).
+
+139
+00:09:35.889 --> 00:09:36.806
+Latency:
+
+140
+00:09:37.086 --> 00:09:38.921
+Events ingested in 1 min.
+
+141
+00:09:39.201 --> 00:09:42.443
+Reconnect command executed within minutes of a recharge.
+
+142
+00:09:42.723 --> 00:09:43.641
+Correctness:
+
+143
+00:09:43.921 --> 00:09:47.846
+Billing-grade accuracy with a full audit of estimates and edits.
+
+144
+00:09:48.126 --> 00:09:48.979
+Safety:
+
+145
+00:09:49.259 --> 00:09:51.329
+Disconnects only when policy allows.
+
+146
+00:09:51.609 --> 00:09:53.742
+Never mass-disconnect because of a bug.
+
+147
+00:09:54.022 --> 00:09:55.025
+Security:
+
+148
+00:09:55.305 --> 00:10:00.510
+Per-meter keys, encrypted and authenticated DLMS, no unauthorised commands.
+
+149
+00:10:00.790 --> 00:10:01.835
+Scalability:
+
+150
+00:10:02.115 --> 00:10:04.569
+25M+ meters and growing.
+
+151
+00:10:04.849 --> 00:10:06.193
+Bursts during storms.
+
+152
+00:10:07.543 --> 00:10:08.801
+Interoperability:
+
+153
+00:10:09.081 --> 00:10:12.623
+Multiple meter makes through standard DLMS or COSEM.
+
+154
+00:10:12.903 --> 00:10:16.401
+HES, MDM integration through standard interfaces.
+
+155
+00:10:16.681 --> 00:10:17.620
+Retention:
+
+156
+00:10:17.900 --> 00:10:22.124
+Years of interval data for disputes and regulatory audits (VERIFY).
+
+157
+00:10:23.474 --> 00:10:24.370
+Part 3.
+
+158
+00:10:24.650 --> 00:10:26.165
+High-Level Architecture.
+
+159
+00:10:27.415 --> 00:10:28.759
+Here is the diagram.
+
+160
+00:10:32.609 --> 00:10:33.654
+Key decisions.
+
+161
+00:10:35.004 --> 00:10:36.348
+Here is a quick table:
+
+162
+00:10:36.628 --> 00:10:38.399
+Decision, and Choice, and Why.
+
+163
+00:10:38.679 --> 00:10:39.639
+Protocol.
+
+164
+00:10:39.919 --> 00:10:40.751
+Choice:
+
+165
+00:10:41.031 --> 00:10:51.313
+DLMS or COSEM (IEC 62056) with the national companion spec (IS 15959; VERIFY).
+
+166
+00:10:51.593 --> 00:10:52.276
+Why:
+
+167
+00:10:52.556 --> 00:10:54.625
+Multi-vendor interoperability.
+
+168
+00:10:54.905 --> 00:10:55.716
+Network.
+
+169
+00:10:55.996 --> 00:10:56.828
+Choice:
+
+170
+00:10:57.108 --> 00:10:57.855
+Mixed:
+
+171
+00:10:58.135 --> 00:11:04.513
+RF mesh in dense urban areas, cellular in sparse or rural areas and for DT meters.
+
+172
+00:11:04.793 --> 00:11:05.476
+Why:
+
+173
+00:11:05.756 --> 00:11:07.207
+Coverage versus cost.
+
+174
+00:11:07.487 --> 00:11:09.556
+HES versus MDM split.
+
+175
+00:11:09.836 --> 00:11:10.668
+Choice:
+
+176
+00:11:10.948 --> 00:11:12.804
+HES owns communication.
+
+177
+00:11:13.084 --> 00:11:14.705
+MDM owns data truth.
+
+178
+00:11:14.985 --> 00:11:15.668
+Why:
+
+179
+00:11:15.948 --> 00:11:17.655
+Swap vendors independently.
+
+180
+00:11:17.935 --> 00:11:18.745
+Ingest.
+
+181
+00:11:19.025 --> 00:11:19.857
+Choice:
+
+182
+00:11:20.137 --> 00:11:22.015
+HES publishes to Kafka.
+
+183
+00:11:22.295 --> 00:11:25.900
+Consumers (MDM, OMS, prepaid) read independently.
+
+184
+00:11:26.180 --> 00:11:26.863
+Why:
+
+185
+00:11:27.143 --> 00:11:28.380
+Decoupling, replay.
+
+186
+00:11:28.660 --> 00:11:29.535
+Storage.
+
+187
+00:11:29.815 --> 00:11:30.647
+Choice:
+
+188
+00:11:30.927 --> 00:11:36.473
+Time-series DB or a columnar store for interval data, relational for master data.
+
+189
+00:11:36.753 --> 00:11:37.436
+Why:
+
+190
+00:11:37.716 --> 00:11:39.167
+Fit the access patterns.
+
+191
+00:11:40.517 --> 00:11:41.391
+Prepaid.
+
+192
+00:11:41.671 --> 00:11:42.503
+Choice:
+
+193
+00:11:42.783 --> 00:11:48.586
+Utility-side balance (a smart prepaid meter reporting consumption), not balance in the meter.
+
+194
+00:11:48.866 --> 00:11:49.549
+Why:
+
+195
+00:11:49.829 --> 00:11:52.218
+Easy tariff changes, central control.
+
+196
+00:11:52.498 --> 00:11:53.351
+Commands.
+
+197
+00:11:53.631 --> 00:11:54.463
+Choice:
+
+198
+00:11:54.743 --> 00:11:58.391
+An idempotent, rate-limited command queue with policy checks.
+
+199
+00:11:58.671 --> 00:11:59.354
+Why:
+
+200
+00:11:59.634 --> 00:12:00.807
+Safety at scale.
+
+201
+00:12:02.157 --> 00:12:03.075
+Part 4.
+
+202
+00:12:03.355 --> 00:12:05.253
+How It Works, End-to-End Journeys.
+
+203
+00:12:06.503 --> 00:12:08.573
+Journey 1: a day of meter data.
+
+204
+00:12:08.853 --> 00:12:09.962
+Inside the meter.
+
+205
+00:12:10.242 --> 00:12:19.138
+Every 15 minutes it records the block load profile: kWh import, kWh export, average voltage, average current.
+
+206
+00:12:19.418 --> 00:12:23.834
+The data is stored in the meter's memory, which holds days to weeks of intervals.
+
+207
+00:12:24.114 --> 00:12:27.058
+At midnight it snapshots the daily billing registers.
+
+208
+00:12:27.338 --> 00:12:28.725
+Communication paths.
+
+209
+00:12:29.005 --> 00:12:32.546
+RF mesh: the meter's radio forms a mesh with neighbours.
+
+210
+00:12:32.826 --> 00:12:38.479
+Data hops to a DCU on a pole, and the DCU backhauls over 4G to the HES.
+
+211
+00:12:38.759 --> 00:12:45.735
+Cellular: an NB-IoT or 4G module talks to the HES directly (APN or VPN).
+
+212
+00:12:46.015 --> 00:12:48.426
+Read schedule (§6.8).
+
+213
+00:12:49.776 --> 00:12:53.552
+The HES scheduler plans reads to fit network capacity.
+
+214
+00:12:53.832 --> 00:12:56.691
+Daily profiles go out after midnight in waves.
+
+215
+00:12:56.971 --> 00:13:00.299
+Load profile is read every 4 to 8 hours in batches.
+
+216
+00:13:00.579 --> 00:13:06.040
+Some meters are configured to push data at set times, with jitter so they don't all send at once.
+
+217
+00:13:06.320 --> 00:13:07.856
+The HES talks DLMS.
+
+218
+00:13:08.136 --> 00:13:12.189
+It opens an association with the meter using security suite keys.
+
+219
+00:13:13.539 --> 00:13:25.315
+It reads the COSEM objects (OBIS codes identify each quantity, for example, 1.0.1.8.0.255 for active import energy).
+
+220
+00:13:25.595 --> 00:13:28.603
+It receives encrypted and authenticated responses.
+
+221
+00:13:28.883 --> 00:13:38.398
+The HES publishes raw readings to Kafka (meter.reads.raw) with meter ID, OBIS code, timestamp, value, quality flags and read time.
+
+222
+00:13:38.678 --> 00:13:41.217
+MDM VEE (§6.1).
+
+223
+00:13:41.497 --> 00:13:44.526
+The MDM consumes readings and validates them:
+
+224
+00:13:44.806 --> 00:13:54.257
+Checks: timestamps in range, no negative consumption on cumulative registers, spike checks, interval sum versus register delta, and more.
+
+225
+00:13:55.607 --> 00:13:59.916
+Gaps are estimated (§6.2) and flagged as estimated.
+
+226
+00:14:00.196 --> 00:14:03.268
+Validated data is written to the time-series store.
+
+227
+00:14:03.548 --> 00:14:06.151
+Daily aggregates feed billing and prepaid.
+
+228
+00:14:06.431 --> 00:14:07.561
+Missing meters.
+
+229
+00:14:07.841 --> 00:14:16.225
+Meters not read by the target time get retries, and are reported in communication-health dashboards (by DCU, area and vendor).
+
+230
+00:14:16.505 --> 00:14:18.703
+Persistent failures create field tickets.
+
+231
+00:14:18.983 --> 00:14:20.007
+Consumer view.
+
+232
+00:14:20.287 --> 00:14:25.684
+The next morning the app shows yesterday's usage by hour, plus a comparison with similar homes.
+
+233
+00:14:27.034 --> 00:14:29.935
+Journey 2: a prepaid recharge and reconnection.
+
+234
+00:14:30.215 --> 00:14:31.218
+Disconnection.
+
+235
+00:14:31.498 --> 00:14:34.229
+Priya's balance fell below zero yesterday evening.
+
+236
+00:14:34.509 --> 00:14:39.885
+Under the regulatory rules the system did not disconnect at night (VERIFY the exact rule).
+
+237
+00:14:40.165 --> 00:14:48.079
+It disconnected this morning at 10:00 after a grace period, and sent her SMS and app alerts before and after.
+
+238
+00:14:48.359 --> 00:14:49.319
+Recharge.
+
+239
+00:14:49.599 --> 00:14:53.439
+Priya recharges 500 rupeesby UPI in the app.
+
+240
+00:14:53.719 --> 00:15:00.567
+The payment gateway confirms, and the prepaid engine credits her balance idempotently, using the payment reference.
+
+241
+00:15:01.917 --> 00:15:03.176
+Reconnect decision.
+
+242
+00:15:03.456 --> 00:15:06.443
+The balance is now above the reconnection threshold.
+
+243
+00:15:06.723 --> 00:15:12.184
+The engine creates a reconnect command for her meter, with the reason recharge and a reference.
+
+244
+00:15:12.464 --> 00:15:15.088
+Command manager (§5.5).
+
+245
+00:15:15.368 --> 00:15:21.192
+The command passes policy checks: meter ID valid, not flagged for tamper, reconnect allowed.
+
+246
+00:15:21.472 --> 00:15:23.264
+It is queued with high priority.
+
+247
+00:15:23.544 --> 00:15:28.301
+The HES sends a DLMS action to the disconnect-control object.
+
+248
+00:15:28.581 --> 00:15:31.525
+The meter's relay closes and power is restored.
+
+249
+00:15:31.805 --> 00:15:37.757
+The meter confirms the relay status, and the HES publishes RelayStatusChanged(connected).
+
+250
+00:15:39.107 --> 00:15:40.195
+Notification.
+
+251
+00:15:40.475 --> 00:15:46.043
+The engine marks the command complete and sends Power reconnected to Priya, typically within minutes.
+
+252
+00:15:46.323 --> 00:15:47.518
+Failure handling.
+
+253
+00:15:47.798 --> 00:15:53.985
+If the meter is unreachable (for example, the RF mesh is weak), the command retries with backoff.
+
+254
+00:15:54.265 --> 00:15:56.931
+After a timeout it escalates to a field visit.
+
+255
+00:15:57.211 --> 00:16:00.859
+Priya sees Reconnection in progress and can call the helpline.
+
+256
+00:16:02.209 --> 00:16:04.449
+Journey 3: daily prepaid deduction.
+
+257
+00:16:04.729 --> 00:16:05.647
+Consumption.
+
+258
+00:16:05.927 --> 00:16:13.735
+After midnight the MDM publishes validated daily consumption for each prepaid meter, broken down by time-of-day slot.
+
+259
+00:16:14.015 --> 00:16:15.999
+Rating (§6.3).
+
+260
+00:16:16.279 --> 00:16:32.471
+The prepaid engine calculates the charges: energy charges by slab and TOD rate;. fixed charges pro-rated per day;. electricity duty and taxes;. subsidies (for example, free units for eligible consumers under state schemes; VERIFY).
+
+261
+00:16:33.821 --> 00:16:37.618
+It then deducts the total from the balance and records ledger entries.
+
+262
+00:16:37.898 --> 00:16:40.586
+Balance projection (§6.4).
+
+263
+00:16:40.866 --> 00:16:43.981
+Days remaining are estimated from recent consumption.
+
+264
+00:16:44.261 --> 00:16:47.781
+If fewer than N days remain, a low-balance alert goes out.
+
+265
+00:16:48.061 --> 00:16:49.255
+Negative balance.
+
+266
+00:16:49.535 --> 00:17:02.207
+If the balance goes negative, the case enters the disconnect workflow: check the policy windows (time of day, holidays, emergency credit);. then schedule a disconnect command in the next allowed window.
+
+267
+00:17:03.557 --> 00:17:04.965
+Near real-time mode.
+
+268
+00:17:05.245 --> 00:17:12.200
+Some utilities deduct more frequently (hourly) using load profile data, which gives faster balance feedback.
+
+269
+00:17:12.480 --> 00:17:16.299
+Daily finalisation reconciles against the validated data.
+
+270
+00:17:17.649 --> 00:17:20.209
+Journey 4: a transformer trips in a storm.
+
+271
+00:17:20.489 --> 00:17:21.470
+Last gasp.
+
+272
+00:17:21.750 --> 00:17:25.505
+A distribution transformer's fuse blows at 19:42.
+
+273
+00:17:25.785 --> 00:17:31.097
+Its 300 consumer meters lose power, and each sends a last gasp power-fail event.
+
+274
+00:17:31.377 --> 00:17:36.945
+This works on cellular meters with a supercapacitor, and on RF meters when the mesh survives.
+
+275
+00:17:37.225 --> 00:17:40.297
+Some events are lost because the mesh nodes are down too.
+
+276
+00:17:40.577 --> 00:17:41.387
+Ingest.
+
+277
+00:17:41.667 --> 00:17:47.470
+The HES receives thousands of events within seconds and publishes them to meter.events.
+
+278
+00:17:47.750 --> 00:17:50.609
+OMS correlation (§6.5).
+
+279
+00:17:51.959 --> 00:17:58.956
+The OMS groups events by time window and network topology from GIS (the meters on the same DT).
+
+280
+00:17:59.236 --> 00:18:06.361
+If more than X% of meters under a DT report power-fail within a minute, it infers a DT-level outage.
+
+281
+00:18:06.641 --> 00:18:09.735
+Meters with no event are inferred as affected too.
+
+282
+00:18:10.015 --> 00:18:15.433
+If multiple DTs on one feeder fail together, it escalates to a feeder-level outage.
+
+283
+00:18:15.713 --> 00:18:19.660
+Individual power-fail events are suppressed into one outage ticket.
+
+284
+00:18:19.940 --> 00:18:20.857
+Response.
+
+285
+00:18:22.207 --> 00:18:24.959
+A crew is dispatched with the DT's location.
+
+286
+00:18:25.239 --> 00:18:26.818
+Consumers get an SMS:
+
+287
+00:18:27.098 --> 00:18:32.538
+Outage in your area, crew assigned, estimated restoration 21:00.
+
+288
+00:18:32.818 --> 00:18:36.253
+Call-centre agents see the known outage when customers call.
+
+289
+00:18:36.533 --> 00:18:37.599
+Restoration.
+
+290
+00:18:37.879 --> 00:18:41.143
+When power returns, the meters send power-restore events.
+
+291
+00:18:41.423 --> 00:18:47.098
+The OMS verifies restoration (a ping of a sample of meters) and closes the ticket.
+
+292
+00:18:47.378 --> 00:18:54.418
+If some meters are still off, that suggests a nested outage (a single service line), and a new ticket is created.
+
+293
+00:18:55.768 --> 00:18:57.261
+Reliability indices.
+
+294
+00:18:57.541 --> 00:19:02.469
+Outage durations per consumer feed SAIDI and SAIFI for regulatory reporting.
+
+295
+00:19:03.819 --> 00:19:06.230
+Journey 5: catching electricity theft.
+
+296
+00:19:06.510 --> 00:19:07.598
+Energy balance.
+
+297
+00:19:07.878 --> 00:19:09.670
+Each DT has its own meter.
+
+298
+00:19:09.950 --> 00:19:16.777
+Every day, energy accounting compares DT output with the sum of its consumers' consumption (after VEE).
+
+299
+00:19:17.057 --> 00:19:21.366
+It adjusts for expected technical losses (§6.7).
+
+300
+00:19:21.646 --> 00:19:25.145
+A DT with 25% unexplained loss is flagged.
+
+301
+00:19:25.425 --> 00:19:34.278
+Consumer-level anomalies under flagged DTs (§6.6): a sudden drop in consumption without a matching seasonal pattern;.
+
+302
+00:19:35.628 --> 00:19:47.127
+tamper events (cover open, magnetic tamper, neutral disturbance, reverse current);. consumption far below similar homes;. zero consumption while the neighbouring meters show usage.
+
+303
+00:19:47.407 --> 00:19:48.815
+Scoring and inspection.
+
+304
+00:19:49.095 --> 00:19:51.207
+A model ranks the suspect consumers.
+
+305
+00:19:51.487 --> 00:19:55.604
+An inspection team visits with a mobile app, and findings are recorded.
+
+306
+00:19:55.884 --> 00:19:56.759
+Feedback.
+
+307
+00:19:57.039 --> 00:20:01.775
+The inspection results (theft found or not) are fed back to retrain the model.
+
+308
+00:20:03.125 --> 00:20:06.239
+Journey 6: a firmware update to 2 million meters.
+
+309
+00:20:06.519 --> 00:20:07.373
+The fix.
+
+310
+00:20:07.653 --> 00:20:11.322
+A meter vendor releases firmware that fixes a clock drift bug.
+
+311
+00:20:11.602 --> 00:20:17.127
+The utility tests it in the lab, then on a pilot group of 1,000 meters in a test area.
+
+312
+00:20:17.407 --> 00:20:20.010
+Staged campaign (§6.9).
+
+313
+00:20:20.290 --> 00:20:25.303
+Waves go 1%, then 5%, then 20%, then 100%.
+
+314
+00:20:25.583 --> 00:20:34.735
+Each wave has health gates: meters come back online after the update, read success rates stay stable, no increase in errors or tamper events.
+
+315
+00:20:35.015 --> 00:20:37.789
+Waves are paused automatically if the gates fail.
+
+316
+00:20:39.139 --> 00:20:40.013
+Bandwidth.
+
+317
+00:20:40.293 --> 00:20:45.179
+Firmware images (hundreds of KB) are sent over a constrained RF mesh.
+
+318
+00:20:45.459 --> 00:20:50.963
+Use multicast or broadcast image transfer where supported (DLMS image transfer).
+
+319
+00:20:51.243 --> 00:20:53.248
+Schedule during low-traffic hours.
+
+320
+00:20:53.528 --> 00:20:55.576
+Transfer blocks with resume support.
+
+321
+00:20:55.856 --> 00:20:56.901
+Activation.
+
+322
+00:20:57.181 --> 00:21:02.365
+The image is verified by signature on the meter, then activated at a scheduled time.
+
+323
+00:21:02.645 --> 00:21:07.445
+The meter reports its new version, and the device management inventory is updated.
+
+324
+00:21:08.795 --> 00:21:09.649
+Rollback.
+
+325
+00:21:09.929 --> 00:21:14.985
+A failed activation falls back to the previous image where the meter supports dual banks.
+
+326
+00:21:16.335 --> 00:21:17.295
+Part 5.
+
+327
+00:21:17.575 --> 00:21:19.111
+Core Subsystems in Depth.
+
+328
+00:21:20.361 --> 00:21:21.491
+Head-End System.
+
+329
+00:21:21.771 --> 00:21:29.579
+Communication servers keep DLMS sessions over TCP or UDP (for cellular), or via the DCUs.
+
+330
+00:21:29.859 --> 00:21:33.699
+They scale horizontally, and meters are partitioned across servers.
+
+331
+00:21:33.979 --> 00:21:44.177
+The scheduler holds job queues per network segment (DCU, cell), respecting capacity, priorities (commands above reads), time windows and retries.
+
+332
+00:21:44.457 --> 00:21:45.459
+Security:
+
+333
+00:21:46.809 --> 00:22:06.137
+DLMS security suites for authentication and encryption, with per-meter keys (global unicast encryption key, authentication key, master key);. keys stored in an HSM and rotated;. meters are provisioned at the factory with keys shared through a secure key exchange (VERIFY standard practices).
+
+334
+00:22:06.417 --> 00:22:13.628
+Multi-vendor adapters cover the vendor quirks in DLMS implementations and conformance to the companion spec.
+
+335
+00:22:13.908 --> 00:22:18.239
+Outputs go to Kafka: raw reads, events and command acknowledgements.
+
+336
+00:22:19.589 --> 00:22:20.506
+MDM.
+
+337
+00:22:20.786 --> 00:22:35.165
+Master data: meters, consumers, service points, DT and feeder relationships (from GIS or CIS), meter swaps with effective dates, and multipliers (CT or PT ratios for large consumers).
+
+338
+00:22:35.445 --> 00:22:43.957
+VEE engine: a rules pipeline per reading type (§6.1 to 6.2), with audit of every estimate and edit.
+
+339
+00:22:44.237 --> 00:22:46.967
+Aggregation: daily and monthly consumption;.
+
+340
+00:22:47.247 --> 00:22:48.442
+TOD buckets;.
+
+341
+00:22:49.792 --> 00:22:56.021
+DT and feeder aggregates for energy accounting;. peak demand (max demand in a billing period).
+
+342
+00:22:56.301 --> 00:23:06.179
+Interfaces: standard messages (IEC 61968 to 9 CIM-based; VERIFY) towards the HES and billing.
+
+343
+00:23:07.529 --> 00:23:08.915
+Time-series storage.
+
+344
+00:23:09.195 --> 00:23:15.745
+Shape of the data: key = (meter ID, channel), value = (timestamp, value, quality flag).
+
+345
+00:23:16.025 --> 00:23:25.838
+Access patterns: write in batches after reads;. read one meter's range (app, disputes);. aggregate across millions of meters for a time range (analytics).
+
+346
+00:23:26.118 --> 00:23:26.993
+Options:
+
+347
+00:23:28.343 --> 00:23:41.761
+a time-series DB (TimescaleDB, InfluxDB, Cassandra with time buckets) for per-meter queries;. columnar lakehouse tables (Parquet or Iceberg, partitioned by date and region) for analytics.
+
+348
+00:23:42.041 --> 00:23:47.823
+Many utilities use both: hot recent data in the TSDB, and everything in the lakehouse.
+
+349
+00:23:48.103 --> 00:23:53.884
+Corrections: re-estimation or late reads replace values, with a version and quality flag.
+
+350
+00:23:54.164 --> 00:23:57.065
+Analytics must use the latest validated version.
+
+351
+00:23:58.415 --> 00:23:59.503
+Prepaid engine.
+
+352
+00:23:59.783 --> 00:24:06.653
+Ledger per consumer account: recharges (credits), deductions (debits), adjustments, and emergency credit.
+
+353
+00:24:06.933 --> 00:24:10.687
+Double-entry, idempotent by reference (I11 patterns).
+
+354
+00:24:10.967 --> 00:24:16.855
+Balance state: current balance;. last deduction time;. projected days;. disconnect status;.
+
+355
+00:24:18.205 --> 00:24:20.296
+grace and emergency credit flags.
+
+356
+00:24:20.576 --> 00:24:38.005
+Disconnect policy engine: rules on allowed windows (for example, working hours only, no holidays), notice periods and exemptions (medical priority consumers, where policies exist);. all encoded as configurable rules per state (VERIFY state regulations).
+
+357
+00:24:38.285 --> 00:24:41.763
+Reconnect SLA: recharge, then reconnect in minutes.
+
+358
+00:24:42.043 --> 00:24:44.475
+The recharge path must be highly available.
+
+359
+00:24:45.825 --> 00:24:47.958
+Command manager (safety-critical).
+
+360
+00:24:48.238 --> 00:24:52.953
+Commands: disconnect, reconnect, load limit, tariff update, time sync, firmware.
+
+361
+00:24:53.233 --> 00:24:54.193
+Guardrails:
+
+362
+00:24:54.473 --> 00:24:56.606
+Rate limits per area and in total.
+
+363
+00:24:56.886 --> 00:25:03.030
+A software bug must not disconnect 1M homes, so there is a global circuit breaker on the disconnect rate.
+
+364
+00:25:03.310 --> 00:25:05.465
+Two-person approval for bulk commands.
+
+365
+00:25:05.745 --> 00:25:09.969
+Policy checks per command: the consumer's status, balance, time window.
+
+366
+00:25:11.319 --> 00:25:15.116
+Idempotency: a command ID ensures repeats do nothing.
+
+367
+00:25:15.396 --> 00:25:18.148
+Verification of the resulting relay state.
+
+368
+00:25:18.428 --> 00:25:22.716
+A full audit trail: who or what initiated the command, why, and when.
+
+369
+00:25:22.996 --> 00:25:26.089
+Priority: reconnects above disconnects above reads.
+
+370
+00:25:27.439 --> 00:25:28.677
+Outage management.
+
+371
+00:25:28.957 --> 00:25:33.181
+Event correlation with GIS topology (§6.5).
+
+372
+00:25:33.461 --> 00:25:35.466
+A crew management and dispatch app.
+
+373
+00:25:35.746 --> 00:25:42.103
+Integration with SCADA for feeder-level trips at substations, which is more authoritative than meter events.
+
+374
+00:25:42.383 --> 00:25:43.919
+Consumer communications.
+
+375
+00:25:44.199 --> 00:25:46.290
+Reliability index computation.
+
+376
+00:25:47.640 --> 00:25:48.877
+Device management.
+
+377
+00:25:49.157 --> 00:25:56.155
+Inventory: meter serial, make, model, firmware, communication module, installation details and photos.
+
+378
+00:25:56.435 --> 00:26:05.651
+Configuration audits: the actual settings read from the meter versus the desired settings (tariff schedule, profile interval, push schedules).
+
+379
+00:26:05.931 --> 00:26:07.829
+Mismatches are fixed with commands.
+
+380
+00:26:08.109 --> 00:26:12.611
+FOTA campaigns: staged rollout with health gates (§6.9).
+
+381
+00:26:12.891 --> 00:26:19.312
+Communication health: per meter and per DCU, including the last successful read and signal quality.
+
+382
+00:26:20.662 --> 00:26:21.601
+Part 6.
+
+383
+00:26:21.881 --> 00:26:22.841
+Algorithms.
+
+384
+00:26:24.091 --> 00:26:25.797
+VEE validation rules.
+
+385
+00:26:26.077 --> 00:26:30.408
+Timestamp checks: within an expected window, and no future timestamps.
+
+386
+00:26:30.688 --> 00:26:34.379
+Clock drift beyond a tolerance flags the meter for a time sync.
+
+387
+00:26:34.659 --> 00:26:42.765
+Cumulative register checks: kWh registers must be non-decreasing unless the meter was replaced (a meter swap event).
+
+388
+00:26:43.045 --> 00:26:50.725
+Interval versus register consistency: the sum of the day's intervals should equal the midnight register delta, within tolerance.
+
+389
+00:26:51.005 --> 00:27:00.008
+Spike and high or low limits: consumption above the connected load times time, or zero consumption while the voltage shows supply present.
+
+390
+00:27:01.358 --> 00:27:08.782
+Pattern checks: usage far outside the consumer's historical distribution, flagged for review rather than auto-corrected.
+
+391
+00:27:09.062 --> 00:27:16.337
+Event context: intervals overlapping a power failure should show zero consumption, which is valid and not a gap.
+
+392
+00:27:17.687 --> 00:27:20.161
+Estimation of missing or invalid data.
+
+393
+00:27:20.441 --> 00:27:25.113
+Short gaps (a few intervals): linear interpolation between neighbouring intervals.
+
+394
+00:27:25.393 --> 00:27:32.305
+When registers are available, distribute the known register delta across the missing intervals using the typical shape.
+
+395
+00:27:32.585 --> 00:27:44.276
+Long gaps (days): use historical profile matching: the same weekday and season, scaled to recent consumption;. or use similar consumers (same tariff and area) as a template.
+
+396
+00:27:44.556 --> 00:27:53.260
+Billing estimates: if no register data exists at the billing date, estimate from the average daily usage, and true up when real data arrives.
+
+397
+00:27:54.610 --> 00:27:57.405
+Always record the method, the version and a flag.
+
+398
+00:27:57.685 --> 00:28:00.949
+Estimated data can be replaced by actual data later.
+
+399
+00:28:02.299 --> 00:28:04.411
+Tariff rating with time-of-day and slabs.
+
+400
+00:28:04.691 --> 00:28:24.915
+Inputs: consumption split by TOD slots (peak, normal, off-peak), from the load profile;. the tariff: slabs per month (0 to 100 units at rate A, 101 to 200 at B, and so on), TOD surcharges or rebates, fixed charges per kW of sanctioned load, duties, subsidies.
+
+401
+00:28:25.195 --> 00:28:34.795
+Monthly postpaid rating: apply the slabs to the monthly total, then apply TOD adjustments per slot, then fixed charges, duty and subsidy.
+
+402
+00:28:36.145 --> 00:28:41.585
+Daily prepaid: slabs are monthly, so the daily deduction allocates slabs incrementally.
+
+403
+00:28:41.865 --> 00:28:48.329
+Track the units consumed so far this month and charge each day's units at the slab rates they fall into.
+
+404
+00:28:48.609 --> 00:28:52.470
+This ensures the month's total equals the postpaid calculation.
+
+405
+00:28:52.750 --> 00:29:00.174
+Net metering: export units offset import, per regulations (net versus gross metering; VERIFY state rules).
+
+406
+00:29:01.524 --> 00:29:03.124
+Prepaid balance projection.
+
+407
+00:29:03.404 --> 00:29:08.865
+Daily burn rate comes from an exponentially weighted moving average of recent days' charges.
+
+408
+00:29:09.145 --> 00:29:13.945
+Add a seasonal adjustment (summer AC load) and weekday or weekend patterns.
+
+409
+00:29:14.225 --> 00:29:18.428
+Days remaining = balance ÷ projected daily charge.
+
+410
+00:29:18.708 --> 00:29:21.993
+Alert when it is below 3 days, and again below 1 day.
+
+411
+00:29:22.273 --> 00:29:30.913
+Emergency credit: if configured, a small credit allows supply during non-disconnect windows, and is recovered on the next recharge.
+
+412
+00:29:32.263 --> 00:29:33.821
+Outage inference from events.
+
+413
+00:29:34.101 --> 00:29:42.335
+Grouping: cluster power-fail events by time (for example, 60 s windows) and by topology node (DT, feeder section).
+
+414
+00:29:42.615 --> 00:29:55.117
+Upstream inference: if the fraction of meters under a node reporting a failure exceeds a threshold, infer that the node is out;. recurse upward: if multiple child nodes are out, infer the parent.
+
+415
+00:29:55.397 --> 00:29:58.085
+This is similar to fault localisation in trees.
+
+416
+00:29:59.435 --> 00:30:05.067
+Missing events: the mesh may be down, so use pings to sample meters and confirm their status.
+
+417
+00:30:05.347 --> 00:30:08.269
+Restoration: power-restore events clear nodes.
+
+418
+00:30:08.549 --> 00:30:12.219
+Nested outages are detected when some meters remain off.
+
+419
+00:30:12.499 --> 00:30:18.557
+Noise: individual meter failures (a tripped home MCB) don't escalate without a threshold.
+
+420
+00:30:18.837 --> 00:30:23.467
+Momentary interruptions (less than 5 minutes) are counted separately (MAIFI).
+
+421
+00:30:24.817 --> 00:30:26.609
+Theft and anomaly detection.
+
+422
+00:30:26.889 --> 00:30:46.067
+Features per consumer: consumption trend breaks (change-point detection);. the ratio to peers' consumption (same tariff, area, sanctioned load);. tamper event counts;. neutral current versus phase current imbalance;. reverse energy;. load profile shape anomalies (flat night usage, for example);.
+
+423
+00:30:47.417 --> 00:30:50.041
+zero consumption while voltage is present.
+
+424
+00:30:50.321 --> 00:31:03.591
+Models: rules for strong signals (magnet tamper);. isolation forest or autoencoders for unsupervised anomaly scoring;. supervised gradient-boosted models trained on inspection outcomes.
+
+425
+00:31:03.871 --> 00:31:09.631
+Prioritisation: combine the consumer score with DT-level loss from the energy balance.
+
+426
+00:31:09.911 --> 00:31:14.092
+Inspection capacity is limited, so rank by expected recovery.
+
+427
+00:31:15.442 --> 00:31:17.703
+Energy accounting and technical loss.
+
+428
+00:31:17.983 --> 00:31:19.711
+For each DT and each day:
+
+429
+00:31:19.991 --> 00:31:28.610
+Loss = DT output energy minus Σ consumer energy (after VEE, with consistent time windows and multipliers).
+
+430
+00:31:28.890 --> 00:31:33.135
+Technical loss estimate = transformer losses plus line losses.
+
+431
+00:31:33.415 --> 00:31:41.245
+Estimate it with a load-flow approximation (I²R using the current profiles) or typical percentages by network type.
+
+432
+00:31:41.525 --> 00:31:44.447
+Commercial loss about loss minus technical loss.
+
+433
+00:31:44.727 --> 00:31:46.455
+Data quality prerequisites:
+
+434
+00:31:47.805 --> 00:31:57.277
+correct consumer-to-DT mapping (a frequent source of false alarms, since GIS mapping errors are common);. complete readings;. meter swaps handled.
+
+435
+00:31:57.557 --> 00:32:10.016
+Detect mapping errors with voltage correlation: meters on the same DT show correlated voltage profiles, so a meter whose voltage correlates better with another DT is probably mis-mapped.
+
+436
+00:32:11.366 --> 00:32:13.670
+Read scheduling under network constraints.
+
+437
+00:32:13.950 --> 00:32:18.238
+Capacity model: each DCU or cell sector has a throughput budget.
+
+438
+00:32:18.518 --> 00:32:25.793
+Each read job has a size (daily profile is small; load profile for 8 hours is medium; firmware is large).
+
+439
+00:32:26.073 --> 00:32:36.910
+Scheduling: a bin-packing and priority scheduler over time slots;. randomised jitter for pushes, so meters don't synchronise;. failed reads retry later with backoff.
+
+440
+00:32:38.260 --> 00:32:46.793
+Adaptive: meters with poor links are read less often and in larger batches, and meters that repeatedly fail are flagged for field checks.
+
+441
+00:32:48.143 --> 00:32:49.786
+Staged OTA rollout.
+
+442
+00:32:50.066 --> 00:32:51.410
+Waves with health gates.
+
+443
+00:32:51.690 --> 00:32:59.797
+Each gate checks metrics against a control group: reconnect rate after reboot;. read success;. error events;. clock accuracy.
+
+444
+00:33:00.077 --> 00:33:06.925
+Automatic pause if any metric degrades beyond thresholds, with statistical tests to avoid noise-driven pauses.
+
+445
+00:33:08.275 --> 00:33:15.464
+Diversity: include different vendors, hardware revisions and network types in the early waves, to surface issues early.
+
+446
+00:33:16.814 --> 00:33:19.182
+Load forecasting and demand response.
+
+447
+00:33:19.462 --> 00:33:37.659
+Short-term load forecasting per feeder, DT and system: inputs are historical load, weather (temperature, humidity), calendar (holidays, festivals) and special events;. models are gradient boosting or deep sequence models;. forecast horizons run from 15 minutes to a day ahead.
+
+448
+00:33:37.939 --> 00:33:40.777
+Uses: power purchase planning (day-ahead markets);.
+
+449
+00:33:41.057 --> 00:33:42.657
+DT overload alerts;.
+
+450
+00:33:44.007 --> 00:33:45.991
+planning for EV charging growth.
+
+451
+00:33:46.271 --> 00:34:01.673
+Demand response: send TOD price signals, or ask enrolled consumers to reduce load;. load limiting via meter settings in emergencies (policy);. measure the response against a baseline (for example, the average of similar days).
+
+452
+00:34:03.023 --> 00:34:03.962
+Part 7.
+
+453
+00:34:04.242 --> 00:34:05.565
+Data Architecture.
+
+454
+00:34:06.815 --> 00:34:08.201
+Operational stores.
+
+455
+00:34:08.481 --> 00:34:09.825
+Here is a quick table:
+
+456
+00:34:10.105 --> 00:34:12.281
+Data, and Store (reference), and Notes.
+
+457
+00:34:12.561 --> 00:34:13.927
+Raw reads and events.
+
+458
+00:34:14.207 --> 00:34:15.444
+Store (reference):
+
+459
+00:34:15.724 --> 00:34:19.073
+Kafka (retained for days) + raw zone in the lakehouse.
+
+460
+00:34:19.353 --> 00:34:20.164
+Notes:
+
+461
+00:34:20.444 --> 00:34:21.980
+Replay for re-processing.
+
+462
+00:34:22.260 --> 00:34:23.860
+Validated interval data.
+
+463
+00:34:24.140 --> 00:34:25.377
+Store (reference):
+
+464
+00:34:25.657 --> 00:34:29.433
+TSDB (recent) + Iceberg or Parquet (all history).
+
+465
+00:34:29.713 --> 00:34:30.524
+Notes:
+
+466
+00:34:30.804 --> 00:34:31.999
+Versioned values.
+
+467
+00:34:32.279 --> 00:34:35.137
+Master data (meters, consumers, topology).
+
+468
+00:34:35.417 --> 00:34:36.655
+Store (reference):
+
+469
+00:34:36.935 --> 00:34:39.601
+PostgreSQL + GIS (PostGIS).
+
+470
+00:34:39.881 --> 00:34:40.692
+Notes:
+
+471
+00:34:40.972 --> 00:34:42.743
+Effective-dated relationships.
+
+472
+00:34:43.023 --> 00:34:44.772
+Prepaid ledger and balances.
+
+473
+00:34:45.052 --> 00:34:46.289
+Store (reference):
+
+474
+00:34:46.569 --> 00:34:49.065
+PostgreSQL (sharded by account).
+
+475
+00:34:49.345 --> 00:34:50.156
+Notes:
+
+476
+00:34:50.436 --> 00:34:51.460
+Idempotent.
+
+477
+00:34:51.740 --> 00:34:52.465
+Billing.
+
+478
+00:34:52.745 --> 00:34:53.983
+Store (reference):
+
+479
+00:34:54.263 --> 00:34:55.692
+CIS database.
+
+480
+00:34:55.972 --> 00:34:56.783
+Notes:
+
+481
+00:34:57.063 --> 00:34:58.087
+Monthly bills.
+
+482
+00:34:58.367 --> 00:34:59.604
+Commands and audit.
+
+483
+00:34:59.884 --> 00:35:01.121
+Store (reference):
+
+484
+00:35:01.401 --> 00:35:04.409
+PostgreSQL + append-only audit log.
+
+485
+00:35:04.689 --> 00:35:05.500
+Notes:
+
+486
+00:35:05.780 --> 00:35:06.633
+Safety.
+
+487
+00:35:06.913 --> 00:35:07.788
+Outages.
+
+488
+00:35:08.068 --> 00:35:09.305
+Store (reference):
+
+489
+00:35:09.585 --> 00:35:10.908
+OMS database.
+
+490
+00:35:11.188 --> 00:35:11.999
+Notes:
+
+491
+00:35:12.279 --> 00:35:13.772
+Reliability indices.
+
+492
+00:35:15.122 --> 00:35:16.978
+Device inventory and firmware.
+
+493
+00:35:17.258 --> 00:35:18.495
+Store (reference):
+
+494
+00:35:18.775 --> 00:35:22.146
+PostgreSQL + object storage for images.
+
+495
+00:35:22.426 --> 00:35:23.237
+Notes:
+
+496
+00:35:23.517 --> 00:35:24.583
+Signed images.
+
+497
+00:35:25.933 --> 00:35:27.256
+Analytics platform.
+
+498
+00:35:27.536 --> 00:35:34.789
+Lakehouse: bronze: raw reads and events;. silver: validated interval data joined with master data;. gold:
+
+499
+00:35:35.069 --> 00:35:40.531
+DT and feeder energy balances, consumer daily usage, outage stats, collections.
+
+500
+00:35:40.811 --> 00:35:43.883
+Workloads: daily energy accounting;. theft scoring;.
+
+501
+00:35:45.233 --> 00:35:59.249
+forecasting;. regulatory reports (reliability indices, loss reports, smart meter performance for scheme monitoring; VERIFY RDSS reporting requirements);. consumer insights (usage comparisons).
+
+502
+00:35:59.529 --> 00:36:06.697
+Stream analytics: real-time outage dashboards, command success rates, prepaid disconnect and reconnect monitoring.
+
+503
+00:36:08.047 --> 00:36:09.028
+Data flow.
+
+504
+00:36:09.308 --> 00:36:10.652
+Here is the diagram.
+
+505
+00:36:14.502 --> 00:36:15.377
+Part 8.
+
+506
+00:36:15.657 --> 00:36:17.342
+Tech Stack (reference choice).
+
+507
+00:36:18.592 --> 00:36:19.936
+Here is a quick table:
+
+508
+00:36:20.216 --> 00:36:21.880
+Layer, and Choice, and Notes.
+
+509
+00:36:22.160 --> 00:36:23.696
+Meters and protocol.
+
+510
+00:36:23.976 --> 00:36:24.808
+Choice:
+
+511
+00:36:25.088 --> 00:36:33.920
+DLMS or COSEM smart meters per IS 16444 and IS 15959 (VERIFY).
+
+512
+00:36:34.200 --> 00:36:35.011
+Notes:
+
+513
+00:36:35.291 --> 00:36:36.357
+Multi-vendor.
+
+514
+00:36:36.637 --> 00:36:37.448
+Network.
+
+515
+00:36:37.728 --> 00:36:38.560
+Choice:
+
+516
+00:36:38.840 --> 00:36:48.141
+RF mesh (IEEE 802.15.4g or Wi-SUN-style), NB-IoT or 4G modules, DCUs.
+
+517
+00:36:48.421 --> 00:36:49.232
+Notes:
+
+518
+00:36:49.512 --> 00:36:50.259
+Mixed.
+
+519
+00:36:50.539 --> 00:36:51.264
+HES.
+
+520
+00:36:51.544 --> 00:36:52.376
+Choice:
+
+521
+00:36:52.656 --> 00:36:58.139
+Vendor HES or custom (Java or Go) with DLMS libraries, HSM.
+
+522
+00:36:58.419 --> 00:36:59.229
+Notes:
+
+523
+00:36:59.509 --> 00:37:01.237
+Often supplied by the AMISP.
+
+524
+00:37:01.517 --> 00:37:02.328
+Ingest.
+
+525
+00:37:02.608 --> 00:37:03.440
+Choice:
+
+526
+00:37:03.720 --> 00:37:08.264
+Kafka (or MQTT brokers for push-based IoT feeding Kafka).
+
+527
+00:37:08.544 --> 00:37:09.355
+Notes:
+
+528
+00:37:09.635 --> 00:37:10.808
+Burst absorption.
+
+529
+00:37:11.088 --> 00:37:12.325
+Stream processing.
+
+530
+00:37:12.605 --> 00:37:13.437
+Choice:
+
+531
+00:37:13.717 --> 00:37:15.211
+Flink or Kafka Streams.
+
+532
+00:37:15.491 --> 00:37:16.301
+Notes:
+
+533
+00:37:16.581 --> 00:37:18.139
+VEE and correlation.
+
+534
+00:37:19.489 --> 00:37:20.406
+MDM.
+
+535
+00:37:20.686 --> 00:37:21.518
+Choice:
+
+536
+00:37:21.798 --> 00:37:26.043
+Commercial MDM products or custom services (Java or Spring).
+
+537
+00:37:26.323 --> 00:37:27.134
+Notes:
+
+538
+00:37:27.414 --> 00:37:28.459
+VEE rules.
+
+539
+00:37:28.739 --> 00:37:29.763
+Time-series.
+
+540
+00:37:30.043 --> 00:37:30.875
+Choice:
+
+541
+00:37:31.155 --> 00:37:35.806
+TimescaleDB, Cassandra, or InfluxDB; plus an Iceberg lakehouse.
+
+542
+00:37:36.086 --> 00:37:36.897
+Notes:
+
+543
+00:37:37.177 --> 00:37:38.286
+Hot and cold.
+
+544
+00:37:38.566 --> 00:37:39.718
+Core services.
+
+545
+00:37:39.998 --> 00:37:40.830
+Choice:
+
+546
+00:37:41.110 --> 00:37:43.670
+Java or Spring Boot, PostgreSQL.
+
+547
+00:37:43.950 --> 00:37:44.761
+Notes:
+
+548
+00:37:45.041 --> 00:37:46.235
+Prepaid, commands.
+
+549
+00:37:46.515 --> 00:37:47.262
+GIS.
+
+550
+00:37:47.542 --> 00:37:48.374
+Choice:
+
+551
+00:37:48.654 --> 00:37:51.193
+PostGIS, utility GIS products.
+
+552
+00:37:51.473 --> 00:37:52.283
+Notes:
+
+553
+00:37:52.563 --> 00:37:53.545
+Topology.
+
+554
+00:37:53.825 --> 00:37:54.785
+Analytics.
+
+555
+00:37:55.065 --> 00:37:55.897
+Choice:
+
+556
+00:37:56.177 --> 00:37:59.249
+Spark, Trino, BI dashboards; Python ML.
+
+557
+00:37:59.529 --> 00:38:00.339
+Notes:
+
+558
+00:38:00.619 --> 00:38:02.347
+Losses, theft, forecasts.
+
+559
+00:38:02.627 --> 00:38:03.459
+Channels.
+
+560
+00:38:03.739 --> 00:38:04.571
+Choice:
+
+561
+00:38:04.851 --> 00:38:08.094
+Mobile app, UPI or BBPS integrations.
+
+562
+00:38:08.374 --> 00:38:09.185
+Notes:
+
+563
+00:38:09.465 --> 00:38:10.489
+Recharges.
+
+564
+00:38:11.839 --> 00:38:12.735
+Part 9.
+
+565
+00:38:13.015 --> 00:38:15.255
+Security, Privacy and Compliance.
+
+566
+00:38:16.505 --> 00:38:17.913
+Critical infrastructure.
+
+567
+00:38:18.193 --> 00:38:24.145
+Remote disconnect is a powerful capability, and a compromised HES could disconnect a city.
+
+568
+00:38:24.425 --> 00:38:26.814
+Mitigations: network segmentation;.
+
+569
+00:38:27.094 --> 00:38:38.422
+HSM-backed per-meter keys;. signed commands;. rate limits and circuit breakers;. two-person approval for bulk actions;. a SOC with ICS or OT monitoring;.
+
+570
+00:38:39.772 --> 00:38:47.687
+CERT-In directions and sectoral cybersecurity guidelines (VERIFY CEA cyber security regulations for the power sector).
+
+571
+00:38:47.967 --> 00:38:49.204
+Firmware integrity.
+
+572
+00:38:49.484 --> 00:38:51.852
+Signed images are verified on the meter.
+
+573
+00:38:52.132 --> 00:38:54.287
+There is a secure boot chain where supported.
+
+574
+00:38:54.567 --> 00:38:55.463
+Privacy.
+
+575
+00:38:55.743 --> 00:39:01.929
+15-minute consumption reveals household routines (when people are at home, sleeping or travelling).
+
+576
+00:39:02.209 --> 00:39:05.345
+Controls: purpose limitation;. access controls;.
+
+577
+00:39:06.695 --> 00:39:10.279
+aggregation for analytics;. consent for third-party sharing;.
+
+578
+00:39:10.559 --> 00:39:13.333
+DPDP Act obligations (VERIFY).
+
+579
+00:39:13.613 --> 00:39:14.850
+Consumer protection.
+
+580
+00:39:15.130 --> 00:39:24.666
+Prepaid disconnection rules, notices and grievance processes follow the Electricity (Rights of Consumers) Rules and the SERC regulations (VERIFY).
+
+581
+00:39:26.016 --> 00:39:26.869
+Part 10.
+
+582
+00:39:27.149 --> 00:39:29.069
+Reliability and Operations.
+
+583
+00:39:30.319 --> 00:39:31.407
+Burst handling.
+
+584
+00:39:31.687 --> 00:39:33.437
+Kafka absorbs storm events.
+
+585
+00:39:33.717 --> 00:39:37.194
+The OMS correlation scales horizontally by region.
+
+586
+00:39:37.474 --> 00:39:40.183
+Dashboards prioritise feeder-level outages.
+
+587
+00:39:40.463 --> 00:39:41.615
+Degraded modes.
+
+588
+00:39:41.895 --> 00:39:50.706
+If the HES is unreachable from the prepaid engine, pause disconnects (fail safe towards supply) but continue accepting recharges.
+
+589
+00:39:50.986 --> 00:39:54.314
+Queue reconnects with high priority when the path recovers.
+
+590
+00:39:55.664 --> 00:39:57.435
+Data completeness monitoring.
+
+591
+00:39:57.715 --> 00:40:01.085
+Read success by DCU, area, vendor and firmware.
+
+592
+00:40:01.365 --> 00:40:02.859
+SLAs with the AMISP.
+
+593
+00:40:03.139 --> 00:40:04.589
+Automatic field tickets.
+
+594
+00:40:04.869 --> 00:40:05.765
+Clock sync.
+
+595
+00:40:06.045 --> 00:40:10.013
+Meters need accurate time for TOD billing and interval alignment.
+
+596
+00:40:10.293 --> 00:40:13.707
+Schedule regular time sync commands and alert on drift.
+
+597
+00:40:13.987 --> 00:40:15.245
+Change management.
+
+598
+00:40:15.525 --> 00:40:21.349
+Tariff changes (new financial year) are configured, tested on sample accounts and scheduled.
+
+599
+00:40:21.629 --> 00:40:23.635
+FOTA goes out in staged waves.
+
+600
+00:40:24.985 --> 00:40:25.987
+Part 11.
+
+601
+00:40:26.267 --> 00:40:27.313
+Key Trade-offs.
+
+602
+00:40:28.563 --> 00:40:29.907
+Here is a quick table:
+
+603
+00:40:30.187 --> 00:40:32.704
+Decision, and Chosen, and Accepted cost.
+
+604
+00:40:32.984 --> 00:40:34.093
+Prepaid balance.
+
+605
+00:40:34.373 --> 00:40:35.205
+Chosen:
+
+606
+00:40:35.485 --> 00:40:37.107
+Central (utility-side).
+
+607
+00:40:37.387 --> 00:40:38.560
+Accepted cost:
+
+608
+00:40:38.840 --> 00:40:42.680
+Depends on communication for timely disconnect and reconnect.
+
+609
+00:40:42.960 --> 00:40:43.771
+Network.
+
+610
+00:40:44.051 --> 00:40:44.883
+Chosen:
+
+611
+00:40:45.163 --> 00:40:46.699
+Mixed RF and cellular.
+
+612
+00:40:46.979 --> 00:40:48.152
+Accepted cost:
+
+613
+00:40:48.432 --> 00:40:50.075
+Operational complexity.
+
+614
+00:40:50.355 --> 00:40:51.805
+Load profile interval.
+
+615
+00:40:52.085 --> 00:40:52.917
+Chosen:
+
+616
+00:40:53.197 --> 00:40:54.243
+15 min.
+
+617
+00:40:54.523 --> 00:40:55.696
+Accepted cost:
+
+618
+00:40:55.976 --> 00:40:57.747
+Data volume and privacy.
+
+619
+00:40:58.027 --> 00:40:59.072
+Estimation.
+
+620
+00:40:59.352 --> 00:41:00.184
+Chosen:
+
+621
+00:41:00.464 --> 00:41:02.213
+Automatic VEE with flags.
+
+622
+00:41:02.493 --> 00:41:03.667
+Accepted cost:
+
+623
+00:41:03.947 --> 00:41:06.080
+Estimates may be wrong until trued up.
+
+624
+00:41:06.360 --> 00:41:07.661
+Disconnect safety.
+
+625
+00:41:07.941 --> 00:41:08.773
+Chosen:
+
+626
+00:41:09.053 --> 00:41:10.888
+Rate limits and policy gates.
+
+627
+00:41:11.168 --> 00:41:12.341
+Accepted cost:
+
+628
+00:41:12.621 --> 00:41:14.435
+Slower collections enforcement.
+
+629
+00:41:14.715 --> 00:41:15.909
+Outage detection.
+
+630
+00:41:16.189 --> 00:41:17.021
+Chosen:
+
+631
+00:41:17.301 --> 00:41:19.776
+Meter events + topology + SCADA.
+
+632
+00:41:20.056 --> 00:41:21.229
+Accepted cost:
+
+633
+00:41:21.509 --> 00:41:23.429
+Needs accurate GIS mapping.
+
+634
+00:41:24.779 --> 00:41:25.654
+Storage.
+
+635
+00:41:25.934 --> 00:41:26.766
+Chosen:
+
+636
+00:41:27.046 --> 00:41:28.753
+TSDB + lakehouse.
+
+637
+00:41:29.033 --> 00:41:30.206
+Accepted cost:
+
+638
+00:41:30.486 --> 00:41:31.467
+Two copies.
+
+639
+00:41:31.747 --> 00:41:32.835
+Theft detection.
+
+640
+00:41:33.115 --> 00:41:33.947
+Chosen:
+
+641
+00:41:34.227 --> 00:41:35.785
+Models + inspections.
+
+642
+00:41:36.065 --> 00:41:37.238
+Accepted cost:
+
+643
+00:41:37.518 --> 00:41:39.203
+Inspection capacity limits.
+
+644
+00:41:40.553 --> 00:41:41.492
+Part 12.
+
+645
+00:41:41.772 --> 00:41:43.116
+Interview Q and A.
+
+646
+00:41:44.366 --> 00:41:45.198
+Beginner.
+
+647
+00:41:45.478 --> 00:41:46.502
+Question 1.
+
+648
+00:41:46.782 --> 00:41:50.579
+What are the HES and the MDM in a smart metering system?
+
+649
+00:41:50.859 --> 00:41:52.225
+Thirty-second answer:
+
+650
+00:41:52.505 --> 00:42:10.254
+The Head-End System talks to meters over the network (DLMS), schedules reads, sends commands and receives events; the Meter Data Management system validates, estimates and stores the data, maintains meter-consumer-network relationships, and feeds billing, prepaid and analytics.
+
+651
+00:42:11.604 --> 00:42:12.607
+Question 2.
+
+652
+00:42:12.887 --> 00:42:16.236
+How does a prepaid smart meter reconnect after a recharge?
+
+653
+00:42:16.516 --> 00:42:17.881
+Thirty-second answer:
+
+654
+00:42:18.161 --> 00:42:36.316
+The payment credits the balance idempotently, the prepaid engine sees the balance above the threshold and issues a reconnect command, the command manager checks policy and sends a DLMS action via the HES, the meter's relay closes and confirms, and the consumer is notified.
+
+655
+00:42:37.666 --> 00:42:38.711
+Question 3.
+
+656
+00:42:38.991 --> 00:42:41.167
+Why validate meter data before billing?
+
+657
+00:42:41.447 --> 00:42:42.813
+Thirty-second answer:
+
+658
+00:42:43.093 --> 00:42:56.447
+Reads can be missing, duplicated, have wrong timestamps, spikes or register resets from meter swaps; billing on bad data creates disputes, so VEE checks, estimates gaps with flags, and audits edits.
+
+659
+00:42:57.797 --> 00:42:58.864
+Question 4.
+
+660
+00:42:59.144 --> 00:43:02.877
+How much data do 25 million smart meters generate?
+
+661
+00:43:03.157 --> 00:43:04.523
+Thirty-second answer:
+
+662
+00:43:04.803 --> 00:43:22.317
+96 intervals a day times a few channels times 25M about 10 billion values a day, around 100k+ values per second on average with big batch peaks, tens of TB a year before compression, so time-series compression and partitioned storage matter.
+
+663
+00:43:23.667 --> 00:43:24.670
+Intermediate.
+
+664
+00:43:24.950 --> 00:43:26.059
+Question 5.
+
+665
+00:43:26.339 --> 00:43:30.841
+How do you detect outages from smart meters without creating a million tickets?
+
+666
+00:43:31.121 --> 00:43:32.486
+Thirty-second answer:
+
+667
+00:43:32.766 --> 00:43:52.798
+Ingest last-gasp events into Kafka, group them by time window and network topology from GIS, infer DT- or feeder-level outages when a threshold fraction of child meters fails, confirm with pings and SCADA, create one outage ticket, and close it on restore events, detecting nested outages.
+
+668
+00:43:54.148 --> 00:43:55.257
+Question 6.
+
+669
+00:43:55.537 --> 00:43:57.841
+How would you estimate missing interval data?
+
+670
+00:43:58.121 --> 00:43:59.487
+Thirty-second answer:
+
+671
+00:43:59.767 --> 00:44:17.068
+Short gaps: interpolate or distribute the known register delta across missing intervals using a typical shape; long gaps: scale historical same-weekday profiles or peer templates; always flag estimates with method and version and replace with actuals when they arrive.
+
+672
+00:44:18.418 --> 00:44:19.506
+Question 7.
+
+673
+00:44:19.786 --> 00:44:23.050
+How do you rate slab tariffs daily for prepaid consumers?
+
+674
+00:44:23.330 --> 00:44:24.695
+Thirty-second answer:
+
+675
+00:44:24.975 --> 00:44:38.351
+Track month-to-date units, and charge each day's units at the slab rates they fall into incrementally, plus TOD adjustments and pro-rated fixed charges, so the month's deductions equal the postpaid calculation.
+
+676
+00:44:39.701 --> 00:44:40.725
+Question 8.
+
+677
+00:44:41.005 --> 00:44:44.248
+How do you schedule reads over a constrained RF mesh?
+
+678
+00:44:44.528 --> 00:44:45.893
+Thirty-second answer:
+
+679
+00:44:46.173 --> 00:44:59.485
+Model throughput per DCU or cell, prioritise commands over reads, batch load profile reads, spread push schedules with jitter, retry with backoff, and read poor-link meters less often in bigger batches.
+
+680
+00:45:00.835 --> 00:45:01.902
+Question 9.
+
+681
+00:45:02.182 --> 00:45:04.422
+What makes remote disconnect safe at scale?
+
+682
+00:45:04.702 --> 00:45:06.067
+Thirty-second answer:
+
+683
+00:45:06.347 --> 00:45:22.219
+Policy checks per command (balance, time windows, exemptions), idempotent command IDs, rate limits per area and globally with a circuit breaker, two-person approval for bulk actions, verification of the resulting relay state, and a full audit trail.
+
+684
+00:45:23.569 --> 00:45:24.337
+Senior.
+
+685
+00:45:24.617 --> 00:45:25.663
+Question 10.
+
+686
+00:45:25.943 --> 00:45:29.356
+How would you find electricity theft using smart meter data?
+
+687
+00:45:29.636 --> 00:45:31.001
+Thirty-second answer:
+
+688
+00:45:31.281 --> 00:45:54.257
+Compute daily DT energy balances (DT meter minus consumers minus estimated technical loss) to find high-loss areas, then score consumers under them using tamper events, consumption trend breaks, peer comparison and profile anomalies with rules plus unsupervised and supervised models, and prioritise inspections, feeding results back.
+
+689
+00:45:55.607 --> 00:45:56.738
+Question 11.
+
+690
+00:45:57.018 --> 00:46:00.005
+How would you roll out firmware to 2 million meters safely?
+
+691
+00:46:00.285 --> 00:46:01.650
+Thirty-second answer:
+
+692
+00:46:01.930 --> 00:46:18.869
+Lab test, a pilot, then staged waves with health gates against a control group (reconnects, read success, errors, clock accuracy), automatic pauses, diverse early waves, multicast image transfer off-peak with resume, signed images, and dual-bank rollback.
+
+693
+00:46:20.219 --> 00:46:21.307
+Question 12.
+
+694
+00:46:21.587 --> 00:46:24.339
+How do you store and query years of interval data?
+
+695
+00:46:24.619 --> 00:46:25.984
+Thirty-second answer:
+
+696
+00:46:26.264 --> 00:46:40.387
+Recent data in a time-series DB keyed by meter and channel for per-meter queries; all history in a lakehouse partitioned by date and region for analytics; version values for corrections; compress with time-series encodings.
+
+697
+00:46:41.737 --> 00:46:43.017
+Question 13.
+
+698
+00:46:43.297 --> 00:46:46.390
+How do you detect consumers mapped to the wrong transformer?
+
+699
+00:46:46.670 --> 00:46:48.035
+Thirty-second answer:
+
+700
+00:46:48.315 --> 00:47:04.742
+Meters on the same transformer see correlated voltage fluctuations; compute correlations between each meter's voltage profile and its DT's (or neighbours') and flag meters that correlate better with another DT, then verify in the field and fix GIS.
+
+701
+00:47:06.092 --> 00:47:07.287
+Question 14.
+
+702
+00:47:07.567 --> 00:47:10.148
+How do you handle a storm with millions of events?
+
+703
+00:47:10.428 --> 00:47:11.793
+Thirty-second answer:
+
+704
+00:47:12.073 --> 00:47:27.945
+Kafka absorbs bursts, OMS correlation scales by region with topology-based grouping, commands get priority over reads, dashboards focus on feeder-level outages, pings confirm status, and consumer notifications are batched per outage.
+
+705
+00:47:29.295 --> 00:47:30.191
+Architect.
+
+706
+00:47:30.471 --> 00:47:31.666
+Question 15.
+
+707
+00:47:31.946 --> 00:47:36.170
+Design an AMI platform for 25 million prepaid meters.
+
+708
+00:47:36.450 --> 00:47:37.815
+Thirty-second answer:
+
+709
+00:47:38.095 --> 00:47:52.474
+Mixed RF mesh and cellular network, HES with DLMS, HSM keys, scheduler and command manager; Kafka as the backbone; MDM with VEE, TSDB and lakehouse; a prepaid engine with ledger,
+
+710
+00:47:52.754 --> 00:48:05.213
+policy-driven disconnects and fast reconnects; OMS with topology correlation; device management and FOTA; analytics for losses, theft and forecasting, with safety guardrails on commands.
+
+711
+00:48:06.563 --> 00:48:07.757
+Question 16.
+
+712
+00:48:08.037 --> 00:48:12.048
+What are the cybersecurity risks of smart metering and your mitigations?
+
+713
+00:48:12.328 --> 00:48:13.693
+Thirty-second answer:
+
+714
+00:48:13.973 --> 00:48:33.579
+Mass disconnect via a compromised HES, malicious firmware, key theft, spoofed data and privacy leaks; mitigate with segmentation, HSM per-meter keys, signed commands and firmware, rate limits and breakers, bulk approvals, OT security monitoring, and privacy controls on interval data.
+
+715
+00:48:34.929 --> 00:48:36.273
+Question 17.
+
+716
+00:48:36.553 --> 00:48:39.198
+How would you build energy accounting for a DISCOM?
+
+717
+00:48:39.478 --> 00:48:40.843
+Thirty-second answer:
+
+718
+00:48:41.123 --> 00:48:59.214
+Accurate topology (consumer, DT, feeder with effective dates), complete validated consumption, DT and feeder meters, daily balances with technical loss estimates, data quality checks (mapping via voltage correlation), and dashboards and work orders for high-loss areas.
+
+719
+00:49:00.564 --> 00:49:01.737
+Question 18.
+
+720
+00:49:02.017 --> 00:49:07.052
+How is IoT telemetry for meters different from generic IoT telemetry?
+
+721
+00:49:07.332 --> 00:49:08.697
+Thirty-second answer:
+
+722
+00:49:08.977 --> 00:49:28.689
+Billing-grade correctness and audit, regulated commands with physical consequences (disconnect), constrained networks, multi-vendor standardised protocols, long device lifetimes (10 plus years), and topology-aware analytics; generic IoT often favours best-effort metrics and MQTT.
+
+723
+00:49:30.039 --> 00:49:31.277
+Question 19.
+
+724
+00:49:31.557 --> 00:49:33.562
+How would you forecast load and use it?
+
+725
+00:49:33.842 --> 00:49:35.207
+Thirty-second answer:
+
+726
+00:49:35.487 --> 00:49:51.637
+Short-term forecasts per feeder and system from history, weather and calendar using gradient boosting or sequence models; use them for day-ahead power purchase, DT overload alerts, demand response baselines and planning for EVs and rooftop solar.
+
+727
+00:49:52.987 --> 00:49:54.096
+Question 20.
+
+728
+00:49:54.376 --> 00:49:57.811
+What happens to prepaid when the communication network fails?
+
+729
+00:49:58.091 --> 00:49:59.456
+Thirty-second answer:
+
+730
+00:49:59.736 --> 00:50:16.163
+Keep accepting recharges and crediting balances; pause disconnects (fail safe towards supply); queue reconnects with priority; estimate consumption from history and true up later; monitor communication health and dispatch field crews for persistent failures.
+
+731
+00:50:17.513 --> 00:50:18.558
+Part 13.
+
+732
+00:50:18.838 --> 00:50:19.606
+Summary.
+
+733
+00:50:20.856 --> 00:50:27.085
+Smart metering replaces manual reads with 15-minute interval data, events and remote commands.
+
+734
+00:50:27.365 --> 00:50:33.147
+It is the backbone for accurate billing, prepaid collections, outage detection and loss reduction.
+
+735
+00:50:33.427 --> 00:50:38.376
+The HES handles communication (DLMS, scheduling, keys, commands).
+
+736
+00:50:38.656 --> 00:50:43.925
+The MDM owns data truth (VEE, estimation, topology, aggregation).
+
+737
+00:50:44.205 --> 00:50:47.640
+Kafka connects them to prepaid, the OMS and analytics.
+
+738
+00:50:47.920 --> 00:50:51.461
+Prepaid is a central ledger with slab and TOD rating.
+
+739
+00:50:51.741 --> 00:50:56.115
+Disconnects are policy-driven and rate-limited, and reconnects must be fast.
+
+740
+00:50:57.465 --> 00:51:05.785
+Analytics turns data into action: energy accounting per DT, theft scoring, outage inference from topology, and forecasting.
+
+741
+00:51:06.065 --> 00:51:10.566
+Safety and security matter more than usual because commands switch real power.
+
+742
+00:51:10.846 --> 00:51:14.921
+Use circuit breakers, approvals, signed firmware and HSM keys.
+
+743
+00:51:16.271 --> 00:51:17.508
+Related chapters.
+
+744
+00:51:17.788 --> 00:51:19.644
+I11, Telecom Billing.
+
+745
+00:51:19.924 --> 00:51:21.353
+I12, Logistics.
+
+746
+00:51:21.633 --> 00:51:24.236
+Ch 51, Real-time Analytics.
+
+747
+00:51:24.516 --> 00:51:26.628
+Ch 50, Job Scheduler.
+
+748
+00:51:26.908 --> 00:51:29.233
+I14, National Digital ID.
+
+749
+00:51:29.513 --> 00:51:30.708
+Next in this tab:
+
+750
+00:51:30.988 --> 00:51:33.569
+I17, Hotel and Homestay Booking.
+
+751
+00:51:34.919 --> 00:51:36.519
+That's the end of this chapter.
+
+752
+00:51:36.799 --> 00:51:42.837
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+753
+00:51:43.117 --> 00:51:44.567
+See you in the next chapter.
+

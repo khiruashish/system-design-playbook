@@ -1,0 +1,614 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:03.465
+Sliding-Window Rate Limiter (Log versus Counter).
+
+2
+00:00:03.745 --> 00:00:07.606
+Chapter 2, from the Coding Interview part of the System Design Playbook.
+
+3
+00:00:09.356 --> 00:00:10.209
+Part 1.
+
+4
+00:00:10.489 --> 00:00:11.385
+Problem.
+
+5
+00:00:12.635 --> 00:00:15.579
+Limit each user to N requests per rolling minute.
+
+6
+00:00:15.859 --> 00:00:25.182
+Show why a fixed window allows 2 times bursts at the boundary, then implement an exact sliding log and a memory-cheap sliding counter, and compare them.
+
+7
+00:00:26.532 --> 00:00:27.407
+Part 2.
+
+8
+00:00:27.687 --> 00:00:28.604
+Key idea.
+
+9
+00:00:29.854 --> 00:00:38.046
+Sliding log keeps the timestamp of every accepted request: exact, but O(N) memory per user (in Redis, a sorted set).
+
+10
+00:00:38.326 --> 00:00:45.899
+Sliding counter keeps only the current and previous fixed-window counts and estimates previous times overlap + current:
+
+11
+00:00:46.179 --> 00:00:48.526
+O(1) memory and slightly approximate.
+
+12
+00:00:48.806 --> 00:00:50.769
+That's what Cloudflare runs at its scale.
+
+13
+00:00:51.049 --> 00:00:55.721
+(Token bucket, which allows controlled bursts, is in the microservice playbook.).
+
+14
+00:00:57.071 --> 00:00:58.415
+Here is the diagram.
+
+15
+00:01:02.265 --> 00:01:03.161
+Part 3.
+
+16
+00:01:03.441 --> 00:01:04.294
+Solution.
+
+17
+00:01:05.544 --> 00:01:09.405
+Here is the Java code, SlidingWindowRateLimiter.java.
+
+18
+00:01:09.685 --> 00:01:13.696
+It runs to 104 lines; the full listing is in the chapter.
+
+19
+00:01:13.976 --> 00:01:17.539
+Problem: limit each user to N requests per rolling window.
+
+20
+00:01:17.819 --> 00:01:22.085
+Compare sliding LOG (exact) and sliding COUNTER (approximate).
+
+21
+00:01:22.365 --> 00:01:25.309
+Exact: keep a timestamp per accepted request.
+
+22
+00:01:25.589 --> 00:01:27.381
+Memory O(N) per user.
+
+23
+00:01:27.661 --> 00:01:28.451
+(Redis:
+
+24
+00:01:28.731 --> 00:01:31.440
+ZSET + ZREMRANGEBYSCORE + ZCARD).
+
+25
+00:01:34.290 --> 00:01:35.207
+Part 4.
+
+26
+00:01:35.487 --> 00:01:36.319
+Walkthrough.
+
+27
+00:01:37.569 --> 00:01:38.913
+Here is a quick table:
+
+28
+00:01:39.193 --> 00:01:44.996
+Code, and Why. while (log.peekFirst() = nowMs - windowMs) log.pollFirst():
+
+29
+00:01:45.276 --> 00:01:47.815
+Evict expired timestamps before counting.
+
+30
+00:01:48.095 --> 00:01:56.927
+The deque stays sorted because time only increases. long windowStart = nowMs - Math.floorMod(nowMs, windowMs):
+
+31
+00:01:57.207 --> 00:02:07.276
+Align to fixed windows. floorMod handles negative timestamps correctly. s2 = (windowStart - s0 == windowMs)? s1:
+
+32
+00:02:07.556 --> 00:02:08.324
+0:
+
+33
+00:02:08.604 --> 00:02:20.743
+On rollover, the old current count becomes the previous one, unless a whole window was skipped, in which case the previous count is 0. double estimated = s2 overlap + s1:
+
+34
+00:02:21.023 --> 00:02:25.439
+Weight the previous window by how much of it still falls inside the rolling window.
+
+35
+00:02:26.789 --> 00:02:28.751
+sliding counter allowed 11:
+
+36
+00:02:29.031 --> 00:02:36.797
+An honest approximation: at the boundary the previous 10 count as 9.98, so one extra request gets through.
+
+37
+00:02:37.077 --> 00:02:40.106
+It assumes the previous window's traffic was uniform.
+
+38
+00:02:41.456 --> 00:02:42.416
+Part 5.
+
+39
+00:02:42.696 --> 00:02:43.635
+Complexity.
+
+40
+00:02:44.885 --> 00:02:46.229
+Here is a quick table:
+
+41
+00:02:46.509 --> 00:02:49.325
+Approach, and Time, and Space. sliding log.
+
+42
+00:02:49.605 --> 00:02:50.351
+Time:
+
+43
+00:02:50.631 --> 00:02:52.082
+O(1) amortised.
+
+44
+00:02:52.362 --> 00:02:53.215
+Space:
+
+45
+00:02:53.495 --> 00:02:55.991
+O(limit) per user. sliding counter.
+
+46
+00:02:56.271 --> 00:02:57.018
+Time:
+
+47
+00:02:57.298 --> 00:02:58.173
+O(1).
+
+48
+00:02:58.453 --> 00:02:59.306
+Space:
+
+49
+00:02:59.586 --> 00:03:01.719
+O(1) per user. fixed window.
+
+50
+00:03:01.999 --> 00:03:02.746
+Time:
+
+51
+00:03:03.026 --> 00:03:03.901
+O(1).
+
+52
+00:03:04.181 --> 00:03:05.034
+Space:
+
+53
+00:03:05.314 --> 00:03:07.213
+O(1) but 2 times bursts.
+
+54
+00:03:08.563 --> 00:03:09.501
+Part 6.
+
+55
+00:03:09.781 --> 00:03:10.507
+Run it.
+
+56
+00:03:11.757 --> 00:03:13.079
+Here is the shell code.
+
+57
+00:03:15.929 --> 00:03:16.847
+On screen:
+
+58
+00:03:17.127 --> 00:03:36.988
+20 requests in 200 ms across a window boundary (limit 10 per minute): fixed window allowed 20 -- 2x burst. sliding log allowed 10. sliding counter allowed 11 (approximate: previous 10 x 99.8% overlap = 9.98 10. lets one more in).
+
+59
+00:03:37.268 --> 00:03:43.668
+36 requests evenly over 3 min: sliding log allowed 30, sliding counter allowed 30.
+
+60
+00:03:43.948 --> 00:03:44.695
+PASS.
+
+61
+00:03:47.545 --> 00:03:48.483
+Part 7.
+
+62
+00:03:48.763 --> 00:03:50.449
+Solve it with Spring Boot 4.
+
+63
+00:03:51.699 --> 00:03:59.229
+The algorithms move into Redis Lua scripts, so count, compare, record is one atomic step shared by every instance.
+
+64
+00:03:59.509 --> 00:04:09.301
+A Spring MVC HandlerInterceptor applies the limit before the controller and returns 429 with Retry-After and RateLimit- headers.
+
+65
+00:04:09.581 --> 00:04:15.576
+The algorithm is a property: ci.rate-limit.algorithm=SLIDINGLOG SLIDINGCOUNTER.
+
+66
+00:04:16.926 --> 00:04:19.721
+The sequence diagram walks through it step by step.
+
+67
+00:04:20.001 --> 00:04:20.897
+C to I:
+
+68
+00:04:21.177 --> 00:04:25.849
+GET or api or v1 or quotes or INFY X-User-Id: asha.
+
+69
+00:04:26.129 --> 00:04:28.049
+I to L: tryAcquire(asha).
+
+70
+00:04:28.329 --> 00:04:29.289
+L to R:
+
+71
+00:04:29.569 --> 00:04:33.451
+EVALSHA sliding-log.lua (ZREMRANGEBYSCORE, ZCARD, ZADD).
+
+72
+00:04:33.731 --> 00:04:36.782
+R to L: allowed, remaining, retryAfterMs.
+
+73
+00:04:37.062 --> 00:04:38.577
+I to Q: continue.
+
+74
+00:04:38.857 --> 00:04:39.753
+Q to C:
+
+75
+00:04:40.033 --> 00:04:42.251
+200 + RateLimit-Remaining.
+
+76
+00:04:42.531 --> 00:04:43.385
+I to C:
+
+77
+00:04:43.665 --> 00:04:47.206
+429 + Retry-After (ProblemDetail).
+
+78
+00:04:51.056 --> 00:04:52.485
+Sliding log (Lua).
+
+79
+00:04:52.765 --> 00:04:55.432
+Here is the LUA code, sliding-log.lua.
+
+80
+00:04:55.712 --> 00:04:57.525
+Sliding LOG (exact).
+
+81
+00:04:57.805 --> 00:05:02.179
+KEYS1 = per-user sorted set of accepted request timestamps.
+
+82
+00:05:02.459 --> 00:05:05.253
+ARGV: nowms, windowms, limit, uniquemember.
+
+83
+00:05:08.103 --> 00:05:09.597
+Sliding counter (Lua).
+
+84
+00:05:09.877 --> 00:05:12.778
+Here is the LUA code, sliding-counter.lua.
+
+85
+00:05:13.058 --> 00:05:16.578
+It runs to 15 lines; the full listing is in the chapter.
+
+86
+00:05:16.858 --> 00:05:19.759
+Sliding COUNTER (approximate, O(1) memory).
+
+87
+00:05:20.039 --> 00:05:24.647
+KEYS1 = current window counter, KEYS2 = previous window counter.
+
+88
+00:05:24.927 --> 00:05:26.975
+ARGV: nowms, windowms, limit.
+
+89
+00:05:29.825 --> 00:05:30.572
+Limiter.
+
+90
+00:05:30.852 --> 00:05:34.052
+Here is the Java code, RedisRateLimiter.java.
+
+91
+00:05:34.332 --> 00:05:37.980
+It runs to 54 lines; the full listing is in the chapter.
+
+92
+00:05:38.260 --> 00:05:49.097
+The interview algorithms moved into Redis Lua scripts, so check-and-increment is ONE atomic step. shared by every app instance (no read-then-write race between servers).
+
+93
+00:05:51.947 --> 00:05:52.929
+Interceptor.
+
+94
+00:05:53.209 --> 00:05:56.814
+Here is the Java code, RateLimitInterceptor.java.
+
+95
+00:05:57.094 --> 00:06:00.806
+It runs to 34 lines; the full listing is in the chapter.
+
+96
+00:06:01.086 --> 00:06:02.622
+Runs before the controller:
+
+97
+00:06:02.902 --> 00:06:08.278
+429 + Retry-After when over the limit, RateLimit- headers always.
+
+98
+00:06:11.128 --> 00:06:11.960
+Wiring.
+
+99
+00:06:12.240 --> 00:06:15.525
+Here is the Java code, RateLimitConfig.java.
+
+100
+00:06:15.805 --> 00:06:19.432
+It runs to 14 lines; the full listing is in the chapter.
+
+101
+00:06:22.282 --> 00:06:23.626
+Run it as a service.
+
+102
+00:06:23.906 --> 00:06:29.645
+The integration test RateLimitIT.java drives the API against a real Redis.
+
+103
+00:06:29.925 --> 00:06:32.613
+This is its transcript ( request, response):
+
+104
+00:06:33.963 --> 00:06:39.595
+On screen: limit 10 requests or 60 s per user (sliding log in a Redis Lua script).
+
+105
+00:06:39.875 --> 00:06:44.547
+GET or api or v1 or quotes or INFY X-User-Id: asha.
+
+106
+00:06:44.827 --> 00:06:46.789
+200 RateLimit-Remaining:
+
+107
+00:06:47.069 --> 00:06:51.848
+9 symbol:INFY,price:1234.5. ...
+
+108
+00:06:52.128 --> 00:06:53.707
+8 more allowed requests...
+
+109
+00:06:53.987 --> 00:06:58.659
+GET or api or v1 or quotes or INFY X-User-Id: asha.
+
+110
+00:06:58.939 --> 00:07:00.901
+200 RateLimit-Remaining:
+
+111
+00:07:01.181 --> 00:07:05.939
+0 symbol:INFY,price:1234.5.
+
+112
+00:07:06.219 --> 00:07:10.891
+GET or api or v1 or quotes or INFY X-User-Id: asha.
+
+113
+00:07:11.171 --> 00:07:13.923
+429 RateLimit-Remaining:
+
+114
+00:07:14.203 --> 00:07:15.568
+0 Retry-After:
+
+115
+00:07:15.848 --> 00:07:28.413
+60 detail:rate limit of 10 per 60s. exceeded; retry in 60s,instance:/api or v1 or quotes or INFY,status:429,title:Too.
+
+116
+00:07:28.693 --> 00:07:29.824
+Many Requests.
+
+117
+00:07:30.104 --> 00:07:34.733
+GET or api or v1 or quotes or INFY X-User-Id: ravi.
+
+118
+00:07:35.013 --> 00:07:36.976
+200 RateLimit-Remaining:
+
+119
+00:07:37.256 --> 00:07:43.080
+9 symbol:INFY,price:1234.5. +30 s.
+
+120
+00:07:43.360 --> 00:07:44.875
+The rest is in the chapter.
+
+121
+00:07:47.725 --> 00:07:49.815
+What changes from the interview version.
+
+122
+00:07:50.095 --> 00:07:51.439
+Here is a quick table:
+
+123
+00:07:51.719 --> 00:07:54.151
+Interview, and Production (Spring Boot 4).
+
+124
+00:07:54.431 --> 00:07:56.650
+MapString, DequeLong per JVM:
+
+125
+00:07:56.930 --> 00:08:06.765
+Redis sorted set per user: one limit across all instances. check then add (racy across servers): one Lua script = atomic check-and-record.
+
+126
+00:08:07.045 --> 00:08:23.343
+System.currentTimeMillis(): injected Clock (tests move time; or use Redis TIME inside the script). returns boolean: interceptor, then 429, Retry-After, RateLimit-Limit or Remaining. unbounded memory for idle users:
+
+127
+00:08:23.623 --> 00:08:26.759
+PEXPIRE on every key: idle users cost nothing.
+
+128
+00:08:28.109 --> 00:08:37.240
+The two counter keys share the userId hash tag so they hash to the same Redis Cluster slot, a requirement for multi-key scripts in a cluster.
+
+129
+00:08:37.520 --> 00:08:43.664
+Gateways (Spring Cloud Gateway's RequestRateLimiter) ship a Redis token bucket built the same way.
+
+130
+00:08:45.014 --> 00:08:45.889
+Part 8.
+
+131
+00:08:46.169 --> 00:08:47.278
+Common mistakes.
+
+132
+00:08:48.528 --> 00:08:49.637
+A fixed window.
+
+133
+00:08:49.917 --> 00:08:53.437
+Clients can send 2N within a second around each boundary.
+
+134
+00:08:53.717 --> 00:08:56.277
+Read-then-write in Redis without atomicity.
+
+135
+00:08:56.557 --> 00:09:01.144
+Use a Lua script or MULTI, or two app servers will each allow the last slot.
+
+136
+00:09:01.424 --> 00:09:02.853
+Using the client's clock.
+
+137
+00:09:03.133 --> 00:09:05.565
+Use the server's or Redis's time (TIME).
+
+138
+00:09:05.845 --> 00:09:09.600
+One global limiter key for all users, which creates a hot key.
+
+139
+00:09:09.880 --> 00:09:11.331
+Shard by user id.
+
+140
+00:09:12.681 --> 00:09:13.577
+Part 9.
+
+141
+00:09:13.857 --> 00:09:15.201
+Follow-up questions.
+
+142
+00:09:16.451 --> 00:09:17.325
+Question.
+
+143
+00:09:17.605 --> 00:09:20.549
+How do you rate-limit across 50 gateway instances?
+
+144
+00:09:20.829 --> 00:09:22.195
+Thirty-second answer:
+
+145
+00:09:22.475 --> 00:09:35.296
+Use a central store (Redis) with an atomic script per request, or local limiters each with N or instances (cheap, approximate), or local token buckets refilled from a central budget periodically.
+
+146
+00:09:35.576 --> 00:09:37.859
+Choose by how strictly the limit must hold.
+
+147
+00:09:39.209 --> 00:09:40.083
+Question.
+
+148
+00:09:40.363 --> 00:09:41.985
+What should the response look like?
+
+149
+00:09:42.265 --> 00:09:43.630
+Thirty-second answer:
+
+150
+00:09:43.910 --> 00:09:55.110
+429 Too Many Requests with Retry-After and RateLimit-Limit or RateLimit-Remaining or RateLimit-Reset headers, so well-behaved clients back off precisely.
+
+151
+00:09:56.460 --> 00:09:58.060
+That's the end of this chapter.
+
+152
+00:09:58.340 --> 00:10:04.377
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+153
+00:10:04.657 --> 00:10:06.108
+See you in the next chapter.
+

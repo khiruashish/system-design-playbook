@@ -1,0 +1,5618 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.270
+Back-of-the-Envelope Estimation.
+
+2
+00:00:02.550 --> 00:00:06.881
+Chapter 02, from the Foundations part of the System Design Playbook.
+
+3
+00:00:08.631 --> 00:00:09.591
+At a glance:
+
+4
+00:00:09.871 --> 00:00:11.044
+Chapter at a glance.
+
+5
+00:00:11.324 --> 00:00:12.327
+Reader bands:
+
+6
+00:00:12.607 --> 00:00:14.911
+B1, then B4, Prerequisites:
+
+7
+00:00:15.191 --> 00:00:17.431
+Ch 01, What you will build:
+
+8
+00:00:17.711 --> 00:00:31.172
+A capacity estimator, taken from a plain-Java calculator (L1) to a planner that reads real production metrics and generates Kubernetes pre-scaling config for a festival sale (L4), Reading time:
+
+9
+00:00:31.452 --> 00:00:32.839
+80 min + code.
+
+10
+00:00:34.189 --> 00:00:35.042
+Part 1.
+
+11
+00:00:35.322 --> 00:00:37.242
+Introduction and Why It Matters.
+
+12
+00:00:38.492 --> 00:00:41.393
+A story: the sale that autoscaling couldn't save.
+
+13
+00:00:41.673 --> 00:00:47.241
+A grocery platform announced a Diwali sale starting at 8:00 pm sharp:
+
+14
+00:00:47.521 --> 00:00:50.743
+1 rupeesonions, 60 % off dry fruits.
+
+15
+00:00:51.023 --> 00:00:52.580
+Engineering was confident.
+
+16
+00:00:52.860 --> 00:00:59.665
+Every service had a Horizontal Pod Autoscaler (HPA) at 60 % CPU, and the cloud scales.
+
+17
+00:00:59.945 --> 00:01:10.164
+At 8:00:00 pm, gateway traffic went from 9 K req per second to 170 K req per second in 40 seconds.
+
+18
+00:01:10.444 --> 00:01:12.279
+8:00:15.
+
+19
+00:01:12.559 --> 00:01:15.396
+Prometheus scraped the first high CPU samples.
+
+20
+00:01:15.676 --> 00:01:17.319
+8:00:30.
+
+21
+00:01:17.599 --> 00:01:22.313
+The HPA decided to scale catalog-service from 12 to 60 pods.
+
+22
+00:01:22.593 --> 00:01:25.687
+8:00:30 to 8:02:30.
+
+23
+00:01:25.967 --> 00:01:27.801
+The cluster had no spare nodes.
+
+24
+00:01:28.081 --> 00:01:32.881
+The node autoscaler requested 30 machines, which took about 3 minutes to join.
+
+25
+00:01:34.231 --> 00:01:35.661
+8:03:40.
+
+26
+00:01:35.941 --> 00:01:38.394
+New JVMs finished starting and warming up.
+
+27
+00:01:38.674 --> 00:01:41.895
+For roughly four minutes, the existing pods were overloaded.
+
+28
+00:01:42.175 --> 00:01:48.085
+Latency rose, clients timed out and retried, which multiplied load by 2 to 3 times.
+
+29
+00:01:48.365 --> 00:01:54.082
+Liveness checks failed, Kubernetes restarted unhealthy pods, and capacity dropped further.
+
+30
+00:01:54.362 --> 00:02:00.826
+The first 10 minutes of the sale, the most valuable 10 minutes of the quarter, returned errors to most customers.
+
+31
+00:02:02.176 --> 00:02:10.240
+Nobody had done the arithmetic: peak ÷ per-pod capacity = pods needed before 8:00 pm.
+
+32
+00:02:10.520 --> 00:02:16.643
+A ten-minute estimate on a whiteboard would have shown that reactive autoscaling could not react in time.
+
+33
+00:02:16.923 --> 00:02:20.251
+The fix was trivial: pre-scale at 7:30 pm.
+
+34
+00:02:21.601 --> 00:02:22.283
+Quote:
+
+35
+00:02:22.563 --> 00:02:24.227
+The thesis of this chapter.
+
+36
+00:02:24.507 --> 00:02:27.131
+Estimation isn't about getting the right number.
+
+37
+00:02:27.411 --> 00:02:32.638
+It's about finding which part of the design the numbers break, and doing that before production does.
+
+38
+00:02:33.988 --> 00:02:36.292
+Where this lives in the grocery platform.
+
+39
+00:02:36.572 --> 00:02:37.937
+Here is a quick table:
+
+40
+00:02:38.217 --> 00:02:40.500
+Decision, and Estimate that drives it.
+
+41
+00:02:40.780 --> 00:02:43.873
+Serve serviceability from memory (Ch 01):
+
+42
+00:02:44.153 --> 00:02:47.609
+2.4 MB dataset, 6 K req per second.
+
+43
+00:02:47.889 --> 00:02:58.769
+Put catalog behind CDN + cache: ~110 K catalog req per second at sale start; ~2 GB per second uncompressed JSON.
+
+44
+00:02:59.049 --> 00:03:00.521
+Pre-scale before sales:
+
+45
+00:03:00.801 --> 00:03:03.212
+Pod warm-up time versus spike rise time.
+
+46
+00:03:03.492 --> 00:03:06.457
+Partition count for order.order.placed.v1:
+
+47
+00:03:06.737 --> 00:03:09.617
+Peak event rate times consumer processing time.
+
+48
+00:03:09.897 --> 00:03:16.489
+DB connection limits across services: Σ(pods times pool size) versus maxconnections.
+
+49
+00:03:16.769 --> 00:03:19.735
+Special handling for the 1 rupeesonion SKU:
+
+50
+00:03:20.015 --> 00:03:23.236
+Reservations per second on a single inventory row.
+
+51
+00:03:23.516 --> 00:03:25.564
+GST invoice storage budget:
+
+52
+00:03:25.844 --> 00:03:29.215
+Orders per year times invoice size times retention.
+
+53
+00:03:30.565 --> 00:03:31.887
+Learning objectives.
+
+54
+00:03:32.167 --> 00:03:33.533
+Here is a quick table:
+
+55
+00:03:33.813 --> 00:03:36.010
+Band, and After this chapter you can....
+
+56
+00:03:36.290 --> 00:03:37.122
+B1:
+
+57
+00:03:37.402 --> 00:03:43.141
+Convert daily volumes to QPS, recall the key latency numbers, and estimate storage.
+
+58
+00:03:43.421 --> 00:03:44.295
+B2:
+
+59
+00:03:44.575 --> 00:03:50.079
+Derive peak factors, apply Little's Law to pools, and estimate bandwidth, memory and servers.
+
+60
+00:03:50.359 --> 00:03:51.255
+B3:
+
+61
+00:03:51.535 --> 00:03:58.447
+Produce a full festival-sale estimate, find hot spots and connection-budget limits, and size for zone failure.
+
+62
+00:03:58.727 --> 00:03:59.623
+B4:
+
+63
+00:03:59.903 --> 00:04:06.879
+Run capacity planning as a process, present estimates with uncertainty, and tie capacity to cost and risk.
+
+64
+00:04:08.229 --> 00:04:09.104
+Part 2.
+
+65
+00:04:09.384 --> 00:04:11.283
+Core Concepts, Beginner to Deep.
+
+66
+00:04:12.533 --> 00:04:14.431
+Intuition: packing for a trip.
+
+67
+00:04:14.711 --> 00:04:16.674
+You don't weigh every shirt before a trip.
+
+68
+00:04:16.954 --> 00:04:17.743
+You think:
+
+69
+00:04:18.023 --> 00:04:21.799
+5 days, 1 shirt per day, plus 2 spare, so 7 shirts.
+
+70
+00:04:22.079 --> 00:04:23.573
+That fits in a cabin bag.
+
+71
+00:04:23.853 --> 00:04:28.909
+That's back-of-the-envelope estimation: rough numbers, simple arithmetic, a decision.
+
+72
+00:04:29.189 --> 00:04:33.477
+The goal is being right within a factor of 2 to 3, not within 1 %.
+
+73
+00:04:33.757 --> 00:04:36.103
+A factor-of-10 error changes the design.
+
+74
+00:04:36.383 --> 00:04:40.074
+A factor-of-2 error usually changes only the instance count.
+
+75
+00:04:41.424 --> 00:04:43.984
+The toolkit: numbers you must know by heart.
+
+76
+00:04:44.264 --> 00:04:45.608
+Powers of two and ten.
+
+77
+00:04:45.888 --> 00:04:47.253
+Here is a quick table:
+
+78
+00:04:47.533 --> 00:04:49.816
+Power, and Exact, and Approx, and Name.
+
+79
+00:04:50.096 --> 00:04:50.800
+2¹⁰.
+
+80
+00:04:51.080 --> 00:04:51.933
+Exact:
+
+81
+00:04:52.213 --> 00:04:53.707
+1,024.
+
+82
+00:04:53.987 --> 00:04:54.904
+Approx:
+
+83
+00:04:55.184 --> 00:04:56.059
+10³.
+
+84
+00:04:56.339 --> 00:04:57.064
+Name:
+
+85
+00:04:57.344 --> 00:04:58.325
+1 KB.
+
+86
+00:04:58.605 --> 00:04:59.459
+2²⁰.
+
+87
+00:04:59.739 --> 00:05:00.592
+Exact:
+
+88
+00:05:00.872 --> 00:05:04.413
+1,048,576.
+
+89
+00:05:04.693 --> 00:05:05.611
+Approx:
+
+90
+00:05:05.891 --> 00:05:06.829
+10⁶.
+
+91
+00:05:07.109 --> 00:05:07.835
+Name:
+
+92
+00:05:08.115 --> 00:05:09.075
+1 MB.
+
+93
+00:05:09.355 --> 00:05:10.229
+2³⁰.
+
+94
+00:05:10.509 --> 00:05:14.051
+Exact: ~1.07 times 10⁹.
+
+95
+00:05:14.331 --> 00:05:15.248
+Approx:
+
+96
+00:05:15.528 --> 00:05:16.424
+10⁹.
+
+97
+00:05:16.704 --> 00:05:17.429
+Name:
+
+98
+00:05:17.709 --> 00:05:18.691
+1 GB.
+
+99
+00:05:18.971 --> 00:05:19.675
+2⁴⁰.
+
+100
+00:05:19.955 --> 00:05:22.728
+Exact: ~1.1 times 10¹².
+
+101
+00:05:23.008 --> 00:05:23.925
+Approx:
+
+102
+00:05:24.205 --> 00:05:25.059
+10¹².
+
+103
+00:05:25.339 --> 00:05:26.064
+Name:
+
+104
+00:05:26.344 --> 00:05:27.325
+1 TB.
+
+105
+00:05:27.605 --> 00:05:28.309
+2⁵⁰.
+
+106
+00:05:28.589 --> 00:05:31.299
+Exact: ~1.13 times 10¹⁵.
+
+107
+00:05:31.579 --> 00:05:32.496
+Approx:
+
+108
+00:05:32.776 --> 00:05:33.480
+10¹⁵.
+
+109
+00:05:33.760 --> 00:05:34.485
+Name:
+
+110
+00:05:34.765 --> 00:05:35.725
+1 PB.
+
+111
+00:05:37.075 --> 00:05:38.441
+Here is a quick table:
+
+112
+00:05:38.721 --> 00:05:40.833
+Handy constant, and Value, and Use.
+
+113
+00:05:41.113 --> 00:05:42.222
+Seconds per day.
+
+114
+00:05:42.502 --> 00:05:43.270
+Value:
+
+115
+00:05:43.550 --> 00:05:46.281
+86,400 about 10⁵.
+
+116
+00:05:46.561 --> 00:05:47.265
+Use:
+
+117
+00:05:47.545 --> 00:05:50.361
+Per-day, then per-second: divide by 10⁵.
+
+118
+00:05:50.641 --> 00:05:51.814
+Seconds per month.
+
+119
+00:05:52.094 --> 00:05:54.739
+Value: ~2.6 times 10⁶.
+
+120
+00:05:55.019 --> 00:05:56.107
+Seconds per year.
+
+121
+00:05:56.387 --> 00:06:01.550
+Value: ~3.15 times 10⁷ about π times 10⁷.
+
+122
+00:06:01.830 --> 00:06:02.918
+1 M per day.
+
+123
+00:06:03.198 --> 00:06:05.075
+Value: about 12 per second.
+
+124
+00:06:05.355 --> 00:06:06.059
+Use:
+
+125
+00:06:06.339 --> 00:06:07.555
+Memorize this one.
+
+126
+00:06:07.835 --> 00:06:08.966
+1 B per day.
+
+127
+00:06:09.246 --> 00:06:11.379
+Value: about 12 K per second.
+
+128
+00:06:11.659 --> 00:06:13.110
+Java object header.
+
+129
+00:06:13.390 --> 00:06:14.158
+Value:
+
+130
+00:06:14.438 --> 00:06:15.910
+12 to 16 bytes.
+
+131
+00:06:16.190 --> 00:06:16.894
+Use:
+
+132
+00:06:17.174 --> 00:06:18.411
+Memory estimates.
+
+133
+00:06:18.691 --> 00:06:19.630
+UUID.
+
+134
+00:06:19.910 --> 00:06:20.678
+Value:
+
+135
+00:06:20.958 --> 00:06:23.731
+16 bytes binary, 36 as text.
+
+136
+00:06:24.011 --> 00:06:24.715
+Use:
+
+137
+00:06:24.995 --> 00:06:27.150
+Index size. long or Instant.
+
+138
+00:06:27.430 --> 00:06:28.198
+Value:
+
+139
+00:06:28.478 --> 00:06:31.187
+8 / ~24 bytes (object).
+
+140
+00:06:32.537 --> 00:06:37.124
+Latency numbers (order of magnitude, 2026 hardware).
+
+141
+00:06:37.404 --> 00:06:38.769
+Here is a quick table:
+
+142
+00:06:39.049 --> 00:06:43.380
+Operation, and Approx. time, and Relative to a RAM read.
+
+143
+00:06:43.660 --> 00:06:45.068
+L1 cache reference.
+
+144
+00:06:45.348 --> 00:06:47.524
+Approx. time: ~1 ns.
+
+145
+00:06:47.804 --> 00:06:49.660
+Relative to a RAM read:
+
+146
+00:06:49.940 --> 00:06:51.775
+0.01 times.
+
+147
+00:06:52.055 --> 00:06:53.335
+Branch mispredict.
+
+148
+00:06:53.615 --> 00:06:56.324
+Approx. time: ~3 to 5 ns.
+
+149
+00:06:56.604 --> 00:06:58.012
+L2 cache reference.
+
+150
+00:06:58.292 --> 00:07:00.532
+Approx. time: ~4 ns.
+
+151
+00:07:00.812 --> 00:07:03.287
+Mutex lock or unlock (uncontended).
+
+152
+00:07:03.567 --> 00:07:05.977
+Approx. time: ~20 ns.
+
+153
+00:07:06.257 --> 00:07:07.665
+Main memory reference.
+
+154
+00:07:07.945 --> 00:07:10.591
+Approx. time: ~100 ns.
+
+155
+00:07:10.871 --> 00:07:12.727
+Relative to a RAM read:
+
+156
+00:07:13.007 --> 00:07:13.881
+1 times.
+
+157
+00:07:14.161 --> 00:07:17.063
+Compress 1 KB (Snappy or LZ4).
+
+158
+00:07:17.343 --> 00:07:20.223
+Approx. time: ~1 to 2 µs.
+
+159
+00:07:20.503 --> 00:07:22.359
+Relative to a RAM read:
+
+160
+00:07:22.639 --> 00:07:23.961
+10 to 20 times.
+
+161
+00:07:24.241 --> 00:07:27.356
+Send 1 KB over a 10 Gbps network.
+
+162
+00:07:27.636 --> 00:07:30.217
+Approx. time: ~1 µs.
+
+163
+00:07:30.497 --> 00:07:32.993
+Read 1 MB sequentially from memory.
+
+164
+00:07:33.273 --> 00:07:35.855
+Approx. time: ~10 µs.
+
+165
+00:07:37.205 --> 00:07:40.213
+NVMe SSD random read (4 KB).
+
+166
+00:07:40.493 --> 00:07:44.055
+Approx. time: ~20 to 100 µs.
+
+167
+00:07:44.335 --> 00:07:48.026
+Relative to a RAM read: ~500 times.
+
+168
+00:07:48.306 --> 00:07:51.122
+Read 1 MB sequentially from NVMe.
+
+169
+00:07:51.402 --> 00:07:55.775
+Approx. time: ~150 to 300 µs.
+
+170
+00:07:56.055 --> 00:07:57.869
+Round trip within the same AZ.
+
+171
+00:07:58.149 --> 00:08:02.479
+Approx. time: ~0.1 to 0.5 ms.
+
+172
+00:08:02.759 --> 00:08:07.474
+Relative to a RAM read: ~2,000 to 5,000 times.
+
+173
+00:08:07.754 --> 00:08:10.229
+Round trip across AZs (same region).
+
+174
+00:08:10.509 --> 00:08:13.965
+Approx. time: ~0.5 to 2 ms.
+
+175
+00:08:14.245 --> 00:08:18.149
+Simple PostgreSQL PK query (incl. network).
+
+176
+00:08:18.429 --> 00:08:21.885
+Approx. time: ~0.5 to 2 ms.
+
+177
+00:08:22.165 --> 00:08:24.021
+Redis GET (incl. network).
+
+178
+00:08:24.301 --> 00:08:27.735
+Approx. time: ~0.2 to 1 ms.
+
+179
+00:08:28.015 --> 00:08:29.189
+HDD seek.
+
+180
+00:08:29.469 --> 00:08:32.178
+Approx. time: ~5 to 10 ms.
+
+181
+00:08:32.458 --> 00:08:34.591
+Mumbai ↔ Hyderabad.
+
+182
+00:08:34.871 --> 00:08:38.306
+Approx. time: ~15 to 25 ms.
+
+183
+00:08:39.656 --> 00:08:41.640
+Mumbai ↔ Singapore.
+
+184
+00:08:41.920 --> 00:08:45.291
+Approx. time: ~55 to 70 ms.
+
+185
+00:08:45.571 --> 00:08:47.576
+Mumbai ↔ US East.
+
+186
+00:08:47.856 --> 00:08:52.059
+Approx. time: ~180 to 220 ms.
+
+187
+00:08:52.339 --> 00:08:55.411
+TLS 1.3 handshake on a new connection.
+
+188
+00:08:55.691 --> 00:08:58.059
+Approx. time: +1 RTT.
+
+189
+00:08:58.339 --> 00:09:01.411
+Spring Boot pod: schedule, then start, then warm.
+
+190
+00:09:01.691 --> 00:09:04.485
+Approx. time: ~20 to 90 s.
+
+191
+00:09:04.765 --> 00:09:06.621
+Relative to a RAM read:
+
+192
+00:09:06.901 --> 00:09:08.309
+Plan for it in scaling.
+
+193
+00:09:08.589 --> 00:09:11.043
+New Kubernetes node joins the cluster.
+
+194
+00:09:11.323 --> 00:09:13.755
+Approx. time: ~1 to 4 min.
+
+195
+00:09:14.035 --> 00:09:15.891
+Relative to a RAM read:
+
+196
+00:09:16.171 --> 00:09:17.899
+The hidden cost of autoscaling.
+
+197
+00:09:19.249 --> 00:09:19.889
+Tip:
+
+198
+00:09:20.169 --> 00:09:21.811
+Three ratios to remember.
+
+199
+00:09:22.091 --> 00:09:26.038
+Memory is ~1,000 times faster than a network hop.
+
+200
+00:09:26.318 --> 00:09:31.758
+A same-region network hop is ~100 times faster than a cross-continent one.
+
+201
+00:09:32.038 --> 00:09:39.419
+Anything that needs a new JVM or a new node takes tens of seconds to minutes, which is an eternity during a spike.
+
+202
+00:09:40.769 --> 00:09:43.991
+Throughput priors (planning defaults, replace with measurements).
+
+203
+00:09:44.271 --> 00:09:47.321
+These are starting assumptions for estimates, not facts.
+
+204
+00:09:47.601 --> 00:09:53.276
+Every real design replaces them with load-test data (§5 L3 or L4).
+
+205
+00:09:54.626 --> 00:09:55.991
+Here is a quick table:
+
+206
+00:09:56.271 --> 00:09:58.511
+Component, and Planning prior, and Notes.
+
+207
+00:09:58.791 --> 00:10:01.479
+Spring Boot endpoint, in-memory work only.
+
+208
+00:10:01.759 --> 00:10:02.869
+Planning prior:
+
+209
+00:10:03.149 --> 00:10:06.071
+2 to 5 K req per second per vCPU.
+
+210
+00:10:06.351 --> 00:10:07.162
+Notes:
+
+211
+00:10:07.442 --> 00:10:09.639
+JSON serialization dominates.
+
+212
+00:10:09.919 --> 00:10:12.778
+Spring Boot endpoint, 1 to 2 DB calls.
+
+213
+00:10:13.058 --> 00:10:14.167
+Planning prior:
+
+214
+00:10:14.447 --> 00:10:18.095
+300 to 1,000 req per second per vCPU.
+
+215
+00:10:18.375 --> 00:10:19.186
+Notes:
+
+216
+00:10:19.466 --> 00:10:20.917
+Depends on query cost.
+
+217
+00:10:21.197 --> 00:10:24.887
+PostgreSQL (8 vCPU), simple PK reads.
+
+218
+00:10:25.167 --> 00:10:26.277
+Planning prior:
+
+219
+00:10:26.557 --> 00:10:28.391
+20 to 50 K per second.
+
+220
+00:10:28.671 --> 00:10:29.482
+Notes:
+
+221
+00:10:29.762 --> 00:10:32.535
+From buffer cache; drops sharply when disk-bound.
+
+222
+00:10:32.815 --> 00:10:36.015
+PostgreSQL (8 vCPU), simple writes.
+
+223
+00:10:36.295 --> 00:10:37.405
+Planning prior:
+
+224
+00:10:37.685 --> 00:10:39.434
+3 to 10 K TPS.
+
+225
+00:10:39.714 --> 00:10:42.850
+Notes: fsync, WAL and indexes matter.
+
+226
+00:10:43.130 --> 00:10:44.474
+Redis, single shard.
+
+227
+00:10:44.754 --> 00:10:47.911
+Planning prior: ~100 K ops per second.
+
+228
+00:10:48.191 --> 00:10:49.002
+Notes:
+
+229
+00:10:49.282 --> 00:10:51.266
+Single-threaded command execution.
+
+230
+00:10:52.616 --> 00:10:53.811
+Kafka partition.
+
+231
+00:10:54.091 --> 00:10:58.592
+Planning prior: ~5 to 10 MB per second write (conservative).
+
+232
+00:10:58.872 --> 00:10:59.683
+Notes:
+
+233
+00:10:59.963 --> 00:11:02.885
+Consumer processing is usually the real limit.
+
+234
+00:11:03.165 --> 00:11:05.512
+One hot DB row, locked updates.
+
+235
+00:11:05.792 --> 00:11:09.909
+Planning prior: ~200 to 1,000 updates per second.
+
+236
+00:11:10.189 --> 00:11:10.000
+Notes:
+
+237
+00:11:11.280 --> 00:11:14.907
+Serialized by the row lock, ~1 to 5 ms each.
+
+238
+00:11:15.187 --> 00:11:16.317
+CDN edge.
+
+239
+00:11:16.597 --> 00:11:17.707
+Planning prior:
+
+240
+00:11:17.987 --> 00:11:19.416
+Effectively unlimited.
+
+241
+00:11:19.696 --> 00:11:20.507
+Notes:
+
+242
+00:11:20.787 --> 00:11:22.088
+You pay per GB.
+
+243
+00:11:23.438 --> 00:11:25.081
+From users to QPS.
+
+244
+00:11:25.361 --> 00:11:26.342
+The core chain:
+
+245
+00:11:27.692 --> 00:11:28.673
+The formula:
+
+246
+00:11:28.953 --> 00:11:40.132
+Avg QPS = (DAU times actions per user per day) / (86,)400 Peak QPS = Avg QPS times peak factor.
+
+247
+00:11:41.482 --> 00:11:42.954
+Example (normal day).
+
+248
+00:11:43.234 --> 00:11:55.501
+2 M DAU times 40 API calls per user per day = 80 M calls per day, then 80 M ÷ 10⁵ about 800 req per second average at the gateway.
+
+249
+00:11:55.781 --> 00:11:59.877
+With the evening peak factor of 5, that's 4,000 req per second.
+
+250
+00:12:01.227 --> 00:12:02.763
+Deriving the peak factor.
+
+251
+00:12:03.043 --> 00:12:05.176
+Peak factors aren't magic constants.
+
+252
+00:12:05.456 --> 00:12:06.928
+They come from traffic shape:
+
+253
+00:12:08.278 --> 00:12:09.643
+Here is a quick table:
+
+254
+00:12:09.923 --> 00:12:14.062
+Source of peak, and Typical factor over the daily average, and How to know.
+
+255
+00:12:14.342 --> 00:12:16.305
+Daily curve (evening dinner rush).
+
+256
+00:12:16.585 --> 00:12:18.803
+Typical factor over the daily average:
+
+257
+00:12:19.083 --> 00:12:20.385
+2 to 5 times.
+
+258
+00:12:20.665 --> 00:12:21.539
+How to know:
+
+259
+00:12:21.819 --> 00:12:23.910
+Hour-of-day histogram from last month.
+
+260
+00:12:24.190 --> 00:12:25.769
+Weekly (Sunday mornings).
+
+261
+00:12:26.049 --> 00:12:28.267
+Typical factor over the daily average:
+
+262
+00:12:28.547 --> 00:12:31.449
+1.2 to 1.5 times on top.
+
+263
+00:12:31.729 --> 00:12:32.603
+How to know:
+
+264
+00:12:32.883 --> 00:12:34.291
+Day-of-week histogram.
+
+265
+00:12:34.571 --> 00:12:37.665
+Marketing push notification to 5 M users.
+
+266
+00:12:37.945 --> 00:12:40.163
+Typical factor over the daily average:
+
+267
+00:12:40.443 --> 00:12:43.025
+5 to 15 times for 2 to 5 minutes.
+
+268
+00:12:43.305 --> 00:12:44.179
+How to know:
+
+269
+00:12:44.459 --> 00:12:45.953
+Past campaign dashboards.
+
+270
+00:12:46.233 --> 00:12:48.750
+Scheduled sale start (8 pm sharp).
+
+271
+00:12:49.030 --> 00:12:51.249
+Typical factor over the daily average:
+
+272
+00:12:51.529 --> 00:12:54.835
+15 to 40 times for the first 1 to 3 minutes.
+
+273
+00:12:55.115 --> 00:12:55.990
+How to know:
+
+274
+00:12:56.270 --> 00:12:58.723
+Past sales; this is the dangerous one.
+
+275
+00:12:59.003 --> 00:13:00.859
+Retry storm after an incident.
+
+276
+00:13:01.139 --> 00:13:03.358
+Typical factor over the daily average:
+
+277
+00:13:03.638 --> 00:13:06.027
+2 to 3 times on top of whatever caused it.
+
+278
+00:13:06.307 --> 00:13:07.182
+How to know:
+
+279
+00:13:07.462 --> 00:13:09.745
+Retry policy times failure rate.
+
+280
+00:13:11.095 --> 00:13:11.841
+Warning:
+
+281
+00:13:12.121 --> 00:13:14.148
+Peaks are measured over the wrong window.
+
+282
+00:13:14.428 --> 00:13:19.804
+A dashboard with 5-minute averages hides a 30-second spike that is 3 times higher.
+
+283
+00:13:20.084 --> 00:13:23.604
+Size for the per-second peak your autoscaler can't absorb.
+
+284
+00:13:23.884 --> 00:13:26.465
+That's the rise time from §1.1.
+
+285
+00:13:27.815 --> 00:13:29.309
+Read or write ratio.
+
+286
+00:13:29.589 --> 00:13:34.645
+Classify every workload by its ratio, because the ratio decides the architecture:
+
+287
+00:13:35.995 --> 00:13:37.360
+Here is a quick table:
+
+288
+00:13:37.640 --> 00:13:40.883
+Ratio, and Example, and Architecture implication.
+
+289
+00:13:41.163 --> 00:13:42.101
+10⁶:
+
+290
+00:13:42.381 --> 00:13:43.021
+1.
+
+291
+00:13:43.301 --> 00:13:44.176
+Example:
+
+292
+00:13:44.456 --> 00:13:46.952
+Serviceability, GST rate tables.
+
+293
+00:13:47.232 --> 00:13:48.789
+Architecture implication:
+
+294
+00:13:49.069 --> 00:13:51.779
+Full replica in memory; push invalidation.
+
+295
+00:13:52.059 --> 00:13:53.019
+100:
+
+296
+00:13:53.299 --> 00:13:53.939
+1.
+
+297
+00:13:54.219 --> 00:13:55.093
+Example:
+
+298
+00:13:55.373 --> 00:13:57.016
+Catalog, product page.
+
+299
+00:13:57.296 --> 00:13:58.853
+Architecture implication:
+
+300
+00:13:59.133 --> 00:14:01.395
+Cache + CDN; read replicas.
+
+301
+00:14:01.675 --> 00:14:02.336
+10:
+
+302
+00:14:02.616 --> 00:14:03.256
+1.
+
+303
+00:14:03.536 --> 00:14:04.411
+Example:
+
+304
+00:14:04.691 --> 00:14:05.416
+Cart.
+
+305
+00:14:05.696 --> 00:14:07.253
+Architecture implication:
+
+306
+00:14:07.533 --> 00:14:09.795
+Cache-friendly, but writes matter; Redis.
+
+307
+00:14:10.075 --> 00:14:10.715
+1:
+
+308
+00:14:10.995 --> 00:14:11.635
+1.
+
+309
+00:14:11.915 --> 00:14:12.789
+Example:
+
+310
+00:14:13.069 --> 00:14:15.373
+Inventory reservations during a sale.
+
+311
+00:14:15.653 --> 00:14:17.211
+Architecture implication:
+
+312
+00:14:17.491 --> 00:14:19.731
+Contention; per-row throughput matters.
+
+313
+00:14:20.011 --> 00:14:20.651
+1:
+
+314
+00:14:20.931 --> 00:14:21.848
+10 plus.
+
+315
+00:14:22.128 --> 00:14:23.003
+Example:
+
+316
+00:14:23.283 --> 00:14:25.480
+Rider location pings, clickstream.
+
+317
+00:14:25.760 --> 00:14:27.317
+Architecture implication:
+
+318
+00:14:27.597 --> 00:14:31.843
+Write-optimized store, batching, time-series or LSM, async.
+
+319
+00:14:33.193 --> 00:14:34.579
+Storage estimation.
+
+320
+00:14:34.859 --> 00:14:35.841
+The formula:
+
+321
+00:14:36.121 --> 00:14:42.179
+Storage = records per day times bytes or record times retention days times overhead.
+
+322
+00:14:43.529 --> 00:14:52.703
+The overhead multiplier covers indexes ( times 1.5 to 3), replication ( times 2 to 3) and headroom ( times 1.3).
+
+323
+00:14:52.983 --> 00:14:54.625
+Worked example: orders.
+
+324
+00:14:55.975 --> 00:14:57.341
+Here is a quick table:
+
+325
+00:14:57.621 --> 00:14:58.943
+Item, and Estimate.
+
+326
+00:14:59.223 --> 00:15:04.749
+Order header row: ~1 KB (IDs, amounts, address snapshot, status, timestamps).
+
+327
+00:15:05.029 --> 00:15:06.095
+Line items:
+
+328
+00:15:06.375 --> 00:15:10.407
+8 items times ~250 B = 2 KB.
+
+329
+00:15:10.687 --> 00:15:11.839
+Status history:
+
+330
+00:15:12.119 --> 00:15:16.386
+6 transitions times ~150 B about 1 KB.
+
+331
+00:15:16.666 --> 00:15:18.970
+Raw per order: ~4 KB.
+
+332
+00:15:19.250 --> 00:15:24.242
+Orders per day (year-round average incl. festivals): ~500 K.
+
+333
+00:15:24.522 --> 00:15:25.461
+Raw per day:
+
+334
+00:15:25.741 --> 00:15:29.538
+500 K times 4 KB = 2 GB per day.
+
+335
+00:15:29.818 --> 00:15:32.698
+Per year: ~730 GB raw.
+
+336
+00:15:34.048 --> 00:15:42.539
+times indexes (2) times copies (3 = primary + 2 replicas): ~4.4 TB per year provisioned.
+
+337
+00:15:42.819 --> 00:15:46.851
+GST record retention (multi-year, confirm with finance):
+
+338
+00:15:47.131 --> 00:15:50.480
+Hot data 1 year in OLTP, older in a cheap archive.
+
+339
+00:15:51.830 --> 00:15:52.747
+Success:
+
+340
+00:15:53.027 --> 00:15:54.499
+What the estimate tells us.
+
+341
+00:15:54.779 --> 00:16:00.113
+A few TB per year in PostgreSQL is fine for one well-provisioned cluster.
+
+342
+00:16:00.393 --> 00:16:02.825
+There's no need to shard orders on day one.
+
+343
+00:16:03.105 --> 00:16:09.675
+But plan partitioning by month so old data moves to archive cheaply (Ch 05, 28).
+
+344
+00:16:09.955 --> 00:16:13.817
+The estimate turned should we shard? into not yet, and here's the trigger.
+
+345
+00:16:15.167 --> 00:16:17.151
+Other storage in the platform (rough):
+
+346
+00:16:18.501 --> 00:16:19.866
+Here is a quick table:
+
+347
+00:16:20.146 --> 00:16:22.023
+Data, and Volume, and Store.
+
+348
+00:16:22.303 --> 00:16:24.074
+GST invoice PDFs.
+
+349
+00:16:24.354 --> 00:16:25.186
+Volume:
+
+350
+00:16:25.466 --> 00:16:32.442
+500 K per day times 60 KB = 30 GB per day, then ~11 TB per year.
+
+351
+00:16:32.722 --> 00:16:33.511
+Store:
+
+352
+00:16:33.791 --> 00:16:36.885
+Object storage + lifecycle to a cold tier.
+
+353
+00:16:37.165 --> 00:16:38.658
+Rider location pings.
+
+354
+00:16:38.938 --> 00:16:39.770
+Volume:
+
+355
+00:16:40.050 --> 00:16:48.711
+40 K riders times 1 ping or 4 s = 10 K writes per second times 100 B about 86 GB per day.
+
+356
+00:16:48.991 --> 00:16:49.781
+Store:
+
+357
+00:16:50.061 --> 00:16:53.453
+Redis (latest) + time-series (7-day retention).
+
+358
+00:16:53.733 --> 00:16:54.906
+Product images.
+
+359
+00:16:55.186 --> 00:16:56.018
+Volume:
+
+360
+00:16:56.298 --> 00:17:04.511
+250 K SKUs times 6 images times 4 sizes times 60 KB about 360 GB.
+
+361
+00:17:04.791 --> 00:17:05.581
+Store:
+
+362
+00:17:05.861 --> 00:17:07.759
+Object storage + CDN.
+
+363
+00:17:08.039 --> 00:17:09.383
+Application logs.
+
+364
+00:17:09.663 --> 00:17:10.495
+Volume:
+
+365
+00:17:10.775 --> 00:17:18.690
+26 services times ~3 KB per request times 80 M requests about 240 GB per day.
+
+366
+00:17:18.970 --> 00:17:19.759
+Store:
+
+367
+00:17:20.039 --> 00:17:23.346
+Often the largest cost line; sample and set retention.
+
+368
+00:17:24.696 --> 00:17:26.104
+Bandwidth estimation.
+
+369
+00:17:26.384 --> 00:17:27.365
+The formula:
+
+370
+00:17:27.645 --> 00:17:30.461
+Bandwidth = QPS times response size.
+
+371
+00:17:31.811 --> 00:17:33.945
+Sale start, catalog API:
+
+372
+00:17:34.225 --> 00:17:43.825
+110 K req per second times 20 KB JSON about 2.2 GB per second about 18 Gbps uncompressed.
+
+373
+00:17:44.105 --> 00:17:51.251
+With gzip or Brotli (~5 to 8 times on JSON), that's ~2 to 3.5 Gbps.
+
+374
+00:17:51.531 --> 00:17:56.545
+Images go to the CDN, so they aren't your origin's problem, but they are your bill:
+
+375
+00:17:56.825 --> 00:18:04.633
+6 M DAU times 40 images times 40 KB about 9.6 TB per day of CDN egress.
+
+376
+00:18:05.983 --> 00:18:06.623
+Tip:
+
+377
+00:18:06.903 --> 00:18:09.591
+Bandwidth estimates catch a class of bugs early.
+
+378
+00:18:09.871 --> 00:18:21.049
+A product-list API returning full product objects (80 KB) instead of list DTOs (8 KB) is a 10 times bandwidth and serialization-CPU bug.
+
+379
+00:18:21.329 --> 00:18:26.769
+Estimating response sizes during API design (Ch 04) prevents it.
+
+380
+00:18:28.119 --> 00:18:29.485
+Memory estimation.
+
+381
+00:18:29.765 --> 00:18:31.066
+Can it fit in memory?
+
+382
+00:18:31.346 --> 00:18:35.975
+That question decides between an in-process cache, Redis, and must go to disk.
+
+383
+00:18:37.325 --> 00:18:38.307
+The formula:
+
+384
+00:18:38.587 --> 00:18:42.939
+Memory = entries times (key + value + per-entry overhead).
+
+385
+00:18:44.289 --> 00:18:45.654
+Here is a quick table:
+
+386
+00:18:45.934 --> 00:18:48.153
+Structure, and Rough per-entry overhead.
+
+387
+00:18:48.433 --> 00:18:55.217
+Java HashMap entry (node + refs): ~32 to 48 B + key and value objects.
+
+388
+00:18:55.497 --> 00:19:01.150
+Java String (short, compact strings): ~40 B + 1 B or char (Latin-1).
+
+389
+00:19:01.430 --> 00:19:04.950
+Redis small key-value: ~50 to 90 B overhead.
+
+390
+00:19:06.300 --> 00:19:07.964
+Example: carts in Redis.
+
+391
+00:19:08.244 --> 00:19:20.105
+1.5 M active carts at peak times (8 items times 60 B + 200 B overhead) about 1.5 M times 680 B about 1 GB.
+
+392
+00:19:20.385 --> 00:19:26.188
+That fits comfortably in a single Redis shard (with a replica), so memory doesn't force clustering.
+
+393
+00:19:26.468 --> 00:19:29.647
+The deciding factor is ops per second (§4).
+
+394
+00:19:30.997 --> 00:19:32.789
+Server count and Little's Law.
+
+395
+00:19:33.069 --> 00:19:34.541
+CPU-based sizing.
+
+396
+00:19:34.821 --> 00:19:43.930
+The formula: cores needed = (peak QPS times CPU ms per request) / (1000 times target utilization).
+
+397
+00:19:45.280 --> 00:19:58.336
+Checkout at 850 req per second times 6 ms CPU per request ÷ (1000 times 0.5) about 10.2 cores, then 6 pods times 2 vCPU.
+
+398
+00:19:59.686 --> 00:20:00.433
+Note:
+
+399
+00:20:00.713 --> 00:20:04.851
+Why target 50 to 60 % utilization, not 90 %?.
+
+400
+00:20:05.131 --> 00:20:11.254
+Queueing theory (M or M or 1 intuition): waiting time grows as ρ / (1 minus ρ).
+
+401
+00:20:11.534 --> 00:20:15.310
+At 50 % utilization the multiplier is 1 times.
+
+402
+00:20:15.590 --> 00:20:17.297
+At 80 % it's 4 times.
+
+403
+00:20:17.577 --> 00:20:20.073
+At 95 % it's 19 times.
+
+404
+00:20:20.353 --> 00:20:25.942
+Tail latency explodes long before CPU hits 100 % (Ch 25).
+
+405
+00:20:27.292 --> 00:20:28.999
+Little's Law: in-flight work.
+
+406
+00:20:29.279 --> 00:20:30.260
+The formula:
+
+407
+00:20:30.540 --> 00:20:35.916
+L = lambda times W (in-flight = arrival rate times time in system).
+
+408
+00:20:37.266 --> 00:20:38.631
+Here is a quick table:
+
+409
+00:20:38.911 --> 00:20:41.066
+Use, and Calculation, and Result.
+
+410
+00:20:41.346 --> 00:20:42.967
+Concurrent checkout requests.
+
+411
+00:20:43.247 --> 00:20:44.314
+Calculation:
+
+412
+00:20:44.594 --> 00:20:48.754
+850 req per second times 0.15 s.
+
+413
+00:20:49.034 --> 00:20:51.594
+Result: ~128 in flight.
+
+414
+00:20:51.874 --> 00:20:53.858
+DB connections checkout needs.
+
+415
+00:20:54.138 --> 00:20:55.205
+Calculation:
+
+416
+00:20:55.485 --> 00:21:00.583
+850 req per second times 20 ms of DB time per request.
+
+417
+00:21:00.863 --> 00:21:03.338
+Result: ~17 connections busy.
+
+418
+00:21:03.618 --> 00:21:05.154
+Threads (platform threads).
+
+419
+00:21:05.434 --> 00:21:06.501
+Calculation:
+
+420
+00:21:06.781 --> 00:21:09.447
+128 in flight + headroom.
+
+421
+00:21:09.727 --> 00:21:13.503
+Result: ~200 (virtual threads remove this limit).
+
+422
+00:21:13.783 --> 00:21:15.554
+Kafka consumer parallelism.
+
+423
+00:21:15.834 --> 00:21:16.901
+Calculation:
+
+424
+00:21:17.181 --> 00:21:20.786
+1,000 events per second times 30 ms processing.
+
+425
+00:21:21.066 --> 00:21:24.693
+Result: ≥ 30 partitions or consumers.
+
+426
+00:21:26.043 --> 00:21:26.960
+Watch out:
+
+427
+00:21:27.240 --> 00:21:28.499
+The connection budget.
+
+428
+00:21:28.779 --> 00:21:35.072
+PostgreSQL connections are expensive (several MB each, with contention above a few hundred).
+
+429
+00:21:35.352 --> 00:21:44.739
+If 26 services times 6 pods times a pool of 20 all point at shared clusters, that's 3,120 potential connections.
+
+430
+00:21:45.019 --> 00:21:48.069
+Little's Law says you need far fewer busy connections.
+
+431
+00:21:48.349 --> 00:21:55.795
+Size pools from Little's Law, not from defaults, and add PgBouncer as pod counts grow (Ch 05).
+
+432
+00:21:57.145 --> 00:22:00.259
+Worked example: the festival-sale checkout estimate.
+
+433
+00:22:00.539 --> 00:22:03.675
+Given: a festival day with 1.5 M orders.
+
+434
+00:22:03.955 --> 00:22:06.857
+The sale starts at 8:00 pm.
+
+435
+00:22:07.137 --> 00:22:13.537
+20 % of the day's orders happen in the first hour, and minute one runs at 5 times that hour's average.
+
+436
+00:22:14.887 --> 00:22:16.252
+Here is a quick table:
+
+437
+00:22:16.532 --> 00:22:18.665
+Step, and Calculation, and Result.
+
+438
+00:22:18.945 --> 00:22:20.417
+Orders in the first hour.
+
+439
+00:22:20.697 --> 00:22:21.764
+Calculation:
+
+440
+00:22:22.044 --> 00:22:24.497
+1.5 M times 0.2.
+
+441
+00:22:24.777 --> 00:22:25.588
+Result:
+
+442
+00:22:25.868 --> 00:22:27.063
+300 K.
+
+443
+00:22:27.343 --> 00:22:29.561
+Average orders per second in that hour.
+
+444
+00:22:29.841 --> 00:22:30.908
+Calculation:
+
+445
+00:22:31.188 --> 00:22:34.623
+300 K ÷ 3,600.
+
+446
+00:22:34.903 --> 00:22:37.036
+Result: ~83 per second.
+
+447
+00:22:37.316 --> 00:22:39.001
+Peak-minute orders per second.
+
+448
+00:22:39.281 --> 00:22:40.348
+Calculation:
+
+449
+00:22:40.628 --> 00:22:42.036
+83 times 5.
+
+450
+00:22:42.316 --> 00:22:45.260
+Result: ~420 orders per second.
+
+451
+00:22:45.540 --> 00:22:49.508
+Checkout attempts (payment failures, retries, drop-offs: times 2).
+
+452
+00:22:49.788 --> 00:22:50.855
+Calculation:
+
+453
+00:22:51.135 --> 00:22:52.863
+420 times 2.
+
+454
+00:22:53.143 --> 00:22:56.428
+Result: ~850 checkout req per second.
+
+455
+00:22:56.708 --> 00:22:59.652
+Concurrent users at 8:00 pm.
+
+456
+00:22:59.932 --> 00:23:00.999
+Calculation:
+
+457
+00:23:01.279 --> 00:23:04.543
+6 M DAU times ~13 % online.
+
+458
+00:23:04.823 --> 00:23:06.785
+Result: ~800 K.
+
+459
+00:23:07.065 --> 00:23:10.244
+Gateway requests (1 request per 4 s per user).
+
+460
+00:23:10.524 --> 00:23:11.591
+Calculation:
+
+461
+00:23:11.871 --> 00:23:14.025
+800 K ÷ 4.
+
+462
+00:23:14.305 --> 00:23:20.108
+Result: ~200 K req per second. ...of which catalog or search or product reads.
+
+463
+00:23:20.388 --> 00:23:22.969
+Calculation: ~55 %.
+
+464
+00:23:23.249 --> 00:23:26.236
+Result: ~110 K req per second.
+
+465
+00:23:27.586 --> 00:23:34.967
+Reservations for the 1 rupeesonion SKU (in 30 % of orders, spread over ~50 busy stores).
+
+466
+00:23:35.247 --> 00:23:36.314
+Calculation:
+
+467
+00:23:36.594 --> 00:23:40.413
+850 times 0.3 ÷ 50.
+
+468
+00:23:40.693 --> 00:23:47.519
+Result: ~5 per second per store-SKU row. ...if one metro store gets 20 % of that demand.
+
+469
+00:23:47.799 --> 00:23:48.866
+Calculation:
+
+470
+00:23:49.146 --> 00:23:52.751
+850 times 0.3 times 0.2.
+
+471
+00:23:53.031 --> 00:23:59.559
+Result: ~50 per second on one row: fine for a row lock (~500 per second max).
+
+472
+00:23:59.839 --> 00:24:03.402
+Order DB statements (order + items + outbox).
+
+473
+00:24:03.682 --> 00:24:04.749
+Calculation:
+
+474
+00:24:05.029 --> 00:24:07.375
+420 times ~12.
+
+475
+00:24:07.655 --> 00:24:11.581
+Result: ~5 K statements per second on the orders primary.
+
+476
+00:24:11.861 --> 00:24:13.397
+Payment webhook callbacks.
+
+477
+00:24:13.677 --> 00:24:17.623
+Calculation: ~420 per second + retries.
+
+478
+00:24:17.903 --> 00:24:18.714
+Result:
+
+479
+00:24:18.994 --> 00:24:22.407
+Idempotent handler required (Ch 20, 45).
+
+480
+00:24:22.687 --> 00:24:24.863
+Kafka order.order.placed.v1.
+
+481
+00:24:25.143 --> 00:24:26.210
+Calculation:
+
+482
+00:24:26.490 --> 00:24:29.093
+420 per second times 2 KB.
+
+483
+00:24:29.373 --> 00:24:36.391
+Result: ~0.8 MB per second: tiny for Kafka; partitions sized by consumer time.
+
+484
+00:24:37.741 --> 00:24:38.659
+Success:
+
+485
+00:24:38.939 --> 00:24:41.541
+What this estimate tells us (the real value).
+
+486
+00:24:41.821 --> 00:24:47.987
+Checkout compute is not the problem. ~850 req per second needs ~6 pods.
+
+487
+00:24:48.267 --> 00:24:59.915
+Read traffic is the problem. ~110 K req per second of catalog needs CDN plus multi-layer caching, and pre-scaling (Ch 07, 21).
+
+488
+00:25:00.195 --> 00:25:02.883
+Contention is a watch item, not a crisis.
+
+489
+00:25:03.163 --> 00:25:07.237
+The hot SKU row sits at ~10 % of lock capacity.
+
+490
+00:25:07.517 --> 00:25:12.637
+We'd re-estimate if the sale became a single national flash deal (Ch 46).
+
+491
+00:25:12.917 --> 00:25:14.219
+Rise time kills.
+
+492
+00:25:14.499 --> 00:25:21.539
+From 9 K to 200 K req per second in about 40 s is faster than any reactive autoscaler.
+
+493
+00:25:21.819 --> 00:25:22.715
+Pre-scale.
+
+494
+00:25:24.065 --> 00:25:26.689
+Estimation in interviews versus at work.
+
+495
+00:25:26.969 --> 00:25:28.334
+Here is a quick table:
+
+496
+00:25:28.614 --> 00:25:30.001
+Interview, and At work.
+
+497
+00:25:30.281 --> 00:25:31.027
+Time.
+
+498
+00:25:31.307 --> 00:25:32.139
+Interview:
+
+499
+00:25:32.419 --> 00:25:33.678
+3 to 5 minutes.
+
+500
+00:25:33.958 --> 00:25:34.833
+At work:
+
+501
+00:25:35.113 --> 00:25:36.243
+Hours to days.
+
+502
+00:25:36.523 --> 00:25:37.355
+Inputs.
+
+503
+00:25:37.635 --> 00:25:38.467
+Interview:
+
+504
+00:25:38.747 --> 00:25:40.283
+Assumed, stated aloud.
+
+505
+00:25:40.563 --> 00:25:41.438
+At work:
+
+506
+00:25:41.718 --> 00:25:44.598
+Measured (metrics, load tests, business forecasts).
+
+507
+00:25:44.878 --> 00:25:45.774
+Precision.
+
+508
+00:25:46.054 --> 00:25:46.886
+Interview:
+
+509
+00:25:47.166 --> 00:25:48.531
+Order of magnitude.
+
+510
+00:25:48.811 --> 00:25:49.686
+At work:
+
+511
+00:25:49.966 --> 00:25:53.806
+Ranges with confidence (P50 or P90 forecasts).
+
+512
+00:25:54.086 --> 00:25:54.939
+Output.
+
+513
+00:25:55.219 --> 00:25:56.051
+Interview:
+
+514
+00:25:56.331 --> 00:25:58.038
+Which parts of the design matter.
+
+515
+00:25:58.318 --> 00:25:59.193
+At work:
+
+516
+00:25:59.473 --> 00:26:03.334
+Capacity plan, budget, pre-scale schedule, risk register.
+
+517
+00:26:03.614 --> 00:26:04.723
+Failure mode.
+
+518
+00:26:05.003 --> 00:26:05.835
+Interview:
+
+519
+00:26:06.115 --> 00:26:09.657
+Precision theatre (computing 83.33 per second).
+
+520
+00:26:09.937 --> 00:26:10.811
+At work:
+
+521
+00:26:11.091 --> 00:26:13.459
+Estimating once and never validating.
+
+522
+00:26:14.809 --> 00:26:15.919
+Interview script:
+
+523
+00:26:16.199 --> 00:26:24.497
+Let me assume 2 M DAU and about 40 API calls each, so 80 M a day, which is about 1 K per second average.
+
+524
+00:26:24.777 --> 00:26:28.383
+Evening peak is maybe 5 times, so 5 K per second.
+
+525
+00:26:28.663 --> 00:26:32.993
+Sale starts are much spikier, maybe 20 to 40 times in the first minute.
+
+526
+00:26:33.273 --> 00:26:39.652
+The read:write ratio is around 100:1, so reads dominate and caching is the main lever.
+
+527
+00:26:39.932 --> 00:26:47.932
+Storage is about 4 KB per order and 500 K orders a day, so 2 GB a day and under 1 TB a year raw.
+
+528
+00:26:48.212 --> 00:26:53.076
+That fits one Postgres cluster, so no sharding yet, and I'll partition by month.
+
+529
+00:26:54.426 --> 00:26:57.349
+Uncertainty, ranges and presenting estimates.
+
+530
+00:26:57.629 --> 00:27:01.469
+Senior estimates are ranges with drivers, not single numbers:
+
+531
+00:27:02.819 --> 00:27:04.184
+Here is a quick table:
+
+532
+00:27:04.464 --> 00:27:12.912
+Scenario, and Orders on sale day, and Peak checkout req per second, and Catalog req per second, and Catalog pods (before AZ headroom).
+
+533
+00:27:13.192 --> 00:27:16.115
+P50 (last year times 1.4 growth).
+
+534
+00:27:16.395 --> 00:27:17.824
+Orders on sale day:
+
+535
+00:27:18.104 --> 00:27:19.363
+1.5 M.
+
+536
+00:27:19.643 --> 00:27:21.307
+Peak checkout req per second:
+
+537
+00:27:21.587 --> 00:27:22.803
+850.
+
+538
+00:27:23.083 --> 00:27:24.619
+Catalog req per second:
+
+539
+00:27:24.899 --> 00:27:26.605
+165 K.
+
+540
+00:27:26.885 --> 00:27:29.339
+Catalog pods (before AZ headroom):
+
+541
+00:27:29.619 --> 00:27:30.621
+55.
+
+542
+00:27:30.901 --> 00:27:34.741
+P90 (marketing overperforms, times 1.15).
+
+543
+00:27:35.021 --> 00:27:36.451
+Orders on sale day:
+
+544
+00:27:36.731 --> 00:27:38.309
+1.75 M.
+
+545
+00:27:38.589 --> 00:27:40.253
+Peak checkout req per second:
+
+546
+00:27:40.533 --> 00:27:41.792
+980.
+
+547
+00:27:42.072 --> 00:27:43.608
+Catalog req per second:
+
+548
+00:27:43.888 --> 00:27:45.296
+190 K.
+
+549
+00:27:45.576 --> 00:27:48.029
+Catalog pods (before AZ headroom):
+
+550
+00:27:48.309 --> 00:27:49.376
+64.
+
+551
+00:27:49.656 --> 00:27:52.579
+Stress (P90 times 1.5 safety).
+
+552
+00:27:52.859 --> 00:27:54.288
+Orders on sale day:
+
+553
+00:27:54.568 --> 00:27:55.763
+2.6 M.
+
+554
+00:27:56.043 --> 00:27:57.707
+Peak checkout req per second:
+
+555
+00:27:57.987 --> 00:27:59.928
+1,470.
+
+556
+00:28:00.208 --> 00:28:01.744
+Catalog req per second:
+
+557
+00:28:02.024 --> 00:28:03.475
+285 K.
+
+558
+00:28:03.755 --> 00:28:06.208
+Catalog pods (before AZ headroom):
+
+559
+00:28:06.488 --> 00:28:07.491
+95.
+
+560
+00:28:08.841 --> 00:28:12.233
+Plan capacity at P90 plus zone-failure headroom.
+
+561
+00:28:12.513 --> 00:28:14.390
+Load test at the stress scenario.
+
+562
+00:28:14.670 --> 00:28:24.142
+Protect beyond stress with load shedding (Ch 18): serve 429 to a slice of low-priority traffic rather than fail everyone.
+
+563
+00:28:24.422 --> 00:28:26.171
+Tell executives the drivers:
+
+564
+00:28:26.451 --> 00:28:35.646
+Every extra 1 M users notified in the 7:55 pm push adds ~35 K req per second at 8:00.
+
+565
+00:28:36.996 --> 00:28:38.319
+Zone-failure headroom.
+
+566
+00:28:38.599 --> 00:28:42.951
+If you run in 3 availability zones and must survive losing one at peak:
+
+567
+00:28:44.301 --> 00:28:51.021
+The formula: pods provisioned = lceil pods needed times (zones) / (zones - 1) rceil.
+
+568
+00:28:52.371 --> 00:28:56.893
+64 pods needed, then 96 provisioned (32 per zone).
+
+569
+00:28:57.173 --> 00:29:01.461
+That's the real cost of the availability NFR from Ch 01.
+
+570
+00:29:01.741 --> 00:29:05.965
+Put it in the design doc so finance sees it as a decision, not waste.
+
+571
+00:29:07.315 --> 00:29:08.211
+Part 3.
+
+572
+00:29:08.491 --> 00:29:10.219
+Architecture and Diagrams.
+
+573
+00:29:11.469 --> 00:29:14.861
+The estimation pipeline (how numbers become decisions).
+
+574
+00:29:15.141 --> 00:29:16.485
+Here is the diagram.
+
+575
+00:29:20.335 --> 00:29:23.621
+Sequence: happy path, planned pre-scaling for the sale.
+
+576
+00:29:23.901 --> 00:29:26.567
+The sequence diagram walks through it step by step.
+
+577
+00:29:26.847 --> 00:29:27.871
+Eng to Pl:
+
+578
+00:29:28.151 --> 00:29:34.893
+POST or api or v1 or capacity or events or diwali-2026 or plan.
+
+579
+00:29:35.173 --> 00:29:39.461
+Pl to Prom: peak request rate per service during last Diwali.
+
+580
+00:29:39.741 --> 00:29:45.821
+Prom to Pl: catalog 118K per second, checkout 610 per second,...
+
+581
+00:29:46.101 --> 00:29:51.178
+Pl to Pl: apply growth, P90, per-pod capacity, AZ headroom.
+
+582
+00:29:51.458 --> 00:29:55.469
+Pl to Eng: plan (pods per service, data-tier checks, warnings).
+
+583
+00:29:55.749 --> 00:30:01.253
+Eng to Git: commit generated ScaledObjects (cron window 1900 IST).
+
+584
+00:30:01.533 --> 00:30:03.026
+Git to Argo: sync.
+
+585
+00:30:03.306 --> 00:30:05.802
+Argo to KEDA: apply ScaledObjects.
+
+586
+00:30:06.082 --> 00:30:10.967
+KEDA to K8s: scale catalog 12, then 95, checkout 4, then 10.
+
+587
+00:30:11.247 --> 00:30:16.239
+K8s to K8s: nodes join, JVMs warm up ( at most 10 min).
+
+588
+00:30:20.089 --> 00:30:24.249
+Sequence: failure path, reactive-only autoscaling at sale start.
+
+589
+00:30:24.529 --> 00:30:27.196
+The sequence diagram walks through it step by step.
+
+590
+00:30:27.476 --> 00:30:28.735
+U to GW:
+
+591
+00:30:29.015 --> 00:30:36.396
+20:00:00 traffic 9K, then 170K req per second in 40 s.
+
+592
+00:30:36.676 --> 00:30:38.468
+GW to Cat: forward.
+
+593
+00:30:38.748 --> 00:30:40.625
+Cat to GW: timeouts.
+
+594
+00:30:40.905 --> 00:30:42.143
+GW to U:
+
+595
+00:30:42.423 --> 00:30:43.660
+504.
+
+596
+00:30:43.940 --> 00:30:48.655
+U to GW: client retries times 2 to 3 (load amplification).
+
+597
+00:30:48.935 --> 00:30:52.369
+Prom to Prom: scrape at 20:00:15.
+
+598
+00:30:52.649 --> 00:30:56.233
+HPA to Prom: sync at 20:00:30.
+
+599
+00:30:56.513 --> 00:31:00.268
+HPA to CA: need 48 more pods, no room on nodes.
+
+600
+00:31:00.548 --> 00:31:03.129
+CA to CA: provision nodes (2 to 4 min).
+
+601
+00:31:03.409 --> 00:31:07.036
+CA to HPA: nodes ready 20:02:40.
+
+602
+00:31:07.316 --> 00:31:12.948
+HPA to Cat: pods scheduled, JVM start + warm-up ~60 s.
+
+603
+00:31:13.228 --> 00:31:14.465
+GW to U:
+
+604
+00:31:14.745 --> 00:31:20.015
+429 + Retry-After for 30 % of low-priority traffic.
+
+605
+00:31:23.865 --> 00:31:24.611
+Note:
+
+606
+00:31:24.891 --> 00:31:27.665
+What the system guarantees after this failure path.
+
+607
+00:31:27.945 --> 00:31:33.022
+Without pre-scaling, nothing: a correct design can still fail on arithmetic alone.
+
+608
+00:31:33.302 --> 00:31:42.795
+With pre-scaling as the primary defence and gateway load shedding as the backstop, the platform degrades a controlled slice of traffic instead of failing everyone.
+
+609
+00:31:43.075 --> 00:31:49.027
+Liveness probes must not depend on request latency, or overload turns into a restart storm.
+
+610
+00:31:50.377 --> 00:31:52.959
+State: the lifecycle of a capacity plan.
+
+611
+00:31:53.239 --> 00:31:58.956
+An estimate is only useful if it becomes a plan that is checked against reality after the event.
+
+612
+00:31:59.236 --> 00:32:01.753
+The same states apply to every sale or launch.
+
+613
+00:32:03.103 --> 00:32:04.447
+Here is the diagram.
+
+614
+00:32:08.297 --> 00:32:09.215
+Part 4.
+
+615
+00:32:09.495 --> 00:32:11.116
+Design Document Excerpt:
+
+616
+00:32:11.396 --> 00:32:14.127
+Diwali 2026 Capacity Plan.
+
+617
+00:32:15.377 --> 00:32:16.742
+Here is a quick table:
+
+618
+00:32:17.022 --> 00:32:18.323
+Field, and Value.
+
+619
+00:32:18.603 --> 00:32:19.947
+Author or Reviewers:
+
+620
+00:32:20.227 --> 00:32:24.409
+Platform capacity owner or SRE, Checkout, Catalog, Finance.
+
+621
+00:32:24.689 --> 00:32:25.585
+Status:
+
+622
+00:32:25.865 --> 00:32:26.739
+Approved.
+
+623
+00:32:27.019 --> 00:32:28.342
+Related ADRs:
+
+624
+00:32:28.622 --> 00:32:32.057
+ADR-014 Pre-scale for scheduled events.
+
+625
+00:32:33.407 --> 00:32:34.047
+1.
+
+626
+00:32:34.327 --> 00:32:35.735
+Context and Problem.
+
+627
+00:32:36.015 --> 00:32:42.969
+Last year's sale start caused ~4 minutes of errors due to reactive autoscaling lag (§1.1).
+
+628
+00:32:43.249 --> 00:32:46.556
+This year's marketing plan is 1.4 times bigger.
+
+629
+00:32:46.836 --> 00:32:47.540
+2.
+
+630
+00:32:47.820 --> 00:32:49.164
+Goals or Non-Goals.
+
+631
+00:32:49.444 --> 00:32:54.031
+Goals: meet SLOs at P90 demand, including loss of one AZ.
+
+632
+00:32:54.311 --> 00:32:56.807
+Degrade gracefully up to the stress scenario.
+
+633
+00:32:57.087 --> 00:33:05.129
+Non-goals: redesigning inventory contention (tracked in Ch 46 work); multi-region (Ch 27).
+
+634
+00:33:05.409 --> 00:33:06.156
+3.
+
+635
+00:33:06.436 --> 00:33:07.396
+Requirements.
+
+636
+00:33:08.746 --> 00:33:10.111
+Here is a quick table:
+
+637
+00:33:10.391 --> 00:33:11.863
+ID, and Requirement.
+
+638
+00:33:12.143 --> 00:33:13.189
+NFR-1:
+
+639
+00:33:13.469 --> 00:33:21.597
+Gateway availability ≥ 99.9 % during 19:45 to 22:00 IST.
+
+640
+00:33:21.877 --> 00:33:22.922
+NFR-2:
+
+641
+00:33:23.202 --> 00:33:31.181
+Catalog p99 at most 300 ms, checkout p99 at most 800 ms at P90 load.
+
+642
+00:33:31.461 --> 00:33:32.527
+NFR-3:
+
+643
+00:33:32.807 --> 00:33:37.629
+Survive loss of 1 of 3 AZs at P90 without breaching NFR-2.
+
+644
+00:33:37.909 --> 00:33:38.997
+NFR-4:
+
+645
+00:33:39.277 --> 00:33:44.823
+Beyond stress load, shed low-priority traffic (recommendations, non-cart browsing) first.
+
+646
+00:33:45.103 --> 00:33:46.149
+NFR-5:
+
+647
+00:33:46.429 --> 00:33:49.522
+Infra spend for the event at most 18 lakh rupees.
+
+648
+00:33:50.872 --> 00:33:51.576
+4.
+
+649
+00:33:51.856 --> 00:33:53.136
+Capacity estimates.
+
+650
+00:33:54.486 --> 00:33:55.851
+Here is a quick table:
+
+651
+00:33:56.131 --> 00:34:11.833
+Service, and Last year peak, and times growth 1.4, and P90 ( times 1.15 on top), and Per-pod capacity at SLO (load test), and Pods needed, and times AZ headroom 1.5, and Provision. catalog.
+
+652
+00:34:12.113 --> 00:34:13.222
+Last year peak:
+
+653
+00:34:13.502 --> 00:34:17.342
+118 K per second. times growth 1.4:
+
+654
+00:34:17.622 --> 00:34:19.841
+165 K per second.
+
+655
+00:34:20.121 --> 00:34:22.958
+P90 ( times 1.15 on top):
+
+656
+00:34:23.238 --> 00:34:25.094
+190 K per second.
+
+657
+00:34:25.374 --> 00:34:27.998
+Per-pod capacity at SLO (load test):
+
+658
+00:34:28.278 --> 00:34:30.006
+3,000 req per second.
+
+659
+00:34:30.286 --> 00:34:31.289
+Pods needed:
+
+660
+00:34:31.569 --> 00:34:34.747
+64. times AZ headroom 1.5:
+
+661
+00:34:35.027 --> 00:34:36.073
+96.
+
+662
+00:34:36.353 --> 00:34:37.227
+Provision:
+
+663
+00:34:37.507 --> 00:34:39.065
+96. search.
+
+664
+00:34:39.345 --> 00:34:40.454
+Last year peak:
+
+665
+00:34:40.734 --> 00:34:44.019
+22 K per second. times growth 1.4:
+
+666
+00:34:44.299 --> 00:34:45.857
+31 K per second.
+
+667
+00:34:46.137 --> 00:34:48.974
+P90 ( times 1.15 on top):
+
+668
+00:34:49.254 --> 00:34:50.897
+35 K per second.
+
+669
+00:34:51.177 --> 00:34:53.801
+Per-pod capacity at SLO (load test):
+
+670
+00:34:54.081 --> 00:34:55.702
+800 req per second.
+
+671
+00:34:55.982 --> 00:34:56.985
+Pods needed:
+
+672
+00:34:57.265 --> 00:35:00.337
+44. times AZ headroom 1.5:
+
+673
+00:35:00.617 --> 00:35:01.705
+66.
+
+674
+00:35:01.985 --> 00:35:02.859
+Provision:
+
+675
+00:35:03.139 --> 00:35:04.633
+66. cart.
+
+676
+00:35:04.913 --> 00:35:06.022
+Last year peak:
+
+677
+00:35:06.302 --> 00:35:09.502
+9 K per second. times growth 1.4:
+
+678
+00:35:09.782 --> 00:35:11.574
+12.6 K per second.
+
+679
+00:35:11.854 --> 00:35:14.691
+P90 ( times 1.15 on top):
+
+680
+00:35:14.971 --> 00:35:17.041
+14.5 K per second.
+
+681
+00:35:17.321 --> 00:35:19.945
+Per-pod capacity at SLO (load test):
+
+682
+00:35:20.225 --> 00:35:22.465
+2,500 req per second.
+
+683
+00:35:22.745 --> 00:35:23.747
+Pods needed:
+
+684
+00:35:24.027 --> 00:35:26.694
+6. times AZ headroom 1.5:
+
+685
+00:35:26.974 --> 00:35:27.721
+9.
+
+686
+00:35:28.001 --> 00:35:28.875
+Provision:
+
+687
+00:35:29.155 --> 00:35:30.371
+9. checkout.
+
+688
+00:35:30.651 --> 00:35:31.761
+Last year peak:
+
+689
+00:35:32.041 --> 00:35:35.603
+610 per second. times growth 1.4:
+
+690
+00:35:35.883 --> 00:35:37.547
+850 per second.
+
+691
+00:35:37.827 --> 00:35:40.665
+P90 ( times 1.15 on top):
+
+692
+00:35:40.945 --> 00:35:42.715
+980 per second.
+
+693
+00:35:42.995 --> 00:35:45.619
+Per-pod capacity at SLO (load test):
+
+694
+00:35:45.899 --> 00:35:47.734
+180 req per second.
+
+695
+00:35:48.014 --> 00:35:49.017
+Pods needed:
+
+696
+00:35:49.297 --> 00:35:51.963
+6. times AZ headroom 1.5:
+
+697
+00:35:52.243 --> 00:35:52.990
+9.
+
+698
+00:35:53.270 --> 00:35:54.145
+Provision:
+
+699
+00:35:54.425 --> 00:35:57.262
+9 (+1 deploy surge). inventory.
+
+700
+00:35:57.542 --> 00:35:58.651
+Last year peak:
+
+701
+00:35:58.931 --> 00:36:02.473
+2.1 K per second. times growth 1.4:
+
+702
+00:36:02.753 --> 00:36:04.459
+2.9 K per second.
+
+703
+00:36:04.739 --> 00:36:07.577
+P90 ( times 1.15 on top):
+
+704
+00:36:07.857 --> 00:36:09.649
+3.4 K per second.
+
+705
+00:36:09.929 --> 00:36:12.553
+Per-pod capacity at SLO (load test):
+
+706
+00:36:12.833 --> 00:36:14.561
+900 req per second.
+
+707
+00:36:14.841 --> 00:36:15.843
+Pods needed:
+
+708
+00:36:16.123 --> 00:36:18.726
+4. times AZ headroom 1.5:
+
+709
+00:36:19.006 --> 00:36:19.753
+6.
+
+710
+00:36:20.033 --> 00:36:20.907
+Provision:
+
+711
+00:36:21.187 --> 00:36:21.934
+6.
+
+712
+00:36:23.284 --> 00:36:24.457
+Data-tier checks.
+
+713
+00:36:24.737 --> 00:36:31.628
+Orders PostgreSQL: ~5 K statements per second at P50, ~6 K at P90.
+
+714
+00:36:31.908 --> 00:36:36.217
+The load test showed 14 K per second at 60 % CPU.
+
+715
+00:36:36.497 --> 00:36:37.265
+OK.
+
+716
+00:36:37.545 --> 00:36:50.345
+Connection budget (orders DB): checkout 10 pods times 10 + order 8 times 10 + outbox relay 2 times 2 = 184 at most 300 via PgBouncer.
+
+717
+00:36:50.625 --> 00:36:51.393
+OK.
+
+718
+00:36:51.673 --> 00:36:52.719
+Redis carts:
+
+719
+00:36:52.999 --> 00:37:02.129
+14.5 K req per second times ~3 ops = 44 K ops per second on one shard (limit ~100 K).
+
+720
+00:37:02.409 --> 00:37:04.073
+OK at 44 %.
+
+721
+00:37:04.353 --> 00:37:05.356
+Watch item.
+
+722
+00:37:05.636 --> 00:37:20.015
+Kafka: order.order.placed.v1 has 24 partitions; consumers at 30 ms or event, then capacity ~800 events per second versus ~560 per second at P90.
+
+723
+00:37:20.295 --> 00:37:21.063
+OK.
+
+724
+00:37:22.413 --> 00:37:23.159
+7.
+
+725
+00:37:23.439 --> 00:37:24.954
+Alternatives considered.
+
+726
+00:37:26.304 --> 00:37:27.669
+Here is a quick table:
+
+727
+00:37:27.949 --> 00:37:30.509
+Option, and Pros, and Cons, and Verdict.
+
+728
+00:37:30.789 --> 00:37:32.475
+Reactive HPA only.
+
+729
+00:37:32.755 --> 00:37:33.608
+Pros:
+
+730
+00:37:33.888 --> 00:37:34.741
+Cheapest.
+
+731
+00:37:35.021 --> 00:37:35.832
+Cons:
+
+732
+00:37:36.112 --> 00:37:38.672
+Fails on rise time (proven last year).
+
+733
+00:37:38.952 --> 00:37:39.763
+Verdict:
+
+734
+00:37:40.043 --> 00:37:40.960
+Rejected.
+
+735
+00:37:41.240 --> 00:37:42.797
+Permanently over-provision.
+
+736
+00:37:43.077 --> 00:37:43.931
+Pros:
+
+737
+00:37:44.211 --> 00:37:44.979
+Simple.
+
+738
+00:37:45.259 --> 00:37:49.461
+Cons: ~60 lakh rupees or quarter of idle capacity.
+
+739
+00:37:49.741 --> 00:37:50.552
+Verdict:
+
+740
+00:37:50.832 --> 00:37:51.749
+Rejected.
+
+741
+00:37:52.029 --> 00:37:56.915
+Scheduled pre-scale (KEDA cron) + reactive above floor + load shedding.
+
+742
+00:37:57.195 --> 00:37:58.048
+Pros:
+
+743
+00:37:58.328 --> 00:38:02.360
+Capacity ready before the spike; still elastic; bounded failure.
+
+744
+00:38:02.640 --> 00:38:03.451
+Cons:
+
+745
+00:38:03.731 --> 00:38:07.037
+Needs a forecast; cost for a 3.5 h window.
+
+746
+00:38:07.317 --> 00:38:08.128
+Verdict:
+
+747
+00:38:08.408 --> 00:38:09.240
+Chosen.
+
+748
+00:38:09.520 --> 00:38:11.291
+Staggered sale start by city.
+
+749
+00:38:11.571 --> 00:38:12.424
+Pros:
+
+750
+00:38:12.704 --> 00:38:14.709
+Smooths the spike ~4 times.
+
+751
+00:38:14.989 --> 00:38:15.800
+Cons:
+
+752
+00:38:16.080 --> 00:38:17.424
+Marketing objection.
+
+753
+00:38:17.704 --> 00:38:18.515
+Verdict:
+
+754
+00:38:18.795 --> 00:38:20.971
+Proposed for 2027.
+
+755
+00:38:22.321 --> 00:38:23.003
+8.
+
+756
+00:38:23.283 --> 00:38:24.435
+Failure modes.
+
+757
+00:38:24.715 --> 00:38:29.643
+Forecast too low, then reactive scaling above the cron floor, plus load shedding.
+
+758
+00:38:29.923 --> 00:38:36.515
+Node capacity unavailable in the region, then reserve capacity with the cloud provider 7 days before.
+
+759
+00:38:36.795 --> 00:38:42.918
+A deploy during the event, then change freeze 18:00 to 23:00.
+
+760
+00:38:43.198 --> 00:38:43.902
+10.
+
+761
+00:38:44.182 --> 00:38:45.270
+Observability.
+
+762
+00:38:45.550 --> 00:38:57.795
+A dedicated event dashboard showing actual versus forecast req per second per service, headroom % (capacity ÷ load), connection-pool saturation, and Kafka consumer lag.
+
+763
+00:38:58.075 --> 00:39:01.723
+A headroom 25 % alert pages the event war room.
+
+764
+00:39:03.073 --> 00:39:03.905
+11.
+
+765
+00:39:04.185 --> 00:39:05.017
+Rollout.
+
+766
+00:39:05.297 --> 00:39:19.079
+A full-scale load test at stress level on D-5 (shadow environment); a pre-scale dress rehearsal on D-2 (scale up, verify nodes, scale down); on the day, the cron trigger fires at 19:30.
+
+767
+00:39:19.359 --> 00:39:20.148
+12.
+
+768
+00:39:20.428 --> 00:39:21.153
+Cost.
+
+769
+00:39:21.433 --> 00:39:33.679
+3.5 h times ~200 extra pods (~300 vCPU), plus reserved node capacity, plus CDN egress about 11 lakh rupees, within budget.
+
+770
+00:39:35.029 --> 00:39:35.882
+14.
+
+771
+00:39:36.162 --> 00:39:38.935
+Decision (ADR-014 summary).
+
+772
+00:39:39.215 --> 00:39:50.778
+For any scheduled event with a forecast peak above 3 times normal, pre-scale with a cron-based floor sized at P90 times AZ headroom, starting 30 minutes before the event.
+
+773
+00:39:51.058 --> 00:39:54.087
+Reactive autoscaling stays active above the floor.
+
+774
+00:39:54.367 --> 00:39:58.058
+Gateway load shedding is mandatory beyond the stress scenario.
+
+775
+00:39:59.408 --> 00:40:00.368
+Part 5.
+
+776
+00:40:00.648 --> 00:40:02.632
+Hands-On Code, Level Ladder.
+
+777
+00:40:03.882 --> 00:40:06.207
+We build a capacity estimator four times.
+
+778
+00:40:06.487 --> 00:40:08.578
+Each level answers a harder question:
+
+779
+00:40:09.928 --> 00:40:11.293
+Here is a quick table:
+
+780
+00:40:11.573 --> 00:40:13.472
+Level, and Question it answers.
+
+781
+00:40:13.752 --> 00:40:14.584
+L1:
+
+782
+00:40:14.864 --> 00:40:16.101
+What are the rough numbers?
+
+783
+00:40:16.381 --> 00:40:18.728
+(a calculator you can run in 10 seconds).
+
+784
+00:40:19.008 --> 00:40:19.819
+L2:
+
+785
+00:40:20.099 --> 00:40:22.893
+Can the team share, save and compare scenarios?
+
+786
+00:40:23.173 --> 00:40:24.411
+(a Spring service).
+
+787
+00:40:24.691 --> 00:40:25.544
+L3:
+
+788
+00:40:25.824 --> 00:40:30.837
+How many pods do we actually provision, including zone failure, and what breaks first?
+
+789
+00:40:31.117 --> 00:40:33.912
+(a measured, policy-driven planner with warnings).
+
+790
+00:40:34.192 --> 00:40:35.067
+L4:
+
+791
+00:40:35.347 --> 00:40:40.808
+Generate the sale-day plan from last year's real traffic and ship it as GitOps config.
+
+792
+00:40:41.088 --> 00:40:42.624
+(Prometheus + KEDA).
+
+793
+00:40:43.974 --> 00:40:46.086
+L1, Concept (plain Java).
+
+794
+00:40:46.366 --> 00:40:47.902
+Here is the Java code.
+
+795
+00:40:48.182 --> 00:40:51.958
+It runs to 71 lines; the full listing is in the chapter.
+
+796
+00:40:52.238 --> 00:40:58.489
+CapacityEstimatorL1.java, run with: java CapacityEstimatorL1.java.
+
+797
+00:41:01.339 --> 00:41:02.171
+Output:
+
+798
+00:41:03.521 --> 00:41:04.438
+On screen:
+
+799
+00:41:04.718 --> 00:41:12.078
+Gateway avg 926 req per second, evening peak 4630 req per second.
+
+800
+00:41:12.358 --> 00:41:13.467
+Festival peak:
+
+801
+00:41:13.747 --> 00:41:18.995
+417 orders per second, 833 checkout req per second.
+
+802
+00:41:19.275 --> 00:41:23.947
+Checkout needs 10.0 cores, then 5 pods of 2 vCPU.
+
+803
+00:41:24.227 --> 00:41:26.659
+Busy DB connections about 17.
+
+804
+00:41:26.939 --> 00:41:29.179
+Order storage or year (provisioned):
+
+805
+00:41:29.459 --> 00:41:30.867
+4.1 TB.
+
+806
+00:41:31.147 --> 00:41:33.110
+Catalog egress (uncompressed):
+
+807
+00:41:33.390 --> 00:41:35.374
+2.1 GB per second.
+
+808
+00:41:38.224 --> 00:41:43.643
+What L1 gets right: every formula from §2 in one place, with named inputs.
+
+809
+00:41:43.923 --> 00:41:45.245
+What L1 can't do:
+
+810
+00:41:46.595 --> 00:41:47.961
+Here is a quick table:
+
+811
+00:41:48.241 --> 00:41:49.734
+Gap, and Why it matters.
+
+812
+00:41:50.014 --> 00:41:51.827
+Inputs are hard-coded guesses:
+
+813
+00:41:52.107 --> 00:41:54.070
+Nobody can review or reuse them.
+
+814
+00:41:54.350 --> 00:41:56.611
+No per-pod capacity from load tests:
+
+815
+00:41:56.891 --> 00:42:02.481
+6 ms CPU is a guess; real limits are often I or O, GC or locks.
+
+816
+00:42:02.761 --> 00:42:04.361
+No zone-failure headroom:
+
+817
+00:42:04.641 --> 00:42:07.606
+Plan fails exactly when an AZ fails at peak.
+
+818
+00:42:07.886 --> 00:42:11.150
+No cross-service checks (DB connections, Kafka):
+
+819
+00:42:11.430 --> 00:42:14.033
+Local answers can be globally impossible.
+
+820
+00:42:15.383 --> 00:42:18.049
+L2, Spring Implementation (four layers).
+
+821
+00:42:18.329 --> 00:42:23.172
+A small capacity-planner service where teams save named scenarios and compare them.
+
+822
+00:42:24.522 --> 00:42:29.407
+Here is the Kotlin code. build.gradle.kts (module l2-spring).
+
+823
+00:42:32.257 --> 00:42:33.175
+Domain math.
+
+824
+00:42:33.455 --> 00:42:34.991
+Here is the Java code.
+
+825
+00:42:35.271 --> 00:42:38.919
+It runs to 28 lines; the full listing is in the chapter.
+
+826
+00:42:39.199 --> 00:42:40.308
+Pure functions.
+
+827
+00:42:40.588 --> 00:42:45.751
+No Spring, no I or O, trivially testable and reusable in L3 or L4.
+
+828
+00:42:48.601 --> 00:42:49.497
+DTOs.
+
+829
+00:42:49.777 --> 00:42:51.313
+Here is the Java code.
+
+830
+00:42:54.163 --> 00:42:55.699
+Here is the Java code.
+
+831
+00:42:58.549 --> 00:43:00.277
+Entity and Repository.
+
+832
+00:43:00.557 --> 00:43:02.093
+Here is the Java code.
+
+833
+00:43:02.373 --> 00:43:06.085
+It runs to 33 lines; the full listing is in the chapter.
+
+834
+00:43:08.935 --> 00:43:10.471
+Here is the Java code.
+
+835
+00:43:13.321 --> 00:43:15.198
+Service, Delegate, Controller.
+
+836
+00:43:15.478 --> 00:43:17.014
+Here is the Java code.
+
+837
+00:43:17.294 --> 00:43:20.665
+It runs to 30 lines; the full listing is in the chapter.
+
+838
+00:43:23.515 --> 00:43:25.051
+Here is the Java code.
+
+839
+00:43:27.901 --> 00:43:29.437
+Here is the Java code.
+
+840
+00:43:29.717 --> 00:43:33.215
+It runs to 15 lines; the full listing is in the chapter.
+
+841
+00:43:36.065 --> 00:43:36.791
+Test.
+
+842
+00:43:37.071 --> 00:43:38.607
+Here is the Java code.
+
+843
+00:43:38.887 --> 00:43:42.599
+It runs to 25 lines; the full listing is in the chapter.
+
+844
+00:43:45.449 --> 00:43:51.891
+What L2 fixed: shared, reviewable, validated scenarios, and math isolated in pure functions.
+
+845
+00:43:52.171 --> 00:43:53.643
+What L2 still assumes:
+
+846
+00:43:53.923 --> 00:44:01.241
+CPU is the bottleneck, 6 ms CPU per request is true, and each service can be sized in isolation.
+
+847
+00:44:01.521 --> 00:44:06.683
+Real systems hit connection limits, zone failures and measured per-pod ceilings first.
+
+848
+00:44:08.033 --> 00:44:10.081
+L3, Production-Grade Planner.
+
+849
+00:44:10.361 --> 00:44:15.033
+L3 replaces guesses with measured per-pod capacity from load tests.
+
+850
+00:44:15.313 --> 00:44:23.036
+It applies an explicit policy (growth, P90 factor, zone headroom) and runs cross-service checks that produce warnings.
+
+851
+00:44:23.316 --> 00:44:26.580
+It refuses to plan a service it has no measurements for.
+
+852
+00:44:27.930 --> 00:44:29.274
+Here is the diagram.
+
+853
+00:44:33.124 --> 00:44:34.127
+Domain model.
+
+854
+00:44:34.407 --> 00:44:35.943
+Here is the Java code.
+
+855
+00:44:38.793 --> 00:44:40.329
+Here is the Java code.
+
+856
+00:44:40.609 --> 00:44:47.051
+Measured by load test: highest req per second ONE pod sustains while meeting its latency SLO.
+
+857
+00:44:49.901 --> 00:44:51.437
+Here is the Java code.
+
+858
+00:44:54.287 --> 00:44:55.823
+Here is the Java code.
+
+859
+00:44:56.103 --> 00:44:59.687
+It runs to 14 lines; the full listing is in the chapter.
+
+860
+00:45:02.537 --> 00:45:03.220
+Note.
+
+861
+00:45:03.500 --> 00:45:08.236
+In a real module, PlanWarning and CapacityPlan each go in their own file.
+
+862
+00:45:08.516 --> 00:45:10.500
+They're shown together here for brevity.
+
+863
+00:45:11.850 --> 00:45:12.618
+Planner.
+
+864
+00:45:12.898 --> 00:45:14.434
+Here is the Java code.
+
+865
+00:45:14.714 --> 00:45:18.533
+It runs to 76 lines; the full listing is in the chapter.
+
+866
+00:45:21.383 --> 00:45:23.367
+Configuration (from load tests).
+
+867
+00:45:23.647 --> 00:45:25.183
+Here is the Java code.
+
+868
+00:45:28.033 --> 00:45:29.505
+Here is the YAML code.
+
+869
+00:45:29.785 --> 00:45:33.454
+It runs to 24 lines; the full listing is in the chapter.
+
+870
+00:45:36.304 --> 00:45:38.565
+Tests (incl. failure scenarios).
+
+871
+00:45:38.845 --> 00:45:40.381
+Here is the Java code.
+
+872
+00:45:40.661 --> 00:45:44.288
+It runs to 58 lines; the full listing is in the chapter.
+
+873
+00:45:47.138 --> 00:45:47.885
+Note:
+
+874
+00:45:48.165 --> 00:45:49.829
+Why no Testcontainers here?.
+
+875
+00:45:50.109 --> 00:45:54.503
+L3's planner is pure logic, so plain unit tests are the right tool.
+
+876
+00:45:54.783 --> 00:45:58.559
+The Testcontainers rule applies when infrastructure is involved.
+
+877
+00:45:58.839 --> 00:46:05.218
+That starts in L4, where the planner talks to Prometheus (tested with a mock HTTP server).
+
+878
+00:46:06.568 --> 00:46:15.123
+What L3 still lacks: the demand input is typed in by hand, and the output is a report someone must turn into Kubernetes config.
+
+879
+00:46:15.403 --> 00:46:17.557
+Both steps are error-prone on sale day.
+
+880
+00:46:18.907 --> 00:46:20.401
+L4, Enterprise:
+
+881
+00:46:20.681 --> 00:46:23.241
+Plan from Real Traffic, Ship as GitOps.
+
+882
+00:46:23.521 --> 00:46:24.971
+L4 closes the loop:
+
+883
+00:46:25.251 --> 00:46:29.241
+Demand comes from Prometheus: last event's peak rate per service.
+
+884
+00:46:29.521 --> 00:46:38.971
+Output is KEDA ScaledObject YAML with a cron floor for the event window plus a Prometheus trigger so reactive scaling still works above the floor.
+
+885
+00:46:39.251 --> 00:46:43.049
+The YAML is committed to the GitOps repo and reviewed like code.
+
+886
+00:46:44.399 --> 00:46:45.999
+Prometheus demand source.
+
+887
+00:46:46.279 --> 00:46:47.815
+Here is the Java code.
+
+888
+00:46:48.095 --> 00:46:53.172
+Minimal mapping of the Prometheus HTTP API instant-query response.
+
+889
+00:46:56.022 --> 00:46:57.558
+Here is the Java code.
+
+890
+00:46:57.838 --> 00:47:01.593
+It runs to 45 lines; the full listing is in the chapter.
+
+891
+00:47:01.873 --> 00:47:07.611
+The RestClient is built (with timeouts) in PrometheusConfig, so tests can inject a mocked one.
+
+892
+00:47:10.461 --> 00:47:11.997
+Here is the Java code.
+
+893
+00:47:12.277 --> 00:47:15.755
+It runs to 20 lines; the full listing is in the chapter.
+
+894
+00:47:18.605 --> 00:47:20.077
+Here is the YAML code.
+
+895
+00:47:22.927 --> 00:47:24.527
+KEDA manifest generator.
+
+896
+00:47:24.807 --> 00:47:26.343
+Here is the Java code.
+
+897
+00:47:26.623 --> 00:47:30.271
+It runs to 54 lines; the full listing is in the chapter.
+
+898
+00:47:30.551 --> 00:47:37.036
+Generates a KEDA ScaledObject: cron floor for the event window + reactive Prometheus trigger.
+
+899
+00:47:39.886 --> 00:47:41.699
+Example output for checkout:
+
+900
+00:47:43.049 --> 00:47:44.521
+Here is the YAML code.
+
+901
+00:47:44.801 --> 00:47:48.471
+It runs to 24 lines; the full listing is in the chapter.
+
+902
+00:47:51.321 --> 00:47:52.067
+Warning:
+
+903
+00:47:52.347 --> 00:47:53.563
+Cron without a year.
+
+904
+00:47:53.843 --> 00:47:55.913
+Cron expressions have no year field.
+
+905
+00:47:56.193 --> 00:47:59.393
+The generated window recurs every year on that date.
+
+906
+00:47:59.673 --> 00:48:04.921
+Label the objects with the event and delete them after the event (§6.1).
+
+907
+00:48:05.201 --> 00:48:11.046
+A stale ScaledObject that pre-scales on the wrong date is just wasted money, but that's still money.
+
+908
+00:48:12.396 --> 00:48:13.996
+Event plan orchestration.
+
+909
+00:48:14.276 --> 00:48:15.812
+Here is the Java code.
+
+910
+00:48:16.092 --> 00:48:19.825
+It runs to 43 lines; the full listing is in the chapter.
+
+911
+00:48:22.675 --> 00:48:23.486
+Tests.
+
+912
+00:48:23.766 --> 00:48:25.302
+Here is the Java code.
+
+913
+00:48:25.582 --> 00:48:29.379
+It runs to 27 lines; the full listing is in the chapter.
+
+914
+00:48:32.229 --> 00:48:33.765
+Here is the Java code.
+
+915
+00:48:34.045 --> 00:48:37.523
+It runs to 20 lines; the full listing is in the chapter.
+
+916
+00:48:40.373 --> 00:48:41.119
+Note:
+
+917
+00:48:41.399 --> 00:48:42.807
+ADR-014:
+
+918
+00:48:43.087 --> 00:48:44.879
+Pre-scale for scheduled events.
+
+919
+00:48:45.159 --> 00:48:46.077
+Context.
+
+920
+00:48:46.357 --> 00:48:50.666
+Scheduled sale starts rise 15 to 40 times within about a minute.
+
+921
+00:48:50.946 --> 00:48:58.754
+Reactive scaling needs 2 to 5 minutes (scrape + HPA sync + node provisioning + JVM warm-up).
+
+922
+00:48:59.034 --> 00:49:03.578
+The incident in §1.1 cost ~4 minutes of errors at peak.
+
+923
+00:49:03.858 --> 00:49:04.733
+Decision.
+
+924
+00:49:05.013 --> 00:49:07.807
+For events forecast above 3 times normal peak:
+
+925
+00:49:08.087 --> 00:49:28.823
+(1) generate the plan from the last comparable event's measured peak times growth times P90; (2) size with measured per-pod capacity and one-zone-loss headroom; (3) apply a KEDA cron floor from Tminus 30 min to event end; (4) keep a Prometheus trigger for reactive scaling above the floor; (5) block
+
+926
+00:49:29.103 --> 00:49:36.165
+manifest generation while the plan has blockers; (6) gateway load shedding is mandatory as the backstop.
+
+927
+00:49:37.515 --> 00:49:38.539
+Consequences.
+
+928
+00:49:38.819 --> 00:49:41.485
+(+) Capacity is in place before the spike.
+
+929
+00:49:41.765 --> 00:49:43.984
+(+) The plan is reviewable in Git.
+
+930
+00:49:44.264 --> 00:49:54.845
+(minus ) We pay for idle capacity for ~30 minutes before the event and during low-demand parts of the window (~11 lakh rupees per major event).
+
+931
+00:49:55.125 --> 00:50:00.608
+(minus ) The forecast can still be wrong, which is why the reactive trigger and load shedding remain.
+
+932
+00:50:00.888 --> 00:50:15.160
+Revisit when: start-time staggering is accepted by marketing, or warm-up drops below ~30 s (for example with CRaC or AOT-cached JVMs), making reactive scaling viable for part of the spike.
+
+933
+00:50:16.510 --> 00:50:18.643
+What changed from L1 to L4.
+
+934
+00:50:18.923 --> 00:50:20.289
+Here is a quick table:
+
+935
+00:50:20.569 --> 00:50:24.025
+Concern, and L1, and L2, and L3, and L4.
+
+936
+00:50:24.305 --> 00:50:25.137
+Inputs.
+
+937
+00:50:25.417 --> 00:50:26.249
+L1:
+
+938
+00:50:26.529 --> 00:50:27.851
+Hard-coded guesses.
+
+939
+00:50:28.131 --> 00:50:28.942
+L2:
+
+940
+00:50:29.222 --> 00:50:30.502
+Saved scenarios.
+
+941
+00:50:30.782 --> 00:50:31.635
+L3:
+
+942
+00:50:31.915 --> 00:50:34.326
+Measured per-pod capacity + policy.
+
+943
+00:50:34.606 --> 00:50:35.481
+L4:
+
+944
+00:50:35.761 --> 00:50:38.278
+Real past traffic + measured capacity.
+
+945
+00:50:38.558 --> 00:50:39.753
+Bottleneck model.
+
+946
+00:50:40.033 --> 00:50:40.865
+L1:
+
+947
+00:50:41.145 --> 00:50:42.083
+CPU.
+
+948
+00:50:42.363 --> 00:50:43.174
+L2:
+
+949
+00:50:43.454 --> 00:50:44.393
+CPU.
+
+950
+00:50:44.673 --> 00:50:45.526
+L3:
+
+951
+00:50:45.806 --> 00:50:50.158
+Measured SLO capacity + DB connections + max pods.
+
+952
+00:50:50.438 --> 00:50:51.313
+L4:
+
+953
+00:50:51.593 --> 00:50:52.873
+Same, per service.
+
+954
+00:50:53.153 --> 00:50:54.155
+Zone failure.
+
+955
+00:50:54.435 --> 00:50:55.289
+L3:
+
+956
+00:50:55.569 --> 00:50:57.467
+(zone headroom, zone multiples).
+
+957
+00:50:57.747 --> 00:50:59.027
+Cross-service checks.
+
+958
+00:50:59.307 --> 00:51:01.099
+L3: connection budgets.
+
+959
+00:51:01.379 --> 00:51:02.595
+Refuses to guess.
+
+960
+00:51:02.875 --> 00:51:04.241
+L3: blockers.
+
+961
+00:51:04.521 --> 00:51:06.697
+L4: no manifests with blockers.
+
+962
+00:51:08.047 --> 00:51:08.900
+Output.
+
+963
+00:51:09.180 --> 00:51:10.012
+L1:
+
+964
+00:51:10.292 --> 00:51:11.145
+Console.
+
+965
+00:51:11.425 --> 00:51:12.236
+L2:
+
+966
+00:51:12.516 --> 00:51:13.455
+JSON.
+
+967
+00:51:13.735 --> 00:51:14.588
+L3:
+
+968
+00:51:14.868 --> 00:51:16.169
+Plan + warnings.
+
+969
+00:51:16.449 --> 00:51:17.324
+L4:
+
+970
+00:51:17.604 --> 00:51:19.801
+Plan + GitOps KEDA manifests.
+
+971
+00:51:20.081 --> 00:51:20.999
+Right for.
+
+972
+00:51:21.279 --> 00:51:22.111
+L1:
+
+973
+00:51:22.391 --> 00:51:23.713
+Interview, whiteboard.
+
+974
+00:51:23.993 --> 00:51:24.804
+L2:
+
+975
+00:51:25.084 --> 00:51:26.236
+Team discussions.
+
+976
+00:51:26.516 --> 00:51:27.369
+L3:
+
+977
+00:51:27.649 --> 00:51:29.185
+Quarterly capacity reviews.
+
+978
+00:51:29.465 --> 00:51:30.340
+L4:
+
+979
+00:51:30.620 --> 00:51:32.092
+Sale-day operations.
+
+980
+00:51:33.442 --> 00:51:34.317
+Question.
+
+981
+00:51:34.597 --> 00:51:35.962
+Would you build L4?
+
+982
+00:51:36.242 --> 00:51:37.607
+Thirty-second answer:
+
+983
+00:51:37.887 --> 00:51:41.002
+Only if you run several large scheduled events a year.
+
+984
+00:51:41.282 --> 00:51:47.255
+For one Diwali sale, L3 plus a hand-written ScaledObject reviewed in a PR is enough.
+
+985
+00:51:47.535 --> 00:51:54.554
+The process (forecast, then measured capacity, then zone headroom, then pre-scale, then shed) matters more than the tool.
+
+986
+00:51:55.904 --> 00:51:56.843
+Part 6.
+
+987
+00:51:57.123 --> 00:51:58.403
+Production Concerns.
+
+988
+00:51:59.653 --> 00:52:02.063
+Failure modes of capacity planning itself.
+
+989
+00:52:02.343 --> 00:52:03.709
+Here is a quick table:
+
+990
+00:52:03.989 --> 00:52:07.829
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+991
+00:52:08.109 --> 00:52:09.346
+Forecast too low.
+
+992
+00:52:09.626 --> 00:52:10.821
+Detection signal:
+
+993
+00:52:11.101 --> 00:52:15.069
+Actual or forecast ratio 1.2 on the event dashboard.
+
+994
+00:52:15.349 --> 00:52:16.565
+Blast radius:
+
+995
+00:52:16.845 --> 00:52:19.981
+Services above their floor rely on reactive scaling.
+
+996
+00:52:20.261 --> 00:52:21.263
+Mitigation:
+
+997
+00:52:21.543 --> 00:52:26.023
+Reactive trigger above floor; load shedding; P90 not P50.
+
+998
+00:52:26.303 --> 00:52:29.845
+Per-pod capacity stale (code got slower since the load test).
+
+999
+00:52:30.125 --> 00:52:31.319
+Detection signal:
+
+1000
+00:52:31.599 --> 00:52:35.546
+Per-pod req per second at SLO drifts in production metrics.
+
+1001
+00:52:35.826 --> 00:52:37.042
+Blast radius:
+
+1002
+00:52:37.322 --> 00:52:39.093
+Every plan built on it is wrong.
+
+1003
+00:52:39.373 --> 00:52:40.375
+Mitigation:
+
+1004
+00:52:40.655 --> 00:52:45.647
+Re-run load tests after major releases; track capacity per pod as a metric.
+
+1005
+00:52:45.927 --> 00:52:48.274
+Node capacity unavailable in region.
+
+1006
+00:52:48.554 --> 00:52:49.749
+Detection signal:
+
+1007
+00:52:50.029 --> 00:52:52.503
+Pending pods; node autoscaler errors.
+
+1008
+00:52:52.783 --> 00:52:53.999
+Blast radius:
+
+1009
+00:52:54.279 --> 00:52:55.943
+Pre-scale silently fails.
+
+1010
+00:52:56.223 --> 00:52:57.226
+Mitigation:
+
+1011
+00:52:57.506 --> 00:53:00.685
+Reserve capacity ahead; dress rehearsal on D-2.
+
+1012
+00:53:00.965 --> 00:53:02.863
+Cron window in the wrong timezone.
+
+1013
+00:53:03.143 --> 00:53:04.338
+Detection signal:
+
+1014
+00:53:04.618 --> 00:53:07.135
+Pre-scale happens 5.5 h off.
+
+1015
+00:53:07.415 --> 00:53:08.631
+Blast radius:
+
+1016
+00:53:08.911 --> 00:53:11.279
+Idle cost, or no capacity at start.
+
+1017
+00:53:11.559 --> 00:53:13.202
+Mitigation: timezone:
+
+1018
+00:53:13.482 --> 00:53:17.173
+Asia or Kolkata explicit; test the generated cron.
+
+1019
+00:53:18.523 --> 00:53:20.891
+Stale ScaledObject repeats next year.
+
+1020
+00:53:21.171 --> 00:53:22.365
+Detection signal:
+
+1021
+00:53:22.645 --> 00:53:24.992
+Unexpected scale-up on a random date.
+
+1022
+00:53:25.272 --> 00:53:26.488
+Blast radius:
+
+1023
+00:53:26.768 --> 00:53:27.493
+Cost.
+
+1024
+00:53:27.773 --> 00:53:28.776
+Mitigation:
+
+1025
+00:53:29.056 --> 00:53:32.299
+Label objects by event; post-event cleanup job.
+
+1026
+00:53:32.579 --> 00:53:34.947
+Connection budget exceeded on scale-up.
+
+1027
+00:53:35.227 --> 00:53:39.045
+Detection signal: too many connections errors; Hikari timeouts.
+
+1028
+00:53:39.325 --> 00:53:40.541
+Blast radius:
+
+1029
+00:53:40.821 --> 00:53:42.485
+Scaling up makes things worse.
+
+1030
+00:53:42.765 --> 00:53:43.768
+Mitigation:
+
+1031
+00:53:44.048 --> 00:53:47.824
+Planner blocker; PgBouncer; pools sized by Little's Law.
+
+1032
+00:53:48.104 --> 00:53:50.600
+Retry amplification during overload.
+
+1033
+00:53:50.880 --> 00:53:52.075
+Detection signal:
+
+1034
+00:53:52.355 --> 00:53:55.043
+Request rate rises while success rate falls.
+
+1035
+00:53:55.323 --> 00:53:56.539
+Blast radius:
+
+1036
+00:53:56.819 --> 00:53:58.291
+Overload feeds itself.
+
+1037
+00:53:58.571 --> 00:53:59.573
+Mitigation:
+
+1038
+00:53:59.853 --> 00:54:04.803
+Retry budgets, jittered backoff, Retry-After honored by clients (Ch 18).
+
+1039
+00:54:05.083 --> 00:54:07.067
+Liveness probe tied to latency.
+
+1040
+00:54:07.347 --> 00:54:08.541
+Detection signal:
+
+1041
+00:54:08.821 --> 00:54:10.677
+Restart storms during overload.
+
+1042
+00:54:10.957 --> 00:54:12.173
+Blast radius:
+
+1043
+00:54:12.453 --> 00:54:13.819
+Capacity collapses.
+
+1044
+00:54:14.099 --> 00:54:15.101
+Mitigation:
+
+1045
+00:54:15.381 --> 00:54:18.987
+Liveness = process health only; readiness for traffic.
+
+1046
+00:54:20.337 --> 00:54:22.150
+Observability for capacity.
+
+1047
+00:54:22.430 --> 00:54:23.795
+Here is a quick table:
+
+1048
+00:54:24.075 --> 00:54:29.110
+Signal, and Type, and Why. httpserverrequestssecondscount rate per service.
+
+1049
+00:54:29.390 --> 00:54:30.051
+Type:
+
+1050
+00:54:30.331 --> 00:54:31.611
+Counter, then rate.
+
+1051
+00:54:31.891 --> 00:54:32.574
+Why:
+
+1052
+00:54:32.854 --> 00:54:34.518
+Demand input for L4.
+
+1053
+00:54:34.798 --> 00:54:36.526
+Per-pod throughput at SLO.
+
+1054
+00:54:36.806 --> 00:54:37.467
+Type:
+
+1055
+00:54:37.747 --> 00:54:42.483
+Derived (rate ÷ ready pods, when p99 within SLO).
+
+1056
+00:54:42.763 --> 00:54:43.446
+Why:
+
+1057
+00:54:43.726 --> 00:54:46.329
+Validates load-test capacity in production.
+
+1058
+00:54:46.609 --> 00:54:52.667
+Headroom % = (pods times per-pod capacity minus load) ÷ capacity.
+
+1059
+00:54:52.947 --> 00:54:53.609
+Type:
+
+1060
+00:54:53.889 --> 00:54:54.913
+Recording rule.
+
+1061
+00:54:55.193 --> 00:54:55.875
+Why:
+
+1062
+00:54:56.155 --> 00:54:58.225
+The single most useful event-day number.
+
+1063
+00:54:58.505 --> 00:55:01.257
+Hikari hikaricpconnectionsactive or pending.
+
+1064
+00:55:01.537 --> 00:55:02.198
+Type:
+
+1065
+00:55:02.478 --> 00:55:03.289
+Gauge.
+
+1066
+00:55:03.569 --> 00:55:04.251
+Why:
+
+1067
+00:55:04.531 --> 00:55:08.329
+Little's Law in practice; pending 0 means pool saturation.
+
+1068
+00:55:08.609 --> 00:55:09.953
+Kafka consumer lag.
+
+1069
+00:55:10.233 --> 00:55:10.894
+Type:
+
+1070
+00:55:11.174 --> 00:55:11.985
+Gauge.
+
+1071
+00:55:12.265 --> 00:55:12.947
+Why:
+
+1072
+00:55:13.227 --> 00:55:14.785
+Consumers under-provisioned.
+
+1073
+00:55:16.135 --> 00:55:18.396
+Pending pods, node provisioning time.
+
+1074
+00:55:18.676 --> 00:55:19.337
+Type:
+
+1075
+00:55:19.617 --> 00:55:20.428
+Gauge.
+
+1076
+00:55:20.708 --> 00:55:21.391
+Why:
+
+1077
+00:55:21.671 --> 00:55:23.100
+Scaling mechanics health.
+
+1078
+00:55:23.380 --> 00:55:24.980
+Actual versus forecast.
+
+1079
+00:55:25.260 --> 00:55:25.921
+Type:
+
+1080
+00:55:26.201 --> 00:55:27.311
+Dashboard panel.
+
+1081
+00:55:27.591 --> 00:55:28.273
+Why:
+
+1082
+00:55:28.553 --> 00:55:30.388
+Calibrates next year's estimate.
+
+1083
+00:55:31.738 --> 00:55:37.647
+Example Prometheus recording rule for headroom (catalog, 3,000 req per second per pod):
+
+1084
+00:55:38.997 --> 00:55:40.469
+Here is the YAML code.
+
+1085
+00:55:40.749 --> 00:55:44.248
+It runs to 16 lines; the full listing is in the chapter.
+
+1086
+00:55:47.098 --> 00:55:48.037
+Security.
+
+1087
+00:55:48.317 --> 00:55:52.583
+Capacity plans reveal business forecasts (order volumes, growth).
+
+1088
+00:55:52.863 --> 00:55:57.130
+Treat planner output as confidential and keep it in a restricted repo.
+
+1089
+00:55:57.410 --> 00:56:01.570
+The planner's Prometheus access should be read-only, through a service account.
+
+1090
+00:56:01.850 --> 00:56:06.309
+Load tests must not hit real payment gateways or send real SMS.
+
+1091
+00:56:06.589 --> 00:56:10.791
+Use sandbox endpoints (Razorpay test mode) and stub providers.
+
+1092
+00:56:12.141 --> 00:56:13.805
+Performance and tuning knobs.
+
+1093
+00:56:14.085 --> 00:56:15.451
+Here is a quick table:
+
+1094
+00:56:15.731 --> 00:56:18.056
+Knob, and Typical value, and Guidance.
+
+1095
+00:56:18.336 --> 00:56:19.723
+Target utilization.
+
+1096
+00:56:20.003 --> 00:56:21.091
+Typical value:
+
+1097
+00:56:21.371 --> 00:56:23.461
+50 to 60 % CPU.
+
+1098
+00:56:23.741 --> 00:56:24.637
+Guidance:
+
+1099
+00:56:24.917 --> 00:56:30.251
+Lower for latency-critical paths; queueing grows as ρ/(1minus ρ).
+
+1100
+00:56:30.531 --> 00:56:31.768
+P90 factor.
+
+1101
+00:56:32.048 --> 00:56:33.136
+Typical value:
+
+1102
+00:56:33.416 --> 00:56:35.677
+1.15 to 1.5.
+
+1103
+00:56:35.957 --> 00:56:36.853
+Guidance:
+
+1104
+00:56:37.133 --> 00:56:39.203
+Derive from forecast error history.
+
+1105
+00:56:39.483 --> 00:56:40.805
+Pre-scale lead time.
+
+1106
+00:56:41.085 --> 00:56:42.173
+Typical value:
+
+1107
+00:56:42.453 --> 00:56:43.392
+30 min.
+
+1108
+00:56:43.672 --> 00:56:48.749
+Guidance: ≥ node provisioning + JVM warm-up + safety.
+
+1109
+00:56:49.029 --> 00:56:50.032
+Zone headroom.
+
+1110
+00:56:50.312 --> 00:56:53.768
+Typical value: zones ÷ (zones minus 1).
+
+1111
+00:56:54.048 --> 00:56:54.944
+Guidance:
+
+1112
+00:56:55.224 --> 00:57:00.109
+1.5 for 3 AZs; 2.0 for 2 AZs (expensive).
+
+1113
+00:57:00.389 --> 00:57:01.797
+Hikari pool size.
+
+1114
+00:57:02.077 --> 00:57:03.165
+Typical value:
+
+1115
+00:57:03.445 --> 00:57:05.685
+Little's Law times 1.5 to 2.
+
+1116
+00:57:05.965 --> 00:57:06.861
+Guidance:
+
+1117
+00:57:07.141 --> 00:57:09.616
+Not the default of 10 for every service.
+
+1118
+00:57:09.896 --> 00:57:11.581
+KEDA Prometheus threshold.
+
+1119
+00:57:11.861 --> 00:57:15.829
+Typical value: per-pod capacity times target utilization.
+
+1120
+00:57:16.109 --> 00:57:17.005
+Guidance:
+
+1121
+00:57:17.285 --> 00:57:20.165
+So reactive scaling starts before saturation.
+
+1122
+00:57:21.515 --> 00:57:22.241
+Cost.
+
+1123
+00:57:22.521 --> 00:57:24.483
+A capacity plan is a cost plan.
+
+1124
+00:57:24.763 --> 00:57:26.235
+For the Diwali example:
+
+1125
+00:57:27.585 --> 00:57:28.951
+Here is a quick table:
+
+1126
+00:57:29.231 --> 00:57:30.553
+Item, and Estimate.
+
+1127
+00:57:30.833 --> 00:57:40.391
+Extra pods (~200 times 1.5 vCPU times 3.5 h): ~1,050 vCPU-hours.
+
+1128
+00:57:40.671 --> 00:57:43.657
+Reserved node capacity (a day's reservation):
+
+1129
+00:57:43.937 --> 00:57:45.324
+Largest line item.
+
+1130
+00:57:45.604 --> 00:57:49.231
+CDN egress (~9.6 TB extra):
+
+1131
+00:57:49.511 --> 00:57:52.220
+Per-GB pricing, negotiate committed-use.
+
+1132
+00:57:52.500 --> 00:57:58.132
+Load-test environment (D-5, 4 h at stress): ~equal to one event hour.
+
+1133
+00:57:59.482 --> 00:58:10.085
+Show finance the cost of the alternative: last year's four minutes of errors at ~420 orders per second is ~100 K lost or delayed orders.
+
+1134
+00:58:10.365 --> 00:58:19.837
+At an average basket of 700, rupeesthat's ~7 crore rupees of GMV at risk against ~11 lakh rupees of capacity.
+
+1135
+00:58:21.187 --> 00:58:22.125
+Part 7.
+
+1136
+00:58:22.405 --> 00:58:24.112
+Anti-Patterns and Pitfalls.
+
+1137
+00:58:25.362 --> 00:58:26.002
+1.
+
+1138
+00:58:26.282 --> 00:58:27.455
+Precision theatre.
+
+1139
+00:58:27.735 --> 00:58:28.546
+Symptom:
+
+1140
+00:58:28.826 --> 00:58:34.309
+83.333 orders per second in an interview, while the peak factor is a guess.
+
+1141
+00:58:34.589 --> 00:58:35.314
+Fix:
+
+1142
+00:58:35.594 --> 00:58:40.927
+Round aggressively (10⁵ seconds per day) and spend the time on what the numbers imply.
+
+1143
+00:58:41.207 --> 00:58:41.911
+2.
+
+1144
+00:58:42.191 --> 00:58:43.621
+Sizing on averages.
+
+1145
+00:58:43.901 --> 00:58:44.711
+Symptom:
+
+1146
+00:58:44.991 --> 00:58:52.650
+We do 1 K req per second, 10 pods is plenty, then the evening peak is 5 times and a sale start is 30 times.
+
+1147
+00:58:52.930 --> 00:58:53.655
+Fix:
+
+1148
+00:58:53.935 --> 00:58:58.821
+Always carry a peak factor, justified by traffic shape (§2.3).
+
+1149
+00:58:59.101 --> 00:58:59.847
+3.
+
+1150
+00:59:00.127 --> 00:59:03.050
+Trusting reactive autoscaling for step changes.
+
+1151
+00:59:04.400 --> 00:59:16.240
+Here is the YAML code. before: only reactive; nothing is ready at 20:00:00. after: cron floor for the event window + reactive above it (L4).
+
+1152
+00:59:19.090 --> 00:59:19.794
+4.
+
+1153
+00:59:20.074 --> 00:59:21.781
+Guessing per-pod capacity.
+
+1154
+00:59:22.061 --> 00:59:22.871
+Symptom:
+
+1155
+00:59:23.151 --> 00:59:26.565
+A pod can do 2,000 req per second from a blog post.
+
+1156
+00:59:26.845 --> 00:59:31.367
+The real endpoint does 3 DB calls and manages 180.
+
+1157
+00:59:31.647 --> 00:59:32.373
+Fix:
+
+1158
+00:59:32.653 --> 00:59:38.882
+Load test each critical service to the point where p99 breaks its SLO, and use that number.
+
+1159
+00:59:39.162 --> 00:59:39.930
+5.
+
+1160
+00:59:40.210 --> 00:59:42.087
+Default pool sizes everywhere.
+
+1161
+00:59:43.437 --> 00:59:58.520
+Here is the YAML code. before: every service, every pod, adds up to thousands of connections. after: sized from Little's Law (850 req per second times 20 ms about 17 busy across the fleet), per pod.
+
+1162
+01:00:01.370 --> 01:00:02.117
+6.
+
+1163
+01:00:02.397 --> 01:00:03.805
+Ignoring zone failure.
+
+1164
+01:00:04.085 --> 01:00:04.895
+Symptom:
+
+1165
+01:00:05.175 --> 01:00:07.245
+Capacity is exactly enough at peak.
+
+1166
+01:00:07.525 --> 01:00:10.618
+One AZ outage at peak becomes a total outage.
+
+1167
+01:00:10.898 --> 01:00:18.727
+Fix: zones ÷ (zones minus 1) headroom for tier-1 services, and write down which services are tier-1.
+
+1168
+01:00:19.007 --> 01:00:19.754
+7.
+
+1169
+01:00:20.034 --> 01:00:21.442
+Forgetting the data tier.
+
+1170
+01:00:21.722 --> 01:00:22.533
+Symptom:
+
+1171
+01:00:22.813 --> 01:00:29.511
+The app tier scales to 96 pods, and the database falls over from connections, CPU or hot rows.
+
+1172
+01:00:29.791 --> 01:00:30.517
+Fix:
+
+1173
+01:00:30.797 --> 01:00:34.679
+Every capacity plan has a data-tier check section (§4).
+
+1174
+01:00:34.959 --> 01:00:35.642
+8.
+
+1175
+01:00:35.922 --> 01:00:37.181
+Estimating once.
+
+1176
+01:00:37.461 --> 01:00:38.271
+Symptom:
+
+1177
+01:00:38.551 --> 01:00:41.687
+The plan from two years ago still drives min replicas.
+
+1178
+01:00:41.967 --> 01:00:42.693
+Fix:
+
+1179
+01:00:42.973 --> 01:00:49.586
+Compare actual versus forecast after every event, and recalibrate the peak factors and per-pod capacity.
+
+1180
+01:00:50.936 --> 01:00:51.811
+Part 8.
+
+1181
+01:00:52.091 --> 01:00:53.435
+Interview Q and A.
+
+1182
+01:00:54.685 --> 01:00:55.517
+Beginner.
+
+1183
+01:00:55.797 --> 01:00:56.821
+Question 1.
+
+1184
+01:00:57.101 --> 01:01:01.346
+Why do back-of-the-envelope estimates in a system design interview at all?
+
+1185
+01:01:01.626 --> 01:01:02.991
+Thirty-second answer:
+
+1186
+01:01:03.271 --> 01:01:05.682
+To find out which parts of the design matter.
+
+1187
+01:01:05.962 --> 01:01:13.855
+Estimates tell you whether data fits in memory, whether you need caching, sharding or async processing, and where the bottleneck will be.
+
+1188
+01:01:14.135 --> 01:01:16.909
+Without numbers, every design choice is a guess.
+
+1189
+01:01:18.259 --> 01:01:19.261
+Question 2.
+
+1190
+01:01:19.541 --> 01:01:24.021
+Convert 10 million requests per day into requests per second, and give the peak.
+
+1191
+01:01:24.301 --> 01:01:25.667
+Thirty-second answer:
+
+1192
+01:01:25.947 --> 01:01:32.325
+10 M ÷ 10⁵ about 100 req per second average (116 exactly).
+
+1193
+01:01:32.605 --> 01:01:34.205
+Peak depends on traffic shape.
+
+1194
+01:01:34.485 --> 01:01:39.968
+With a typical 3 to 5 times daily peak, that's 300 to 500 req per second.
+
+1195
+01:01:40.248 --> 01:01:43.107
+A scheduled event can reach 20 to 40 times.
+
+1196
+01:01:44.457 --> 01:01:45.502
+Question 3.
+
+1197
+01:01:45.782 --> 01:01:49.558
+Which latency numbers should every engineer know, and why do they matter?
+
+1198
+01:01:49.838 --> 01:01:51.203
+Thirty-second answer:
+
+1199
+01:01:51.483 --> 01:02:09.083
+Memory ~100 ns, SSD random read ~20 to 100 µs, same-AZ round trip ~0.1 to 0.5 ms, cross-region ~50 to 200 ms, and new pod or JVM start in tens of seconds.
+
+1200
+01:02:09.363 --> 01:02:15.635
+They tell you what a design can achieve: memory is ~1,000 times faster than a network call.
+
+1201
+01:02:16.985 --> 01:02:18.052
+Question 4.
+
+1202
+01:02:18.332 --> 01:02:21.980
+Estimate storage for 1 million orders per day for one year.
+
+1203
+01:02:22.260 --> 01:02:23.625
+Thirty-second answer:
+
+1204
+01:02:23.905 --> 01:02:34.401
+Around 4 KB per order (header, ~8 items, status history) times 1 M per day about 4 GB per day about 1.5 TB per year raw.
+
+1205
+01:02:34.681 --> 01:02:39.396
+With indexes ( times 2) and 3 copies, ~9 TB provisioned.
+
+1206
+01:02:39.676 --> 01:02:44.263
+That fits a single well-provisioned relational cluster with monthly partitions.
+
+1207
+01:02:45.613 --> 01:02:46.615
+Intermediate.
+
+1208
+01:02:46.895 --> 01:02:48.005
+Question 5.
+
+1209
+01:02:48.285 --> 01:02:51.421
+How do you derive a peak factor instead of just picking one?
+
+1210
+01:02:51.701 --> 01:02:53.066
+Thirty-second answer:
+
+1211
+01:02:53.346 --> 01:03:01.303
+From traffic shape: hour-of-day and day-of-week histograms, past campaigns and sale starts, and retry behaviour during incidents.
+
+1212
+01:03:01.583 --> 01:03:07.706
+Take the per-second or 10-second maximum over the relevant window, divided by the daily average.
+
+1213
+01:03:09.056 --> 01:03:10.165
+Question 6.
+
+1214
+01:03:10.445 --> 01:03:13.603
+Use Little's Law to size a database connection pool.
+
+1215
+01:03:13.883 --> 01:03:15.248
+Thirty-second answer:
+
+1216
+01:03:15.528 --> 01:03:20.712
+Busy connections = request rate times time each request holds a connection.
+
+1217
+01:03:20.992 --> 01:03:27.712
+At 850 req per second times 20 ms = 17 busy connections across the fleet.
+
+1218
+01:03:27.992 --> 01:03:36.547
+Give 1.5 to 2 times headroom and split across pods: with 10 pods, ~4 per pod minimum, so 10 per pod is generous.
+
+1219
+01:03:37.897 --> 01:03:38.985
+Question 7.
+
+1220
+01:03:39.265 --> 01:03:42.315
+Why does the read or write ratio matter for design?
+
+1221
+01:03:42.595 --> 01:03:43.961
+Thirty-second answer:
+
+1222
+01:03:44.241 --> 01:03:45.862
+It tells you where to optimize.
+
+1223
+01:03:46.142 --> 01:03:50.707
+Read-heavy workloads (100:1) want caches, replicas and CDNs.
+
+1224
+01:03:50.987 --> 01:04:00.417
+Write-heavy workloads want append-friendly stores, batching and partitioning. one-on-one contended workloads need attention to locking and hot keys.
+
+1225
+01:04:01.767 --> 01:04:02.791
+Question 8.
+
+1226
+01:04:03.071 --> 01:04:07.700
+Estimate bandwidth for the product listing API at peak and how to reduce it.
+
+1227
+01:04:07.980 --> 01:04:09.345
+Thirty-second answer:
+
+1228
+01:04:09.625 --> 01:04:18.564
+110 K req per second times 20 KB about 2.2 GB per second (~18 Gbps) uncompressed.
+
+1229
+01:04:18.844 --> 01:04:34.140
+Reduce it with compression (5 to 8 times on JSON), list DTOs instead of full objects, pagination limits, sparse fields, HTTP caching or CDN for anonymous listings, and images served only via CDN.
+
+1230
+01:04:35.490 --> 01:04:36.557
+Question 9.
+
+1231
+01:04:36.837 --> 01:04:40.037
+How many servers do you need for 20 K req per second?
+
+1232
+01:04:40.317 --> 01:04:41.682
+Thirty-second answer:
+
+1233
+01:04:41.962 --> 01:04:43.647
+It depends on per-request cost.
+
+1234
+01:04:43.927 --> 01:04:51.927
+If a pod sustains 1,000 req per second at SLO (from a load test), that's 20 pods at 100 % utilization.
+
+1235
+01:04:52.207 --> 01:04:54.853
+At a 60 % target, ~34.
+
+1236
+01:04:55.133 --> 01:04:59.421
+With 3-AZ headroom, ~51, rounded to a multiple of 3.
+
+1237
+01:05:00.771 --> 01:05:01.539
+Senior.
+
+1238
+01:05:01.819 --> 01:05:02.864
+Question 10.
+
+1239
+01:05:03.144 --> 01:05:07.240
+Walk me through a capacity estimate for checkout during a festival sale.
+
+1240
+01:05:07.520 --> 01:05:08.885
+Thirty-second answer:
+
+1241
+01:05:09.165 --> 01:05:21.496
+1.5 M orders that day, 20 % in the first hour, first minute at 5 times, then ~420 orders per second, ~850 checkout attempts per second.
+
+1242
+01:05:21.776 --> 01:05:23.845
+That's ~6 pods for checkout.
+
+1243
+01:05:24.125 --> 01:05:35.347
+The real risks are ~110 K req per second of catalog reads, hot inventory rows, DB connection budgets, and the 40-second rise time, so pre-scale.
+
+1244
+01:05:36.697 --> 01:05:37.827
+Question 11.
+
+1245
+01:05:38.107 --> 01:05:39.451
+We have autoscaling.
+
+1246
+01:05:39.731 --> 01:05:42.142
+Why did the sale still fail in the first minutes?
+
+1247
+01:05:42.422 --> 01:05:43.787
+Thirty-second answer:
+
+1248
+01:05:44.067 --> 01:05:56.931
+Reactive scaling has latency: metrics scrape (~15 s), HPA sync (~15 s), node provisioning (1 to 4 min), JVM start and warm-up (20 to 90 s).
+
+1249
+01:05:57.211 --> 01:06:00.070
+A spike rising in 40 s outruns all of it.
+
+1250
+01:06:00.350 --> 01:06:06.238
+Meanwhile, overload, retries and latency-based liveness probes reduce capacity further.
+
+1251
+01:06:07.588 --> 01:06:08.676
+Question 12.
+
+1252
+01:06:08.956 --> 01:06:13.201
+How do you manage the database connection budget across 26 services?
+
+1253
+01:06:13.481 --> 01:06:14.847
+Thirty-second answer:
+
+1254
+01:06:15.127 --> 01:06:17.708
+Treat connections per database as a budget.
+
+1255
+01:06:17.988 --> 01:06:26.884
+Size each service's pool from Little's Law, sum pods times pool per database including peak scale-out, and keep the total under a safe limit.
+
+1256
+01:06:27.164 --> 01:06:33.585
+Use PgBouncer (transaction pooling) when the fleet is large, and enforce this in the capacity plan.
+
+1257
+01:06:34.935 --> 01:06:36.215
+Question 13.
+
+1258
+01:06:36.495 --> 01:06:40.271
+How would an estimate reveal a hot key problem before production?
+
+1259
+01:06:40.551 --> 01:06:41.917
+Thirty-second answer:
+
+1260
+01:06:42.197 --> 01:06:44.735
+Estimate per-key load, not just total load.
+
+1261
+01:06:45.015 --> 01:07:02.274
+Multiply total rate times fraction touching the key times concentration (one store, one SKU), and compare with single-key capacity (row lock ~200 to 1,000 updates per second, Redis key on one shard ~100 K ops per second shared).
+
+1262
+01:07:03.624 --> 01:07:04.819
+Question 14.
+
+1263
+01:07:05.099 --> 01:07:07.573
+Your estimate was 3 times off in production.
+
+1264
+01:07:07.853 --> 01:07:10.179
+What went wrong and how do you catch it earlier?
+
+1265
+01:07:10.459 --> 01:07:11.824
+Thirty-second answer:
+
+1266
+01:07:12.104 --> 01:07:27.037
+Usual causes: a wrong peak factor or window, per-pod capacity taken from a guess or stale load test, missing fan-out or retries, a new feature adding calls per page, or a marketing change nobody told engineering about.
+
+1267
+01:07:27.317 --> 01:07:36.875
+Catch it with actual-versus-forecast dashboards, early canary traffic, load tests after major releases, and a forecast process that includes marketing.
+
+1268
+01:07:38.225 --> 01:07:39.121
+Architect.
+
+1269
+01:07:39.401 --> 01:07:40.595
+Question 15.
+
+1270
+01:07:40.875 --> 01:07:46.550
+How would you set up capacity planning as an ongoing process for a 26-service platform?
+
+1271
+01:07:46.830 --> 01:07:48.195
+Thirty-second answer:
+
+1272
+01:07:48.475 --> 01:07:53.510
+Assign ownership (a capacity owner per tier-1 service and a platform owner overall).
+
+1273
+01:07:53.790 --> 01:07:58.227
+Keep measured per-pod capacity profiles current through regular load tests.
+
+1274
+01:07:58.507 --> 01:08:01.579
+Forecast quarterly and per event with business input.
+
+1275
+01:08:01.859 --> 01:08:04.526
+Plan with policy (P90, zone headroom).
+
+1276
+01:08:04.806 --> 01:08:05.979
+Check data tiers.
+
+1277
+01:08:06.259 --> 01:08:08.307
+Ship plans as GitOps config.
+
+1278
+01:08:08.587 --> 01:08:11.489
+Review actual versus forecast after each event.
+
+1279
+01:08:12.839 --> 01:08:14.033
+Question 16.
+
+1280
+01:08:14.313 --> 01:08:18.111
+How do you estimate the infrastructure cost of a new feature per order?
+
+1281
+01:08:18.391 --> 01:08:19.756
+Thirty-second answer:
+
+1282
+01:08:20.036 --> 01:08:29.508
+Estimate added requests per order (fan-out), CPU per request, storage and egress per order, and third-party costs (SMS, maps API).
+
+1283
+01:08:29.788 --> 01:08:33.500
+Convert to ₹ with unit prices, then divide by orders.
+
+1284
+01:08:33.780 --> 01:08:37.001
+Compare with the feature's revenue or retention impact.
+
+1285
+01:08:38.351 --> 01:08:39.695
+Question 17.
+
+1286
+01:08:39.975 --> 01:08:42.642
+The business expects 10 times growth in 2 years.
+
+1287
+01:08:42.922 --> 01:08:45.013
+What breaks first and how do you plan?
+
+1288
+01:08:45.293 --> 01:08:46.658
+Thirty-second answer:
+
+1289
+01:08:46.938 --> 01:08:49.093
+Estimate each component at 10 times.
+
+1290
+01:08:49.373 --> 01:09:04.626
+Usually the first to break are single-writer databases (write throughput, connections), hot keys, shared infra (Kafka cluster, Redis shard), cost lines like logs and CDN, and org or operational load, before stateless compute.
+
+1291
+01:09:04.906 --> 01:09:08.767
+Plan changes in order of time to break times lead time to fix.
+
+1292
+01:09:10.117 --> 01:09:11.291
+Question 18.
+
+1293
+01:09:11.571 --> 01:09:15.837
+How do you present capacity estimates and their uncertainty to executives?
+
+1294
+01:09:16.117 --> 01:09:17.483
+Thirty-second answer:
+
+1295
+01:09:17.763 --> 01:09:26.552
+Give scenarios (P50 or P90 or stress) with their drivers, what each costs, and what happens if we're wrong (degradation, not outage).
+
+1296
+01:09:26.832 --> 01:09:28.539
+Lead with the decision you need:
+
+1297
+01:09:28.819 --> 01:09:35.539
+Approve 11 lakh rupees to protect ~7 crore rupees of GMV at risk in the first hour.
+
+1298
+01:09:36.889 --> 01:09:38.126
+Question 19.
+
+1299
+01:09:38.406 --> 01:09:43.441
+How do you estimate when there's no historical data (a new city launch or a new product)?
+
+1300
+01:09:43.721 --> 01:09:45.086
+Thirty-second answer:
+
+1301
+01:09:45.366 --> 01:10:03.158
+Use analogues (a similar city scaled by population or penetration), top-down market sizing checked against bottom-up (store capacity times riders times slots), wide ranges, and a staged launch (invite-only, one pincode cluster) that produces real data quickly.
+
+1302
+01:10:03.438 --> 01:10:08.494
+Then design for elasticity plus hard limits (admission control, slot caps).
+
+1303
+01:10:09.844 --> 01:10:10.953
+Question 20.
+
+1304
+01:10:11.233 --> 01:10:14.604
+Is N+1 or zone-failure headroom worth the cost?
+
+1305
+01:10:14.884 --> 01:10:16.079
+How do you decide?
+
+1306
+01:10:16.359 --> 01:10:17.724
+Thirty-second answer:
+
+1307
+01:10:18.004 --> 01:10:19.092
+Decide per tier.
+
+1308
+01:10:19.372 --> 01:10:30.529
+Tier-1 paths (checkout, payment, catalog during events) get zones ÷ (zones minus 1) headroom because an AZ loss at peak is a total outage otherwise.
+
+1309
+01:10:30.809 --> 01:10:34.713
+Tier-2 or 3 services accept degradation or shed load.
+
+1310
+01:10:34.993 --> 01:10:41.692
+Weigh the headroom cost against the probability of an AZ event times revenue at risk times duration.
+
+1311
+01:10:43.042 --> 01:10:43.938
+Part 9.
+
+1312
+01:10:44.218 --> 01:10:45.626
+Summary and Practice.
+
+1313
+01:10:46.876 --> 01:10:47.964
+Key takeaways.
+
+1314
+01:10:48.244 --> 01:10:52.404
+Estimation finds which part of the design breaks, not a precise number.
+
+1315
+01:10:52.684 --> 01:10:53.516
+Anchors:
+
+1316
+01:10:53.796 --> 01:11:07.023
+1 M per day about 12 per second, a day about 10⁵ s, memory ~100 ns, same-AZ hop ~0.5 ms, new JVM or node = tens of seconds to minutes.
+
+1317
+01:11:07.303 --> 01:11:10.225
+Peak factors come from traffic shape and rise time.
+
+1318
+01:11:10.505 --> 01:11:13.172
+Scheduled sale starts are the dangerous case.
+
+1319
+01:11:13.452 --> 01:11:22.583
+The read or write ratio decides the architecture: memory replica, cache or CDN, write-optimized store, or contention design.
+
+1320
+01:11:22.863 --> 01:11:28.772
+Storage = records times size times retention times overhead (indexes, replicas).
+
+1321
+01:11:29.052 --> 01:11:31.164
+Separate OLTP, blobs and archive.
+
+1322
+01:11:32.514 --> 01:11:35.501
+Little's Law sizes pools, threads and partitions.
+
+1323
+01:11:35.781 --> 01:11:38.725
+Size connection pools from it, never from defaults.
+
+1324
+01:11:39.005 --> 01:11:41.799
+Target 50 to 60 % utilization.
+
+1325
+01:11:42.079 --> 01:11:44.703
+Queueing makes tails explode near saturation.
+
+1326
+01:11:44.983 --> 01:11:50.615
+Add zone-failure headroom for tier-1 services: zones ÷ (zones minus 1).
+
+1327
+01:11:50.895 --> 01:11:54.053
+Reactive autoscaling can't absorb step changes.
+
+1328
+01:11:54.333 --> 01:11:57.063
+Pre-scale, and keep load shedding as the backstop.
+
+1329
+01:11:57.343 --> 01:12:01.845
+Present ranges with drivers and cost, and recalibrate after every event.
+
+1330
+01:12:03.195 --> 01:12:04.517
+Decision cheat sheet.
+
+1331
+01:12:04.797 --> 01:12:06.163
+Here is a quick table:
+
+1332
+01:12:06.443 --> 01:12:08.555
+If the estimate shows..., and Then....
+
+1333
+01:12:08.835 --> 01:12:11.459
+Dataset a few hundred MB, read-mostly:
+
+1334
+01:12:11.739 --> 01:12:13.552
+In-memory replica per instance.
+
+1335
+01:12:13.832 --> 01:12:16.648
+Read:write ≥ 100:1:
+
+1336
+01:12:16.928 --> 01:12:19.296
+Cache + CDN + read replicas.
+
+1337
+01:12:19.576 --> 01:12:21.005
+Write-heavy time series:
+
+1338
+01:12:21.285 --> 01:12:23.653
+LSM or time-series store, batching.
+
+1339
+01:12:23.933 --> 01:12:25.939
+Per-key rate near single-key limits:
+
+1340
+01:12:26.219 --> 01:12:31.616
+Split keys, bucket, queue (Ch 46). Σ pools DB connection limit:
+
+1341
+01:12:31.896 --> 01:12:34.157
+Little's Law sizing, PgBouncer.
+
+1342
+01:12:34.437 --> 01:12:36.357
+Spike rise time scaling time:
+
+1343
+01:12:36.637 --> 01:12:38.771
+Pre-scale (cron floor) + shedding.
+
+1344
+01:12:39.051 --> 01:12:42.272
+Growth breaks a component before a migration could finish:
+
+1345
+01:12:42.552 --> 01:12:45.603
+Start the migration now (runway versus lead time).
+
+1346
+01:12:46.953 --> 01:12:48.083
+Exercises.
+
+1347
+01:12:48.363 --> 01:12:49.729
+Here is a quick table:
+
+1348
+01:12:50.009 --> 01:12:51.865
+Band, and Exercise, and Hint.
+
+1349
+01:12:52.145 --> 01:12:52.977
+B1.
+
+1350
+01:12:53.257 --> 01:12:54.323
+Exercise:
+
+1351
+01:12:54.603 --> 01:13:00.385
+Estimate daily and peak QPS for search-service with 2 M DAU and 6 searches each.
+
+1352
+01:13:00.665 --> 01:13:01.347
+Hint:
+
+1353
+01:13:01.627 --> 01:13:06.086
+12 M per day about 140 per second; evening 5 times.
+
+1354
+01:13:06.366 --> 01:13:07.198
+B1.
+
+1355
+01:13:07.478 --> 01:13:08.545
+Exercise:
+
+1356
+01:13:08.825 --> 01:13:12.217
+Estimate one year of GST invoice PDF storage.
+
+1357
+01:13:12.497 --> 01:13:13.179
+Hint:
+
+1358
+01:13:13.459 --> 01:13:18.281
+500 K per day times 60 KB times 365.
+
+1359
+01:13:18.561 --> 01:13:19.435
+B2.
+
+1360
+01:13:19.715 --> 01:13:20.782
+Exercise:
+
+1361
+01:13:21.062 --> 01:13:30.235
+Size the Kafka partitions for tracking.location.updated.v1 at 10 K msgs per second with 5 ms processing.
+
+1362
+01:13:30.515 --> 01:13:31.198
+Hint:
+
+1363
+01:13:31.478 --> 01:13:32.417
+Little's Law:
+
+1364
+01:13:32.697 --> 01:13:37.347
+10 K times 0.005 = 50 concurrent.
+
+1365
+01:13:37.627 --> 01:13:38.502
+B2.
+
+1366
+01:13:38.782 --> 01:13:39.849
+Exercise:
+
+1367
+01:13:40.129 --> 01:13:45.846
+Extend L2 to return bandwidth in Gbps and warn when 10 Gbps.
+
+1368
+01:13:46.126 --> 01:13:46.809
+Hint:
+
+1369
+01:13:47.089 --> 01:13:48.881
+Add a warning list to the response.
+
+1370
+01:13:49.161 --> 01:13:50.035
+B3.
+
+1371
+01:13:50.315 --> 01:13:51.382
+Exercise:
+
+1372
+01:13:51.662 --> 01:14:00.003
+Add a Kafka-consumer check to the L3 planner (partitions times per-consumer rate ≥ forecast events per second).
+
+1373
+01:14:00.283 --> 01:14:00.966
+Hint:
+
+1374
+01:14:01.246 --> 01:14:02.569
+New profile fields.
+
+1375
+01:14:03.919 --> 01:14:04.793
+B3.
+
+1376
+01:14:05.073 --> 01:14:06.140
+Exercise:
+
+1377
+01:14:06.420 --> 01:14:10.772
+Write the PromQL for per-pod throughput when p99 SLO.
+
+1378
+01:14:11.052 --> 01:14:11.735
+Hint:
+
+1379
+01:14:12.015 --> 01:14:14.703
+Combine the rate with a histogramquantile filter.
+
+1380
+01:14:14.983 --> 01:14:15.857
+B4.
+
+1381
+01:14:16.137 --> 01:14:17.204
+Exercise:
+
+1382
+01:14:17.484 --> 01:14:24.055
+Write a runway-versus-lead-time table for 10 times growth across orders DB, Redis carts and Kafka.
+
+1383
+01:14:24.335 --> 01:14:25.017
+Hint:
+
+1384
+01:14:25.297 --> 01:14:27.751
+Compare months-to-limit with migration months.
+
+1385
+01:14:28.031 --> 01:14:28.905
+B4.
+
+1386
+01:14:29.185 --> 01:14:30.252
+Exercise:
+
+1387
+01:14:30.532 --> 01:14:37.487
+Draft ADR-015: virtual waiting room versus pre-scaling for a national 1 rupeesflash deal.
+
+1388
+01:14:37.767 --> 01:14:38.449
+Hint:
+
+1389
+01:14:38.729 --> 01:14:40.777
+Admission control, fairness, cost.
+
+1390
+01:14:42.127 --> 01:14:43.130
+Further reading.
+
+1391
+01:14:43.410 --> 01:14:47.869
+Jeff Dean, Numbers Everyone Should Know (and the updated community versions).
+
+1392
+01:14:48.149 --> 01:14:50.645
+The Art of Capacity Planning, John Allspaw.
+
+1393
+01:14:50.925 --> 01:14:53.335
+Site Reliability Engineering (Google):
+
+1394
+01:14:53.615 --> 01:14:58.906
+Software Engineering in SRE: capacity planning and Handling Overload chapters.
+
+1395
+01:14:59.186 --> 01:15:00.103
+John D.
+
+1396
+01:15:00.383 --> 01:15:01.066
+C.
+
+1397
+01:15:01.346 --> 01:15:06.978
+Little, A Proof for the Queuing Formula L = λW (1961).
+
+1398
+01:15:07.258 --> 01:15:08.666
+KEDA documentation:
+
+1399
+01:15:08.946 --> 01:15:10.759
+Cron and Prometheus scalers.
+
+1400
+01:15:12.109 --> 01:15:13.347
+Related chapters.
+
+1401
+01:15:13.627 --> 01:15:30.224
+01, What System Design Is, 05, Relational Databases, 07, Caching, 18, Resilience Patterns, 25, Performance Engineering, 26, Deployment and Infrastructure, 46, Checkout and Inventory Reservation.
+
+1402
+01:15:31.574 --> 01:15:33.174
+That's the end of this chapter.
+
+1403
+01:15:33.454 --> 01:15:39.577
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1404
+01:15:39.857 --> 01:15:41.307
+See you in the next chapter.
+

@@ -1,0 +1,6054 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.609
+API Design.
+
+2
+00:00:01.889 --> 00:00:06.241
+Chapter 04, from the Foundations part of the System Design Playbook.
+
+3
+00:00:07.991 --> 00:00:08.951
+At a glance:
+
+4
+00:00:09.231 --> 00:00:10.404
+Chapter at a glance.
+
+5
+00:00:10.684 --> 00:00:11.687
+Reader bands:
+
+6
+00:00:11.967 --> 00:00:14.271
+B1, then B4, Prerequisites:
+
+7
+00:00:14.551 --> 00:00:18.113
+Ch 01, Ch 03, What you will build:
+
+8
+00:00:18.393 --> 00:00:33.199
+The Orders API, taken from in-memory idempotency, cursors and ETags (L1) to a contract-first, versioned API with race-free idempotency across pods and signed webhooks for sellers (L4), Reading time:
+
+9
+00:00:33.479 --> 00:00:35.100
+100 min + code.
+
+10
+00:00:36.450 --> 00:00:37.303
+Part 1.
+
+11
+00:00:37.583 --> 00:00:39.503
+Introduction and Why It Matters.
+
+12
+00:00:40.753 --> 00:00:43.612
+A story: the double charge nobody could explain.
+
+13
+00:00:43.892 --> 00:00:53.172
+During a Sunday-morning peak, the grocery app's checkout call started taking 6 to 9 seconds, because a slow promotion service sat on the critical path.
+
+14
+00:00:53.452 --> 00:00:57.569
+The mobile client had a 5-second timeout and retried automatically.
+
+15
+00:00:57.849 --> 00:00:59.279
+The server hadn't failed.
+
+16
+00:00:59.559 --> 00:01:00.711
+It was just slow.
+
+17
+00:01:00.991 --> 00:01:08.521
+So each failed checkout had actually succeeded, and the retry created a second order and a second UPI collect request.
+
+18
+00:01:08.801 --> 00:01:10.572
+Some customers approved both.
+
+19
+00:01:10.852 --> 00:01:16.996
+By noon, support had 2,300 tickets about duplicate orders and duplicate payments.
+
+20
+00:01:17.276 --> 00:01:20.881
+Finance spent two weeks reconciling refunds with Razorpay.
+
+21
+00:01:22.231 --> 00:01:24.962
+The root cause wasn't the slow promotion service.
+
+22
+00:01:25.242 --> 00:01:26.991
+It was the API contract:
+
+23
+00:01:27.271 --> 00:01:33.991
+POST or orders had no idempotency key, so the server couldn't tell a new order from the same order, asked twice.
+
+24
+00:01:34.271 --> 00:01:38.858
+The network always delivers some requests twice, because timeouts are ambiguous.
+
+25
+00:01:39.138 --> 00:01:42.509
+An API that can't handle that is broken by design.
+
+26
+00:01:43.859 --> 00:01:44.541
+Quote:
+
+27
+00:01:44.821 --> 00:01:46.485
+The thesis of this chapter.
+
+28
+00:01:46.765 --> 00:01:55.043
+An API is a long-lived contract with clients you don't control, over a network that duplicates, reorders and drops messages.
+
+29
+00:01:55.323 --> 00:02:01.061
+Good API design makes the contract safe to retry, safe to evolve, and hard to misuse.
+
+30
+00:02:01.341 --> 00:02:04.925
+The contract usually outlives the implementation behind it.
+
+31
+00:02:06.275 --> 00:02:08.579
+Where this lives in the grocery platform.
+
+32
+00:02:08.859 --> 00:02:10.203
+Here is a quick table:
+
+33
+00:02:10.483 --> 00:02:13.385
+API, and Consumers, and Design concerns.
+
+34
+00:02:13.665 --> 00:02:17.163
+Public customer API (via gateway or BFF).
+
+35
+00:02:17.443 --> 00:02:18.382
+Consumers:
+
+36
+00:02:18.662 --> 00:02:22.950
+Angular web, Flutter app (versions in the wild for 12 plus months).
+
+37
+00:02:23.230 --> 00:02:24.403
+Design concerns:
+
+38
+00:02:24.683 --> 00:02:29.419
+Backward compatibility, pagination, mobile payload size, idempotency.
+
+39
+00:02:29.699 --> 00:02:30.958
+Seller API.
+
+40
+00:02:31.238 --> 00:02:32.177
+Consumers:
+
+41
+00:02:32.457 --> 00:02:34.035
+Third-party sellers' systems.
+
+42
+00:02:34.315 --> 00:02:35.489
+Design concerns:
+
+43
+00:02:35.769 --> 00:02:39.459
+Versioning, rate limits, webhooks, auth scopes, documentation.
+
+44
+00:02:39.739 --> 00:02:41.467
+Internal service APIs.
+
+45
+00:02:41.747 --> 00:02:42.686
+Consumers:
+
+46
+00:02:42.966 --> 00:02:44.459
+26 services.
+
+47
+00:02:44.739 --> 00:02:45.913
+Design concerns:
+
+48
+00:02:46.193 --> 00:02:49.926
+Contracts, gRPC versus REST, timeouts, deadlines.
+
+49
+00:02:50.206 --> 00:02:50.995
+Events.
+
+50
+00:02:51.275 --> 00:02:52.214
+Consumers:
+
+51
+00:02:52.494 --> 00:02:54.755
+Kafka consumers (Ch 14).
+
+52
+00:02:55.035 --> 00:02:56.209
+Design concerns:
+
+53
+00:02:56.489 --> 00:02:58.643
+Schema evolution, compatibility.
+
+54
+00:02:58.923 --> 00:02:59.883
+Webhooks in.
+
+55
+00:03:00.163 --> 00:03:01.102
+Consumers:
+
+56
+00:03:01.382 --> 00:03:03.046
+Razorpay payment callbacks.
+
+57
+00:03:03.326 --> 00:03:04.499
+Design concerns:
+
+58
+00:03:04.779 --> 00:03:07.553
+Signature verification, idempotent handling.
+
+59
+00:03:07.833 --> 00:03:08.835
+Webhooks out.
+
+60
+00:03:09.115 --> 00:03:10.054
+Consumers:
+
+61
+00:03:10.334 --> 00:03:12.254
+Sellers (order placed, cancelled).
+
+62
+00:03:12.534 --> 00:03:13.707
+Design concerns:
+
+63
+00:03:13.987 --> 00:03:16.355
+Signing, retries, ordering, replay.
+
+64
+00:03:17.705 --> 00:03:19.028
+Learning objectives.
+
+65
+00:03:19.308 --> 00:03:20.652
+Here is a quick table:
+
+66
+00:03:20.932 --> 00:03:23.129
+Band, and After this chapter you can....
+
+67
+00:03:23.409 --> 00:03:24.241
+B1:
+
+68
+00:03:24.521 --> 00:03:28.873
+Model resources, pick correct methods and status codes, and paginate.
+
+69
+00:03:29.153 --> 00:03:30.028
+B2:
+
+70
+00:03:30.308 --> 00:03:38.329
+Design idempotent writes, conditional requests, error models, versioning, and choose between REST, GraphQL and gRPC.
+
+71
+00:03:38.609 --> 00:03:39.505
+B3:
+
+72
+00:03:39.785 --> 00:03:46.719
+Implement race-free idempotency, keyset pagination at scale, safe webhooks, and backward-compatible evolution.
+
+73
+00:03:46.999 --> 00:03:47.895
+B4:
+
+74
+00:03:48.175 --> 00:03:56.516
+Run API governance (contract-first, linting, deprecation policy), and decide between gateway, BFF and federation.
+
+75
+00:03:57.866 --> 00:03:58.741
+Part 2.
+
+76
+00:03:59.021 --> 00:04:00.898
+Core Concepts, Beginner to Deep.
+
+77
+00:04:02.148 --> 00:04:05.113
+Intuition: a restaurant menu and the order slip.
+
+78
+00:04:05.393 --> 00:04:08.785
+An API is a restaurant's menu plus its order slips:
+
+79
+00:04:09.065 --> 00:04:12.863
+The menu (the contract) tells customers what they can order and how.
+
+80
+00:04:13.143 --> 00:04:20.204
+Once it's printed and in customers' hands, you can add dishes, but renaming or removing one confuses regulars.
+
+81
+00:04:20.484 --> 00:04:27.887
+An order slip with a number (the idempotency key) means that if a waiter brings the same slip twice, the kitchen cooks it once.
+
+82
+00:04:28.167 --> 00:04:30.556
+Is my table's order still what I think it is?
+
+83
+00:04:30.836 --> 00:04:35.209
+(the ETag) stops you from cancelling a dish the kitchen has already served.
+
+84
+00:04:36.559 --> 00:04:43.023
+A clear reason when something can't be done (the error model), such as Paneer is sold out; try Mushroom, beats No.
+
+85
+00:04:44.373 --> 00:04:46.613
+REST maturity and resource modeling.
+
+86
+00:04:46.893 --> 00:04:48.664
+The Richardson Maturity Model:
+
+87
+00:04:50.014 --> 00:04:51.358
+Here is a quick table:
+
+88
+00:04:51.638 --> 00:04:53.814
+Level, and Description, and Example.
+
+89
+00:04:54.094 --> 00:04:54.841
+0.
+
+90
+00:04:55.121 --> 00:04:56.059
+Description:
+
+91
+00:04:56.339 --> 00:04:59.262
+One endpoint, RPC over HTTP.
+
+92
+00:04:59.542 --> 00:05:00.417
+Example:
+
+93
+00:05:00.697 --> 00:05:03.491
+POST or api with action:createOrder.
+
+94
+00:05:03.771 --> 00:05:04.411
+1.
+
+95
+00:05:04.691 --> 00:05:05.630
+Description:
+
+96
+00:05:05.910 --> 00:05:06.870
+Resources.
+
+97
+00:05:07.150 --> 00:05:08.025
+Example:
+
+98
+00:05:08.305 --> 00:05:11.163
+POST or orders, GET or orders or 42.
+
+99
+00:05:11.443 --> 00:05:12.147
+2.
+
+100
+00:05:12.427 --> 00:05:13.366
+Description:
+
+101
+00:05:13.646 --> 00:05:16.974
+HTTP verbs + status codes used correctly.
+
+102
+00:05:17.254 --> 00:05:18.129
+Example:
+
+103
+00:05:18.409 --> 00:05:22.782
+GET is safe, PUT idempotent, 201 Created + Location.
+
+104
+00:05:23.062 --> 00:05:23.809
+3.
+
+105
+00:05:24.089 --> 00:05:25.027
+Description:
+
+106
+00:05:25.307 --> 00:05:29.147
+Hypermedia (HATEOAS): responses link to next actions.
+
+107
+00:05:29.427 --> 00:05:34.419
+Example: links: cancel: href: /orders or 42 or cancel.
+
+108
+00:05:35.769 --> 00:05:43.321
+Most good production APIs are Level 2, with selective links where they help clients (pagination next, allowed actions).
+
+109
+00:05:43.601 --> 00:05:45.052
+Resource modeling rules:
+
+110
+00:05:46.402 --> 00:05:47.746
+Here is a quick table:
+
+111
+00:05:48.026 --> 00:05:49.541
+Rule, and Good, and Bad.
+
+112
+00:05:49.821 --> 00:05:50.930
+Nouns, plural.
+
+113
+00:05:51.210 --> 00:05:55.306
+Good: /orders, /orders/orderId/items.
+
+114
+00:05:55.586 --> 00:05:57.805
+Bad: /getOrders, /order.
+
+115
+00:05:58.085 --> 00:05:59.599
+Nest only for ownership.
+
+116
+00:05:59.879 --> 00:06:02.631
+Good: /orders/id/items.
+
+117
+00:06:02.911 --> 00:06:08.778
+Bad: /customers/c/orders/o/items/i/product.
+
+118
+00:06:09.058 --> 00:06:12.045
+State transitions as sub-resources or actions.
+
+119
+00:06:12.325 --> 00:06:13.007
+Good:
+
+120
+00:06:13.287 --> 00:06:19.645
+POST or orders/id/cancellation or POST or orders/id/cancel.
+
+121
+00:06:19.925 --> 00:06:20.629
+Bad:
+
+122
+00:06:20.909 --> 00:06:23.981
+PUT or orders/id with status:CANCELLED.
+
+123
+00:06:24.261 --> 00:06:25.839
+IDs are opaque strings.
+
+124
+00:06:26.119 --> 00:06:29.170
+Good: id: ord01J9ZK...
+
+125
+00:06:29.450 --> 00:06:30.154
+Bad:
+
+126
+00:06:30.434 --> 00:06:33.335
+Auto-increment ints (enumerable, leak volume).
+
+127
+00:06:33.615 --> 00:06:36.303
+Money as integer minor units + currency.
+
+128
+00:06:36.583 --> 00:06:38.077
+Good: amount: value:
+
+129
+00:06:38.357 --> 00:06:40.298
+45000, currency:
+
+130
+00:06:40.578 --> 00:06:41.773
+INR (paise).
+
+131
+00:06:42.053 --> 00:06:43.311
+Bad: amount:
+
+132
+00:06:43.591 --> 00:06:45.319
+450.0.
+
+133
+00:06:46.669 --> 00:06:50.253
+Time as ISO-8601 UTC.
+
+134
+00:06:50.533 --> 00:06:51.771
+Good: createdAt:
+
+135
+00:06:52.051 --> 00:06:58.024
+2026 to 09 to 26T10:00:00Z.
+
+136
+00:06:58.304 --> 00:06:59.008
+Bad:
+
+137
+00:06:59.288 --> 00:07:03.704
+26 or 09 or 2026 3:30 PM.
+
+138
+00:07:03.984 --> 00:07:05.221
+Consistent casing.
+
+139
+00:07:05.501 --> 00:07:07.955
+Good: camelCase in JSON everywhere.
+
+140
+00:07:08.235 --> 00:07:08.939
+Bad:
+
+141
+00:07:09.219 --> 00:07:09.965
+Mixed.
+
+142
+00:07:11.315 --> 00:07:11.955
+Tip:
+
+143
+00:07:12.235 --> 00:07:15.030
+Why a state transition shouldn't be a generic PUT.
+
+144
+00:07:15.310 --> 00:07:22.542
+PUT or orders or 42 status:CANCELLED lets clients set any status, including invalid ones like DELIVERED.
+
+145
+00:07:22.822 --> 00:07:34.705
+An explicit POST or orders or 42 or cancel models the business action, carries its own rules (only before packing), and can have its own permissions, audit trail and idempotency.
+
+146
+00:07:36.055 --> 00:07:37.655
+Resource model for orders.
+
+147
+00:07:37.935 --> 00:07:39.279
+Here is the diagram.
+
+148
+00:07:43.129 --> 00:07:45.603
+HTTP methods and status codes.
+
+149
+00:07:45.883 --> 00:07:47.227
+Here is a quick table:
+
+150
+00:07:47.507 --> 00:07:50.409
+Method, and Safe, and Idempotent, and Typical use.
+
+151
+00:07:50.689 --> 00:07:51.393
+GET.
+
+152
+00:07:51.673 --> 00:07:52.782
+Typical use:
+
+153
+00:07:53.062 --> 00:07:53.830
+Read.
+
+154
+00:07:54.110 --> 00:07:54.771
+HEAD.
+
+155
+00:07:55.051 --> 00:07:56.161
+Typical use:
+
+156
+00:07:56.441 --> 00:07:58.894
+Read headers only (existence, ETag).
+
+157
+00:07:59.174 --> 00:07:59.899
+POST.
+
+158
+00:08:00.179 --> 00:08:01.203
+Idempotent:
+
+159
+00:08:01.483 --> 00:08:02.870
+(make it so with a key).
+
+160
+00:08:03.150 --> 00:08:04.259
+Typical use:
+
+161
+00:08:04.539 --> 00:08:06.310
+Create, or a business action.
+
+162
+00:08:06.590 --> 00:08:07.251
+PUT.
+
+163
+00:08:07.531 --> 00:08:08.641
+Typical use:
+
+164
+00:08:08.921 --> 00:08:10.755
+Replace a resource entirely.
+
+165
+00:08:11.035 --> 00:08:11.782
+PATCH.
+
+166
+00:08:12.062 --> 00:08:13.086
+Idempotent:
+
+167
+00:08:13.366 --> 00:08:14.561
+Not necessarily.
+
+168
+00:08:14.841 --> 00:08:15.950
+Typical use:
+
+169
+00:08:16.230 --> 00:08:19.622
+Partial update (JSON Merge Patch or JSON Patch).
+
+170
+00:08:19.902 --> 00:08:20.691
+DELETE.
+
+171
+00:08:20.971 --> 00:08:22.081
+Typical use:
+
+172
+00:08:22.361 --> 00:08:23.150
+Remove.
+
+173
+00:08:24.500 --> 00:08:25.844
+Here is a quick table:
+
+174
+00:08:26.124 --> 00:08:28.684
+Code, and Meaning, and Grocery example.
+
+175
+00:08:28.964 --> 00:08:30.201
+200 OK.
+
+176
+00:08:30.481 --> 00:08:31.271
+Meaning:
+
+177
+00:08:31.551 --> 00:08:32.831
+Success with body.
+
+178
+00:08:33.111 --> 00:08:34.348
+Grocery example:
+
+179
+00:08:34.628 --> 00:08:35.481
+GET order.
+
+180
+00:08:35.761 --> 00:08:37.297
+201 Created.
+
+181
+00:08:37.577 --> 00:08:38.367
+Meaning:
+
+182
+00:08:38.647 --> 00:08:40.481
+Created + Location header.
+
+183
+00:08:40.761 --> 00:08:41.999
+Grocery example:
+
+184
+00:08:42.279 --> 00:08:43.217
+POST order.
+
+185
+00:08:43.497 --> 00:08:45.012
+202 Accepted.
+
+186
+00:08:45.292 --> 00:08:46.081
+Meaning:
+
+187
+00:08:46.361 --> 00:08:48.132
+Accepted for async processing.
+
+188
+00:08:48.412 --> 00:08:49.649
+Grocery example:
+
+189
+00:08:49.929 --> 00:08:51.700
+Bulk price upload by seller.
+
+190
+00:08:51.980 --> 00:08:53.751
+204 No Content.
+
+191
+00:08:54.031 --> 00:08:54.820
+Meaning:
+
+192
+00:08:55.100 --> 00:08:56.508
+Success, no body.
+
+193
+00:08:56.788 --> 00:08:58.025
+Grocery example:
+
+194
+00:08:58.305 --> 00:08:59.543
+DELETE cart item.
+
+195
+00:08:59.823 --> 00:09:01.892
+304 Not Modified.
+
+196
+00:09:02.172 --> 00:09:02.961
+Meaning:
+
+197
+00:09:03.241 --> 00:09:04.521
+Conditional GET matched.
+
+198
+00:09:04.801 --> 00:09:06.039
+Grocery example:
+
+199
+00:09:06.319 --> 00:09:07.919
+Catalog with If-None-Match.
+
+200
+00:09:08.199 --> 00:09:09.820
+400 Bad Request.
+
+201
+00:09:10.100 --> 00:09:10.889
+Meaning:
+
+202
+00:09:11.169 --> 00:09:12.449
+Malformed syntax.
+
+203
+00:09:12.729 --> 00:09:13.967
+Grocery example:
+
+204
+00:09:14.247 --> 00:09:15.527
+Invalid JSON.
+
+205
+00:09:15.807 --> 00:09:17.641
+401 Unauthorized.
+
+206
+00:09:17.921 --> 00:09:18.711
+Meaning:
+
+207
+00:09:18.991 --> 00:09:20.399
+Not authenticated.
+
+208
+00:09:20.679 --> 00:09:21.916
+Grocery example:
+
+209
+00:09:22.196 --> 00:09:23.903
+Missing or expired token.
+
+210
+00:09:24.183 --> 00:09:25.719
+403 Forbidden.
+
+211
+00:09:25.999 --> 00:09:26.788
+Meaning:
+
+212
+00:09:27.068 --> 00:09:28.945
+Authenticated but not allowed.
+
+213
+00:09:29.225 --> 00:09:30.463
+Grocery example:
+
+214
+00:09:30.743 --> 00:09:33.047
+Seller editing another seller's SKU.
+
+215
+00:09:34.397 --> 00:09:36.039
+404 Not Found.
+
+216
+00:09:36.319 --> 00:09:37.109
+Meaning:
+
+217
+00:09:37.389 --> 00:09:39.735
+Doesn't exist (or you mustn't know it does).
+
+218
+00:09:40.015 --> 00:09:41.253
+Grocery example:
+
+219
+00:09:41.533 --> 00:09:42.877
+Someone else's order.
+
+220
+00:09:43.157 --> 00:09:44.799
+409 Conflict.
+
+221
+00:09:45.079 --> 00:09:45.869
+Meaning:
+
+222
+00:09:46.149 --> 00:09:47.727
+Conflicts with current state.
+
+223
+00:09:48.007 --> 00:09:49.245
+Grocery example:
+
+224
+00:09:49.525 --> 00:09:54.090
+Cancel an order that's already packed; same idempotency key still in progress.
+
+225
+00:09:54.370 --> 00:09:56.482
+412 Precondition Failed.
+
+226
+00:09:56.762 --> 00:09:57.551
+Meaning:
+
+227
+00:09:57.831 --> 00:09:59.133
+If-Match didn't match.
+
+228
+00:09:59.413 --> 00:10:00.650
+Grocery example:
+
+229
+00:10:00.930 --> 00:10:02.509
+Stale ETag on cancel.
+
+230
+00:10:02.789 --> 00:10:05.455
+415 Unsupported Media Type.
+
+231
+00:10:05.735 --> 00:10:06.525
+Meaning:
+
+232
+00:10:06.805 --> 00:10:08.021
+Wrong Content-Type.
+
+233
+00:10:08.301 --> 00:10:09.538
+Grocery example:
+
+234
+00:10:09.818 --> 00:10:12.122
+XML sent to a JSON API.
+
+235
+00:10:12.402 --> 00:10:15.218
+422 Unprocessable Content.
+
+236
+00:10:15.498 --> 00:10:16.287
+Meaning:
+
+237
+00:10:16.567 --> 00:10:18.658
+Well-formed but semantically invalid.
+
+238
+00:10:18.938 --> 00:10:20.175
+Grocery example:
+
+239
+00:10:20.455 --> 00:10:25.042
+Pincode not serviceable; idempotency key reused with a different body.
+
+240
+00:10:26.392 --> 00:10:29.080
+428 Precondition Required.
+
+241
+00:10:29.360 --> 00:10:30.149
+Meaning:
+
+242
+00:10:30.429 --> 00:10:32.179
+If-Match required but missing.
+
+243
+00:10:32.459 --> 00:10:33.696
+Grocery example:
+
+244
+00:10:33.976 --> 00:10:35.533
+Cancel without an ETag.
+
+245
+00:10:35.813 --> 00:10:38.245
+429 Too Many Requests.
+
+246
+00:10:38.525 --> 00:10:39.315
+Meaning:
+
+247
+00:10:39.595 --> 00:10:41.728
+Rate limited (+ Retry-After).
+
+248
+00:10:42.008 --> 00:10:43.245
+Grocery example:
+
+249
+00:10:43.525 --> 00:10:45.296
+Seller API over quota.
+
+250
+00:10:45.576 --> 00:10:47.645
+500 Internal Server Error.
+
+251
+00:10:47.925 --> 00:10:48.715
+Meaning:
+
+252
+00:10:48.995 --> 00:10:49.699
+Bug.
+
+253
+00:10:49.979 --> 00:10:53.669
+502 or 503 or 504.
+
+254
+00:10:53.949 --> 00:10:54.739
+Meaning:
+
+255
+00:10:55.019 --> 00:10:57.515
+Upstream bad or unavailable or timeout.
+
+256
+00:10:57.795 --> 00:10:59.032
+Grocery example:
+
+257
+00:10:59.312 --> 00:11:02.235
+Serviceability unavailable (Ch 01).
+
+258
+00:11:03.585 --> 00:11:04.331
+Warning:
+
+259
+00:11:04.611 --> 00:11:07.043
+The 200-with-error-body anti-pattern.
+
+260
+00:11:07.323 --> 00:11:15.707
+200 OK success: false, error:... breaks caches, monitoring (error rates look like zero), retries and client libraries.
+
+261
+00:11:15.987 --> 00:11:17.566
+Use real status codes.
+
+262
+00:11:18.916 --> 00:11:21.881
+Pagination: offset, cursor and keyset, then.
+
+263
+00:11:22.161 --> 00:11:23.505
+Here is a quick table:
+
+264
+00:11:23.785 --> 00:11:31.807
+Offset (?page=5 and size=20), and Cursor, opaque (?cursor=eyJ0...) backed by keyset.
+
+265
+00:11:32.087 --> 00:11:32.961
+SQL.
+
+266
+00:11:33.241 --> 00:11:36.313
+Offset (?page=5 and size=20):
+
+267
+00:11:36.593 --> 00:11:39.815
+ORDER BY createdat DESC LIMIT 20 OFFSET 80.
+
+268
+00:11:40.095 --> 00:11:44.276
+Cursor, opaque (?cursor=eyJ0...) backed by keyset:
+
+269
+00:11:44.556 --> 00:11:50.913
+WHERE (createdat, id) (:ts,:id) ORDER BY createdat DESC, id DESC LIMIT 21.
+
+270
+00:11:51.193 --> 00:11:52.559
+Cost for deep pages.
+
+271
+00:11:52.839 --> 00:11:55.911
+Offset (?page=5 and size=20):
+
+272
+00:11:56.191 --> 00:12:01.545
+O(offset): the DB reads and discards 80, 800, 80,000 rows.
+
+273
+00:12:01.825 --> 00:12:06.007
+Cursor, opaque (?cursor=eyJ0...) backed by keyset:
+
+274
+00:12:06.287 --> 00:12:08.932
+O(limit) with an index, regardless of depth.
+
+275
+00:12:09.212 --> 00:12:11.196
+Stability while data changes.
+
+276
+00:12:11.476 --> 00:12:14.548
+Offset (?page=5 and size=20):
+
+277
+00:12:14.828 --> 00:12:18.604
+New rows shift pages, causing duplicates or skipped items.
+
+278
+00:12:18.884 --> 00:12:23.065
+Cursor, opaque (?cursor=eyJ0...) backed by keyset:
+
+279
+00:12:23.345 --> 00:12:26.801
+Stable: each page continues after the last item seen.
+
+280
+00:12:27.081 --> 00:12:28.319
+Jump to page N.
+
+281
+00:12:28.599 --> 00:12:32.780
+Cursor, opaque (?cursor=eyJ0...) backed by keyset:
+
+282
+00:12:33.060 --> 00:12:34.447
+(only next or prev).
+
+283
+00:12:34.727 --> 00:12:35.729
+Total count.
+
+284
+00:12:36.009 --> 00:12:39.081
+Offset (?page=5 and size=20):
+
+285
+00:12:39.361 --> 00:12:41.921
+Easy (but COUNT() is expensive at scale).
+
+286
+00:12:42.201 --> 00:12:46.383
+Cursor, opaque (?cursor=eyJ0...) backed by keyset:
+
+287
+00:12:46.663 --> 00:12:48.817
+Usually omitted or approximated.
+
+288
+00:12:50.167 --> 00:12:51.021
+Use for.
+
+289
+00:12:51.301 --> 00:12:54.373
+Offset (?page=5 and size=20):
+
+290
+00:12:54.653 --> 00:12:58.215
+Admin tables with small data, page 3 of 7 UIs.
+
+291
+00:12:58.495 --> 00:13:02.677
+Cursor, opaque (?cursor=eyJ0...) backed by keyset:
+
+292
+00:13:02.957 --> 00:13:06.861
+Feeds, order history, APIs, infinite scroll, exports.
+
+293
+00:13:08.211 --> 00:13:18.173
+The L1 run in §5 shows the stability property: a new order that arrives between page 1 and page 2 doesn't shift items into page 2.
+
+294
+00:13:19.523 --> 00:13:20.441
+On screen:
+
+295
+00:13:20.721 --> 00:13:31.451
+2. page 1: ord5, ord4. page 2: ord3, ord2 (no duplicate, new order not shifted in). page 3: ord1 next=null.
+
+296
+00:13:34.301 --> 00:13:35.368
+Keyset rules:
+
+297
+00:13:35.648 --> 00:13:38.891
+The sort key must be unique, so add a tiebreaker (id).
+
+298
+00:13:39.171 --> 00:13:41.773
+There must be a composite index matching the sort:
+
+299
+00:13:42.053 --> 00:13:44.720
+(customerid, createdat DESC, id DESC).
+
+300
+00:13:44.000 --> 00:13:52.275
+The cursor is opaque to clients (base64url, and ideally signed), so you can change its internals later.
+
+301
+00:13:52.555 --> 00:13:56.693
+Fetch limit + 1 rows to know whether there's a next page, without a COUNT.
+
+302
+00:13:58.043 --> 00:14:01.478
+Put a maximum limit on page size (for example 50).
+
+303
+00:14:02.828 --> 00:14:04.471
+Here is the JSON code.
+
+304
+00:14:07.321 --> 00:14:08.707
+Filtering and sorting.
+
+305
+00:14:08.987 --> 00:14:10.331
+Here is a quick table:
+
+306
+00:14:10.611 --> 00:14:12.425
+Concern, and Recommendation.
+
+307
+00:14:12.705 --> 00:14:13.857
+Simple filters:
+
+308
+00:14:14.137 --> 00:14:24.953
+Query params:?status=PLACED and createdAfter=2026 to 09 to 01T00:00:00Z.
+
+309
+00:14:25.233 --> 00:14:26.449
+Multiple values:
+
+310
+00:14:26.729 --> 00:14:30.654
+Repeat the param:?status=PLACED and status=PACKED.
+
+311
+00:14:30.934 --> 00:14:37.270
+Sorting: ?sort=-createdAt,id with an allow-list of sortable fields (each must be indexed).
+
+312
+00:14:37.550 --> 00:14:38.617
+Complex search:
+
+313
+00:14:38.897 --> 00:14:45.937
+A dedicated search endpoint backed by a search engine (Ch 22), not arbitrary SQL filters.
+
+314
+00:14:46.217 --> 00:14:52.467
+Sparse fields: ?fields=id,status,total for mobile payload size (or GraphQL).
+
+315
+00:14:52.747 --> 00:14:53.750
+Validation:
+
+316
+00:14:54.030 --> 00:14:58.915
+Unknown filter or sort fields return 400, never silently ignored.
+
+317
+00:15:00.265 --> 00:15:01.183
+Watch out:
+
+318
+00:15:01.463 --> 00:15:03.980
+Unbounded filtering is a DoS vector.
+
+319
+00:15:04.260 --> 00:15:12.281
+Every allowed filter and sort combination needs an index, or a single client request can table-scan your primary database.
+
+320
+00:15:12.561 --> 00:15:16.657
+Allow-list them, and send complex queries to search or analytics stores.
+
+321
+00:15:18.007 --> 00:15:19.287
+Idempotency keys.
+
+322
+00:15:19.567 --> 00:15:25.946
+A client generates a unique key (a UUID) per logical operation and sends it with the request.
+
+323
+00:15:26.226 --> 00:15:28.359
+The server stores the key with the outcome.
+
+324
+00:15:28.639 --> 00:15:33.077
+Retries with the same key return the same outcome without re-executing.
+
+325
+00:15:34.427 --> 00:15:36.197
+Here is the HTTP code.
+
+326
+00:15:39.047 --> 00:15:42.653
+Server-side rules (the ones most implementations get wrong):
+
+327
+00:15:44.003 --> 00:15:45.347
+Here is a quick table:
+
+328
+00:15:45.627 --> 00:15:46.715
+Rule, and Why.
+
+329
+00:15:46.995 --> 00:15:50.195
+Scope keys per client (customer or API key):
+
+330
+00:15:50.475 --> 00:15:53.739
+One client's key can't collide with, or reveal, another's.
+
+331
+00:15:54.019 --> 00:15:56.877
+Store a fingerprint of the request (hash of the body):
+
+332
+00:15:57.157 --> 00:15:59.824
+Same key with a different body is a client bug.
+
+333
+00:16:00.104 --> 00:16:03.581
+Return 422, don't replay the wrong result.
+
+334
+00:16:03.861 --> 00:16:07.168
+Insert the key before doing the work, with a unique constraint:
+
+335
+00:16:07.448 --> 00:16:09.347
+Two concurrent duplicates race.
+
+336
+00:16:09.627 --> 00:16:10.992
+Only one may proceed.
+
+337
+00:16:11.272 --> 00:16:15.240
+While in progress, duplicates get 409 + Retry-After:
+
+338
+00:16:15.520 --> 00:16:18.165
+Don't run twice, and don't block a thread waiting.
+
+339
+00:16:18.445 --> 00:16:21.688
+On completion, store the response (status + body):
+
+340
+00:16:21.968 --> 00:16:24.293
+Retries get byte-identical replays.
+
+341
+00:16:25.643 --> 00:16:29.910
+On retriable failure (5xx before side effects), release the key:
+
+342
+00:16:30.190 --> 00:16:32.409
+So the client can retry the operation.
+
+343
+00:16:32.689 --> 00:16:35.483
+Expire keys after a window (24 h):
+
+344
+00:16:35.763 --> 00:16:36.958
+Bounded storage.
+
+345
+00:16:37.238 --> 00:16:38.518
+Document the window.
+
+346
+00:16:38.798 --> 00:16:40.910
+Keys don't replace business uniqueness:
+
+347
+00:16:41.190 --> 00:16:45.350
+Still have unique constraints on things like one payment per order attempt.
+
+348
+00:16:46.700 --> 00:16:57.452
+The IETF draft for the Idempotency-Key HTTP header standardizes the header name and the 409 or 422 semantics described here.
+
+349
+00:16:58.802 --> 00:17:00.850
+ETags and conditional requests.
+
+350
+00:17:01.130 --> 00:17:04.650
+ETag is a version identifier for a representation.
+
+351
+00:17:04.930 --> 00:17:06.274
+It serves two jobs:
+
+352
+00:17:07.624 --> 00:17:08.968
+Here is a quick table:
+
+353
+00:17:09.248 --> 00:17:12.576
+Use, and Request header, and Server behaviour, and Benefit.
+
+354
+00:17:12.856 --> 00:17:13.987
+Caching (read).
+
+355
+00:17:14.267 --> 00:17:15.312
+Request header:
+
+356
+00:17:15.592 --> 00:17:17.469
+If-None-Match: v17.
+
+357
+00:17:17.749 --> 00:17:18.965
+Server behaviour:
+
+358
+00:17:19.245 --> 00:17:22.637
+Same, then 304 Not Modified, no body.
+
+359
+00:17:22.917 --> 00:17:23.771
+Benefit:
+
+360
+00:17:24.051 --> 00:17:27.635
+Saves bandwidth and CPU (catalog, category trees).
+
+361
+00:17:27.915 --> 00:17:29.877
+Optimistic concurrency (write).
+
+362
+00:17:30.157 --> 00:17:31.203
+Request header:
+
+363
+00:17:31.483 --> 00:17:33.040
+If-Match: v17.
+
+364
+00:17:33.320 --> 00:17:34.536
+Server behaviour:
+
+365
+00:17:34.816 --> 00:17:37.781
+Different, then 412 Precondition Failed.
+
+366
+00:17:38.061 --> 00:17:38.915
+Benefit:
+
+367
+00:17:39.195 --> 00:17:40.795
+Prevents the lost update.
+
+368
+00:17:41.075 --> 00:17:42.547
+Require a precondition.
+
+369
+00:17:42.827 --> 00:17:44.555
+Request header: none sent.
+
+370
+00:17:44.835 --> 00:17:46.051
+Server behaviour:
+
+371
+00:17:46.331 --> 00:17:49.019
+428 Precondition Required.
+
+372
+00:17:49.299 --> 00:17:50.152
+Benefit:
+
+373
+00:17:50.432 --> 00:17:52.672
+Forces clients to be concurrency-safe.
+
+374
+00:17:54.022 --> 00:17:56.710
+The lost update without ETags looks like this.
+
+375
+00:17:56.990 --> 00:18:01.726
+The customer opens an order (status PLACED) and taps Cancel 40 seconds later.
+
+376
+00:18:02.006 --> 00:18:03.542
+Meanwhile the store packed it.
+
+377
+00:18:03.822 --> 00:18:09.838
+Without If-Match, the server may cancel a packed order, or a naive PUT may overwrite the packing status.
+
+378
+00:18:10.118 --> 00:18:16.667
+With If-Match, the server answers 412, and the app re-fetches and shows Your order is already packed.
+
+379
+00:18:16.947 --> 00:18:21.491
+Strong versus weak ETags: v17 is strong (byte-identical).
+
+380
+00:18:21.771 --> 00:18:25.526
+W/v17 is weak (semantically equivalent).
+
+381
+00:18:25.806 --> 00:18:33.998
+For concurrency control use strong ETags derived from the entity version (JPA @Version), not from a hash of the JSON.
+
+382
+00:18:35.348 --> 00:18:36.265
+Error model:
+
+383
+00:18:36.545 --> 00:18:40.727
+RFC 9457 Problem Details.
+
+384
+00:18:41.007 --> 00:18:42.777
+Here is the HTTP code.
+
+385
+00:18:43.057 --> 00:18:46.727
+It runs to 17 lines; the full listing is in the chapter.
+
+386
+00:18:49.577 --> 00:18:50.921
+Here is a quick table:
+
+387
+00:18:51.201 --> 00:18:52.886
+Field, and Rule. type:
+
+388
+00:18:53.166 --> 00:18:56.217
+A stable URI per error type, and documented.
+
+389
+00:18:56.497 --> 00:19:00.507
+Clients switch on it (or on code), never on detail text. title:
+
+390
+00:19:00.787 --> 00:19:03.219
+Short and stable for the type. detail:
+
+391
+00:19:03.499 --> 00:19:05.334
+Human-readable for this occurrence.
+
+392
+00:19:05.614 --> 00:19:09.625
+Safe to show users; no stack traces or SQL. code:
+
+393
+00:19:09.905 --> 00:19:16.646
+A stable machine code (extension member), which is easier for mobile apps than URIs. correlationId:
+
+394
+00:19:16.926 --> 00:19:22.323
+Joins the client report to server logs and traces (Ch 24). retryable:
+
+395
+00:19:22.603 --> 00:19:25.462
+Tells clients whether retrying can help. errors:
+
+396
+00:19:25.742 --> 00:19:27.598
+Field-level validation errors.
+
+397
+00:19:28.948 --> 00:19:30.676
+Spring supports this natively:
+
+398
+00:19:30.956 --> 00:19:37.143
+ProblemDetail, ErrorResponse, and spring.mvc.problemdetails.enabled=true.
+
+399
+00:19:38.493 --> 00:19:40.029
+Versioning and evolution.
+
+400
+00:19:40.309 --> 00:19:46.410
+The best versioning strategy is not needing new versions: evolve compatibly for as long as possible.
+
+401
+00:19:46.690 --> 00:19:48.781
+Backward-compatible (safe) changes:
+
+402
+00:19:49.061 --> 00:19:57.573
+Add optional request fields, response fields, endpoints or enum values (only if clients were told to tolerate unknown values).
+
+403
+00:19:57.853 --> 00:19:59.239
+Relax validation.
+
+404
+00:19:59.519 --> 00:20:00.735
+Breaking changes:
+
+405
+00:20:01.015 --> 00:20:02.637
+Remove or rename fields.
+
+406
+00:20:03.987 --> 00:20:05.437
+Change types or meaning.
+
+407
+00:20:05.717 --> 00:20:07.616
+Make an optional field required.
+
+408
+00:20:07.896 --> 00:20:10.051
+Change status codes or error types.
+
+409
+00:20:10.331 --> 00:20:13.339
+Change pagination semantics or default sorting.
+
+410
+00:20:13.619 --> 00:20:18.120
+Add an enum value clients switch on exhaustively (a trap for mobile apps).
+
+411
+00:20:19.470 --> 00:20:20.814
+Here is a quick table:
+
+412
+00:20:21.094 --> 00:20:23.803
+Strategy, and Example, and Pros, and Cons.
+
+413
+00:20:24.083 --> 00:20:25.257
+URI version.
+
+414
+00:20:25.537 --> 00:20:31.147
+Example: /api or v1 or orders, /api or v2 or orders.
+
+415
+00:20:31.427 --> 00:20:32.281
+Pros:
+
+416
+00:20:32.561 --> 00:20:35.121
+Obvious, easy routing, caching, docs.
+
+417
+00:20:35.401 --> 00:20:36.211
+Cons:
+
+418
+00:20:36.491 --> 00:20:37.281
+Coarse.
+
+419
+00:20:37.561 --> 00:20:39.353
+Clients must change URLs.
+
+420
+00:20:39.633 --> 00:20:41.083
+Header or media type.
+
+421
+00:20:41.363 --> 00:20:42.238
+Example:
+
+422
+00:20:42.518 --> 00:20:48.193
+Accept: application or vnd.grocery.order+json;version=2.
+
+423
+00:20:48.473 --> 00:20:49.326
+Pros:
+
+424
+00:20:49.606 --> 00:20:51.867
+Clean URIs, per-resource versions.
+
+425
+00:20:52.147 --> 00:20:52.958
+Cons:
+
+426
+00:20:53.238 --> 00:20:56.459
+Harder to test, cache and route; invisible in logs.
+
+427
+00:20:56.739 --> 00:20:57.721
+Query param.
+
+428
+00:20:58.001 --> 00:21:00.006
+Example: ?version=2.
+
+429
+00:21:00.286 --> 00:21:01.139
+Pros:
+
+430
+00:21:01.419 --> 00:21:02.166
+Easy.
+
+431
+00:21:02.446 --> 00:21:03.257
+Cons:
+
+432
+00:21:03.537 --> 00:21:05.094
+Messy, cache-unfriendly.
+
+433
+00:21:05.374 --> 00:21:07.102
+Date-based (Stripe-style).
+
+434
+00:21:07.382 --> 00:21:08.257
+Example:
+
+435
+00:21:08.537 --> 00:21:09.646
+Grocery-Version:
+
+436
+00:21:09.926 --> 00:21:14.534
+2026 to 09 to 01, pinned per API key.
+
+437
+00:21:14.814 --> 00:21:15.667
+Pros:
+
+438
+00:21:15.947 --> 00:21:18.571
+Fine-grained, clients upgrade deliberately.
+
+439
+00:21:18.851 --> 00:21:19.662
+Cons:
+
+440
+00:21:19.942 --> 00:21:23.206
+Needs version-transformation layers, which is complex.
+
+441
+00:21:24.556 --> 00:21:25.751
+Platform choice:
+
+442
+00:21:26.031 --> 00:21:41.071
+URI major version for public and seller APIs (/v1), additive evolution within a major version, and the tolerant reader principle for clients (ignore unknown fields, handle unknown enum values with a default).
+
+443
+00:21:41.351 --> 00:21:42.908
+Deprecation lifecycle:
+
+444
+00:21:44.258 --> 00:21:45.602
+Here is the diagram.
+
+445
+00:21:49.452 --> 00:21:51.223
+Here is the HTTP code.
+
+446
+00:21:54.073 --> 00:21:54.819
+Note:
+
+447
+00:21:55.099 --> 00:21:57.894
+Mobile apps make versioning a multi-year concern.
+
+448
+00:21:58.174 --> 00:22:02.547
+A Flutter app version released today may still be on phones in 18 months.
+
+449
+00:22:02.827 --> 00:22:12.683
+Public mobile APIs need long compatibility windows, server-driven minimum-version checks (a force-upgrade screen), and metrics of traffic per app version.
+
+450
+00:22:14.033 --> 00:22:16.551
+OpenAPI-first (contract-first).
+
+451
+00:22:16.831 --> 00:22:18.175
+Here is a quick table:
+
+452
+00:22:18.455 --> 00:22:20.652
+Approach, and How, and Pros, and Cons.
+
+453
+00:22:20.932 --> 00:22:21.871
+Code-first.
+
+454
+00:22:22.151 --> 00:22:22.812
+How:
+
+455
+00:22:23.092 --> 00:22:26.932
+Write controllers, generate OpenAPI from annotations.
+
+456
+00:22:27.212 --> 00:22:28.065
+Pros:
+
+457
+00:22:28.345 --> 00:22:29.647
+Fast for one team.
+
+458
+00:22:29.927 --> 00:22:30.737
+Cons:
+
+459
+00:22:31.017 --> 00:22:35.796
+The contract is an accident of implementation; hard to review before building.
+
+460
+00:22:36.076 --> 00:22:37.228
+Contract-first.
+
+461
+00:22:37.508 --> 00:22:38.169
+How:
+
+462
+00:22:38.449 --> 00:22:44.103
+Write the OpenAPI spec, review it, generate server interfaces and client SDKs.
+
+463
+00:22:44.383 --> 00:22:45.236
+Pros:
+
+464
+00:22:45.516 --> 00:22:51.212
+The contract is reviewed like a design doc; parallel work (the mobile team mocks it); linting.
+
+465
+00:22:51.492 --> 00:22:52.303
+Cons:
+
+466
+00:22:52.583 --> 00:22:55.975
+Tooling setup; discipline to keep spec and code in sync.
+
+467
+00:22:57.325 --> 00:22:59.607
+Contract-first workflow for the platform:
+
+468
+00:22:59.887 --> 00:23:03.621
+A PR adds or changes openapi or orders-v1.yaml.
+
+469
+00:23:03.901 --> 00:23:08.893
+CI runs Spectral lint (naming, pagination, error model, security schemes).
+
+470
+00:23:09.173 --> 00:23:16.149
+CI runs a breaking-change diff against main (for example oasdiff), and fails the build on unapproved breaks.
+
+471
+00:23:16.429 --> 00:23:23.575
+Server interfaces are generated (openapi-generator, interfaceOnly=true), and controllers implement them.
+
+472
+00:23:24.925 --> 00:23:30.365
+Client SDKs (Dart for Flutter, TypeScript for Angular) are generated and published.
+
+473
+00:23:30.645 --> 00:23:35.509
+Contract tests verify the implementation against the spec (Ch 29).
+
+474
+00:23:36.859 --> 00:23:37.841
+GraphQL.
+
+475
+00:23:38.121 --> 00:23:44.009
+GraphQL lets clients ask for exactly the fields they need from a typed schema, in one request.
+
+476
+00:23:45.359 --> 00:23:46.916
+Here is the GRAPHQL code.
+
+477
+00:23:49.766 --> 00:23:51.110
+Here is a quick table:
+
+478
+00:23:51.390 --> 00:23:52.777
+Strength, and Caveat.
+
+479
+00:23:53.057 --> 00:23:56.385
+No over or under-fetching; one round trip per screen:
+
+480
+00:23:56.665 --> 00:23:58.563
+N+1 resolver problem:
+
+481
+00:23:58.843 --> 00:24:03.174
+20 orders times a rider field = 20 calls to dispatch.
+
+482
+00:24:03.454 --> 00:24:07.849
+Fix with batching (DataLoader; @BatchMapping in Spring for GraphQL).
+
+483
+00:24:08.129 --> 00:24:10.774
+Strong typing, introspection, great tooling:
+
+484
+00:24:11.054 --> 00:24:14.851
+HTTP caching is harder (mostly POST, one URL).
+
+485
+00:24:15.131 --> 00:24:17.521
+Use persisted queries plus GET for caching.
+
+486
+00:24:17.801 --> 00:24:20.915
+Schema evolution by adding fields; @deprecated:
+
+487
+00:24:21.195 --> 00:24:24.865
+Query cost: clients can ask for deep, expensive graphs.
+
+488
+00:24:25.145 --> 00:24:28.067
+Enforce depth and complexity limits, and timeouts.
+
+489
+00:24:28.347 --> 00:24:32.059
+Federation composes one graph from many services' subgraphs:
+
+490
+00:24:32.339 --> 00:24:38.057
+Operational complexity; a router is on the critical path; ownership boundaries must be clear.
+
+491
+00:24:39.407 --> 00:24:40.921
+Here is the Java code.
+
+492
+00:24:41.201 --> 00:24:51.953
+It runs to 16 lines; the full listing is in the chapter. excerpt, Spring for GraphQL: batch-load riders for many orders in ONE call (fixes N+1).
+
+493
+00:24:54.803 --> 00:25:02.121
+Use GraphQL for a client-facing aggregation layer with many screens and client teams (a BFF-like role).
+
+494
+00:25:02.401 --> 00:25:10.187
+Avoid it for service-to-service calls, simple CRUD, or public partner APIs where predictable cost and caching matter more.
+
+495
+00:25:11.537 --> 00:25:13.820
+gRPC and Protocol Buffers.
+
+496
+00:25:14.100 --> 00:25:15.764
+Here is the PROTOBUF code.
+
+497
+00:25:16.044 --> 00:25:19.585
+It runs to 19 lines; the full listing is in the chapter.
+
+498
+00:25:22.435 --> 00:25:23.779
+Here is a quick table:
+
+499
+00:25:24.059 --> 00:25:25.446
+Strength, and Caveat.
+
+500
+00:25:25.726 --> 00:25:28.990
+Compact binary encoding, fast (de)serialization:
+
+501
+00:25:29.270 --> 00:25:31.979
+Not human-readable; needs tooling to debug.
+
+502
+00:25:32.259 --> 00:25:35.950
+Strict typed contracts, generated clients in many languages:
+
+503
+00:25:36.230 --> 00:25:39.046
+Browsers need gRPC-Web or a proxy.
+
+504
+00:25:39.326 --> 00:25:43.977
+HTTP or 2 multiplexing, streaming (client, server, bidirectional):
+
+505
+00:25:44.257 --> 00:25:47.521
+L4 load balancers pin all calls to one backend.
+
+506
+00:25:47.801 --> 00:25:51.619
+Use L7 or client-side balancing (Ch 08).
+
+507
+00:25:51.899 --> 00:25:53.905
+Deadlines propagate across calls:
+
+508
+00:25:54.185 --> 00:25:58.878
+Evolution rules: never reuse field numbers; reserved for removed fields.
+
+509
+00:26:00.228 --> 00:26:15.865
+Protobuf evolution rules: add fields with new numbers; never change a field's number or type; mark removed fields reserved; remember that proto3 scalars have default values (use wrapper types or optional when unset differs from zero).
+
+510
+00:26:16.145 --> 00:26:17.233
+Choosing a style:
+
+511
+00:26:18.583 --> 00:26:19.927
+Here is a quick table:
+
+512
+00:26:20.207 --> 00:26:21.530
+Use case, and Choose.
+
+513
+00:26:21.810 --> 00:26:24.114
+Public customer or seller APIs:
+
+514
+00:26:24.394 --> 00:26:26.911
+REST + JSON (OpenAPI).
+
+515
+00:26:27.191 --> 00:26:30.263
+Mobile screen aggregation across many services:
+
+516
+00:26:30.543 --> 00:26:32.570
+BFF (REST) or GraphQL.
+
+517
+00:26:32.850 --> 00:26:41.042
+High-QPS internal service-to-service calls: gRPC (or REST with HTTP or 2 if the team is REST-first).
+
+518
+00:26:41.322 --> 00:26:46.421
+Streaming internal updates: gRPC streaming, or events (Ch 14).
+
+519
+00:26:46.701 --> 00:26:48.322
+Server, then browser push:
+
+520
+00:26:48.602 --> 00:26:50.629
+SSE (Ch 03).
+
+521
+00:26:51.979 --> 00:26:54.347
+API gateway versus BFF.
+
+522
+00:26:54.627 --> 00:26:55.971
+Here is the diagram.
+
+523
+00:26:59.821 --> 00:27:01.165
+Here is a quick table:
+
+524
+00:27:01.445 --> 00:27:04.730
+API gateway, and Backend-for-Frontend (BFF).
+
+525
+00:27:05.010 --> 00:27:05.842
+Purpose.
+
+526
+00:27:06.122 --> 00:27:07.402
+API gateway:
+
+527
+00:27:07.682 --> 00:27:09.303
+Cross-cutting edge concerns.
+
+528
+00:27:09.583 --> 00:27:11.610
+Backend-for-Frontend (BFF):
+
+529
+00:27:11.890 --> 00:27:13.597
+Client-specific composition.
+
+530
+00:27:13.877 --> 00:27:14.687
+Does.
+
+531
+00:27:14.967 --> 00:27:16.247
+API gateway:
+
+532
+00:27:16.527 --> 00:27:23.951
+TLS, authentication, rate limiting, routing, request size limits, WAF integration, observability.
+
+533
+00:27:24.231 --> 00:27:26.258
+Backend-for-Frontend (BFF):
+
+534
+00:27:26.538 --> 00:27:32.533
+Aggregates calls per screen, shapes payloads, handles app-version quirks, orchestrates UI flows.
+
+535
+00:27:32.813 --> 00:27:33.709
+Owned by.
+
+536
+00:27:33.989 --> 00:27:35.269
+API gateway:
+
+537
+00:27:35.549 --> 00:27:36.594
+Platform team.
+
+538
+00:27:36.874 --> 00:27:38.901
+Backend-for-Frontend (BFF):
+
+539
+00:27:39.181 --> 00:27:42.018
+The client team (web team owns web-bff).
+
+540
+00:27:42.298 --> 00:27:43.450
+Business logic.
+
+541
+00:27:43.730 --> 00:27:45.010
+API gateway:
+
+542
+00:27:45.290 --> 00:27:45.973
+None.
+
+543
+00:27:46.253 --> 00:27:48.279
+Backend-for-Frontend (BFF):
+
+544
+00:27:48.559 --> 00:27:51.802
+Presentation logic only, never domain rules.
+
+545
+00:27:52.082 --> 00:27:52.807
+Count.
+
+546
+00:27:53.087 --> 00:27:54.367
+API gateway:
+
+547
+00:27:54.647 --> 00:27:57.997
+One (or one per trust zone: public, partner, internal).
+
+548
+00:27:58.277 --> 00:28:00.303
+Backend-for-Frontend (BFF):
+
+549
+00:28:00.583 --> 00:28:01.906
+One per client type.
+
+550
+00:28:03.256 --> 00:28:04.301
+Anti-pattern.
+
+551
+00:28:04.581 --> 00:28:05.861
+API gateway:
+
+552
+00:28:06.141 --> 00:28:08.872
+Gateway with business logic (smart gateway).
+
+553
+00:28:09.152 --> 00:28:11.179
+Backend-for-Frontend (BFF):
+
+554
+00:28:11.459 --> 00:28:14.936
+BFF that becomes a second monolith with domain rules.
+
+555
+00:28:16.286 --> 00:28:18.910
+Webhooks: design for senders and receivers.
+
+556
+00:28:19.190 --> 00:28:24.225
+Webhooks are reverse APIs: you call the consumer's endpoint when something happens.
+
+557
+00:28:24.505 --> 00:28:28.985
+As a sender (grocery, then seller systems: order.placed, order.cancelled):
+
+558
+00:28:30.335 --> 00:28:31.679
+Here is a quick table:
+
+559
+00:28:31.959 --> 00:28:33.345
+Concern, and Design.
+
+560
+00:28:33.625 --> 00:28:34.628
+Authenticity:
+
+561
+00:28:34.908 --> 00:28:46.279
+HMAC-SHA256 signature over timestamp +. + rawBody with a per-endpoint secret; header Grocery-Signature: t=...v1=...
+
+562
+00:28:46.559 --> 00:28:47.775
+Replay protection:
+
+563
+00:28:48.055 --> 00:28:51.148
+Receivers reject timestamps older than 5 minutes.
+
+564
+00:28:51.428 --> 00:28:52.303
+Delivery:
+
+565
+00:28:52.583 --> 00:29:01.201
+At-least-once from an outbox (Ch 13), retried with exponential backoff + jitter for ~24 to 72 h.
+
+566
+00:29:01.481 --> 00:29:02.591
+Idempotency:
+
+567
+00:29:02.871 --> 00:29:07.223
+Each delivery has a stable event.id, and receivers dedupe on it.
+
+568
+00:29:07.503 --> 00:29:08.292
+Ordering:
+
+569
+00:29:08.572 --> 00:29:09.681
+Not guaranteed.
+
+570
+00:29:09.961 --> 00:29:15.764
+Include sequence or occurredAt and the resource version, and receivers fetch current state if unsure.
+
+571
+00:29:16.044 --> 00:29:16.897
+Payload:
+
+572
+00:29:17.177 --> 00:29:21.977
+Thin (order ord42 changed, version 7) or fat (full snapshot).
+
+573
+00:29:22.257 --> 00:29:25.415
+Thin plus fetch is safer for PII and evolution.
+
+574
+00:29:26.765 --> 00:29:27.746
+Endpoint health:
+
+575
+00:29:28.026 --> 00:29:34.938
+Disable after N consecutive days of failures and notify the seller; provide a replay UI or API.
+
+576
+00:29:35.218 --> 00:29:36.050
+Timeouts:
+
+577
+00:29:36.330 --> 00:29:37.887
+Short (5 to 10 s).
+
+578
+00:29:38.167 --> 00:29:41.005
+The receiver should acknowledge fast and process async.
+
+579
+00:29:42.355 --> 00:29:45.085
+As a receiver (Razorpay, then payment-service):
+
+580
+00:29:45.365 --> 00:29:52.363
+Verify the signature over the raw body bytes (not re-serialized JSON) with a constant-time comparison.
+
+581
+00:29:52.643 --> 00:29:56.632
+Deduplicate by event or payment id (idempotent processing).
+
+582
+00:29:56.912 --> 00:30:00.411
+Respond 2xx quickly, then process asynchronously.
+
+583
+00:30:00.691 --> 00:30:02.845
+Never trust the payload alone for money.
+
+584
+00:30:03.125 --> 00:30:07.243
+Fetch or verify the payment status via the API when in doubt.
+
+585
+00:30:08.593 --> 00:30:13.990
+Tolerate out-of-order events (a payment.captured may arrive before payment.authorized).
+
+586
+00:30:15.340 --> 00:30:17.089
+Designing for mobile clients.
+
+587
+00:30:17.369 --> 00:30:18.713
+Here is a quick table:
+
+588
+00:30:18.993 --> 00:30:20.337
+Concern, and Practice.
+
+589
+00:30:20.617 --> 00:30:23.561
+Round trips are expensive (Ch 03):
+
+590
+00:30:23.841 --> 00:30:28.065
+Screen-shaped BFF endpoints; one call per screen where possible.
+
+591
+00:30:28.345 --> 00:30:29.455
+Payload size:
+
+592
+00:30:29.735 --> 00:30:34.663
+Compact DTOs, fields= or GraphQL, compression, no nulls-everywhere.
+
+593
+00:30:34.943 --> 00:30:36.159
+Old app versions:
+
+594
+00:30:36.439 --> 00:30:41.409
+Tolerant parsing, server-driven minimum version, feature flags by app version.
+
+595
+00:30:41.689 --> 00:30:42.841
+Flaky networks:
+
+596
+00:30:43.121 --> 00:30:47.537
+Idempotency keys on every mutating call; safe automatic retries.
+
+597
+00:30:47.817 --> 00:30:49.268
+Clock skew on devices:
+
+598
+00:30:49.548 --> 00:30:54.391
+Server timestamps are authoritative; never trust client time for business rules.
+
+599
+00:30:54.671 --> 00:30:56.121
+Unknown enum values:
+
+600
+00:30:56.401 --> 00:31:00.583
+Clients map unknowns to a default (OTHER), enforced by code review.
+
+601
+00:31:01.933 --> 00:31:02.829
+Part 3.
+
+602
+00:31:03.109 --> 00:31:04.837
+Architecture and Diagrams.
+
+603
+00:31:06.087 --> 00:31:08.199
+Request path for the Orders API.
+
+604
+00:31:08.479 --> 00:31:09.823
+Here is the diagram.
+
+605
+00:31:13.673 --> 00:31:16.766
+Sequence: happy path, idempotent order creation.
+
+606
+00:31:17.046 --> 00:31:19.841
+The sequence diagram walks through it step by step.
+
+607
+00:31:20.121 --> 00:31:25.070
+App to App: key = UUID for this checkout attempt (persisted locally).
+
+608
+00:31:25.350 --> 00:31:26.481
+App to OS:
+
+609
+00:31:26.761 --> 00:31:31.881
+POST or api or v1 or orders, Idempotency-Key k1, body B.
+
+610
+00:31:32.161 --> 00:31:33.313
+OS to DB:
+
+611
+00:31:33.593 --> 00:31:38.009
+INSERT idempotencyrecord(customer, k1, hash(B), INPROGRESS).
+
+612
+00:31:38.289 --> 00:31:41.830
+DB to OS: inserted (unique on customer+key).
+
+613
+00:31:42.110 --> 00:31:46.590
+OS to OS: validate cart, price, serviceability, reserve stock...
+
+614
+00:31:46.870 --> 00:31:48.022
+OS to DB:
+
+615
+00:31:48.302 --> 00:31:55.427
+INSERT order + items + outbox, UPDATE idempotencyrecord, then COMPLETED (201, body).
+
+616
+00:31:55.707 --> 00:31:56.710
+OS to App:
+
+617
+00:31:56.990 --> 00:32:03.390
+201 Created, Location or api or v1 or orders or ord9, ETag 1.
+
+618
+00:32:07.240 --> 00:32:11.443
+Sequence: failure path, timeout, retry and a concurrent duplicate.
+
+619
+00:32:11.723 --> 00:32:14.517
+The sequence diagram walks through it step by step.
+
+620
+00:32:14.797 --> 00:32:15.992
+App to OS1:
+
+621
+00:32:16.272 --> 00:32:18.811
+POST or orders, key k1, body B.
+
+622
+00:32:19.091 --> 00:32:20.499
+OS1 to DB:
+
+623
+00:32:20.779 --> 00:32:24.085
+INSERT idempotencyrecord(k1, INPROGRESS).
+
+624
+00:32:24.365 --> 00:32:27.864
+App to App: client timeout at 5 s (outcome unknown).
+
+625
+00:32:28.144 --> 00:32:32.240
+App to OS2: retry POST or orders, key k1, body B.
+
+626
+00:32:32.520 --> 00:32:33.885
+OS2 to DB:
+
+627
+00:32:34.165 --> 00:32:38.347
+INSERT idempotencyrecord(k1), then unique violation.
+
+628
+00:32:38.627 --> 00:32:39.992
+OS2 to DB:
+
+629
+00:32:40.272 --> 00:32:42.661
+SELECT record k1, then INPROGRESS.
+
+630
+00:32:42.941 --> 00:32:44.072
+OS2 to App:
+
+631
+00:32:44.352 --> 00:32:46.784
+409 Conflict, Retry-After:
+
+632
+00:32:47.064 --> 00:32:49.133
+2, code IDEMPOTENCYINPROGRESS.
+
+633
+00:32:49.413 --> 00:32:55.365
+OS1 to DB: order committed, record k1, then COMPLETED (201, body).
+
+634
+00:32:55.645 --> 00:32:59.635
+App to OS2: retry after 2 s, key k1, body B.
+
+635
+00:32:59.915 --> 00:33:01.280
+OS2 to DB:
+
+636
+00:33:01.560 --> 00:33:04.803
+SELECT record k1, then COMPLETED, hash matches.
+
+637
+00:33:05.083 --> 00:33:06.213
+OS2 to App:
+
+638
+00:33:06.493 --> 00:33:11.528
+201 Created (replayed, identical body), Idempotent-Replayed: true.
+
+639
+00:33:11.808 --> 00:33:13.003
+App to OS2:
+
+640
+00:33:13.283 --> 00:33:15.821
+POST or orders, key k1, body B'.
+
+641
+00:33:16.101 --> 00:33:17.232
+OS2 to App:
+
+642
+00:33:17.512 --> 00:33:20.307
+422 IDEMPOTENCYKEYREUSED.
+
+643
+00:33:24.157 --> 00:33:24.903
+Note:
+
+644
+00:33:25.183 --> 00:33:27.957
+What the system guarantees after this failure path.
+
+645
+00:33:28.237 --> 00:33:36.258
+Exactly one order per (customer, idempotency key), no matter how many retries arrive, on how many pods, or how concurrently.
+
+646
+00:33:36.538 --> 00:33:39.589
+Retries receive the original response byte for byte.
+
+647
+00:33:39.869 --> 00:33:45.309
+A reused key with a different body is rejected instead of silently returning the wrong order.
+
+648
+00:33:46.659 --> 00:33:49.155
+State: idempotency record lifecycle.
+
+649
+00:33:49.435 --> 00:33:50.779
+Here is the diagram.
+
+650
+00:33:54.629 --> 00:33:57.445
+Sequence: outbound webhook delivery to a seller.
+
+651
+00:33:57.725 --> 00:34:00.519
+The sequence diagram walks through it step by step.
+
+652
+00:34:00.799 --> 00:34:05.557
+K to WD: order.order.placed.v1 (ord9, seller s7).
+
+653
+00:34:05.837 --> 00:34:07.287
+WD to DB:
+
+654
+00:34:07.567 --> 00:34:12.943
+INSERT delivery(eventid, endpoint, attempt 0), unique on event+endpoint.
+
+655
+00:34:13.223 --> 00:34:14.439
+WD to S:
+
+656
+00:34:14.719 --> 00:34:22.570
+POST or hooks, Grocery-Signature t=..v1=HMAC(secret, t.body), event id evt1.
+
+657
+00:34:22.850 --> 00:34:24.130
+S to WD:
+
+658
+00:34:24.410 --> 00:34:25.327
+200.
+
+659
+00:34:25.607 --> 00:34:28.103
+WD to DB: mark DELIVERED.
+
+660
+00:34:28.383 --> 00:34:29.663
+S to WD:
+
+661
+00:34:29.943 --> 00:34:31.159
+503.
+
+662
+00:34:31.439 --> 00:34:38.245
+WD to DB: attempt 1, nextat = now + backoff(1 min ± jitter).
+
+663
+00:34:42.095 --> 00:34:43.012
+Part 4.
+
+664
+00:34:43.292 --> 00:34:44.913
+Design Document Excerpt:
+
+665
+00:34:45.193 --> 00:34:46.836
+Orders API v1.
+
+666
+00:34:48.086 --> 00:34:49.430
+Here is a quick table:
+
+667
+00:34:49.710 --> 00:34:51.011
+Field, and Value.
+
+668
+00:34:51.291 --> 00:34:52.635
+Author or Reviewers:
+
+669
+00:34:52.915 --> 00:34:57.310
+Order team or Mobile, Web, Seller platform, Security, API guild.
+
+670
+00:34:57.590 --> 00:34:58.486
+Status:
+
+671
+00:34:58.766 --> 00:34:59.641
+Approved.
+
+672
+00:34:59.921 --> 00:35:01.243
+Related ADRs:
+
+673
+00:35:01.523 --> 00:35:13.193
+ADR-020 Idempotency keys mandatory on mutating customer APIs; ADR-021 URI major versioning + additive evolution.
+
+674
+00:35:14.543 --> 00:35:15.183
+1.
+
+675
+00:35:15.463 --> 00:35:16.871
+Context and Problem.
+
+676
+00:35:17.151 --> 00:35:21.545
+Duplicate orders and payments from client retries (§1.1).
+
+677
+00:35:21.825 --> 00:35:26.668
+Offset pagination on order history degraded as heavy users' histories grew.
+
+678
+00:35:26.948 --> 00:35:32.111
+There were no conditional updates, and error responses were inconsistent across services.
+
+679
+00:35:32.391 --> 00:35:33.095
+2.
+
+680
+00:35:33.375 --> 00:35:34.719
+Goals or Non-Goals.
+
+681
+00:35:34.999 --> 00:35:46.092
+Goals: retry-safe creation and actions; stable, fast pagination; concurrency-safe state changes; one error model; a contract-first spec with SDKs.
+
+682
+00:35:47.442 --> 00:35:55.741
+Non-goals: checkout orchestration internals (Ch 13, 46); GraphQL (revisit per §2.11).
+
+683
+00:35:56.021 --> 00:35:56.767
+3.
+
+684
+00:35:57.047 --> 00:35:58.007
+Requirements.
+
+685
+00:35:59.357 --> 00:36:00.701
+Here is a quick table:
+
+686
+00:36:00.981 --> 00:36:02.453
+ID, and Requirement.
+
+687
+00:36:02.733 --> 00:36:03.672
+FR-1:
+
+688
+00:36:03.952 --> 00:36:08.112
+Create an order from a cart (POST or api or v1 or orders).
+
+689
+00:36:08.392 --> 00:36:09.331
+FR-2:
+
+690
+00:36:09.611 --> 00:36:14.133
+List my orders, newest first (GET or api or v1 or orders).
+
+691
+00:36:14.413 --> 00:36:15.395
+FR-3:
+
+692
+00:36:15.675 --> 00:36:19.536
+Get an order (GET or api or v1 or orders/id).
+
+693
+00:36:19.816 --> 00:36:20.797
+FR-4:
+
+694
+00:36:21.077 --> 00:36:27.947
+Cancel an order before packing (POST or api or v1 or orders/id/cancel).
+
+695
+00:36:28.227 --> 00:36:29.272
+NFR-1:
+
+696
+00:36:29.552 --> 00:36:37.232
+Every mutating call requires Idempotency-Key; a duplicate never creates a second order (verified under concurrency).
+
+697
+00:36:37.512 --> 00:36:38.557
+NFR-2:
+
+698
+00:36:38.837 --> 00:36:43.296
+List p99 at most 150 ms at any page depth.
+
+699
+00:36:43.576 --> 00:36:44.643
+NFR-3:
+
+700
+00:36:44.923 --> 00:36:48.549
+Cancel requires If-Match; stale, then 412.
+
+701
+00:36:48.829 --> 00:36:49.917
+NFR-4:
+
+702
+00:36:50.197 --> 00:36:54.656
+All errors are application or problem+json with a stable code.
+
+703
+00:36:56.006 --> 00:36:57.051
+NFR-5:
+
+704
+00:36:57.331 --> 00:37:01.129
+No breaking change within v1; enforced by CI diff.
+
+705
+00:37:02.479 --> 00:37:03.183
+4.
+
+706
+00:37:03.463 --> 00:37:04.743
+Capacity estimates.
+
+707
+00:37:06.093 --> 00:37:07.437
+Here is a quick table:
+
+708
+00:37:07.717 --> 00:37:09.039
+Item, and Estimate.
+
+709
+00:37:09.319 --> 00:37:14.717
+Create attempts (festival peak, Ch 02): ~850 per second.
+
+710
+00:37:14.997 --> 00:37:16.383
+Idempotency records:
+
+711
+00:37:16.663 --> 00:37:30.573
+1.5 M orders per day times ~1.5 attempts times ~1.2 KB stored response about 2.7 GB per day; 24 h TTL, then 3 GB live.
+
+712
+00:37:30.853 --> 00:37:40.495
+List calls: ~2 per order-history screen visit; ~3 K per second peak, served by index (customerid, createdat DESC, id DESC).
+
+713
+00:37:40.775 --> 00:37:46.471
+Get calls: ~5 K per second at peak (tracking screen fallback polling, BFF).
+
+714
+00:37:46.751 --> 00:37:58.378
+Seller webhooks: ~1.5 M per day order events times ~1.1 (cancellations), then ~20 per second average, ~400 per second peak.
+
+715
+00:37:59.728 --> 00:38:02.480
+5.2 API contract (excerpt).
+
+716
+00:38:03.830 --> 00:38:05.302
+Here is the YAML code.
+
+717
+00:38:05.582 --> 00:38:09.273
+It runs to 56 lines; the full listing is in the chapter.
+
+718
+00:38:12.123 --> 00:38:13.851
+5.3 Data model.
+
+719
+00:38:15.201 --> 00:38:16.801
+Here is the SQL code.
+
+720
+00:38:17.081 --> 00:38:20.750
+It runs to 17 lines; the full listing is in the chapter.
+
+721
+00:38:23.600 --> 00:38:24.347
+7.
+
+722
+00:38:24.627 --> 00:38:26.141
+Alternatives considered.
+
+723
+00:38:27.491 --> 00:38:28.835
+Here is a quick table:
+
+724
+00:38:29.115 --> 00:38:31.654
+Option, and Pros, and Cons, and Verdict.
+
+725
+00:38:31.934 --> 00:38:33.769
+Rely on client not retrying.
+
+726
+00:38:34.049 --> 00:38:34.902
+Pros:
+
+727
+00:38:35.182 --> 00:38:36.313
+Nothing to build.
+
+728
+00:38:36.593 --> 00:38:37.403
+Cons:
+
+729
+00:38:37.683 --> 00:38:41.033
+Networks retry for you (proxies, SDKs, users).
+
+730
+00:38:41.313 --> 00:38:42.123
+Verdict:
+
+731
+00:38:42.403 --> 00:38:43.321
+Rejected.
+
+732
+00:38:43.601 --> 00:38:46.054
+Business dedupe only (one order per cart).
+
+733
+00:38:46.334 --> 00:38:47.187
+Pros:
+
+734
+00:38:47.467 --> 00:38:48.235
+Simple.
+
+735
+00:38:48.515 --> 00:38:49.326
+Cons:
+
+736
+00:38:49.606 --> 00:38:54.299
+A cart can legitimately be re-ordered; doesn't cover cancel or refund actions.
+
+737
+00:38:54.579 --> 00:38:55.390
+Verdict:
+
+738
+00:38:55.670 --> 00:38:56.715
+Complementary.
+
+739
+00:38:56.995 --> 00:38:58.467
+Idempotency in Redis.
+
+740
+00:38:58.747 --> 00:38:59.601
+Pros:
+
+741
+00:38:59.881 --> 00:39:00.670
+Fast.
+
+742
+00:39:00.950 --> 00:39:01.761
+Cons:
+
+743
+00:39:02.041 --> 00:39:05.795
+Harder to make atomic with the order write; eviction loses keys.
+
+744
+00:39:06.075 --> 00:39:06.886
+Verdict:
+
+745
+00:39:07.166 --> 00:39:08.745
+Rejected for money flows.
+
+746
+00:39:09.025 --> 00:39:14.145
+Idempotency table in the same DB as orders, same transaction for completion.
+
+747
+00:39:14.425 --> 00:39:15.278
+Pros:
+
+748
+00:39:15.558 --> 00:39:17.841
+Atomic with the business write; durable.
+
+749
+00:39:18.121 --> 00:39:18.931
+Cons:
+
+750
+00:39:19.211 --> 00:39:20.790
+Extra write per request.
+
+751
+00:39:21.070 --> 00:39:21.881
+Verdict:
+
+752
+00:39:22.161 --> 00:39:22.993
+Chosen.
+
+753
+00:39:24.343 --> 00:39:25.687
+Offset pagination.
+
+754
+00:39:25.967 --> 00:39:26.820
+Pros:
+
+755
+00:39:27.100 --> 00:39:28.593
+Simple, page numbers.
+
+756
+00:39:28.873 --> 00:39:29.684
+Cons:
+
+757
+00:39:29.964 --> 00:39:32.119
+O(offset), unstable pages.
+
+758
+00:39:32.399 --> 00:39:33.209
+Verdict:
+
+759
+00:39:33.489 --> 00:39:34.855
+Admin UIs only.
+
+760
+00:39:35.135 --> 00:39:37.055
+Keyset with opaque signed cursor.
+
+761
+00:39:37.335 --> 00:39:38.188
+Pros:
+
+762
+00:39:38.468 --> 00:39:39.876
+O(limit), stable.
+
+763
+00:39:40.156 --> 00:39:40.967
+Cons:
+
+764
+00:39:41.247 --> 00:39:42.697
+No jump to page N.
+
+765
+00:39:42.977 --> 00:39:43.788
+Verdict:
+
+766
+00:39:44.068 --> 00:39:44.900
+Chosen.
+
+767
+00:39:46.250 --> 00:39:46.933
+8.
+
+768
+00:39:47.213 --> 00:39:48.365
+Failure modes.
+
+769
+00:39:48.645 --> 00:39:53.999
+A pod crashes mid-request: the record stays INPROGRESS until lockeduntil (30 s).
+
+770
+00:39:54.279 --> 00:40:01.063
+The next retry takes over and checks whether an order already exists for the key's resourceid before re-executing.
+
+771
+00:40:01.343 --> 00:40:02.687
+DB unavailable:
+
+772
+00:40:02.967 --> 00:40:08.066
+503 with a retryable problem, and the client retries with the same key.
+
+773
+00:40:08.346 --> 00:40:13.423
+Clock skew between pods: lockeduntil uses DB time (now()), not pod time.
+
+774
+00:40:13.703 --> 00:40:14.450
+9.
+
+775
+00:40:14.730 --> 00:40:15.669
+Security.
+
+776
+00:40:15.949 --> 00:40:18.594
+Keys are scoped to the authenticated customer.
+
+777
+00:40:18.874 --> 00:40:22.351
+Cursors are HMAC-signed (tampering returns 400).
+
+778
+00:40:22.631 --> 00:40:25.149
+Order ids are opaque (no enumeration).
+
+779
+00:40:25.429 --> 00:40:28.415
+Other customers' orders return 404.
+
+780
+00:40:28.695 --> 00:40:31.959
+Problem responses never include internal details.
+
+781
+00:40:33.309 --> 00:40:34.141
+11.
+
+782
+00:40:34.421 --> 00:40:35.253
+Rollout.
+
+783
+00:40:35.533 --> 00:40:46.755
+Idempotency-Key is optional in app version N (logged when missing), then required from version N+2 (428 for older apps, with a force-upgrade prompt).
+
+784
+00:40:47.035 --> 00:40:51.493
+The keyset list ships as a new cursor param while page stays for 2 releases.
+
+785
+00:40:51.773 --> 00:40:52.627
+14.
+
+786
+00:40:52.907 --> 00:40:55.531
+Decision (ADR-020 summary).
+
+787
+00:40:55.811 --> 00:41:09.379
+All mutating customer and seller APIs require an Idempotency-Key, scoped per client, fingerprinted, stored in the same database and transaction as the business effect, and retained for 24 hours.
+
+788
+00:41:09.659 --> 00:41:16.357
+In-progress duplicates get 409 with Retry-After, and mismatched bodies get 422.
+
+789
+00:41:17.707 --> 00:41:18.667
+Part 5.
+
+790
+00:41:18.947 --> 00:41:20.931
+Hands-On Code, Level Ladder.
+
+791
+00:41:22.181 --> 00:41:24.507
+We build the Orders API four times:
+
+792
+00:41:25.857 --> 00:41:27.201
+Here is a quick table:
+
+793
+00:41:27.481 --> 00:41:30.169
+Level, and New requirement that forces the step.
+
+794
+00:41:30.449 --> 00:41:31.281
+L1:
+
+795
+00:41:31.561 --> 00:41:34.569
+Show idempotency, cursors and ETags working.
+
+796
+00:41:34.849 --> 00:41:36.449
+(plain Java, in memory).
+
+797
+00:41:36.729 --> 00:41:37.539
+L2:
+
+798
+00:41:37.819 --> 00:41:43.430
+Real HTTP endpoints with correct status codes, ETags and Problem Details.
+
+799
+00:41:43.710 --> 00:41:44.563
+L3:
+
+800
+00:41:44.843 --> 00:41:50.006
+Retries and concurrent duplicates across many pods must never create two orders.
+
+801
+00:41:50.286 --> 00:41:54.766
+Pagination must stay fast at any depth, and cursors can't be tampered with.
+
+802
+00:41:55.046 --> 00:41:55.921
+L4:
+
+803
+00:41:56.201 --> 00:42:05.182
+Many teams and external sellers depend on this contract: contract-first, CI-enforced compatibility, deprecation, and signed webhooks.
+
+804
+00:42:06.532 --> 00:42:08.687
+L1, Concept (plain Java).
+
+805
+00:42:08.967 --> 00:42:10.481
+Here is the Java code.
+
+806
+00:42:10.761 --> 00:42:15.049
+It runs to 136 lines; the full listing is in the chapter.
+
+807
+00:42:15.329 --> 00:42:21.111
+OrdersApiL1.java, run with: java OrdersApiL1.java.
+
+808
+00:42:21.391 --> 00:42:25.188
+Three API-design ideas in plain Java, no framework:
+
+809
+00:42:25.468 --> 00:42:26.108
+1.
+
+810
+00:42:26.388 --> 00:42:30.591
+Idempotency keys, a retried create must not create a second order.
+
+811
+00:42:33.441 --> 00:42:35.233
+Actual output from running it:
+
+812
+00:42:36.583 --> 00:42:37.500
+On screen:
+
+813
+00:42:37.780 --> 00:42:38.847
+1. create:
+
+814
+00:42:39.127 --> 00:42:41.516
+201 ord1. retry:
+
+815
+00:42:41.796 --> 00:42:44.505
+201 ord1 (same order: true).
+
+816
+00:42:44.785 --> 00:42:55.516
+2. page 1: ord5, ord4. page 2: ord3, ord2 (no duplicate, new order not shifted in). page 3: ord1 next=null.
+
+817
+00:42:55.796 --> 00:42:58.036
+3. cancel with stale ETag 1:
+
+818
+00:42:58.316 --> 00:43:03.159
+412 order changed; re-fetch (current 2). cancel without If-Match:
+
+819
+00:43:03.439 --> 00:43:05.871
+428 If-Match required.
+
+820
+00:43:08.721 --> 00:43:21.265
+What L1 gets right: a replayed response for a duplicate key, keyset pagination with an opaque cursor and limit + 1 lookahead, and 412 or 428 semantics.
+
+821
+00:43:21.545 --> 00:43:22.867
+What L1 can't do:
+
+822
+00:43:24.217 --> 00:43:25.561
+Here is a quick table:
+
+823
+00:43:25.841 --> 00:43:27.207
+Gap, and Consequence.
+
+824
+00:43:27.487 --> 00:43:28.575
+In-memory maps:
+
+825
+00:43:28.855 --> 00:43:34.316
+Lost on restart; invisible to other pods. get then put on the idempotency map:
+
+826
+00:43:34.596 --> 00:43:37.455
+Two concurrent duplicates both pass the check (race).
+
+827
+00:43:37.735 --> 00:43:39.207
+No request fingerprint:
+
+828
+00:43:39.487 --> 00:43:43.113
+Same key + different body silently returns the wrong order.
+
+829
+00:43:43.393 --> 00:43:44.588
+Unsigned cursor:
+
+830
+00:43:44.868 --> 00:43:48.623
+Clients can craft cursors, and a changed cursor format breaks them.
+
+831
+00:43:48.903 --> 00:43:51.100
+No HTTP, no error model:
+
+832
+00:43:51.380 --> 00:43:52.788
+Not an API yet.
+
+833
+00:43:54.138 --> 00:43:56.805
+L2, Spring Implementation (four layers).
+
+834
+00:43:57.085 --> 00:44:01.970
+Here is the Kotlin code. build.gradle.kts (module l2-spring).
+
+835
+00:44:04.820 --> 00:44:06.441
+Domain and Repositories.
+
+836
+00:44:06.721 --> 00:44:08.236
+Here is the Java code.
+
+837
+00:44:08.516 --> 00:44:12.228
+It runs to 33 lines; the full listing is in the chapter.
+
+838
+00:44:15.078 --> 00:44:16.593
+Here is the Java code.
+
+839
+00:44:19.443 --> 00:44:20.957
+Here is the Java code.
+
+840
+00:44:23.807 --> 00:44:25.322
+Here is the Java code.
+
+841
+00:44:25.602 --> 00:44:29.122
+It runs to 15 lines; the full listing is in the chapter.
+
+842
+00:44:31.972 --> 00:44:33.487
+Here is the Java code.
+
+843
+00:44:33.767 --> 00:44:37.713
+L2: naive idempotency, stores which order a key produced.
+
+844
+00:44:40.563 --> 00:44:42.078
+Here is the Java code.
+
+845
+00:44:44.928 --> 00:44:45.760
+Service.
+
+846
+00:44:46.040 --> 00:44:47.555
+Here is the Java code.
+
+847
+00:44:47.835 --> 00:44:51.589
+It runs to 68 lines; the full listing is in the chapter.
+
+848
+00:44:54.439 --> 00:44:55.954
+Here is the Java code.
+
+849
+00:44:58.804 --> 00:45:00.319
+Here is the Java code.
+
+850
+00:45:03.169 --> 00:45:04.726
+DTOs and Delegate.
+
+851
+00:45:05.006 --> 00:45:06.521
+Here is the Java code.
+
+852
+00:45:09.371 --> 00:45:10.885
+Here is the Java code.
+
+853
+00:45:13.735 --> 00:45:15.250
+Here is the Java code.
+
+854
+00:45:18.100 --> 00:45:19.615
+Here is the Java code.
+
+855
+00:45:19.895 --> 00:45:23.543
+It runs to 54 lines; the full listing is in the chapter.
+
+856
+00:45:26.393 --> 00:45:27.651
+Controller and Errors.
+
+857
+00:45:27.931 --> 00:45:29.446
+Here is the Java code.
+
+858
+00:45:29.726 --> 00:45:33.523
+It runs to 57 lines; the full listing is in the chapter.
+
+859
+00:45:36.373 --> 00:45:37.888
+Here is the Java code.
+
+860
+00:45:40.738 --> 00:45:42.253
+Here is the Java code.
+
+861
+00:45:42.533 --> 00:45:46.245
+It runs to 43 lines; the full listing is in the chapter.
+
+862
+00:45:49.095 --> 00:45:49.820
+Test.
+
+863
+00:45:50.100 --> 00:45:51.615
+Here is the Java code.
+
+864
+00:45:51.895 --> 00:45:55.628
+It runs to 26 lines; the full listing is in the chapter.
+
+865
+00:45:58.478 --> 00:46:15.011
+What L2 fixed: real HTTP semantics (201 + Location + ETag, 304, 412, 428, 409), Problem Details, keyset pagination in the database, and ownership checks.
+
+866
+00:46:15.291 --> 00:46:16.955
+What L2 still gets wrong:
+
+867
+00:46:17.235 --> 00:46:20.094
+The idempotency race (see the comment in create).
+
+868
+00:46:20.374 --> 00:46:24.939
+No fingerprint, so key reuse with a different body replays a different order.
+
+869
+00:46:25.219 --> 00:46:29.209
+Replays return the order's current state, not the original response.
+
+870
+00:46:29.489 --> 00:46:30.961
+The cursor is forgeable.
+
+871
+00:46:32.311 --> 00:46:42.017
+The cancel check is read-then-write. @Version saves the commit, but the error path is an OptimisticLockException, then 500 unless it's mapped.
+
+872
+00:46:43.367 --> 00:46:45.117
+L3, Production-Grade.
+
+873
+00:46:45.397 --> 00:46:50.047
+L3 switches the write path to explicit SQL (JdbcClient).
+
+874
+00:46:50.327 --> 00:46:58.861
+Idempotency and conditional updates need atomic database statements, and those are clearer written by hand than inferred by an ORM.
+
+875
+00:47:00.211 --> 00:47:03.325
+Here is the Kotlin code. l3-production adds.
+
+876
+00:47:06.175 --> 00:47:07.882
+Idempotency (race-free).
+
+877
+00:47:08.162 --> 00:47:09.677
+Here is the Java code.
+
+878
+00:47:09.957 --> 00:47:13.989
+It runs to 105 lines; the full listing is in the chapter.
+
+879
+00:47:14.269 --> 00:47:29.266
+Postgres-backed idempotency. begin(), commits IMMEDIATELY (REQUIRESNEW) so concurrent duplicates on other pods see the claim. complete(), runs INSIDE the business transaction, so order exists and key completed commit atomically.
+
+880
+00:47:32.116 --> 00:47:33.631
+Here is the Java code.
+
+881
+00:47:33.911 --> 00:47:37.580
+It runs to 17 lines; the full listing is in the chapter.
+
+882
+00:47:37.860 --> 00:47:45.433
+Hash of method + path + a CANONICAL representation (not raw JSON: whitespace or field order may differ).
+
+883
+00:47:48.283 --> 00:47:49.329
+Signed cursor.
+
+884
+00:47:49.609 --> 00:47:51.123
+Here is the Java code.
+
+885
+00:47:51.403 --> 00:47:55.073
+It runs to 53 lines; the full listing is in the chapter.
+
+886
+00:47:55.353 --> 00:48:05.593
+Opaque, tamper-proof keyset cursor: base64url(payload) +. + base64url(HMAC-SHA256(payload)).
+
+887
+00:48:08.443 --> 00:48:11.045
+Order write or read repository (SQL).
+
+888
+00:48:11.325 --> 00:48:12.840
+Here is the Java code.
+
+889
+00:48:13.120 --> 00:48:16.896
+It runs to 73 lines; the full listing is in the chapter.
+
+890
+00:48:19.746 --> 00:48:20.578
+Service.
+
+891
+00:48:20.858 --> 00:48:22.373
+Here is the Java code.
+
+892
+00:48:22.653 --> 00:48:25.981
+It runs to 80 lines; the full listing is in the chapter.
+
+893
+00:48:28.831 --> 00:48:30.345
+Here is the Java code.
+
+894
+00:48:33.195 --> 00:48:34.710
+Here is the Java code.
+
+895
+00:48:37.560 --> 00:48:39.075
+Here is the Java code.
+
+896
+00:48:41.925 --> 00:48:42.799
+Controller.
+
+897
+00:48:43.079 --> 00:48:44.594
+Here is the Java code.
+
+898
+00:48:44.874 --> 00:48:48.650
+It runs to 95 lines; the full listing is in the chapter.
+
+899
+00:48:51.500 --> 00:48:53.015
+Here is the Java code.
+
+900
+00:48:53.295 --> 00:48:59.929
+It runs to 24 lines; the full listing is in the chapter. excerpt, additions to ProblemHandler.
+
+901
+00:49:00.209 --> 00:49:01.084
+VERIFY:
+
+902
+00:49:01.364 --> 00:49:07.764
+HttpStatus.UNPROCESSABLECONTENT (Spring 7) versus UNPROCESSABLEENTITY (older).
+
+903
+00:49:10.614 --> 00:49:11.830
+Config and schema.
+
+904
+00:49:12.110 --> 00:49:13.710
+Here is the SQL code.
+
+905
+00:49:13.990 --> 00:49:15.782
+V1orders.sql.
+
+906
+00:49:16.062 --> 00:49:21.075
+V2idempotency.sql: see the design doc §5.3.
+
+907
+00:49:23.925 --> 00:49:25.440
+Here is the Java code.
+
+908
+00:49:25.720 --> 00:49:30.136
+Secret from the secrets manager (Ch 23), never from the repo.
+
+909
+00:49:30.416 --> 00:49:33.787
+Rotation: accept old + new for one TTL.
+
+910
+00:49:36.637 --> 00:49:38.109
+Here is the YAML code.
+
+911
+00:49:40.959 --> 00:49:42.559
+Here is the SQL code.
+
+912
+00:49:42.839 --> 00:49:47.937
+Housekeeping (scheduled job or pgcron): delete expired keys in batches.
+
+913
+00:49:50.787 --> 00:49:53.049
+Integration tests (Testcontainers).
+
+914
+00:49:53.329 --> 00:49:54.843
+Here is the Java code.
+
+915
+00:49:55.123 --> 00:49:58.899
+It runs to 75 lines; the full listing is in the chapter.
+
+916
+00:50:01.749 --> 00:50:08.021
+What L3 guarantees: exactly one order per (customer, key) under any concurrency, across pods.
+
+917
+00:50:08.301 --> 00:50:09.987
+Byte-identical replays.
+
+918
+00:50:10.267 --> 00:50:12.592
+422 on key reuse.
+
+919
+00:50:12.872 --> 00:50:14.771
+Crash takeover after 30 s.
+
+920
+00:50:15.051 --> 00:50:18.165
+O(limit) pagination with tamper-proof cursors.
+
+921
+00:50:18.445 --> 00:50:26.296
+Atomic conditional cancel, with the zero-rows case correctly mapped to 404, 412 or 409.
+
+922
+00:50:26.576 --> 00:50:30.075
+What L3 still lacks: the contract lives only in code.
+
+923
+00:50:30.355 --> 00:50:39.293
+There's no automated protection against breaking changes, no deprecation mechanics, and sellers still poll for new orders instead of receiving events.
+
+924
+00:50:40.643 --> 00:50:42.115
+L4, Enterprise:
+
+925
+00:50:42.395 --> 00:50:45.339
+Contract-First, Governed Evolution, Signed Webhooks.
+
+926
+00:50:45.619 --> 00:50:47.027
+Contract-first build.
+
+927
+00:50:47.307 --> 00:50:48.737
+Here is the Kotlin code.
+
+928
+00:50:49.017 --> 00:50:59.363
+It runs to 23 lines; the full listing is in the chapter. build.gradle.kts, generate server interfaces from the reviewed OpenAPI spec.
+
+929
+00:51:02.213 --> 00:51:15.696
+Here is the Java code. excerpt, the controller now implements the generated contract; signatures come from the spec. createOrder(...), listOrders(...), cancelOrder(...) delegate to the L3 services.
+
+930
+00:51:18.546 --> 00:51:24.114
+Here is the YAML code. .github or workflows or api-contract.yml (excerpt).
+
+931
+00:51:26.964 --> 00:51:28.436
+Here is the YAML code.
+
+932
+00:51:28.716 --> 00:51:36.289
+It runs to 20 lines; the full listing is in the chapter. openapi/.spectral.yaml, platform API rules.
+
+933
+00:51:39.139 --> 00:51:40.526
+Deprecation headers.
+
+934
+00:51:40.806 --> 00:51:42.321
+Here is the Java code.
+
+935
+00:51:42.601 --> 00:51:46.355
+It runs to 47 lines; the full listing is in the chapter.
+
+936
+00:51:46.635 --> 00:51:58.710
+Adds RFC 9745 Deprecation + RFC 8594 Sunset headers to deprecated routes, and meters who still calls them.
+
+937
+00:52:01.560 --> 00:52:03.032
+Here is the YAML code.
+
+938
+00:52:05.882 --> 00:52:06.565
+Note.
+
+939
+00:52:06.845 --> 00:52:16.253
+Watch api.deprecated.callsappversion for the long tail of old mobile app versions, and use the minimum-supported-version prompt to move them.
+
+940
+00:52:17.603 --> 00:52:19.203
+Webhook signing and dispatch.
+
+941
+00:52:19.483 --> 00:52:20.997
+Here is the Java code.
+
+942
+00:52:21.277 --> 00:52:24.947
+It runs to 51 lines; the full listing is in the chapter.
+
+943
+00:52:25.227 --> 00:52:26.357
+Signature header:
+
+944
+00:52:26.637 --> 00:52:36.237
+Grocery-Signature: t=unix-seconds,v1=hex HMAC-SHA256(secret, t +. + rawBody).
+
+945
+00:52:36.517 --> 00:52:39.653
+Receiver side (we ship this in the seller SDK).
+
+946
+00:52:39.933 --> 00:52:42.899
+Constant-time compare; rejects stale timestamps.
+
+947
+00:52:45.749 --> 00:52:47.263
+Here is the Java code.
+
+948
+00:52:47.543 --> 00:52:51.085
+It runs to 19 lines; the full listing is in the chapter.
+
+949
+00:52:51.365 --> 00:53:02.799
+1m, 5m, 30m, 2h, 6h, 12h, 24h, 24h... with ±20 % jitter; DEAD after ~72 h.
+
+950
+00:53:05.649 --> 00:53:07.164
+Here is the Java code.
+
+951
+00:53:07.444 --> 00:53:11.071
+It runs to 84 lines; the full listing is in the chapter.
+
+952
+00:53:11.351 --> 00:53:12.503
+Delivery worker.
+
+953
+00:53:12.783 --> 00:53:18.713
+Rows are created per (event, endpoint) by a Kafka consumer (unique constraint, then no dupes).
+
+954
+00:53:18.993 --> 00:53:20.551
+Many worker pods can run:
+
+955
+00:53:20.831 --> 00:53:24.927
+FOR UPDATE SKIP LOCKED hands each due row to exactly one worker.
+
+956
+00:53:27.777 --> 00:53:28.523
+Warning:
+
+957
+00:53:28.803 --> 00:53:33.241
+Don't hold a DB transaction across slow HTTP calls at scale.
+
+958
+00:53:33.521 --> 00:53:40.753
+The worker above keeps the row lock (and a DB connection) while calling seller endpoints, for up to 50 times 10 s.
+
+959
+00:53:41.033 --> 00:53:43.081
+That's fine at ~20 per second.
+
+960
+00:53:43.361 --> 00:53:46.027
+At high volume, claim rows first (UPDATE...
+
+961
+00:53:46.307 --> 00:53:50.403
+SET status='SENDING', leaseuntil=now()+30s...
+
+962
+00:53:50.683 --> 00:53:55.526
+RETURNING), commit, deliver outside the transaction, and then record the outcome.
+
+963
+00:53:55.806 --> 00:53:58.985
+That's the same lease idea as the idempotency record.
+
+964
+00:54:00.335 --> 00:54:02.340
+Razorpay inbound verification.
+
+965
+00:54:02.620 --> 00:54:04.135
+Here is the Java code.
+
+966
+00:54:04.415 --> 00:54:08.105
+It runs to 36 lines; the full listing is in the chapter.
+
+967
+00:54:08.385 --> 00:54:13.505
+Take the RAW body: re-serialized JSON would not match the signature.
+
+968
+00:54:16.355 --> 00:54:16.995
+Tip.
+
+969
+00:54:17.275 --> 00:54:24.059
+Confirm the exact header names and signing scheme in Razorpay's current webhook documentation before shipping.
+
+970
+00:54:24.339 --> 00:54:33.214
+The pattern (HMAC over the raw body, constant-time compare, dedupe by event id, acknowledge fast, process async) is universal.
+
+971
+00:54:34.564 --> 00:54:35.375
+Tests.
+
+972
+00:54:35.655 --> 00:54:37.169
+Here is the Java code.
+
+973
+00:54:37.449 --> 00:54:41.119
+It runs to 38 lines; the full listing is in the chapter.
+
+974
+00:54:43.969 --> 00:54:45.483
+Here is the Java code.
+
+975
+00:54:48.333 --> 00:54:49.080
+Note:
+
+976
+00:54:49.360 --> 00:54:50.811
+ADR-021:
+
+977
+00:54:51.091 --> 00:54:55.656
+URI major versions, additive evolution, contract-first governance.
+
+978
+00:54:55.936 --> 00:54:56.853
+Context.
+
+979
+00:54:57.133 --> 00:55:03.619
+Mobile app versions live 12 to 18 months, and 400 plus sellers integrate with our APIs.
+
+980
+00:55:03.899 --> 00:55:06.821
+Unreviewed changes broke clients twice last year.
+
+981
+00:55:08.171 --> 00:55:09.046
+Decision.
+
+982
+00:55:09.326 --> 00:55:14.531
+(1) Public and seller APIs use a URI major version (/v1).
+
+983
+00:55:14.811 --> 00:55:23.003
+Within a major version, only additive changes are allowed, and clients must be tolerant readers (unknown fields and enum values).
+
+984
+00:55:23.283 --> 00:55:26.526
+(2) Specs are OpenAPI-first in the service repo:
+
+985
+00:55:26.806 --> 00:55:36.299
+Spectral rules (idempotency headers, Problem Details, kebab-case paths, keyset pagination) and oasdiff breaking-change checks gate every PR.
+
+986
+00:55:36.579 --> 00:55:49.081
+(3) Deprecations carry Deprecation, Sunset and Link headers, are metered per app version, and go through brownouts before 410 Gone, with a minimum 6-month window for public APIs.
+
+987
+00:55:49.361 --> 00:56:05.723
+(4) Seller events are delivered as signed webhooks (HMAC-SHA256, timestamp tolerance of 5 min), at least once, with a stable event id, and retried for ~72 h before being dead-lettered with notification.
+
+988
+00:56:07.073 --> 00:56:08.097
+Consequences.
+
+989
+00:56:08.377 --> 00:56:11.364
+(+) Breaking changes can't merge accidentally.
+
+990
+00:56:11.644 --> 00:56:15.569
+(+) SDKs are generated for Flutter, Angular and sellers.
+
+991
+00:56:15.849 --> 00:56:22.100
+(minus ) Spec-first slows prototyping, so allow x-experimental endpoints behind feature flags.
+
+992
+00:56:22.380 --> 00:56:27.073
+(minus ) Running two major versions doubles the test surface during migrations.
+
+993
+00:56:27.353 --> 00:56:40.495
+Revisit when: seller integrations need finer-grained evolution (consider date-based versions per API key) or the number of client teams makes GraphQL federation attractive for the customer apps.
+
+994
+00:56:41.845 --> 00:56:43.978
+What changed from L1 to L4.
+
+995
+00:56:44.258 --> 00:56:45.602
+Here is a quick table:
+
+996
+00:56:45.882 --> 00:56:49.338
+Concern, and L1, and L2, and L3, and L4.
+
+997
+00:56:49.618 --> 00:56:50.749
+Idempotency.
+
+998
+00:56:51.029 --> 00:56:51.861
+L1:
+
+999
+00:56:52.141 --> 00:56:53.122
+Map, racy.
+
+1000
+00:56:53.402 --> 00:56:54.213
+L2:
+
+1001
+00:56:54.493 --> 00:56:56.989
+DB table, check-then-insert (racy).
+
+1002
+00:56:57.269 --> 00:56:58.122
+L3:
+
+1003
+00:56:58.402 --> 00:57:02.839
+Unique-claim + fingerprint + same-tx completion + takeover.
+
+1004
+00:57:03.119 --> 00:57:03.994
+L4:
+
+1005
+00:57:04.274 --> 00:57:06.727
+Enforced for every mutation by lint rule.
+
+1006
+00:57:07.007 --> 00:57:08.223
+Replay fidelity.
+
+1007
+00:57:08.503 --> 00:57:09.335
+L1:
+
+1008
+00:57:09.615 --> 00:57:10.703
+Same object.
+
+1009
+00:57:10.983 --> 00:57:11.794
+L2:
+
+1010
+00:57:12.074 --> 00:57:13.802
+Current state (not original).
+
+1011
+00:57:14.082 --> 00:57:14.935
+L3:
+
+1012
+00:57:15.215 --> 00:57:17.135
+Byte-identical stored response.
+
+1013
+00:57:17.415 --> 00:57:18.653
+L4: same.
+
+1014
+00:57:18.933 --> 00:57:19.978
+Pagination.
+
+1015
+00:57:20.258 --> 00:57:21.090
+L1:
+
+1016
+00:57:21.370 --> 00:57:22.586
+Keyset in memory.
+
+1017
+00:57:22.866 --> 00:57:23.677
+L2:
+
+1018
+00:57:23.957 --> 00:57:26.794
+Keyset JPQL, base64 cursor.
+
+1019
+00:57:27.074 --> 00:57:27.927
+L3:
+
+1020
+00:57:28.207 --> 00:57:32.517
+Row-value keyset + index + HMAC cursor + max limit.
+
+1021
+00:57:32.797 --> 00:57:33.671
+L4:
+
+1022
+00:57:33.951 --> 00:57:35.338
+Contract-documented.
+
+1023
+00:57:35.618 --> 00:57:36.941
+Concurrency on writes.
+
+1024
+00:57:37.221 --> 00:57:38.053
+L1:
+
+1025
+00:57:38.333 --> 00:57:39.378
+ETag check.
+
+1026
+00:57:39.658 --> 00:57:41.706
+L2: @Version read-then-write.
+
+1027
+00:57:41.986 --> 00:57:42.839
+L3:
+
+1028
+00:57:43.119 --> 00:57:44.314
+Atomic UPDATE...
+
+1029
+00:57:44.594 --> 00:57:50.354
+WHERE version =? + 404 or 412 or 409 mapping.
+
+1030
+00:57:50.634 --> 00:57:51.871
+L4: same.
+
+1031
+00:57:53.221 --> 00:57:54.075
+Errors.
+
+1032
+00:57:54.355 --> 00:57:55.187
+L1:
+
+1033
+00:57:55.467 --> 00:57:56.341
+Strings.
+
+1034
+00:57:56.621 --> 00:57:57.432
+L2:
+
+1035
+00:57:57.712 --> 00:57:58.907
+Problem Details.
+
+1036
+00:57:59.187 --> 00:58:02.707
+L3: + stable codes, retryable, Retry-After.
+
+1037
+00:58:02.987 --> 00:58:03.861
+L4:
+
+1038
+00:58:04.141 --> 00:58:05.251
+Lint-enforced.
+
+1039
+00:58:05.531 --> 00:58:06.427
+Contract.
+
+1040
+00:58:06.707 --> 00:58:07.539
+L1:
+
+1041
+00:58:07.819 --> 00:58:08.501
+None.
+
+1042
+00:58:08.781 --> 00:58:09.592
+L2:
+
+1043
+00:58:09.872 --> 00:58:10.811
+Code-first.
+
+1044
+00:58:11.091 --> 00:58:11.944
+L3:
+
+1045
+00:58:12.224 --> 00:58:13.163
+Code-first.
+
+1046
+00:58:13.443 --> 00:58:14.317
+L4:
+
+1047
+00:58:14.597 --> 00:58:19.952
+OpenAPI-first, generated interfaces or SDKs, breaking-change CI.
+
+1048
+00:58:20.232 --> 00:58:21.149
+Evolution.
+
+1049
+00:58:21.429 --> 00:58:22.304
+L4:
+
+1050
+00:58:22.584 --> 00:58:27.363
+Deprecation or Sunset headers, metered, 410 after sunset.
+
+1051
+00:58:27.643 --> 00:58:28.645
+Integration.
+
+1052
+00:58:28.925 --> 00:58:29.800
+L4:
+
+1053
+00:58:30.080 --> 00:58:34.453
+Signed, retried, at-least-once webhooks; verified inbound webhooks.
+
+1054
+00:58:35.803 --> 00:58:36.742
+Part 6.
+
+1055
+00:58:37.022 --> 00:58:38.302
+Production Concerns.
+
+1056
+00:58:39.552 --> 00:58:40.704
+Failure modes.
+
+1057
+00:58:40.984 --> 00:58:42.328
+Here is a quick table:
+
+1058
+00:58:42.608 --> 00:58:46.491
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+1059
+00:58:46.771 --> 00:58:48.861
+Duplicate side effects from retries.
+
+1060
+00:58:49.141 --> 00:58:50.336
+Detection signal:
+
+1061
+00:58:50.616 --> 00:58:55.800
+Duplicate orders or payments per customer within minutes; reconciliation mismatches.
+
+1062
+00:58:56.080 --> 00:58:57.296
+Blast radius:
+
+1063
+00:58:57.576 --> 00:58:58.621
+Money, trust.
+
+1064
+00:58:58.901 --> 00:58:59.904
+Mitigation:
+
+1065
+00:59:00.184 --> 00:59:07.587
+Mandatory idempotency keys (lint + 428 when missing), fingerprinting, same-tx completion.
+
+1066
+00:59:07.867 --> 00:59:09.595
+Idempotency table growth.
+
+1067
+00:59:09.875 --> 00:59:11.069
+Detection signal:
+
+1068
+00:59:11.349 --> 00:59:13.291
+Table size or bloat metrics.
+
+1069
+00:59:13.571 --> 00:59:14.787
+Blast radius:
+
+1070
+00:59:15.067 --> 00:59:17.115
+DB storage, vacuum pressure.
+
+1071
+00:59:17.395 --> 00:59:18.397
+Mitigation:
+
+1072
+00:59:18.677 --> 00:59:22.837
+24 h TTL, batched deletes, partition by day at scale.
+
+1073
+00:59:23.117 --> 00:59:24.504
+Stuck INPROGRESS keys.
+
+1074
+00:59:24.784 --> 00:59:25.979
+Detection signal:
+
+1075
+00:59:26.259 --> 00:59:28.200
+Count of INPROGRESS older than lock.
+
+1076
+00:59:28.480 --> 00:59:29.696
+Blast radius:
+
+1077
+00:59:29.976 --> 00:59:32.877
+Clients get 409 until takeover.
+
+1078
+00:59:33.157 --> 00:59:34.160
+Mitigation:
+
+1079
+00:59:34.440 --> 00:59:37.875
+Lock expiry + takeover; alert when the count grows.
+
+1080
+00:59:38.155 --> 00:59:39.733
+Deep offset pagination.
+
+1081
+00:59:40.013 --> 00:59:41.208
+Detection signal:
+
+1082
+00:59:41.488 --> 00:59:44.112
+Slow query log shows OFFSET 50000.
+
+1083
+00:59:44.392 --> 00:59:45.608
+Blast radius:
+
+1084
+00:59:45.888 --> 00:59:47.787
+DB CPU for everyone.
+
+1085
+00:59:48.067 --> 00:59:49.069
+Mitigation:
+
+1086
+00:59:49.349 --> 00:59:52.976
+Keyset pagination; cap page depth on legacy endpoints.
+
+1087
+00:59:54.326 --> 00:59:56.609
+Unindexed filter or sort combination.
+
+1088
+00:59:56.889 --> 00:59:58.083
+Detection signal:
+
+1089
+00:59:58.363 --> 01:00:00.219
+Seq scans on the orders table.
+
+1090
+01:00:00.499 --> 01:00:01.715
+Blast radius:
+
+1091
+01:00:01.995 --> 01:00:03.403
+DB saturation.
+
+1092
+01:00:03.683 --> 01:00:04.686
+Mitigation:
+
+1093
+01:00:04.966 --> 01:00:08.998
+Allow-list filters and sorts; review indexes with each new param.
+
+1094
+01:00:09.278 --> 01:00:10.622
+Breaking change shipped.
+
+1095
+01:00:10.902 --> 01:00:12.097
+Detection signal:
+
+1096
+01:00:12.377 --> 01:00:17.731
+Spike in 4xx or 5xx from specific app versions; client crash reports.
+
+1097
+01:00:18.011 --> 01:00:19.227
+Blast radius:
+
+1098
+01:00:19.507 --> 01:00:21.107
+Old app versions broken.
+
+1099
+01:00:21.387 --> 01:00:26.059
+Mitigation: oasdiff in CI, tolerant readers, canary by app version.
+
+1100
+01:00:26.339 --> 01:00:28.601
+Enum value added, old apps crash.
+
+1101
+01:00:28.881 --> 01:00:30.075
+Detection signal:
+
+1102
+01:00:30.355 --> 01:00:32.318
+Crash reports on unknown status.
+
+1103
+01:00:32.598 --> 01:00:33.814
+Blast radius:
+
+1104
+01:00:34.094 --> 01:00:35.310
+Old app versions.
+
+1105
+01:00:35.590 --> 01:00:36.593
+Mitigation:
+
+1106
+01:00:36.873 --> 01:00:41.609
+Contract says unknown, then OTHER; test old app builds against new responses.
+
+1107
+01:00:42.959 --> 01:00:44.793
+Webhook endpoint down for days.
+
+1108
+01:00:45.073 --> 01:00:50.769
+Detection signal: webhook.deliveryresult=retry per endpoint; DEAD rows.
+
+1109
+01:00:51.049 --> 01:00:52.265
+Blast radius:
+
+1110
+01:00:52.545 --> 01:00:53.996
+One seller's integration.
+
+1111
+01:00:54.276 --> 01:00:55.279
+Mitigation:
+
+1112
+01:00:55.559 --> 01:01:00.913
+Backoff, DEAD + notification, replay API, auto-disable after N days.
+
+1113
+01:01:01.193 --> 01:01:02.985
+Webhook signature secret leaked.
+
+1114
+01:01:03.265 --> 01:01:04.460
+Detection signal:
+
+1115
+01:01:04.740 --> 01:01:07.172
+Unexpected deliveries claimed by sellers.
+
+1116
+01:01:07.452 --> 01:01:08.668
+Blast radius:
+
+1117
+01:01:08.948 --> 01:01:10.015
+Spoofed events.
+
+1118
+01:01:10.295 --> 01:01:11.297
+Mitigation:
+
+1119
+01:01:11.577 --> 01:01:17.423
+Per-endpoint secrets, rotation with two active secrets, event re-fetch for critical data.
+
+1120
+01:01:17.703 --> 01:01:18.833
+Payload bloat.
+
+1121
+01:01:19.113 --> 01:01:23.977
+Detection signal: p99 response size, serialization CPU.
+
+1122
+01:01:24.257 --> 01:01:25.473
+Blast radius:
+
+1123
+01:01:25.753 --> 01:01:27.439
+Latency, egress cost.
+
+1124
+01:01:27.719 --> 01:01:28.721
+Mitigation:
+
+1125
+01:01:29.001 --> 01:01:33.439
+List DTOs, fields=, compression, payload budgets in review.
+
+1126
+01:01:34.789 --> 01:01:35.877
+Observability.
+
+1127
+01:01:36.157 --> 01:01:37.501
+Here is a quick table:
+
+1128
+01:01:37.781 --> 01:01:42.858
+Signal, and Type, and Why. http.server.requestsuri,method,status.
+
+1129
+01:01:43.138 --> 01:01:43.799
+Type:
+
+1130
+01:01:44.079 --> 01:01:44.826
+Timer.
+
+1131
+01:01:45.106 --> 01:01:45.789
+Why:
+
+1132
+01:01:46.069 --> 01:01:52.853
+Per-route latency and error rates (use templated URIs, not raw ids). orders.idempotencyoutcome.
+
+1133
+01:01:53.133 --> 01:01:53.794
+Type:
+
+1134
+01:01:54.074 --> 01:01:54.906
+Counter.
+
+1135
+01:01:55.186 --> 01:01:55.869
+Why:
+
+1136
+01:01:56.149 --> 01:01:59.626
+Proceed or Replay or InProgress or KeyReused mix.
+
+1137
+01:01:59.906 --> 01:02:03.362
+A replay spike means a client or network issue upstream.
+
+1138
+01:02:03.642 --> 01:02:05.221
+Stale INPROGRESS records.
+
+1139
+01:02:05.501 --> 01:02:06.162
+Type:
+
+1140
+01:02:06.442 --> 01:02:07.253
+Gauge.
+
+1141
+01:02:07.533 --> 01:02:08.215
+Why:
+
+1142
+01:02:08.495 --> 01:02:13.082
+Crash takeovers pending. api.deprecated.callsroute,appversion.
+
+1143
+01:02:13.362 --> 01:02:14.023
+Type:
+
+1144
+01:02:14.303 --> 01:02:15.135
+Counter.
+
+1145
+01:02:15.415 --> 01:02:16.098
+Why:
+
+1146
+01:02:16.378 --> 01:02:17.829
+Deprecation progress.
+
+1147
+01:02:18.109 --> 01:02:21.095
+Requests per X-App-Version or seller client id.
+
+1148
+01:02:21.375 --> 01:02:22.037
+Type:
+
+1149
+01:02:22.317 --> 01:02:23.149
+Counter.
+
+1150
+01:02:23.429 --> 01:02:24.111
+Why:
+
+1151
+01:02:24.391 --> 01:02:25.970
+Who's affected by a change.
+
+1152
+01:02:27.320 --> 01:02:28.792
+Response size per route.
+
+1153
+01:02:29.072 --> 01:02:29.733
+Type:
+
+1154
+01:02:30.013 --> 01:02:31.400
+Distribution summary.
+
+1155
+01:02:31.680 --> 01:02:32.363
+Why:
+
+1156
+01:02:32.643 --> 01:02:33.837
+Payload budgets.
+
+1157
+01:02:34.117 --> 01:02:35.739
+Problem code distribution.
+
+1158
+01:02:36.019 --> 01:02:36.680
+Type:
+
+1159
+01:02:36.960 --> 01:02:38.389
+Counter (log-derived).
+
+1160
+01:02:38.669 --> 01:02:39.352
+Why:
+
+1161
+01:02:39.632 --> 01:02:45.648
+Top client-visible errors, for product and UX. webhook.deliveryresult and delivery lag.
+
+1162
+01:02:45.928 --> 01:02:46.589
+Type:
+
+1163
+01:02:46.869 --> 01:02:48.064
+Counter or Timer.
+
+1164
+01:02:48.344 --> 01:02:49.027
+Why:
+
+1165
+01:02:49.307 --> 01:02:50.757
+Seller integration health.
+
+1166
+01:02:52.107 --> 01:03:02.411
+Log fields on every request: correlationId, route, status, customerId (hashed if needed), idempotencyKey, appVersion, durationMs.
+
+1167
+01:03:03.761 --> 01:03:04.700
+Security.
+
+1168
+01:03:04.980 --> 01:03:06.644
+Authorization per resource.
+
+1169
+01:03:06.924 --> 01:03:17.868
+Every lookup is scoped by the authenticated principal (WHERE customerid =:me), which prevents IDOR, the top API vulnerability class (OWASP API1:
+
+1170
+01:03:18.148 --> 01:03:20.367
+Broken Object Level Authorization).
+
+1171
+01:03:20.647 --> 01:03:25.959
+Opaque, non-sequential IDs, and 404 for resources the caller can't see.
+
+1172
+01:03:26.239 --> 01:03:40.148
+Input limits: max body size, max array lengths, max page size, strict JSON parsing (reject unknown fields on writes if you want strictness, or ignore them if you want tolerance, but decide explicitly).
+
+1173
+01:03:40.428 --> 01:03:45.143
+Mass assignment: request DTOs contain only client-settable fields.
+
+1174
+01:03:45.423 --> 01:03:47.641
+Never bind requests straight to entities.
+
+1175
+01:03:48.991 --> 01:03:55.071
+Idempotency keys are scoped per client, so they can't be used to read another client's replayed responses.
+
+1176
+01:03:55.351 --> 01:03:56.546
+Cursors are signed.
+
+1177
+01:03:56.826 --> 01:04:01.263
+They leak nothing sensitive and can't be forged to skip authorization filters.
+
+1178
+01:04:01.543 --> 01:04:02.418
+Webhooks:
+
+1179
+01:04:02.698 --> 01:04:15.989
+HMAC signatures, timestamp tolerance, secrets in a vault, TLS-only URLs, and SSRF protection when sellers register URLs (block private IP ranges and metadata endpoints).
+
+1180
+01:04:16.269 --> 01:04:21.261
+Problem Details never include stack traces, SQL or internal hostnames.
+
+1181
+01:04:21.541 --> 01:04:28.645
+Rate limits and quotas per client (Ch 18, 39), with 429 + Retry-After.
+
+1182
+01:04:29.995 --> 01:04:31.659
+Performance and tuning knobs.
+
+1183
+01:04:31.939 --> 01:04:33.283
+Here is a quick table:
+
+1184
+01:04:33.563 --> 01:04:35.397
+Knob, and Value, and Guidance.
+
+1185
+01:04:35.677 --> 01:04:36.936
+Max page size.
+
+1186
+01:04:37.216 --> 01:04:37.984
+Value:
+
+1187
+01:04:38.264 --> 01:04:39.053
+50.
+
+1188
+01:04:39.333 --> 01:04:40.229
+Guidance:
+
+1189
+01:04:40.509 --> 01:04:44.029
+Larger pages hurt p99 and mobile payload.
+
+1190
+01:04:44.309 --> 01:04:45.397
+Keyset index.
+
+1191
+01:04:45.677 --> 01:04:46.445
+Value:
+
+1192
+01:04:46.725 --> 01:04:49.392
+(customerid, createdat DESC, id DESC).
+
+1193
+01:04:49.672 --> 01:04:50.568
+Guidance:
+
+1194
+01:04:50.848 --> 01:04:52.704
+Must match the ORDER BY exactly.
+
+1195
+01:04:52.984 --> 01:04:54.264
+Idempotency lock.
+
+1196
+01:04:54.544 --> 01:04:55.312
+Value:
+
+1197
+01:04:55.592 --> 01:04:56.509
+30 s.
+
+1198
+01:04:56.789 --> 01:05:04.021
+Guidance: ≥ p99.9 of request duration, so an active owner isn't taken over.
+
+1199
+01:05:04.301 --> 01:05:05.901
+Idempotency TTL.
+
+1200
+01:05:06.181 --> 01:05:06.949
+Value:
+
+1201
+01:05:07.229 --> 01:05:08.381
+24 h.
+
+1202
+01:05:08.661 --> 01:05:13.717
+Guidance: ≥ the longest client retry horizon (offline apps).
+
+1203
+01:05:13.997 --> 01:05:15.256
+Response compression.
+
+1204
+01:05:15.536 --> 01:05:18.651
+Value: gzip or br above ~1 KB.
+
+1205
+01:05:18.931 --> 01:05:19.827
+Guidance:
+
+1206
+01:05:20.107 --> 01:05:21.792
+Payload versus CPU.
+
+1207
+01:05:22.072 --> 01:05:23.203
+ETag for GETs.
+
+1208
+01:05:23.483 --> 01:05:24.251
+Value:
+
+1209
+01:05:24.531 --> 01:05:26.429
+From version, not body hash.
+
+1210
+01:05:26.709 --> 01:05:27.605
+Guidance:
+
+1211
+01:05:27.885 --> 01:05:30.637
+Cheap to compute; enables 304.
+
+1212
+01:05:31.987 --> 01:05:33.097
+Webhook timeout.
+
+1213
+01:05:33.377 --> 01:05:34.145
+Value:
+
+1214
+01:05:34.425 --> 01:05:36.515
+3 s connect or 10 s read.
+
+1215
+01:05:36.795 --> 01:05:37.691
+Guidance:
+
+1216
+01:05:37.971 --> 01:05:40.915
+Senders shouldn't be held hostage by slow receivers.
+
+1217
+01:05:41.195 --> 01:05:43.222
+Webhook concurrency per endpoint.
+
+1218
+01:05:43.502 --> 01:05:44.270
+Value:
+
+1219
+01:05:44.550 --> 01:05:45.617
+5 to 10.
+
+1220
+01:05:45.897 --> 01:05:46.793
+Guidance:
+
+1221
+01:05:47.073 --> 01:05:49.035
+Don't DoS a small seller's server.
+
+1222
+01:05:50.385 --> 01:05:51.111
+Cost.
+
+1223
+01:05:51.391 --> 01:05:56.233
+Idempotency adds roughly one extra insert and one update per mutation.
+
+1224
+01:05:56.513 --> 01:06:06.348
+At ~850 per second peak that's negligible next to the order write itself, and it's far cheaper than one day of duplicate-refund reconciliation.
+
+1225
+01:06:06.628 --> 01:06:17.060
+Keyset pagination turns deep-page queries from O(offset) into O(limit), often the single largest DB CPU saving for history screens.
+
+1226
+01:06:17.340 --> 01:06:20.540
+Payload trimming reduces egress (Ch 02:
+
+1227
+01:06:20.820 --> 01:06:24.639
+10 times differences are common) and serialization CPU.
+
+1228
+01:06:24.919 --> 01:06:32.151
+Generated SDKs cost some CI time but save integration support hours for 400 plus sellers.
+
+1229
+01:06:33.501 --> 01:06:34.439
+Part 7.
+
+1230
+01:06:34.719 --> 01:06:36.426
+Anti-Patterns and Pitfalls.
+
+1231
+01:06:37.676 --> 01:06:38.316
+1.
+
+1232
+01:06:38.596 --> 01:06:40.111
+Non-idempotent creates.
+
+1233
+01:06:40.391 --> 01:06:41.201
+Symptom:
+
+1234
+01:06:41.481 --> 01:06:44.831
+Duplicate orders after timeouts (§1.1).
+
+1235
+01:06:45.111 --> 01:06:45.836
+Fix:
+
+1236
+01:06:46.116 --> 01:06:51.385
+Require an Idempotency-Key on every mutation, implemented race-free (L3).
+
+1237
+01:06:51.665 --> 01:06:52.369
+2.
+
+1238
+01:06:52.649 --> 01:06:54.569
+Check-then-insert idempotency.
+
+1239
+01:06:55.919 --> 01:07:05.711
+Here is the Java code. before: two concurrent duplicates both see not found. after: claim first with a unique constraint; only the winner proceeds.
+
+1240
+01:07:08.561 --> 01:07:09.308
+3.
+
+1241
+01:07:09.588 --> 01:07:11.743
+200 OK with an error body.
+
+1242
+01:07:12.023 --> 01:07:12.833
+Symptom:
+
+1243
+01:07:13.113 --> 01:07:16.121
+Dashboards show 0 % errors while users fail.
+
+1244
+01:07:16.401 --> 01:07:17.703
+Caches store errors.
+
+1245
+01:07:17.983 --> 01:07:18.708
+Fix:
+
+1246
+01:07:18.988 --> 01:07:21.548
+Real status codes and Problem Details.
+
+1247
+01:07:21.828 --> 01:07:22.532
+4.
+
+1248
+01:07:22.812 --> 01:07:25.564
+Offset pagination on large, changing lists.
+
+1249
+01:07:26.914 --> 01:07:38.050
+Here is the SQL code. before: reads and throws away 50,000 rows; pages shift as new orders arrive. after: index seek from the last seen position.
+
+1250
+01:07:40.900 --> 01:07:41.668
+5.
+
+1251
+01:07:41.948 --> 01:07:43.996
+Generic PUT for state transitions.
+
+1252
+01:07:44.276 --> 01:07:45.087
+Symptom:
+
+1253
+01:07:45.367 --> 01:07:49.825
+Clients set impossible states, and there's no audit or permission per action.
+
+1254
+01:07:50.105 --> 01:07:50.831
+Fix:
+
+1255
+01:07:51.111 --> 01:07:56.039
+Explicit action endpoints (/cancel) with rules, idempotency and If-Match.
+
+1256
+01:07:56.319 --> 01:07:57.065
+6.
+
+1257
+01:07:57.345 --> 01:07:59.564
+Breaking changes inside a version.
+
+1258
+01:07:59.844 --> 01:08:00.655
+Symptom:
+
+1259
+01:08:00.935 --> 01:08:05.777
+Renaming total to grandTotal in v1 crashes app versions still in use.
+
+1260
+01:08:06.057 --> 01:08:06.783
+Fix:
+
+1261
+01:08:07.063 --> 01:08:08.215
+Additive only.
+
+1262
+01:08:08.495 --> 01:08:13.892
+Add grandTotal, deprecate total, remove it only in v2, with CI diff checks.
+
+1263
+01:08:14.172 --> 01:08:14.919
+7.
+
+1264
+01:08:15.199 --> 01:08:16.969
+Exposing entities directly.
+
+1265
+01:08:18.319 --> 01:08:20.325
+Here is the Java code. before:
+
+1266
+01:08:20.605 --> 01:08:33.490
+JPA entity as request or response, mass assignment, lazy-loading surprises, leaks internal fields. after: request or response DTO records mapped explicitly in the delegate.
+
+1267
+01:08:36.340 --> 01:08:37.023
+8.
+
+1268
+01:08:37.303 --> 01:08:38.988
+Chatty APIs for mobile.
+
+1269
+01:08:39.268 --> 01:08:40.079
+Symptom:
+
+1270
+01:08:40.359 --> 01:08:43.281
+The home screen needs 14 calls on 4G.
+
+1271
+01:08:43.561 --> 01:08:44.287
+Fix:
+
+1272
+01:08:44.567 --> 01:08:48.535
+A BFF with screen-shaped endpoints, or GraphQL with batching.
+
+1273
+01:08:48.815 --> 01:08:49.561
+9.
+
+1274
+01:08:49.841 --> 01:08:51.868
+Unsigned, unretried webhooks.
+
+1275
+01:08:52.148 --> 01:08:52.959
+Symptom:
+
+1276
+01:08:53.239 --> 01:08:57.932
+Sellers miss orders during their own deploys and can't prove the events were genuine.
+
+1277
+01:08:58.212 --> 01:08:58.937
+Fix:
+
+1278
+01:08:59.217 --> 01:09:05.703
+Signed, at-least-once, backoff for ~72 h, stable event ids, and a replay API.
+
+1279
+01:09:05.983 --> 01:09:06.687
+10.
+
+1280
+01:09:06.967 --> 01:09:09.121
+Clients switching on error message text.
+
+1281
+01:09:09.401 --> 01:09:10.212
+Symptom:
+
+1282
+01:09:10.492 --> 01:09:12.796
+Fixing a typo in detail breaks the app.
+
+1283
+01:09:13.076 --> 01:09:13.801
+Fix:
+
+1284
+01:09:14.081 --> 01:09:17.153
+Stable type and code. detail is for humans.
+
+1285
+01:09:18.503 --> 01:09:19.378
+Part 8.
+
+1286
+01:09:19.658 --> 01:09:21.002
+Interview Q and A.
+
+1287
+01:09:22.252 --> 01:09:23.084
+Beginner.
+
+1288
+01:09:23.364 --> 01:09:24.388
+Question 1.
+
+1289
+01:09:24.668 --> 01:09:27.505
+How do you model REST resources for an orders system?
+
+1290
+01:09:27.785 --> 01:09:29.151
+Thirty-second answer:
+
+1291
+01:09:29.431 --> 01:09:36.620
+Use nouns and collections: /orders, /orders/id, /orders/id/items.
+
+1292
+01:09:36.900 --> 01:09:58.788
+Use HTTP methods for their semantics (GET read, POST create, PUT replace, PATCH partial update, DELETE remove), explicit action endpoints for business transitions (POST or orders/id/cancel), opaque ids, money in minor units with currency, and ISO-8601 UTC timestamps.
+
+1293
+01:10:00.138 --> 01:10:01.141
+Question 2.
+
+1294
+01:10:01.421 --> 01:10:04.130
+What's the difference between PUT, POST and PATCH?
+
+1295
+01:10:04.410 --> 01:10:05.733
+Which are idempotent?
+
+1296
+01:10:06.013 --> 01:10:07.378
+Thirty-second answer:
+
+1297
+01:10:07.658 --> 01:10:11.797
+POST creates or triggers an action and is not idempotent by default.
+
+1298
+01:10:12.077 --> 01:10:17.879
+PUT replaces a resource at a known URI and is idempotent (same request, same result).
+
+1299
+01:10:18.159 --> 01:10:23.493
+PATCH partially updates and isn't necessarily idempotent (for example increment quantity).
+
+1300
+01:10:23.773 --> 01:10:27.143
+GET, HEAD, PUT and DELETE are idempotent by definition.
+
+1301
+01:10:28.493 --> 01:10:29.539
+Question 3.
+
+1302
+01:10:29.819 --> 01:10:39.632
+Explain 401 versus 403 versus 404, and 409 versus 412 versus 422.
+
+1303
+01:10:39.912 --> 01:10:41.277
+Thirty-second answer:
+
+1304
+01:10:41.557 --> 01:10:44.160
+401 means not authenticated.
+
+1305
+01:10:44.440 --> 01:10:47.619
+403 means authenticated but not allowed.
+
+1306
+01:10:47.899 --> 01:10:54.512
+404 means not found, and it's also used to hide the existence of resources the caller mustn't see.
+
+1307
+01:10:54.792 --> 01:11:00.616
+409 means a conflict with current state (can't cancel a packed order; key in progress).
+
+1308
+01:11:00.896 --> 01:11:05.163
+412 means an If-Match precondition failed (stale version).
+
+1309
+01:11:05.443 --> 01:11:14.552
+422 means well-formed but semantically invalid (pincode not serviceable; idempotency key reused with a different body).
+
+1310
+01:11:15.902 --> 01:11:16.969
+Question 4.
+
+1311
+01:11:17.249 --> 01:11:20.235
+Offset versus cursor pagination: which and why?
+
+1312
+01:11:20.515 --> 01:11:21.881
+Thirty-second answer:
+
+1313
+01:11:22.161 --> 01:11:30.182
+Offset is simple and supports jump to page N, but costs O(offset) and returns duplicates or skips when data changes.
+
+1314
+01:11:30.462 --> 01:11:34.494
+Cursor (keyset) pagination seeks from the last item's sort key:
+
+1315
+01:11:34.774 --> 01:11:39.339
+O(limit) at any depth, and stable under inserts, but only next or prev.
+
+1316
+01:11:39.619 --> 01:11:42.499
+Use cursor for APIs, feeds and history.
+
+1317
+01:11:42.779 --> 01:11:44.870
+Use offset for small admin tables.
+
+1318
+01:11:46.220 --> 01:11:47.223
+Intermediate.
+
+1319
+01:11:47.503 --> 01:11:48.612
+Question 5.
+
+1320
+01:11:48.892 --> 01:11:51.687
+Design an idempotent 'create order' API.
+
+1321
+01:11:51.967 --> 01:11:53.332
+Thirty-second answer:
+
+1322
+01:11:53.612 --> 01:12:00.375
+The client sends an Idempotency-Key (a UUID per logical attempt, persisted locally for retries).
+
+1323
+01:12:00.655 --> 01:12:19.236
+The server scopes it per customer, stores a fingerprint of the request, claims the key with a unique insert before doing work, completes the key in the same transaction as the order write with the stored response, replays that response on retries, returns 409 + Retry-After while in progress,
+
+1324
+01:12:19.516 --> 01:12:25.767
+returns 422 on reuse with a different body, and expires keys after 24 h.
+
+1325
+01:12:27.117 --> 01:12:28.226
+Question 6.
+
+1326
+01:12:28.506 --> 01:12:30.277
+What problem do ETags solve?
+
+1327
+01:12:30.557 --> 01:12:31.922
+Thirty-second answer:
+
+1328
+01:12:32.202 --> 01:12:33.205
+Two problems.
+
+1329
+01:12:33.485 --> 01:12:34.317
+Caching:
+
+1330
+01:12:34.597 --> 01:12:37.647
+If-None-Match, then 304 saves bandwidth.
+
+1331
+01:12:37.927 --> 01:12:38.909
+Concurrency:
+
+1332
+01:12:39.189 --> 01:12:48.661
+If-Match on writes prevents lost updates, because if the resource changed since the client read it, the server returns 412 and the client re-fetches.
+
+1333
+01:12:50.011 --> 01:12:51.099
+Question 7.
+
+1334
+01:12:51.379 --> 01:12:55.176
+How do you version an API, and what counts as a breaking change?
+
+1335
+01:12:55.456 --> 01:12:56.821
+Thirty-second answer:
+
+1336
+01:12:57.101 --> 01:13:04.675
+Prefer additive evolution within a major version, with URI major versions (/v1) for public APIs.
+
+1337
+01:13:04.955 --> 01:13:20.315
+Breaking changes: removing or renaming fields, changing types or semantics, making optional fields required, changing status codes, error types, pagination or defaults, and adding enum values that clients switch on exhaustively.
+
+1338
+01:13:20.595 --> 01:13:23.731
+Deprecate with headers, metrics and a sunset timeline.
+
+1339
+01:13:25.081 --> 01:13:26.105
+Question 8.
+
+1340
+01:13:26.385 --> 01:13:30.502
+REST versus GraphQL versus gRPC: how do you choose?
+
+1341
+01:13:30.782 --> 01:13:32.147
+Thirty-second answer:
+
+1342
+01:13:32.427 --> 01:13:38.827
+REST or JSON for public and partner APIs: cacheable, universal, easy to document.
+
+1343
+01:13:39.107 --> 01:13:52.739
+GraphQL for client-driven aggregation across many services and screens, with batching and cost limits. gRPC for high-performance internal service calls with strict contracts, streaming and deadlines.
+
+1344
+01:13:54.089 --> 01:13:55.156
+Question 9.
+
+1345
+01:13:55.436 --> 01:13:58.892
+Design a consistent error model for 26 services.
+
+1346
+01:13:59.172 --> 01:14:00.537
+Thirty-second answer:
+
+1347
+01:14:00.817 --> 01:14:16.561
+RFC 9457 Problem Details everywhere (application or problem+json), with a stable type URI and a machine code, a human detail, correlationId, a retryable flag, and field-level errors.
+
+1348
+01:14:16.841 --> 01:14:18.463
+Document codes in the spec.
+
+1349
+01:14:18.743 --> 01:14:21.644
+Clients branch on code, never on message text.
+
+1350
+01:14:22.994 --> 01:14:23.762
+Senior.
+
+1351
+01:14:24.042 --> 01:14:25.087
+Question 10.
+
+1352
+01:14:25.367 --> 01:14:29.549
+Your idempotency implementation still produced duplicates under load.
+
+1353
+01:14:29.829 --> 01:14:30.810
+What went wrong?
+
+1354
+01:14:31.090 --> 01:14:32.455
+Thirty-second answer:
+
+1355
+01:14:32.735 --> 01:14:53.279
+Likely causes: check-then-insert without a unique constraint (a race); the key committed only after the work, so duplicates didn't see it; key completion in a different transaction from the business write (crash between the two); keys stored in an evicting cache; keys not scoped (or scoped per pod); or clients generating a new key per retry.
+
+1356
+01:14:54.629 --> 01:14:55.760
+Question 11.
+
+1357
+01:14:56.040 --> 01:15:00.200
+How do you implement keyset pagination with sorting and filters at scale?
+
+1358
+01:15:00.480 --> 01:15:01.845
+Thirty-second answer:
+
+1359
+01:15:02.125 --> 01:15:08.589
+Allow-list sort orders, each with a composite index matching (filter columns... sort columns... id).
+
+1360
+01:15:08.869 --> 01:15:12.859
+Encode the last row's sort values in a signed, versioned cursor.
+
+1361
+01:15:13.139 --> 01:15:17.939
+Use row-value comparison ((a, b) (??)) with the same direction as the ORDER BY.
+
+1362
+01:15:18.219 --> 01:15:19.648
+Fetch limit + 1.
+
+1363
+01:15:19.928 --> 01:15:24.280
+For complex search, use a search engine's searchafter rather than SQL.
+
+1364
+01:15:25.630 --> 01:15:26.718
+Question 12.
+
+1365
+01:15:26.998 --> 01:15:29.387
+Design webhooks from the platform to sellers.
+
+1366
+01:15:29.667 --> 01:15:31.033
+Thirty-second answer:
+
+1367
+01:15:31.313 --> 01:15:36.134
+Produce events from an outbox, and create one delivery row per (event, endpoint).
+
+1368
+01:15:36.414 --> 01:15:58.771
+Sign with HMAC-SHA256 over timestamp + raw body, deliver at least once with exponential backoff and jitter for ~72 h, use a stable event id for receiver dedupe, apply short timeouts and per-endpoint concurrency limits, dead-letter with notification, and provide a replay API and a delivery log UI.
+
+1369
+01:16:00.121 --> 01:16:01.401
+Question 13.
+
+1370
+01:16:01.681 --> 01:16:06.972
+GraphQL: what are the N+1 problem and query cost, and how do you control them?
+
+1371
+01:16:07.252 --> 01:16:08.617
+Thirty-second answer:
+
+1372
+01:16:08.897 --> 01:16:16.727
+N+1 happens when resolving a field per item calls the backend N times (20 orders, then 20 rider lookups).
+
+1373
+01:16:17.007 --> 01:16:21.913
+Fix it with batching (DataLoader or @BatchMapping) and caching within a request.
+
+1374
+01:16:22.193 --> 01:16:32.711
+Query cost: clients can request deep or wide graphs, so enforce depth and complexity limits, timeouts, persisted queries (an allow-list) and per-client rate limits.
+
+1375
+01:16:34.061 --> 01:16:35.255
+Question 14.
+
+1376
+01:16:35.535 --> 01:16:39.077
+How do you design rate limits and quotas for the seller API?
+
+1377
+01:16:39.357 --> 01:16:40.722
+Thirty-second answer:
+
+1378
+01:16:41.002 --> 01:17:00.053
+Per seller API key: a token bucket per endpoint class (reads versus writes), daily quotas for bulk operations, 429 with Retry-After and rate-limit headers (RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset), separate limits for expensive endpoints, and plan-based tiers.
+
+1379
+01:17:00.333 --> 01:17:05.154
+Enforce at the gateway with a distributed store (Redis), with local burst allowance.
+
+1380
+01:17:06.504 --> 01:17:07.400
+Architect.
+
+1381
+01:17:07.680 --> 01:17:08.875
+Question 15.
+
+1382
+01:17:09.155 --> 01:17:14.509
+How would you run API governance across 26 services and several client teams?
+
+1383
+01:17:14.789 --> 01:17:16.155
+Thirty-second answer:
+
+1384
+01:17:16.435 --> 01:17:21.107
+A lightweight API guild owns a style guide, encoded as Spectral rules.
+
+1385
+01:17:21.387 --> 01:17:24.160
+Specs are contract-first in each service repo.
+
+1386
+01:17:24.440 --> 01:17:27.256
+CI enforces lint and breaking-change diffs.
+
+1387
+01:17:27.536 --> 01:17:33.339
+Shared starters cover Problem Details, idempotency, pagination and correlation ids.
+
+1388
+01:17:33.619 --> 01:17:35.987
+Clients and SDKs are generated.
+
+1389
+01:17:36.267 --> 01:17:43.157
+There's a deprecation policy with metrics, and reviews only for new public or seller APIs or major versions.
+
+1390
+01:17:44.507 --> 01:17:45.702
+Question 16.
+
+1391
+01:17:45.982 --> 01:17:52.062
+API gateway, BFF, or GraphQL federation: how do you decide for the customer apps?
+
+1392
+01:17:52.342 --> 01:17:53.707
+Thirty-second answer:
+
+1393
+01:17:53.987 --> 01:17:56.953
+Always have a gateway for cross-cutting edge concerns.
+
+1394
+01:17:57.233 --> 01:18:04.379
+Add BFFs when web and mobile need differently shaped, screen-oriented APIs and the client teams can own them.
+
+1395
+01:18:04.659 --> 01:18:16.243
+Choose GraphQL (federated) when many client teams and screens need flexible composition across many services and you can invest in schema governance and query-cost controls.
+
+1396
+01:18:17.593 --> 01:18:18.937
+Question 17.
+
+1397
+01:18:19.217 --> 01:18:26.428
+You must retire or v1 or orders or history but 8 % of traffic comes from app versions over a year old.
+
+1398
+01:18:26.708 --> 01:18:27.689
+What's your plan?
+
+1399
+01:18:27.969 --> 01:18:29.335
+Thirty-second answer:
+
+1400
+01:18:29.615 --> 01:18:52.868
+Measure by app version, keep v1 working behind an adapter onto the new implementation, add Deprecation or Sunset headers, ship an in-app force-upgrade prompt via the minimum-supported-version config, run brownouts (scheduled short windows returning 410 with a friendly message), coordinate with product on a sunset date, and only then return 410.
+
+1401
+01:18:54.218 --> 01:18:55.391
+Question 18.
+
+1402
+01:18:55.671 --> 01:18:58.573
+Design the developer platform for third-party sellers.
+
+1403
+01:18:58.853 --> 01:19:00.218
+Thirty-second answer:
+
+1404
+01:19:00.498 --> 01:19:21.789
+OAuth2 client credentials with scopes (catalog:write, orders:read), a sandbox with test data and simulated events, OpenAPI docs and generated SDKs, signed webhooks with a replay API, rate limits and quotas by tier, async bulk jobs (202 + job resource), a status page and changelog,
+
+1405
+01:19:22.069 --> 01:19:28.618
+versioning and deprecation policy, and self-serve dashboards (API usage, webhook deliveries, errors).
+
+1406
+01:19:29.968 --> 01:19:31.205
+Question 19.
+
+1407
+01:19:31.485 --> 01:19:35.987
+Should internal service-to-service calls standardize on gRPC or REST?
+
+1408
+01:19:36.267 --> 01:19:37.632
+Thirty-second answer:
+
+1409
+01:19:37.912 --> 01:19:49.603
+It depends on team skills, tooling and performance needs. gRPC gives typed contracts, efficient encoding, streaming and deadlines, which suit high-QPS internal paths.
+
+1410
+01:19:49.883 --> 01:19:53.872
+REST or JSON gives universal tooling and easier debugging.
+
+1411
+01:19:54.152 --> 01:20:06.547
+A pragmatic standard is contract-first either way (proto or OpenAPI), gRPC for hot paths and streaming, and REST elsewhere, with shared observability and deadline propagation.
+
+1412
+01:20:07.897 --> 01:20:09.006
+Question 20.
+
+1413
+01:20:09.286 --> 01:20:14.683
+How do you design APIs for long-running operations (bulk price upload, refunds)?
+
+1414
+01:20:14.963 --> 01:20:16.329
+Thirty-second answer:
+
+1415
+01:20:16.609 --> 01:20:29.558
+Accept with 202 Accepted and a Location to an operation resource (/operations/id) that exposes status, progress, result or errors, with idempotency on the submit.
+
+1416
+01:20:29.838 --> 01:20:33.145
+Offer webhook or SSE notification on completion.
+
+1417
+01:20:33.425 --> 01:20:38.225
+Make operations cancellable where possible, and keep results for a retention window.
+
+1418
+01:20:39.575 --> 01:20:40.471
+Part 9.
+
+1419
+01:20:40.751 --> 01:20:42.159
+Summary and Practice.
+
+1420
+01:20:43.409 --> 01:20:44.497
+Key takeaways.
+
+1421
+01:20:44.777 --> 01:20:49.278
+An API is a long-lived contract over an unreliable network.
+
+1422
+01:20:49.558 --> 01:20:53.227
+Design it to be retry-safe, evolvable and hard to misuse.
+
+1423
+01:20:53.507 --> 01:20:59.054
+Model resources with correct methods, and use explicit actions for business state transitions.
+
+1424
+01:20:59.334 --> 01:21:07.121
+Use status codes the client can act on, and RFC 9457 Problem Details with stable codes.
+
+1425
+01:21:07.401 --> 01:21:11.539
+Keyset pagination with an opaque, signed cursor and a matching index:
+
+1426
+01:21:11.819 --> 01:21:13.291
+O(limit) and stable.
+
+1427
+01:21:14.641 --> 01:21:29.084
+Every mutation takes an Idempotency-Key: claim with a unique insert, fingerprint the request, complete in the same transaction, replay identically, return 409 while in progress and 422 on reuse.
+
+1428
+01:21:29.364 --> 01:21:33.929
+ETags do caching (304) and concurrency (412).
+
+1429
+01:21:34.209 --> 01:21:36.983
+Implement writes as atomic conditional updates.
+
+1430
+01:21:37.263 --> 01:21:38.564
+Evolve additively.
+
+1431
+01:21:38.844 --> 01:21:45.927
+Use a URI major version for public APIs, tolerant readers, and CI-enforced breaking-change checks.
+
+1432
+01:21:46.207 --> 01:21:56.404
+REST for public and partner APIs, GraphQL for flexible client composition (with batching and cost limits), gRPC for internal hot paths.
+
+1433
+01:21:57.754 --> 01:22:03.578
+Gateway for edge concerns, BFF per client for composition, no domain rules in either.
+
+1434
+01:22:03.858 --> 01:22:10.365
+Webhooks are signed, at-least-once, deduplicated by event id, retried with backoff, and replayable.
+
+1435
+01:22:10.645 --> 01:22:13.866
+Receivers verify the raw body and acknowledge fast.
+
+1436
+01:22:15.216 --> 01:22:16.539
+Decision cheat sheet.
+
+1437
+01:22:16.819 --> 01:22:18.163
+Here is a quick table:
+
+1438
+01:22:18.443 --> 01:22:19.552
+Need, and Choose.
+
+1439
+01:22:19.832 --> 01:22:21.667
+Retry-safe create or action:
+
+1440
+01:22:21.947 --> 01:22:25.851
+Idempotency-Key + DB claim + same-tx completion.
+
+1441
+01:22:26.131 --> 01:22:27.560
+Prevent lost updates:
+
+1442
+01:22:27.840 --> 01:22:33.152
+Strong ETag + If-Match (428 if missing) + conditional UPDATE.
+
+1443
+01:22:33.432 --> 01:22:35.245
+History, feeds, exports:
+
+1444
+01:22:35.525 --> 01:22:37.872
+Keyset pagination with signed cursor.
+
+1445
+01:22:38.152 --> 01:22:39.944
+Admin table with page numbers:
+
+1446
+01:22:40.224 --> 01:22:41.931
+Offset (small data only).
+
+1447
+01:22:42.211 --> 01:22:43.981
+Public or partner API:
+
+1448
+01:22:44.261 --> 01:22:48.229
+REST + OpenAPI-first + URI major version.
+
+1449
+01:22:48.509 --> 01:22:50.707
+Mobile screens across many services:
+
+1450
+01:22:50.987 --> 01:22:53.867
+BFF, or GraphQL with persisted queries.
+
+1451
+01:22:54.147 --> 01:22:58.349
+Internal high-QPS or streaming: gRPC with deadlines.
+
+1452
+01:22:58.629 --> 01:22:59.803
+Long-running work:
+
+1453
+01:23:00.083 --> 01:23:04.904
+202 + operation resource + webhook or SSE completion.
+
+1454
+01:23:06.254 --> 01:23:08.025
+Notify external systems:
+
+1455
+01:23:08.305 --> 01:23:10.673
+Signed, retried, replayable webhooks.
+
+1456
+01:23:12.023 --> 01:23:13.153
+Exercises.
+
+1457
+01:23:13.433 --> 01:23:14.777
+Here is a quick table:
+
+1458
+01:23:15.057 --> 01:23:16.913
+Band, and Exercise, and Hint.
+
+1459
+01:23:17.193 --> 01:23:18.025
+B1.
+
+1460
+01:23:18.305 --> 01:23:19.372
+Exercise:
+
+1461
+01:23:19.652 --> 01:23:23.855
+Run L1, then add a list with status filter to the cursor logic.
+
+1462
+01:23:24.135 --> 01:23:24.817
+Hint:
+
+1463
+01:23:25.097 --> 01:23:27.444
+The filter applies before limit + 1.
+
+1464
+01:23:27.724 --> 01:23:28.556
+B1.
+
+1465
+01:23:28.836 --> 01:23:29.903
+Exercise:
+
+1466
+01:23:30.183 --> 01:23:34.279
+Write the Problem Details JSON for slot no longer available.
+
+1467
+01:23:34.559 --> 01:23:35.241
+Hint:
+
+1468
+01:23:35.521 --> 01:23:37.249
+Pick type, code, retryable.
+
+1469
+01:23:37.529 --> 01:23:38.404
+B2.
+
+1470
+01:23:38.684 --> 01:23:39.751
+Exercise:
+
+1471
+01:23:40.031 --> 01:23:45.492
+Add If-None-Match, then 304 support to L3's GET or orders/id.
+
+1472
+01:23:45.772 --> 01:23:46.455
+Hint:
+
+1473
+01:23:46.735 --> 01:23:48.975
+WebRequest.checkNotModified.
+
+1474
+01:23:49.255 --> 01:23:50.129
+B2.
+
+1475
+01:23:50.409 --> 01:23:51.476
+Exercise:
+
+1476
+01:23:51.756 --> 01:23:59.457
+Write an OpenAPI 3.1 spec for POST or orders/id/cancel with all its responses.
+
+1477
+01:23:59.737 --> 01:24:00.420
+Hint:
+
+1478
+01:24:00.700 --> 01:24:06.161
+200, 404, 409, 412, 428.
+
+1479
+01:24:06.441 --> 01:24:07.316
+B3.
+
+1480
+01:24:07.596 --> 01:24:08.663
+Exercise:
+
+1481
+01:24:08.943 --> 01:24:15.983
+Add crash-takeover to the L3 IT: kill the owner mid-request (simulate by inserting a stale INPROGRESS row).
+
+1482
+01:24:16.263 --> 01:24:18.055
+Hint: lockeduntil in the past.
+
+1483
+01:24:19.405 --> 01:24:20.279
+B3.
+
+1484
+01:24:20.559 --> 01:24:21.626
+Exercise:
+
+1485
+01:24:21.906 --> 01:24:24.445
+Implement previous-page cursors for L3.
+
+1486
+01:24:24.725 --> 01:24:25.407
+Hint:
+
+1487
+01:24:25.687 --> 01:24:29.122
+Reverse the comparison and order, then reverse the results.
+
+1488
+01:24:29.402 --> 01:24:30.277
+B4.
+
+1489
+01:24:30.557 --> 01:24:31.623
+Exercise:
+
+1490
+01:24:31.903 --> 01:24:35.871
+Write the Spectral ruleset for your platform's top 10 API rules.
+
+1491
+01:24:36.151 --> 01:24:36.834
+Hint:
+
+1492
+01:24:37.114 --> 01:24:38.479
+Start from §2.
+
+1493
+01:24:38.759 --> 01:24:39.634
+B4.
+
+1494
+01:24:39.914 --> 01:24:40.981
+Exercise:
+
+1495
+01:24:41.261 --> 01:24:43.309
+Draft ADR-022:
+
+1496
+01:24:43.589 --> 01:24:49.285
+GraphQL federation versus BFFs for the customer apps in 2027.
+
+1497
+01:24:49.565 --> 01:24:50.247
+Hint:
+
+1498
+01:24:50.527 --> 01:24:52.447
+Team topology, cost limits.
+
+1499
+01:24:53.797 --> 01:24:54.800
+Further reading.
+
+1500
+01:24:55.080 --> 01:25:12.616
+RFC 9110 (HTTP Semantics), RFC 9457 (Problem Details), RFC 9745 (Deprecation header), RFC 8594 (Sunset header).
+
+1501
+01:25:12.896 --> 01:25:14.176
+IETF draft:
+
+1502
+01:25:14.456 --> 01:25:17.336
+The Idempotency-Key HTTP Header Field.
+
+1503
+01:25:17.616 --> 01:25:22.629
+Stripe API design blog posts on idempotency and API versioning.
+
+1504
+01:25:22.909 --> 01:25:26.771
+Zalando RESTful API Guidelines (open source).
+
+1505
+01:25:27.051 --> 01:25:34.709
+Google API Improvement Proposals (AIP), especially the pagination and long-running operations AIPs.
+
+1506
+01:25:34.989 --> 01:25:39.192
+Designing Web APIs, Brenda Jin, Saurabh Sahni, Amir Shevat.
+
+1507
+01:25:40.542 --> 01:25:42.057
+Spring Framework reference:
+
+1508
+01:25:42.337 --> 01:25:46.731
+ProblemDetail, RestClient; Spring for GraphQL: @BatchMapping.
+
+1509
+01:25:48.081 --> 01:25:49.319
+Related chapters.
+
+1510
+01:25:49.599 --> 01:26:07.860
+03, Networking, 05, Relational Databases, 13, Distributed Transactions or Outbox, 17, Inter-Service Communication, 18, Resilience Patterns, 20, Idempotency, IDs and Locks, 29, Testing Distributed Systems, 45, Payment System.
+
+1511
+01:26:09.210 --> 01:26:10.810
+That's the end of this chapter.
+
+1512
+01:26:11.090 --> 01:26:17.127
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1513
+01:26:17.407 --> 01:26:18.858
+See you in the next chapter.
+

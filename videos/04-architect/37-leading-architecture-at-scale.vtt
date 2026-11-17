@@ -1,0 +1,3134 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.099
+Leading Architecture at Scale.
+
+2
+00:00:02.379 --> 00:00:06.582
+Chapter 37, from the Architect part of the System Design Playbook.
+
+3
+00:00:08.332 --> 00:00:09.292
+At a glance:
+
+4
+00:00:09.572 --> 00:00:10.745
+Chapter at a glance.
+
+5
+00:00:11.025 --> 00:00:12.028
+Reader bands:
+
+6
+00:00:12.308 --> 00:00:14.697
+B3, then B4, Prerequisites:
+
+7
+00:00:14.977 --> 00:00:20.439
+Ch 16, Ch 31, Ch 32, Ch 33, What you will build:
+
+8
+00:00:20.719 --> 00:00:39.855
+The socio-technical side of architecture, how team structure shapes the system (Conway's law), how to organise teams around the flow of change, how a platform team keeps a fleet of services on a paved road, how to run a fleet-wide migration, and how staff+ engineers lead without formal authority.
+
+9
+00:00:40.135 --> 00:00:44.316
+Four runnable labs over the grocery platform's 26 services.
+
+10
+00:00:45.666 --> 00:00:46.498
+L1:
+
+11
+00:00:46.778 --> 00:00:48.101
+Conway's law, measured.
+
+12
+00:00:48.381 --> 00:01:10.397
+A year of 500 features against two ownership maps: organised by history and layer, 91% of features needed more than one team and every bounded context was split across 2 to 3 teams; aligning teams to the Ch 33 contexts helped only modestly (86%), because this year's work flows across those contexts.
+
+13
+00:01:10.677 --> 00:01:12.661
+L2: teams from change data.
+
+14
+00:01:12.941 --> 00:01:34.658
+Within cognitive-load limits (2 to 4 services per team, balanced load), grouping services by how they change together cut hand-offs from 500 to 240 and multi-team features from 86% to 43%, and surfaced groupings to question, such as a shared messaging capability that belongs with a platform team.
+
+15
+00:01:36.008 --> 00:01:37.928
+L3: the paved road, scanned.
+
+16
+00:01:38.208 --> 00:01:58.539
+26 real repos generated from template v3 or v2 or v1 or by hand and scanned for 8 golden-path capabilities: current-template services passed 100%, v2 60%, v1 28%, hand-rolled 19%; only 8 of 26 were fully on the current path.
+
+17
+00:01:58.819 --> 00:02:00.888
+L4: a fleet-wide migration.
+
+18
+00:02:01.168 --> 00:02:24.336
+Spring Boot 2, then 3 across 26 services: a central team took 31 sprints (~14 months); team-owned with libraries migrated first 11; starting everyone before the libraries were ready finished about the same (10.4) but spent 32% more effort on workarounds; adding codemods 8.6 sprints and 37% less effort.
+
+19
+00:02:25.686 --> 00:02:26.667
+Reading time:
+
+20
+00:02:26.947 --> 00:02:28.739
+110 min + code.
+
+21
+00:02:30.089 --> 00:02:30.943
+Part 1.
+
+22
+00:02:31.223 --> 00:02:33.143
+Introduction and Why It Matters.
+
+23
+00:02:34.393 --> 00:02:37.465
+A story: the architecture that the org chart rewrote.
+
+24
+00:02:37.745 --> 00:02:56.070
+The grocery platform's architecture team produced an excellent target architecture: bounded contexts from event storming (Ch 33), a modular monolith for ordering, services for inventory and fulfilment, events between contexts, cells for blast radius (Ch 34).
+
+25
+00:02:56.350 --> 00:03:02.046
+The ADRs were written, the diagrams generated from a model, the fitness functions in CI.
+
+26
+00:03:02.326 --> 00:03:05.654
+Eighteen months later the system looked nothing like the target.
+
+27
+00:03:05.934 --> 00:03:08.110
+The reason was not bad engineering.
+
+28
+00:03:08.390 --> 00:03:09.841
+It was the organisation:
+
+29
+00:03:11.191 --> 00:03:18.572
+Teams were organised by technical layer and history, an API team, a data team, a core team, a mobile team.
+
+30
+00:03:18.852 --> 00:03:22.073
+Every bounded context was split across two or three of them.
+
+31
+00:03:22.353 --> 00:03:33.916
+Each feature needed a meeting between teams, so teams built integration shortcuts, a shared table here, a synchronous call there, and the architecture drifted towards the org chart (L1).
+
+32
+00:03:34.196 --> 00:03:37.695
+The architecture team decided; delivery teams implemented.
+
+33
+00:03:37.975 --> 00:03:43.713
+Decisions made far from the code were resisted, misunderstood, or quietly worked around.
+
+34
+00:03:43.993 --> 00:03:47.577
+The architects became a review bottleneck and were cut out of the loop.
+
+35
+00:03:48.927 --> 00:03:51.210
+Standards were documents, not defaults.
+
+36
+00:03:51.490 --> 00:04:00.685
+Every new service was set up by hand from a wiki page, so each one was different: some had tracing, some had the outbox, some had JSON logs.
+
+37
+00:04:00.965 --> 00:04:04.271
+By service twenty, no two were configured alike (L3).
+
+38
+00:04:04.551 --> 00:04:06.386
+The big migration never finished.
+
+39
+00:04:06.666 --> 00:04:11.039
+A move to Spring Boot 3 was assigned to a two-person migration squad.
+
+40
+00:04:11.319 --> 00:04:19.725
+A year later a third of the services were migrated, the squad was burnt out, and the owning teams had learned nothing about their new stack (L4).
+
+41
+00:04:21.075 --> 00:04:23.464
+Nobody could say whether things were getting better.
+
+42
+00:04:23.744 --> 00:04:29.909
+There were no measures of delivery flow, coordination cost, or standards adoption, only anecdotes.
+
+43
+00:04:30.189 --> 00:04:36.589
+The recovery was led by two principal engineers who treated the organisation as part of the architecture.
+
+44
+00:04:36.869 --> 00:04:53.936
+They realigned teams to how work actually flowed, created a platform team whose product was a paved road, replaced review gates with an advice process and automated checks, and ran migrations as sequenced, team-owned programmes with the platform doing the enabling work first.
+
+45
+00:04:55.286 --> 00:04:55.969
+Quote:
+
+46
+00:04:56.249 --> 00:04:57.913
+The thesis of this chapter.
+
+47
+00:04:58.193 --> 00:05:07.451
+At scale, architecture is socio-technical: the system you get is shaped as much by team boundaries, incentives and defaults as by diagrams.
+
+48
+00:05:07.731 --> 00:05:17.033
+Conway's law isn't a curiosity, it's a force, and you either use it (align teams to how change flows) or it rewrites your architecture for you.
+
+49
+00:05:17.313 --> 00:05:34.038
+The architect's leverage therefore shifts from making decisions to shaping the conditions under which many teams make good decisions: team boundaries that minimise hand-offs, a platform that makes the right thing the easy thing, governance by guardrails and advice rather than gates,
+
+50
+00:05:34.318 --> 00:05:39.822
+migrations that are planned and enabled rather than assigned, and measures that show whether it's working.
+
+51
+00:05:41.172 --> 00:05:43.476
+Where this lives in the grocery platform.
+
+52
+00:05:43.756 --> 00:05:45.100
+Here is a quick table:
+
+53
+00:05:45.380 --> 00:05:47.684
+Lever, and Grocery platform, and Lab.
+
+54
+00:05:47.964 --> 00:05:49.031
+Team boundaries.
+
+55
+00:05:49.311 --> 00:05:50.591
+Grocery platform:
+
+56
+00:05:50.871 --> 00:05:55.692
+8 stream-aligned teams owning 3 to 4 services each, aligned to change flow.
+
+57
+00:05:55.972 --> 00:05:56.655
+Lab:
+
+58
+00:05:56.935 --> 00:05:58.257
+L1, L2.
+
+59
+00:05:58.537 --> 00:05:59.540
+Team types.
+
+60
+00:05:59.820 --> 00:06:01.100
+Grocery platform:
+
+61
+00:06:01.380 --> 00:06:07.012
+Stream-aligned teams, a platform team, an enabling team for migrations or observability.
+
+62
+00:06:07.292 --> 00:06:09.148
+Lab: §2.3.
+
+63
+00:06:09.428 --> 00:06:10.452
+Paved road.
+
+64
+00:06:10.732 --> 00:06:12.012
+Grocery platform:
+
+65
+00:06:12.292 --> 00:06:17.796
+Service template + platform starter + CI + catalog; scanner and scorecards.
+
+66
+00:06:18.076 --> 00:06:18.759
+Lab:
+
+67
+00:06:19.039 --> 00:06:19.892
+L3.
+
+68
+00:06:20.172 --> 00:06:21.047
+Governance.
+
+69
+00:06:21.327 --> 00:06:22.607
+Grocery platform:
+
+70
+00:06:22.887 --> 00:06:27.303
+Advice process, ADRs, fitness functions, tech radar (Ch 31).
+
+71
+00:06:27.583 --> 00:06:29.439
+Lab: §2.6.
+
+72
+00:06:29.719 --> 00:06:30.721
+Migrations.
+
+73
+00:06:31.001 --> 00:06:32.281
+Grocery platform:
+
+74
+00:06:32.561 --> 00:06:37.724
+Platform-first enablers, team-owned execution, codemods, tracking fitness function.
+
+75
+00:06:38.004 --> 00:06:38.687
+Lab:
+
+76
+00:06:38.967 --> 00:06:39.841
+L4.
+
+77
+00:06:40.121 --> 00:06:40.911
+Measures.
+
+78
+00:06:41.191 --> 00:06:42.471
+Grocery platform:
+
+79
+00:06:42.751 --> 00:06:47.935
+DORA metrics, hand-offs per feature, golden-path adoption, cognitive-load surveys.
+
+80
+00:06:48.215 --> 00:06:50.092
+Lab: §2.9.
+
+81
+00:06:51.442 --> 00:06:52.765
+Learning objectives.
+
+82
+00:06:53.045 --> 00:06:54.943
+By the end you will be able to:
+
+83
+00:06:55.223 --> 00:06:59.959
+Explain and use Conway's law, including the inverse Conway manoeuvre (L1).
+
+84
+00:07:00.239 --> 00:07:07.301
+Design team boundaries with Team Topologies' team types, interaction modes and cognitive-load limits (L2).
+
+85
+00:07:07.581 --> 00:07:13.106
+Build and run a paved road as a platform product, and measure adoption and drift (L3).
+
+86
+00:07:13.386 --> 00:07:16.757
+Plan and lead fleet-wide migrations that finish (L4).
+
+87
+00:07:18.107 --> 00:07:22.011
+Govern architecture across many teams without becoming a bottleneck.
+
+88
+00:07:22.291 --> 00:07:28.691
+Lead as a staff+ engineer: technical strategy, influence without authority, and measuring outcomes.
+
+89
+00:07:30.041 --> 00:07:30.915
+Part 2.
+
+90
+00:07:31.195 --> 00:07:33.073
+Core Concepts, Beginner to Deep.
+
+91
+00:07:34.323 --> 00:07:37.288
+Intuition: architecture is socio-technical.
+
+92
+00:07:37.568 --> 00:07:43.221
+Every interface in a system is also a line of communication between the people who own each side.
+
+93
+00:07:43.501 --> 00:07:55.981
+If two teams must change their services together every week, they must talk every week; if they can't, they'll find ways around it, shared databases, duplicated logic, synchronous calls just for now.
+
+94
+00:07:56.261 --> 00:08:01.701
+Over time the system's structure converges on the organisation's communication structure.
+
+95
+00:08:01.981 --> 00:08:04.925
+That makes three things part of an architect's job at scale:
+
+96
+00:08:05.205 --> 00:08:11.520
+Team boundaries, who owns what determines how much coordination each change needs (L1, L2).
+
+97
+00:08:12.870 --> 00:08:17.990
+Defaults, what's easy gets done; what requires remembering a wiki page doesn't (L3).
+
+98
+00:08:18.270 --> 00:08:25.481
+Flow of work, large changes across many teams need sequencing, enablers and ownership, not heroics (L4).
+
+99
+00:08:26.831 --> 00:08:29.433
+Conway's law and the inverse Conway manoeuvre.
+
+100
+00:08:29.713 --> 00:08:38.396
+Organizations which design systems are constrained to produce designs which are copies of the communication structures of these organizations.
+
+101
+00:08:38.676 --> 00:08:41.236
+Melvin Conway, 1968.
+
+102
+00:08:41.516 --> 00:08:42.945
+Two practical readings:
+
+103
+00:08:43.225 --> 00:08:48.751
+Descriptive: look at your org chart and you can predict your architecture's seams, and its problems.
+
+104
+00:08:49.031 --> 00:08:56.476
+The §1.1 platform, organised by layer, grew layer-shaped services with cross-team coupling in every feature.
+
+105
+00:08:57.826 --> 00:09:08.706
+Prescriptive, the inverse Conway manoeuvre: design the team structure you need for the architecture you want, so the natural communication paths reinforce the intended boundaries.
+
+106
+00:09:10.056 --> 00:09:17.053
+L1 measures it: the same 26 services and the same year of 500 features, under two ownership maps.
+
+107
+00:09:17.333 --> 00:09:29.643
+Organised by history and layer, 91% of features needed more than one team, 26% needed three or more, and the busiest team pairs had to coordinate on 80 plus features a year.
+
+108
+00:09:29.923 --> 00:09:47.053
+Aligning teams to the bounded contexts on paper improved this only modestly, 86% still crossed a team boundary, because the year's work flowed across those contexts (promotions changes always touched the cart; slot capacity always touched dark-store stock).
+
+109
+00:09:47.333 --> 00:09:55.611
+The lesson: align teams to how change actually flows, which you measure, rather than to nouns or contexts inferred on a whiteboard.
+
+110
+00:09:56.961 --> 00:09:58.177
+Team Topologies.
+
+111
+00:09:58.457 --> 00:10:04.601
+Matthew Skelton and Manuel Pais's Team Topologies gives a vocabulary that has become standard:
+
+112
+00:10:04.881 --> 00:10:06.075
+Four team types:
+
+113
+00:10:07.425 --> 00:10:08.769
+Here is a quick table:
+
+114
+00:10:09.049 --> 00:10:11.460
+Type, and Purpose, and Grocery example.
+
+115
+00:10:11.740 --> 00:10:12.743
+Stream-aligned.
+
+116
+00:10:13.023 --> 00:10:13.833
+Purpose:
+
+117
+00:10:14.113 --> 00:10:18.273
+Owns a slice of the business value stream end to end; the default type.
+
+118
+00:10:18.553 --> 00:10:19.791
+Grocery example:
+
+119
+00:10:20.071 --> 00:10:23.271
+Checkout experience, Fulfilment, Delivery, Catalog.
+
+120
+00:10:23.551 --> 00:10:24.489
+Platform.
+
+121
+00:10:24.769 --> 00:10:25.580
+Purpose:
+
+122
+00:10:25.860 --> 00:10:31.833
+Provides internal services that reduce stream teams' cognitive load, consumed as self-service.
+
+123
+00:10:32.113 --> 00:10:33.351
+Grocery example:
+
+124
+00:10:33.631 --> 00:10:37.428
+Service template, CI, observability, messaging, identity.
+
+125
+00:10:37.708 --> 00:10:38.561
+Enabling.
+
+126
+00:10:38.841 --> 00:10:39.652
+Purpose:
+
+127
+00:10:39.932 --> 00:10:43.580
+Helps stream teams adopt new capabilities, then steps away.
+
+128
+00:10:43.860 --> 00:10:45.097
+Grocery example:
+
+129
+00:10:45.377 --> 00:10:48.897
+A migration or observability enabling team (L4).
+
+130
+00:10:49.177 --> 00:10:50.628
+Complicated-subsystem.
+
+131
+00:10:50.908 --> 00:10:51.719
+Purpose:
+
+132
+00:10:51.999 --> 00:10:54.729
+Owns a part requiring deep specialist knowledge.
+
+133
+00:10:55.009 --> 00:10:56.247
+Grocery example:
+
+134
+00:10:56.527 --> 00:10:59.684
+Routing optimisation, search ranking, fraud models.
+
+135
+00:11:01.034 --> 00:11:02.399
+Three interaction modes:
+
+136
+00:11:02.679 --> 00:11:09.378
+Collaboration, two teams work closely for a limited time on something new (high bandwidth, high cost; should end).
+
+137
+00:11:09.658 --> 00:11:18.725
+X-as-a-Service, one team consumes another's capability through a clear API with minimal coordination (the goal for platform services).
+
+138
+00:11:19.005 --> 00:11:23.613
+Facilitating, an enabling team coaches another team to build a capability.
+
+139
+00:11:24.963 --> 00:11:31.917
+Cognitive load is the organising constraint: a team can only own as much as it can understand and operate.
+
+140
+00:11:32.197 --> 00:11:40.112
+Too many services, domains or technologies per team and quality drops, on-call becomes miserable, and changes slow down.
+
+141
+00:11:40.392 --> 00:11:55.368
+L2's limits (2 to 4 services per team, change load at most 1.5x the average) encode that constraint; without it, the optimal organisation is one giant team with zero hand-offs and no ability to cope.
+
+142
+00:11:55.648 --> 00:12:01.835
+Team size: small, long-lived teams (5 to 9 people) with stable ownership, you build it, you run it.
+
+143
+00:12:03.185 --> 00:12:05.190
+Deriving team boundaries from change.
+
+144
+00:12:05.470 --> 00:12:09.118
+Because change flow is what determines coordination, measure it:
+
+145
+00:12:09.398 --> 00:12:14.838
+Feature and ticket data: which services each feature touched (L1 or L2 use this).
+
+146
+00:12:15.118 --> 00:12:21.710
+Change coupling from version control: files and services that change in the same commits or pull requests.
+
+147
+00:12:21.990 --> 00:12:26.470
+Runtime coupling: synchronous call graphs from tracing (Ch 24).
+
+148
+00:12:26.750 --> 00:12:28.606
+Then optimise under constraints.
+
+149
+00:12:28.886 --> 00:12:39.595
+L2's local search assigns 26 services to 8 teams to minimise hand-offs (for each feature, teams involved minus one) within cognitive-load limits:
+
+150
+00:12:40.945 --> 00:12:42.289
+Here is a quick table:
+
+151
+00:12:42.569 --> 00:12:45.897
+Ownership, and Hand-offs or year, and Multi-team features.
+
+152
+00:12:46.177 --> 00:12:47.671
+Historical (by layer).
+
+153
+00:12:47.951 --> 00:12:49.188
+Hand-offs or year:
+
+154
+00:12:49.468 --> 00:12:50.940
+591.
+
+155
+00:12:51.220 --> 00:12:52.649
+Multi-team features:
+
+156
+00:12:52.929 --> 00:12:54.167
+91%.
+
+157
+00:12:54.447 --> 00:12:56.196
+Bounded contexts on paper.
+
+158
+00:12:56.476 --> 00:12:57.713
+Hand-offs or year:
+
+159
+00:12:57.993 --> 00:12:58.975
+500.
+
+160
+00:12:59.255 --> 00:13:00.684
+Multi-team features:
+
+161
+00:13:00.964 --> 00:13:02.223
+86%.
+
+162
+00:13:02.503 --> 00:13:04.124
+Optimised from change data.
+
+163
+00:13:04.404 --> 00:13:05.641
+Hand-offs or year:
+
+164
+00:13:05.921 --> 00:13:07.073
+240.
+
+165
+00:13:07.353 --> 00:13:08.783
+Multi-team features:
+
+166
+00:13:09.063 --> 00:13:10.343
+43%.
+
+167
+00:13:11.693 --> 00:13:14.487
+The optimised teams are evidence, not a decision.
+
+168
+00:13:14.767 --> 00:13:22.874
+Some groupings reflect genuine domain cohesion (pricing, promotions, cart and checkout as one checkout experience team).
+
+169
+00:13:23.154 --> 00:13:39.837
+Others are warnings: identity and notification grouped with rider and tracking because OTP logins and rider updates both send messages, a shared capability that belongs with a platform team as a self-service API, not inside one stream team.
+
+170
+00:13:40.117 --> 00:13:47.818
+Ask of every coupling: is it essential (one domain, align a team to it) or accidental (a design flaw, fix the design)?
+
+171
+00:13:48.098 --> 00:13:52.365
+And weigh skills, on-call load and domain language before moving anything.
+
+172
+00:13:52.645 --> 00:13:56.911
+Re-run the analysis periodically; how change flows shifts with the product.
+
+173
+00:13:58.261 --> 00:14:00.565
+Platform engineering and the paved road.
+
+174
+00:14:00.845 --> 00:14:04.920
+A platform team exists to reduce stream-aligned teams' cognitive load.
+
+175
+00:14:05.200 --> 00:14:14.075
+Its main product is often a paved road (golden path): the easiest way to build, ship and run a service is also the standard-compliant way.
+
+176
+00:14:14.355 --> 00:14:17.149
+Components of the grocery platform's paved road:
+
+177
+00:14:17.429 --> 00:14:38.699
+A service template (Backstage software template or similar) that generates a new service with the hexagonal package structure (Ch 34), the platform starter (JSON logs, tracing, metrics, outbox, Ch 15), health endpoints, an ArchUnit test (Ch 31), a CI pipeline with SBOM and vulnerability scanning,
+
+178
+00:14:38.979 --> 00:14:43.245
+a Dockerfile on the standard base image, and a catalog entry with an owner.
+
+179
+00:14:44.595 --> 00:14:54.451
+Self-service infrastructure: databases, topics, buckets and secrets provisioned by pull request, with policy-as-code guardrails (Ch 36).
+
+180
+00:14:54.731 --> 00:15:00.875
+A service catalog or developer portal: every service, its owner, docs, dependencies, scorecard.
+
+181
+00:15:02.225 --> 00:15:05.937
+The key lesson from L3: a template is a one-time copy.
+
+182
+00:15:06.217 --> 00:15:24.607
+Services created from the current template passed all 8 checks; services from older templates and hand-rolled ones drifted (v2 60%, v1 28%, hand-rolled 19%), because every later improvement, SBOMs, Java 21, the newer starter, never reached them.
+
+183
+00:15:24.887 --> 00:15:28.513
+Only 8 of 26 services were fully on the current path.
+
+184
+00:15:28.793 --> 00:15:33.167
+So a platform team's job is not just the template but keeping the fleet on it:
+
+185
+00:15:33.447 --> 00:15:41.937
+Libraries over copy-paste: put behaviour in a versioned starter or BOM that services depend on, so upgrades are a version bump.
+
+186
+00:15:43.287 --> 00:15:49.730
+Automated upgrade pull requests (Renovate for versions; OpenRewrite recipes for code changes).
+
+187
+00:15:50.010 --> 00:15:55.557
+Scorecards per service and team, generated by a conformance scanner, so drift is visible.
+
+188
+00:15:55.837 --> 00:16:08.957
+Platform as a product: talk to users (stream teams), measure adoption and satisfaction, deprecate carefully, and keep it the thinnest viable platform, enough to reduce load, not a second bureaucracy.
+
+189
+00:16:10.307 --> 00:16:18.392
+The failure mode is the ticket-ops platform: a team that provisions things on request via tickets, becoming a bottleneck with a queue.
+
+190
+00:16:18.672 --> 00:16:20.955
+Self-service with guardrails is the goal.
+
+191
+00:16:22.305 --> 00:16:24.993
+Governance at scale: guardrails, not gates.
+
+192
+00:16:25.273 --> 00:16:32.718
+With 8 plus teams, central architecture review of every change doesn't scale (Ch 31 §2.8).
+
+193
+00:16:32.998 --> 00:16:34.171
+The pattern that works:
+
+194
+00:16:34.451 --> 00:16:45.353
+Principles, a short list that lets teams make consistent decisions alone (prefer events between contexts, no shared databases, personal data encrypted at the field level).
+
+195
+00:16:45.633 --> 00:16:55.105
+Guardrails, automated checks that enforce the non-negotiables: fitness functions, policy-as-code, conformance scanners (L3), contract tests.
+
+196
+00:16:55.385 --> 00:16:59.886
+Paved roads, make the recommended choice the default (§2.5).
+
+197
+00:17:01.236 --> 00:17:10.388
+The advice process, anyone can make an architectural decision after seeking advice from those affected and from experts, recorded in an ADR.
+
+198
+00:17:10.668 --> 00:17:17.687
+Light review for one-way doors, new datastores, new trust boundaries, cross-context contracts, big migrations.
+
+199
+00:17:17.967 --> 00:17:24.260
+A technology radar, Adopt or Trial or Assess or Hold, so common choices need no debate.
+
+200
+00:17:24.540 --> 00:17:34.247
+Architecture guild or community of practice, engineers from every team share decisions, patterns and incidents; architects facilitate rather than dictate.
+
+201
+00:17:35.597 --> 00:17:45.410
+The architect's role shifts from gatekeeper to designer of the decision system: the principles, guardrails and forums that make many independent decisions coherent.
+
+202
+00:17:46.760 --> 00:17:48.381
+Leading large migrations.
+
+203
+00:17:48.661 --> 00:17:59.115
+Fleet-wide changes, framework upgrades, moving off a shared database, adopting a new messaging platform, entering cells, are where architecture leadership is most visible.
+
+204
+00:17:59.395 --> 00:18:07.757
+They fail in predictable ways: under-resourced central squads, no sequencing, unclear finish lines, and a long tail nobody owns.
+
+205
+00:18:08.037 --> 00:18:16.485
+L4 schedules a Spring Boot 2, then 3 or Java 21 migration across 26 services and two shared libraries:
+
+206
+00:18:17.835 --> 00:18:19.179
+Here is a quick table:
+
+207
+00:18:19.459 --> 00:18:22.297
+Strategy, and Finish, and Effort spent, and Notes.
+
+208
+00:18:22.577 --> 00:18:24.561
+Central 2-stream migration team.
+
+209
+00:18:24.841 --> 00:18:25.630
+Finish:
+
+210
+00:18:25.910 --> 00:18:28.299
+31 sprints (~14 months).
+
+211
+00:18:28.579 --> 00:18:29.582
+Effort spent:
+
+212
+00:18:29.862 --> 00:18:30.843
+58.
+
+213
+00:18:31.123 --> 00:18:31.934
+Notes:
+
+214
+00:18:32.214 --> 00:18:34.454
+Bottleneck; owners don't learn their stack.
+
+215
+00:18:34.734 --> 00:18:38.254
+Platform migrates libraries first, teams own services.
+
+216
+00:18:38.534 --> 00:18:39.323
+Finish:
+
+217
+00:18:39.603 --> 00:18:40.755
+11 sprints.
+
+218
+00:18:41.035 --> 00:18:42.038
+Effort spent:
+
+219
+00:18:42.318 --> 00:18:43.299
+58.
+
+220
+00:18:43.579 --> 00:18:44.390
+Notes:
+
+221
+00:18:44.670 --> 00:18:46.355
+Parallel across 8 teams.
+
+222
+00:18:46.635 --> 00:18:49.387
+Teams start immediately, libraries not ready.
+
+223
+00:18:49.667 --> 00:18:50.457
+Finish:
+
+224
+00:18:50.737 --> 00:18:52.081
+10.4 sprints.
+
+225
+00:18:52.361 --> 00:18:53.363
+Effort spent:
+
+226
+00:18:53.643 --> 00:18:55.905
+76 (+32%).
+
+227
+00:18:56.185 --> 00:18:56.995
+Notes:
+
+228
+00:18:57.275 --> 00:18:59.771
+Same finish, 9 workarounds to undo.
+
+229
+00:19:00.051 --> 00:19:02.547
+Libraries first + automated codemods.
+
+230
+00:19:02.827 --> 00:19:03.617
+Finish:
+
+231
+00:19:03.897 --> 00:19:05.283
+8.6 sprints.
+
+232
+00:19:05.563 --> 00:19:06.566
+Effort spent:
+
+233
+00:19:06.846 --> 00:19:07.827
+37.
+
+234
+00:19:08.107 --> 00:19:08.918
+Notes:
+
+235
+00:19:09.198 --> 00:19:11.203
+Mechanical changes automated.
+
+236
+00:19:12.553 --> 00:19:13.919
+What the table teaches:
+
+237
+00:19:14.199 --> 00:19:21.580
+Centralised migration is a bottleneck, the same work takes three times as long and leaves owning teams uninvolved.
+
+238
+00:19:21.860 --> 00:19:25.081
+Sequence the dependencies and fund the enablers first.
+
+239
+00:19:25.361 --> 00:19:37.927
+Starting everyone immediately looks faster and finishes at about the same time, but burns a third more effort on shims that someone must later remove, a false economy the calendar alone won't show.
+
+240
+00:19:38.207 --> 00:19:43.817
+Automate the mechanical part (OpenRewrite recipes, codemods), the biggest single win.
+
+241
+00:19:45.167 --> 00:19:46.511
+A migration playbook:
+
+242
+00:19:46.791 --> 00:19:52.445
+Make the case with data: risk of staying (end-of-support dates, CVEs), benefit of moving.
+
+243
+00:19:52.725 --> 00:19:59.509
+Plan the dependency order and the enabling work (shared libraries, recipes, docs, a reference migration).
+
+244
+00:19:59.789 --> 00:20:05.655
+Team ownership: each team migrates its own services, with an enabling team available to help.
+
+245
+00:20:05.935 --> 00:20:12.719
+A tracking fitness function, L3's scanner answering % of services on Boot 3, visible on a dashboard.
+
+246
+00:20:14.069 --> 00:20:19.104
+A deprecation policy: announced end dates for the old path, with support tapering.
+
+247
+00:20:19.384 --> 00:20:25.315
+Finish the tail: the last 10% takes disproportionate effort; plan for it and celebrate finishing.
+
+248
+00:20:26.665 --> 00:20:28.030
+Technical strategy.
+
+249
+00:20:28.310 --> 00:20:35.883
+Principal engineers and architects own technical strategy: a coherent answer to where is our technology going, and why?
+
+250
+00:20:36.163 --> 00:20:46.211
+Diagnosis, the honest current state: constraints, risks, bottlenecks (measured where possible, L1's coordination cost, L3's drift, DORA metrics).
+
+251
+00:20:46.491 --> 00:20:55.857
+Guiding policies, the few choices that address the diagnosis (teams own their services end to end, events between contexts, one paved road).
+
+252
+00:20:56.137 --> 00:21:04.841
+Coherent actions, the concrete programmes: team realignment, platform investments, migrations, deprecations, each with owners and measures.
+
+253
+00:21:06.191 --> 00:21:11.780
+A target architecture as a direction, not a blueprint, updated as reality teaches you.
+
+254
+00:21:12.060 --> 00:21:23.900
+A technical-debt budget, a standing share of capacity (often 15 to 25%) for platform upgrades, debt paydown and resilience work, so it doesn't have to win against every feature.
+
+255
+00:21:24.180 --> 00:21:27.764
+Write it down (Ch 32) and revisit it at least yearly.
+
+256
+00:21:29.114 --> 00:21:30.650
+Measuring whether it's working.
+
+257
+00:21:30.930 --> 00:21:37.927
+DORA metrics, deployment frequency, lead time for changes, change failure rate, and time to restore service.
+
+258
+00:21:38.207 --> 00:21:43.455
+They measure delivery flow and stability, and respond to team structure and platform quality.
+
+259
+00:21:43.735 --> 00:21:51.479
+Coordination measures, hand-offs per feature, multi-team feature share (L1 or L2), cross-team pull-request reviews.
+
+260
+00:21:51.759 --> 00:22:00.357
+Platform measures, golden-path adoption and drift (L3), time to create a production-ready service, platform satisfaction surveys.
+
+261
+00:22:00.637 --> 00:22:08.893
+Architecture measures, fitness-function pass rates, drift reports (Ch 32 L4), ADR coverage of one-way doors.
+
+262
+00:22:10.243 --> 00:22:20.163
+People measures, cognitive-load and on-call surveys (the SPACE framework reminds you that productivity is multi-dimensional; don't reduce it to one number).
+
+263
+00:22:20.443 --> 00:22:25.349
+Use measures to find constraints and check interventions, never to rank individuals.
+
+264
+00:22:26.699 --> 00:22:29.814
+Influence without authority: the staff+ engineer.
+
+265
+00:22:30.094 --> 00:22:33.998
+Senior technical leaders usually lead without direct reports.
+
+266
+00:22:34.278 --> 00:22:49.617
+Common staff+ archetypes (Will Larson): tech lead (guides one team's execution), architect (owns direction for a critical area), solver (dives into the hardest problems), right hand (extends an executive's reach across the org).
+
+267
+00:22:49.897 --> 00:22:51.326
+All rely on influence:
+
+268
+00:22:51.606 --> 00:22:56.342
+Write, design docs, strategy, ADRs; writing scales your thinking beyond meetings.
+
+269
+00:22:56.622 --> 00:23:01.657
+Build consensus before the meeting, talk to the people affected; the meeting ratifies.
+
+270
+00:23:01.937 --> 00:23:07.078
+Bring evidence, L1, L4-style analysis turns opinions into shared facts.
+
+271
+00:23:08.428 --> 00:23:13.399
+Make others successful, sponsor, mentor, delegate the interesting work, and give credit.
+
+272
+00:23:13.679 --> 00:23:18.479
+Stay close to the code, enough to keep your judgement grounded and your credibility real.
+
+273
+00:23:18.759 --> 00:23:23.985
+Pick your battles, two-way doors aren't worth a fight (Ch 31); one-way doors are.
+
+274
+00:23:24.265 --> 00:23:28.831
+Disagree and commit, make your case well, then support the decision once it's made.
+
+275
+00:23:30.181 --> 00:23:31.077
+Part 3.
+
+276
+00:23:31.357 --> 00:23:33.085
+Architecture and Diagrams.
+
+277
+00:23:34.335 --> 00:23:36.895
+Team topology of the grocery platform.
+
+278
+00:23:37.175 --> 00:23:38.519
+Here is the diagram.
+
+279
+00:23:42.369 --> 00:23:45.547
+Sequence: happy path, a team-owned migration wave.
+
+280
+00:23:45.827 --> 00:23:48.622
+The sequence diagram walks through it step by step.
+
+281
+00:23:48.902 --> 00:23:49.990
+Arch to Arch:
+
+282
+00:23:50.270 --> 00:23:54.003
+RFC - why migrate, dependency order, finish date, measures.
+
+283
+00:23:54.283 --> 00:23:58.465
+Arch to Plat: fund library migration first (starter, outbox).
+
+284
+00:23:58.745 --> 00:24:02.969
+Plat to Teams: starter v4 released, upgrade recipe published.
+
+285
+00:24:03.249 --> 00:24:07.259
+En to Teams: reference migration with one team, office hours.
+
+286
+00:24:07.539 --> 00:24:13.619
+Teams to Teams: each team migrates its own services, automated PRs do the mechanical part.
+
+287
+00:24:13.899 --> 00:24:18.059
+Score to Arch: percent of services on Boot 3, per team, weekly.
+
+288
+00:24:18.339 --> 00:24:22.862
+Arch to Teams: deprecation date for Boot 2 path announced, tail tracked.
+
+289
+00:24:26.712 --> 00:24:30.296
+Sequence: failure path, the ticket-ops platform bottleneck.
+
+290
+00:24:30.576 --> 00:24:33.371
+The sequence diagram walks through it step by step.
+
+291
+00:24:33.651 --> 00:24:37.128
+Team to Queue: request new database, topic and pipeline.
+
+292
+00:24:37.408 --> 00:24:38.389
+Queue to Team:
+
+293
+00:24:38.669 --> 00:24:39.885
+9 days in queue.
+
+294
+00:24:40.165 --> 00:24:44.069
+Team to Team: works around it - reuses another team's database.
+
+295
+00:24:44.349 --> 00:24:49.555
+Plat to Plat: redesign - self-service provisioning by pull request with policy checks.
+
+296
+00:24:49.835 --> 00:24:50.859
+Team to Plat:
+
+297
+00:24:51.139 --> 00:24:54.531
+PR creates database, topic and pipeline in minutes.
+
+298
+00:24:58.381 --> 00:25:00.685
+State: a service's ownership lifecycle.
+
+299
+00:25:00.965 --> 00:25:02.309
+Here is the diagram.
+
+300
+00:25:06.159 --> 00:25:07.076
+Part 4.
+
+301
+00:25:07.356 --> 00:25:08.977
+Design Document Excerpt:
+
+302
+00:25:09.257 --> 00:25:12.756
+Grocery Engineering Organisation and Platform Strategy.
+
+303
+00:25:14.006 --> 00:25:14.753
+Note:
+
+304
+00:25:15.033 --> 00:25:20.046
+Design Document (excerpt), Engineering Operating Model v1.0.
+
+305
+00:25:20.326 --> 00:25:21.222
+Status:
+
+306
+00:25:21.502 --> 00:25:22.782
+Accepted, Authors:
+
+307
+00:25:23.062 --> 00:25:25.985
+Principal engineers, VP Engineering, Reviewers:
+
+308
+00:25:26.265 --> 00:25:28.782
+All engineering managers and tech leads.
+
+309
+00:25:29.062 --> 00:25:46.833
+Context, Target architecture drifted towards the org chart; every bounded context split across 2 to 3 layer-based teams; 91% of features needed multiple teams; services configured by hand from a wiki; the Boot 3 migration stalled with a 2-person squad.
+
+310
+00:25:48.183 --> 00:26:09.964
+Decision, Reorganise into stream-aligned teams by change flow (validated with feature data), a platform team running the paved road as a product, and a small enabling team; govern with principles, guardrails and the advice process; run migrations platform-first and team-owned; measure with DORA plus coordination and adoption metrics.
+
+311
+00:26:11.314 --> 00:26:26.141
+Related ADRs, ADR-230 Stream-aligned teams from change data, 2 to 4 services each (L1, L2); ADR-231 Platform team owns template, starter, CI, observability,
+
+312
+00:26:26.421 --> 00:26:49.802
+messaging and notification as self-service; ADR-232 Conformance scanner + scorecards + automated upgrade PRs (L3); ADR-233 Advice process replaces the architecture review board, except one-way doors; ADR-234 Migration playbook: platform-first enablers, team ownership, codemods,
+
+313
+00:26:50.082 --> 00:27:05.207
+tracking fitness function (L4); ADR-235 20% capacity for platform and debt work; ADR-236 DORA + hand-offs per feature + golden-path adoption as org-level measures.
+
+314
+00:27:05.487 --> 00:27:06.447
+Requirements.
+
+315
+00:27:07.797 --> 00:27:15.179
+R1, Local change. at most 50% of features require more than one team (measured quarterly from feature data).
+
+316
+00:27:15.459 --> 00:27:16.909
+R2, Bounded load.
+
+317
+00:27:17.189 --> 00:27:23.376
+No team owns more than 4 services or carries more than 1.5x the average change load.
+
+318
+00:27:23.656 --> 00:27:25.213
+R3, Paved road.
+
+319
+00:27:25.493 --> 00:27:32.768
+90% of services pass all golden-path checks within two quarters; a new production-ready service in under a day.
+
+320
+00:27:33.048 --> 00:27:34.819
+R4, Migrations finish.
+
+321
+00:27:35.099 --> 00:27:41.883
+Fleet-wide migrations have a dependency plan, enablers funded first, and an announced end date for the old path.
+
+322
+00:27:43.233 --> 00:27:45.430
+R5, Decisions close to the code.
+
+323
+00:27:45.710 --> 00:27:51.683
+One-way doors get ADRs and light review; everything else is decided by teams with advice.
+
+324
+00:27:51.963 --> 00:27:53.371
+Decisions in detail.
+
+325
+00:27:53.651 --> 00:27:55.806
+Teams (ADR-230).
+
+326
+00:27:56.086 --> 00:28:06.283
+Seven stream-aligned teams from L2's analysis, adjusted by humans: notification and identity move to the platform team as shared capabilities.
+
+327
+00:28:06.563 --> 00:28:10.403
+Platform (ADR-231 or 232).
+
+328
+00:28:10.683 --> 00:28:19.409
+Template + starter as a versioned library; Renovate and OpenRewrite for upgrades; scanner in CI and weekly scorecards (L3).
+
+329
+00:28:20.759 --> 00:28:23.297
+Governance (ADR-233).
+
+330
+00:28:23.577 --> 00:28:28.036
+Principles page, tech radar, guild fortnightly; ADRs in repos.
+
+331
+00:28:28.316 --> 00:28:31.089
+Migrations (ADR-234).
+
+332
+00:28:31.369 --> 00:28:41.524
+Boot 3: platform migrates the starter and outbox library in sprints 1 to 5; teams migrate with recipes; target 9 sprints (L4 strategy D).
+
+333
+00:28:41.804 --> 00:28:44.428
+Capacity (ADR-235).
+
+334
+00:28:44.708 --> 00:28:49.529
+20% of each team's capacity for platform upgrades, debt and resilience.
+
+335
+00:28:49.809 --> 00:28:52.284
+Measures (ADR-236).
+
+336
+00:28:52.564 --> 00:28:56.105
+DORA per team; hand-offs per feature; adoption dashboard.
+
+337
+00:28:57.455 --> 00:28:58.479
+Consequences.
+
+338
+00:28:58.759 --> 00:29:07.037
+A reorganisation is disruptive, ownership transfers, on-call changes, new relationships, and must be done carefully and explained.
+
+339
+00:29:07.317 --> 00:29:16.298
+In return: fewer hand-offs, a fleet that stays current, migrations that finish, and architects whose influence scales through defaults and guardrails.
+
+340
+00:29:17.648 --> 00:29:18.608
+Part 5.
+
+341
+00:29:18.888 --> 00:29:20.872
+Hands-On Code, Level Ladder.
+
+342
+00:29:22.122 --> 00:29:22.890
+Info:
+
+343
+00:29:23.170 --> 00:29:24.258
+What's real here.
+
+344
+00:29:24.538 --> 00:29:29.509
+All four labs are JDK 21 programs with deterministic output.
+
+345
+00:29:29.789 --> 00:29:46.941
+L1 and L2 replay the same year of 500 features (generated from the platform's recurring feature types in features.csv) against ownership maps from services.csv; L2 runs a real local-search optimiser under stated constraints.
+
+346
+00:29:47.221 --> 00:29:52.341
+L3 writes 26 real repositories to disk and scans the actual files.
+
+347
+00:29:52.621 --> 00:29:55.394
+L4 is a dependency-aware list scheduler.
+
+348
+00:29:55.674 --> 00:30:03.994
+The lead-time model (L1), the workaround penalty and codemod saving (L4) are stated assumptions, change them and re-run.
+
+349
+00:30:05.344 --> 00:30:26.635
+All four labs share two input files (in labs or ch37-leading-architecture/): services.csv, the 26 services with their bounded context, their current owner (9 teams organised by history and layer) and their context-aligned owner (8 teams), plus migration effort in sprints. features.csv,
+
+350
+00:30:26.915 --> 00:30:36.003
+14 recurring feature types with yearly weights and the services each touches (for example, promo-change,14,pricing promotions cart).
+
+351
+00:30:36.283 --> 00:30:43.216
+Run every lab with -Dstdout.encoding=UTF-8 so the box-drawing characters print correctly.
+
+352
+00:30:44.566 --> 00:30:46.443
+L1, Conway's law, measured.
+
+353
+00:30:46.723 --> 00:30:47.662
+Requirement:
+
+354
+00:30:47.942 --> 00:30:50.566
+Features take weeks, and every one needs a meeting.
+
+355
+00:30:50.846 --> 00:30:52.702
+Is that the code, or who owns it?
+
+356
+00:30:52.982 --> 00:30:58.358
+A year of 500 features is replayed against two ownership maps for the same services.
+
+357
+00:30:58.638 --> 00:31:01.433
+The code never changes; only who owns what.
+
+358
+00:31:01.713 --> 00:31:07.409
+The lead-time model (5 days + 4 days per extra team) is an explicit assumption.
+
+359
+00:31:08.759 --> 00:31:11.596
+Here is the Java code, ConwayL1.java.
+
+360
+00:31:11.876 --> 00:31:16.079
+It runs to 116 lines; the full listing is in the chapter.
+
+361
+00:31:16.359 --> 00:31:26.556
+ConwayL1.java, run with: java ConwayL1.java services.csv features.csv (JDK 21, no dependencies).
+
+362
+00:31:26.836 --> 00:31:28.159
+CONWAY'S LAW, MEASURED.
+
+363
+00:31:28.439 --> 00:31:40.855
+Organisations design systems that mirror their communication structures, and the reverse is. what an architect can use: if the teams don't match the architecture's boundaries, every change needs a meeting.
+
+364
+00:31:43.705 --> 00:31:44.622
+On screen:
+
+365
+00:31:44.902 --> 00:31:48.187
+26 services, 500 features over a year.
+
+366
+00:31:48.467 --> 00:31:59.113
+Same code, same features, two ownership maps. ownership map teams avg teams ≥2 teams ≥3 teams lead time hot pairs.
+
+367
+00:31:59.393 --> 00:32:15.649
+CURRENT (by history or layer) 9 2.18 91% 26% 9.7 d 13. busiest coordination pairs: api-team↔data-team (85), core-team↔finance-eng.
+
+368
+00:32:15.929 --> 00:32:20.089
+(82), api-team↔ops-eng (75).
+
+369
+00:32:20.369 --> 00:32:36.305
+ALIGNED (by bounded context) 8 2.00 86% 14% 9.0 d 9. busiest coordination pairs: ordering↔pricing-promo (110), ordering↔payments.
+
+370
+00:32:36.585 --> 00:32:44.030
+(83), fulfilment-ops↔inventory (64). lead-time model (an assumption, not a measurement):
+
+371
+00:32:44.310 --> 00:32:54.913
+5 days + 4 days per. additional team involved. team pairs that must coordinate on ≥ 25 features a year (about every other week).
+
+372
+00:32:55.193 --> 00:32:56.707
+The rest is in the chapter.
+
+373
+00:32:59.557 --> 00:33:00.411
+Reading it:
+
+374
+00:33:00.691 --> 00:33:12.104
+Organised by history and layer, every bounded context is split across 2 to 3 teams, 91% of features need more than one team and 26% need three or more.
+
+375
+00:33:12.384 --> 00:33:20.192
+Thirteen team pairs must coordinate roughly every other week; api-team and data-team share 85 features a year.
+
+376
+00:33:20.472 --> 00:33:33.400
+Aligning teams to the bounded contexts helps, three-team features fall from 26% to 14%, hot pairs from 13 to 9, but 86% of features still cross a team boundary.
+
+377
+00:33:33.680 --> 00:33:42.043
+The busiest pair becomes ordering↔pricing-promo (110 features): promotions changes always touch the cart.
+
+378
+00:33:43.393 --> 00:33:45.398
+The lesson is the chapter's thesis:
+
+379
+00:33:45.678 --> 00:33:53.529
+Conway's law rewards aligning teams to how change actually flows, which you measure, not to a context map drawn from nouns.
+
+380
+00:33:54.879 --> 00:34:01.471
+Here is the shell code, VERIFY: the same analysis on real history — services touched per merged PR.
+
+381
+00:34:01.751 --> 00:34:05.719
+One line per PR: the top-level service directories it changed.
+
+382
+00:34:05.999 --> 00:34:08.260
+Feed into ConwayL1's feature list.
+
+383
+00:34:11.110 --> 00:34:15.569
+L2, Deriving teams from change data, within cognitive-load limits.
+
+384
+00:34:15.849 --> 00:34:16.787
+Requirement:
+
+385
+00:34:17.067 --> 00:34:21.313
+If contexts on paper don't match how work flows, what team boundaries would?
+
+386
+00:34:21.593 --> 00:34:23.406
+And don't give me one giant team.
+
+387
+00:34:23.686 --> 00:34:36.998
+A simulated-annealing local search (30 restarts times 20,000 moves and swaps) assigns the 26 services to 8 teams to minimise hand-offs, subject to Team Topologies-style limits:
+
+388
+00:34:37.278 --> 00:34:42.483
+2 to 4 services per team and at most 1.5x the average change load.
+
+389
+00:34:42.763 --> 00:34:44.747
+It takes about 45 seconds.
+
+390
+00:34:46.097 --> 00:34:48.892
+Here is the Java code, TeamsL2.java.
+
+391
+00:34:49.172 --> 00:34:53.247
+It runs to 140 lines; the full listing is in the chapter.
+
+392
+00:34:53.527 --> 00:35:03.276
+TeamsL2.java, run with: java TeamsL2.java services.csv features.csv (JDK 21, no dependencies).
+
+393
+00:35:03.556 --> 00:35:08.164
+DERIVING TEAM BOUNDARIES FROM HOW CHANGE FLOWS, under cognitive-load limits.
+
+394
+00:35:08.444 --> 00:35:19.921
+Using the same year of features as L1, a. local search assigns the 26 services to 8 teams to minimise HAND-OFFS (for each feature, the number of teams involved.
+
+395
+00:35:22.771 --> 00:35:23.689
+On screen:
+
+396
+00:35:23.969 --> 00:35:25.633
+Same 500 features.
+
+397
+00:35:25.913 --> 00:35:29.241
+Hand-offs = Σ (teams per feature minus 1).
+
+398
+00:35:29.521 --> 00:35:30.353
+Limits:
+
+399
+00:35:30.633 --> 00:35:45.993
+2 to 4 services per. team, change load at most 188 features or team. ownership map teams hand-offs multi-team % max team load. one giant team (no limits) 1 0 0% 500.
+
+400
+00:35:46.273 --> 00:35:52.289
+CURRENT, by history or layer 9 591 91% 333.
+
+401
+00:35:52.569 --> 00:35:58.350
+ALIGNED, by bounded context (L1) 8 500 86% 212.
+
+402
+00:35:58.630 --> 00:36:05.350
+OPTIMISED from change data (within limits) 8 240 43% 171.
+
+403
+00:36:05.630 --> 00:36:09.171
+Optimised teams (services grouped by who changes together):
+
+404
+00:36:09.451 --> 00:36:13.931
+T1: stock, reservation from contexts inventory=2.
+
+405
+00:36:14.211 --> 00:36:21.422
+T2: rider, tracking, identity, notification from contexts customer=2. delivery=2.
+
+406
+00:36:21.702 --> 00:36:23.217
+The rest is in the chapter.
+
+407
+00:36:26.067 --> 00:36:26.920
+Reading it:
+
+408
+00:36:27.200 --> 00:36:34.325
+Without limits the answer is useless: one team, zero hand-offs, and all 500 features on one team's plate.
+
+409
+00:36:34.605 --> 00:36:38.211
+The cognitive-load constraints are what make the problem meaningful.
+
+410
+00:36:38.491 --> 00:36:54.384
+Within the limits, grouping by change more than halves hand-offs (500, then 240) and cuts multi-team features from 86% to 43%, while lowering the busiest team's load (212, then 171).
+
+411
+00:36:55.734 --> 00:36:58.422
+6 of 8 optimised teams mix contexts.
+
+412
+00:36:58.702 --> 00:37:00.494
+Some are genuine value streams:
+
+413
+00:37:00.774 --> 00:37:11.014
+T8 (pricing, promotions, cart, checkout) is a checkout-experience team; T5 puts slot and picking with the dark-store services they always change with.
+
+414
+00:37:11.294 --> 00:37:21.534
+T2 is a warning, not an answer: identity and notification land with rider and tracking because OTP logins and rider updates both send messages.
+
+415
+00:37:21.814 --> 00:37:28.662
+That is a shared capability, the §4 design moves it to the platform team as a self-service API.
+
+416
+00:37:28.942 --> 00:37:36.067
+Treat the output as evidence for people who know the domain, skills and on-call realities, then re-run it every quarter.
+
+417
+00:37:37.417 --> 00:37:40.361
+L3, The paved road, and the drift away from it.
+
+418
+00:37:40.641 --> 00:37:41.580
+Requirement:
+
+419
+00:37:41.860 --> 00:37:43.332
+We have a service template.
+
+420
+00:37:43.612 --> 00:37:47.665
+Why are no two services configured alike, and which ones are furthest off?
+
+421
+00:37:47.945 --> 00:38:07.849
+The lab writes 26 real repositories to disk, each generated from template v3 (current), v2, v1, or by hand, and then a scanner that reads only the files (pom.xml, application.yml, Dockerfile, CI workflow, tests, catalog-info.yaml) checks 8 golden-path capabilities.
+
+422
+00:38:09.199 --> 00:38:12.399
+Here is the Java code, PavedRoadL3.java.
+
+423
+00:38:12.679 --> 00:38:17.138
+It runs to 165 lines; the full listing is in the chapter.
+
+424
+00:38:17.418 --> 00:38:26.911
+PavedRoadL3.java, run with: java PavedRoadL3.java services.csv (JDK 21, no dependencies).
+
+425
+00:38:27.191 --> 00:38:29.538
+THE PAVED ROAD (GOLDEN PATH) AT SCALE.
+
+426
+00:38:29.818 --> 00:38:43.151
+At 26 services and 8 teams, please follow the standards doesn't scale; a. platform team gives teams a service TEMPLATE that already does the right thing, Spring Boot 3 on Java 21, the platform.
+
+427
+00:38:46.001 --> 00:38:46.919
+On screen:
+
+428
+00:38:47.199 --> 00:38:58.719
+Generated 26 service repos (161 files) from template v3 or v2 or v1 or by hand; scanning. them against the v3 golden path.
+
+429
+00:38:58.999 --> 00:39:01.964
+Adoption by capability (26 services):
+
+430
+00:39:02.244 --> 00:39:05.081
+Spring Boot 3.x 20 or 26 ████████████████████.
+
+431
+00:39:05.361 --> 00:39:23.815
+Java 21 runtime image 11 or 26 ███████████. platform starter ≥ 4 8 or 26 ████████. structured JSON logs 21 or 26 █████████████████████. health + metrics exposed 25 or 26 █████████████████████████. architecture test 12 or 26 ████████████.
+
+432
+00:39:24.095 --> 00:39:24.799
+CI:
+
+433
+00:39:25.079 --> 00:39:31.372
+SBOM + vuln scan 8 or 26 ████████. catalog entry with owner 19 or 26 ███████████████████.
+
+434
+00:39:31.652 --> 00:39:33.167
+The rest is in the chapter.
+
+435
+00:39:36.017 --> 00:39:36.870
+Reading it:
+
+436
+00:39:37.150 --> 00:39:48.115
+Current-template services pass 100% (by construction, that is what a paved road is); v2 60%, v1 28%, hand-rolled 19%.
+
+437
+00:39:48.395 --> 00:39:51.958
+Only 8 of 26 services are fully on the current path.
+
+438
+00:39:52.238 --> 00:40:10.627
+The capabilities added most recently, SBOM + vulnerability scan (8 or 26), starter v4 (8 or 26), Java 21 (11 or 26), have the lowest adoption: a template is a one-time copy, so improvements never reach earlier services.
+
+439
+00:40:11.977 --> 00:40:20.681
+The lowest scorers (media, reservation, slot at 1 or 8) are where the platform team's upgrade pull requests and help should go first.
+
+440
+00:40:20.961 --> 00:40:27.105
+Reservation and slot are hand-rolled and business-critical, drift concentrated where risk is highest.
+
+441
+00:40:27.385 --> 00:40:37.412
+Wire the scanner into CI and a weekly per-team scorecard, and it doubles as L4's migration fitness function (% on Boot 3 is the first row).
+
+442
+00:40:38.762 --> 00:40:50.005
+Here is the YAML code, VERIFY: an OpenRewrite recipe run that closes the mechanical gaps (Maven plugin). mvn -U org.openrewrite.mavenrun \.
+
+443
+00:40:50.285 --> 00:40:54.103
+Renovate keeps grocery-platform-starter current across all repos:
+
+444
+00:40:56.953 --> 00:40:59.492
+L4, A fleet-wide migration, planned.
+
+445
+00:40:59.772 --> 00:41:00.711
+Requirement:
+
+446
+00:41:00.991 --> 00:41:02.847
+Spring Boot 2 is out of support.
+
+447
+00:41:03.127 --> 00:41:08.161
+Get all 26 services to Boot 3 or Java 21, how, and how long?
+
+448
+00:41:08.441 --> 00:41:12.495
+A dependency-aware list scheduler plans the migration four ways.
+
+449
+00:41:12.775 --> 00:41:20.903
+The platform starter (3 sprints) must be migrated before every service; the outbox library (2 sprints) before its 7 users.
+
+450
+00:41:21.183 --> 00:41:31.700
+The workaround penalty (+80% effort for a service started before its libraries are ready) and the codemod saving (minus 40%) are stated assumptions.
+
+451
+00:41:33.050 --> 00:41:36.314
+Here is the Java code, MigrationL4.java.
+
+452
+00:41:36.594 --> 00:41:40.882
+It runs to 136 lines; the full listing is in the chapter.
+
+453
+00:41:41.162 --> 00:41:50.485
+MigrationL4.java, run with: java MigrationL4.java services.csv (JDK 21, no dependencies).
+
+454
+00:41:50.765 --> 00:41:52.663
+A FLEET-WIDE MIGRATION, PLANNED.
+
+455
+00:41:52.943 --> 00:42:07.685
+Moving 26 services from Spring Boot 2 to Spring Boot 3 or Java 21 (javax, then jakarta, new. observability APIs, new security config) is the kind of change an architect leads but can't do alone.
+
+456
+00:42:07.965 --> 00:42:09.309
+It has a dependency.
+
+457
+00:42:12.159 --> 00:42:13.076
+On screen:
+
+458
+00:42:13.356 --> 00:42:14.529
+Fleet migration:
+
+459
+00:42:14.809 --> 00:42:21.145
+Spring Boot 2, then 3 or Java 21 across 26 services + 2 shared libraries.
+
+460
+00:42:21.425 --> 00:42:22.215
+(starter:
+
+461
+00:42:22.495 --> 00:42:23.924
+3 sprints, outbox:
+
+462
+00:42:24.204 --> 00:42:29.857
+2). strategy done after effort spent workarounds services done by 4 or 8 or 12.
+
+463
+00:42:30.137 --> 00:42:39.503
+A) central migration team, 2 parallel streams 31.0 spr 58.0 spr 0 0 or 2 or 5.
+
+464
+00:42:39.783 --> 00:42:48.487
+B) platform migrates libraries first, teams own their services 11.0 spr 58.0 spr 0.
+
+465
+00:42:48.767 --> 00:42:50.815
+0 or 18 or 26.
+
+466
+00:42:51.095 --> 00:43:01.953
+C) teams start immediately, libraries not ready (workarounds) 10.4 spr 76.4 spr 9 3. / 18 or 26.
+
+467
+00:43:02.233 --> 00:43:13.689
+D) B + automated codemods (minus 40% service effort) 8.6 spr 36.8 spr 0 0 or 25 or 26.
+
+468
+00:43:13.969 --> 00:43:15.612
+(1 sprint = 2 weeks.
+
+469
+00:43:15.892 --> 00:43:21.951
+Effort per service from services.csv; penalties or savings are. stated assumptions.).
+
+470
+00:43:22.231 --> 00:43:23.745
+The rest is in the chapter.
+
+471
+00:43:26.595 --> 00:43:27.449
+Reading it:
+
+472
+00:43:27.729 --> 00:43:28.881
+A) Central team:
+
+473
+00:43:29.161 --> 00:43:38.121
+58 sprints of work through 2 streams takes 31 sprints (~14 months), only 5 services are done after 12 sprints.
+
+474
+00:43:38.401 --> 00:43:41.387
+This is the §1.1 migration squad.
+
+475
+00:43:41.667 --> 00:43:50.734
+B) Platform-first, team-owned: the same 58 sprints of effort, spread across 8 teams after the libraries are ready, done in 11 sprints.
+
+476
+00:43:52.084 --> 00:44:07.060
+C) Everyone starts immediately: finishes at about the same time (10.4 sprints) because parallelism hides the wait, but spends 76.4 sprints of effort, 32% more, and leaves 9 workarounds to unpick.
+
+477
+00:44:07.340 --> 00:44:09.665
+A calendar-only view would call this the winner.
+
+478
+00:44:09.945 --> 00:44:11.481
+D) B + codemods:
+
+479
+00:44:11.761 --> 00:44:18.823
+8.6 sprints and 36.8 sprints of effort, 25 of 26 services done by sprint 8.
+
+480
+00:44:19.103 --> 00:44:22.879
+Automating the mechanical changes is the biggest single lever.
+
+481
+00:44:24.229 --> 00:44:34.405
+The architect's contribution is the plan and the enablers, not the typing: sequencing, funding the platform work first, recipes, and a tracking fitness function.
+
+482
+00:44:35.755 --> 00:44:36.693
+Part 6.
+
+483
+00:44:36.973 --> 00:44:38.253
+Production Concerns.
+
+484
+00:44:39.503 --> 00:44:40.655
+Failure modes.
+
+485
+00:44:40.935 --> 00:44:42.279
+Here is a quick table:
+
+486
+00:44:42.559 --> 00:44:44.842
+Failure, and Symptom, and Mitigation.
+
+487
+00:44:45.122 --> 00:44:46.423
+Teams split by layer.
+
+488
+00:44:46.703 --> 00:44:47.514
+Symptom:
+
+489
+00:44:47.794 --> 00:44:50.333
+Every feature needs several teams (L1).
+
+490
+00:44:50.613 --> 00:44:51.615
+Mitigation:
+
+491
+00:44:51.895 --> 00:44:54.541
+Stream-aligned teams by change flow (L2).
+
+492
+00:44:54.821 --> 00:44:56.997
+Teams aligned to nouns, not flow.
+
+493
+00:44:57.277 --> 00:44:58.087
+Symptom:
+
+494
+00:44:58.367 --> 00:45:01.845
+Contexts on paper, coordination in practice (L1).
+
+495
+00:45:02.125 --> 00:45:03.127
+Mitigation:
+
+496
+00:45:03.407 --> 00:45:05.498
+Measure change coupling; realign.
+
+497
+00:45:05.778 --> 00:45:07.037
+Overloaded teams.
+
+498
+00:45:07.317 --> 00:45:08.127
+Symptom:
+
+499
+00:45:08.407 --> 00:45:11.522
+Slow changes, painful on-call, quality drops.
+
+500
+00:45:11.802 --> 00:45:12.805
+Mitigation:
+
+501
+00:45:13.085 --> 00:45:16.519
+Cognitive-load limits; platform takes shared capabilities.
+
+502
+00:45:16.799 --> 00:45:17.823
+Template drift.
+
+503
+00:45:18.103 --> 00:45:18.914
+Symptom:
+
+504
+00:45:19.194 --> 00:45:21.967
+Old services miss every improvement (L3).
+
+505
+00:45:22.247 --> 00:45:23.250
+Mitigation:
+
+506
+00:45:23.530 --> 00:45:27.199
+Versioned libraries, automated upgrade PRs, scorecards.
+
+507
+00:45:27.479 --> 00:45:28.845
+Ticket-ops platform.
+
+508
+00:45:29.125 --> 00:45:29.935
+Symptom:
+
+509
+00:45:30.215 --> 00:45:33.095
+Queues and workarounds (§3.3).
+
+510
+00:45:33.375 --> 00:45:34.378
+Mitigation:
+
+511
+00:45:34.658 --> 00:45:37.730
+Self-service with guardrails; platform as product.
+
+512
+00:45:39.080 --> 00:45:40.637
+Central migration squad.
+
+513
+00:45:40.917 --> 00:45:41.728
+Symptom:
+
+514
+00:45:42.008 --> 00:45:44.312
+Migration never finishes (L4).
+
+515
+00:45:44.592 --> 00:45:45.595
+Mitigation:
+
+516
+00:45:45.875 --> 00:45:48.947
+Platform-first enablers, team ownership, codemods.
+
+517
+00:45:49.227 --> 00:45:51.147
+Architecture review bottleneck.
+
+518
+00:45:51.427 --> 00:45:52.237
+Symptom:
+
+519
+00:45:52.517 --> 00:45:54.181
+Teams bypass architects.
+
+520
+00:45:54.461 --> 00:45:55.464
+Mitigation:
+
+521
+00:45:55.744 --> 00:45:58.240
+Advice process, principles, guardrails.
+
+522
+00:45:58.520 --> 00:46:00.227
+Reorg without architecture.
+
+523
+00:46:00.507 --> 00:46:01.317
+Symptom:
+
+524
+00:46:01.597 --> 00:46:03.325
+New seams where the old ones were.
+
+525
+00:46:03.605 --> 00:46:04.608
+Mitigation:
+
+526
+00:46:04.888 --> 00:46:08.365
+Inverse Conway: design teams and architecture together.
+
+527
+00:46:09.715 --> 00:46:11.913
+Observability of the organisation.
+
+528
+00:46:12.193 --> 00:46:16.161
+DORA metrics per team from CI or CD and incident data.
+
+529
+00:46:16.441 --> 00:46:25.294
+Coordination: multi-team features and cross-team PR reviews per quarter (L1 or L2 method on real ticket and git data).
+
+530
+00:46:25.574 --> 00:46:31.270
+Paved-road adoption: scanner scorecards per service and team (L3), trend over time.
+
+531
+00:46:31.550 --> 00:46:38.569
+Migration progress: a fitness function per programme (% migrated), with the tail listed by owner (L4).
+
+532
+00:46:38.849 --> 00:46:44.353
+Surveys: cognitive load, on-call health, platform satisfaction, quarterly and anonymous.
+
+533
+00:46:45.703 --> 00:46:46.641
+Security.
+
+534
+00:46:46.921 --> 00:46:50.505
+The paved road is the most effective security control at scale:
+
+535
+00:46:50.785 --> 00:47:00.023
+SBOMs, vulnerability scanning, secure defaults and patched base images reach every service automatically, or don't reach drifted ones (L3).
+
+536
+00:47:00.303 --> 00:47:08.921
+Ownership in the catalog is a security requirement: every service has someone who receives its vulnerability alerts and on-call pages.
+
+537
+00:47:09.201 --> 00:47:16.220
+Migrations are often security-driven (end-of-support frameworks); track them like vulnerabilities, with deadlines.
+
+538
+00:47:17.570 --> 00:47:18.893
+Performance and flow.
+
+539
+00:47:19.173 --> 00:47:30.991
+Team size and ownership affect delivery speed more than most technical choices: every extra team on a feature adds hand-off latency (L1's model assumes 4 days; measure your own).
+
+540
+00:47:31.271 --> 00:47:37.799
+Collaboration mode is expensive; time-box it and move to X-as-a-service once the interface is clear.
+
+541
+00:47:38.079 --> 00:47:44.522
+Platform APIs need SLOs like any product, a slow or flaky platform taxes every team.
+
+542
+00:47:45.872 --> 00:47:46.597
+Cost.
+
+543
+00:47:46.877 --> 00:47:59.357
+A platform team costs headcount; it pays back through fewer hand-offs, faster service creation, fewer incidents from drift, and migrations that finish (L4's 31, then 8.6 sprints).
+
+544
+00:47:59.637 --> 00:48:07.360
+Reorganisations have real costs (context switching, lost knowledge, morale); do them deliberately, rarely, and with evidence.
+
+545
+00:48:07.640 --> 00:48:15.832
+Allocate a standing share of capacity to platform and debt work (§2.8), or it loses every prioritisation battle.
+
+546
+00:48:17.182 --> 00:48:18.121
+Part 7.
+
+547
+00:48:18.401 --> 00:48:20.107
+Anti-Patterns and Pitfalls.
+
+548
+00:48:21.357 --> 00:48:22.275
+Watch out:
+
+549
+00:48:22.555 --> 00:48:23.195
+1.
+
+550
+00:48:23.475 --> 00:48:24.861
+Ignoring Conway's law.
+
+551
+00:48:25.141 --> 00:48:32.459
+Drawing a target architecture without changing team boundaries; the org chart rewrites it (§1.1, L1).
+
+552
+00:48:33.809 --> 00:48:34.726
+Watch out:
+
+553
+00:48:35.006 --> 00:48:35.710
+2.
+
+554
+00:48:35.990 --> 00:48:37.633
+Teams by technical layer.
+
+555
+00:48:37.913 --> 00:48:42.883
+Frontend team, backend team, database team: every feature crosses all of them.
+
+556
+00:48:44.233 --> 00:48:45.151
+Watch out:
+
+557
+00:48:45.431 --> 00:48:46.177
+3.
+
+558
+00:48:46.457 --> 00:48:48.889
+Aligning teams to nouns rather than flow.
+
+559
+00:48:49.169 --> 00:48:54.396
+Contexts that look right on paper but don't match how work actually changes (L1).
+
+560
+00:48:54.676 --> 00:48:55.977
+Measure change coupling.
+
+561
+00:48:57.327 --> 00:48:58.245
+Watch out:
+
+562
+00:48:58.525 --> 00:48:59.229
+4.
+
+563
+00:48:59.509 --> 00:49:01.002
+One team owning too much.
+
+564
+00:49:01.282 --> 00:49:10.477
+Minimising hand-offs by piling services onto one team trades coordination cost for cognitive overload (L2's degenerate case).
+
+565
+00:49:11.827 --> 00:49:12.744
+Watch out:
+
+566
+00:49:13.024 --> 00:49:13.792
+5.
+
+567
+00:49:14.072 --> 00:49:15.672
+Architects as gatekeepers.
+
+568
+00:49:15.952 --> 00:49:19.920
+Central review of everything becomes a bottleneck and gets bypassed.
+
+569
+00:49:20.200 --> 00:49:22.355
+Guardrails, principles and advice.
+
+570
+00:49:23.705 --> 00:49:24.622
+Watch out:
+
+571
+00:49:24.902 --> 00:49:25.649
+6.
+
+572
+00:49:25.929 --> 00:49:27.721
+Standards as wiki pages.
+
+573
+00:49:28.001 --> 00:49:32.161
+What isn't the default doesn't happen consistently (§1.1).
+
+574
+00:49:32.441 --> 00:49:34.425
+Paved roads and automated checks.
+
+575
+00:49:35.775 --> 00:49:36.692
+Watch out:
+
+576
+00:49:36.972 --> 00:49:37.719
+7.
+
+577
+00:49:37.999 --> 00:49:39.535
+Templates without upgrades.
+
+578
+00:49:39.815 --> 00:49:43.697
+A template is a one-time copy; the fleet drifts from it (L3).
+
+579
+00:49:43.977 --> 00:49:46.644
+Versioned libraries and automated PRs.
+
+580
+00:49:47.994 --> 00:49:48.911
+Watch out:
+
+581
+00:49:49.191 --> 00:49:49.874
+8.
+
+582
+00:49:50.154 --> 00:49:51.818
+Ticket-ops platform teams.
+
+583
+00:49:52.098 --> 00:49:55.831
+A platform that provisions by ticket is a queue, not a product.
+
+584
+00:49:56.111 --> 00:49:57.882
+Self-service with guardrails.
+
+585
+00:49:59.232 --> 00:50:00.149
+Watch out:
+
+586
+00:50:00.429 --> 00:50:01.176
+9.
+
+587
+00:50:01.456 --> 00:50:03.333
+The two-person migration squad.
+
+588
+00:50:03.613 --> 00:50:09.224
+Central teams can't migrate a fleet in reasonable time, and owners learn nothing (L4).
+
+589
+00:50:10.574 --> 00:50:11.491
+Watch out:
+
+590
+00:50:11.771 --> 00:50:12.475
+10.
+
+591
+00:50:12.755 --> 00:50:15.422
+Starting everyone before the enablers are ready.
+
+592
+00:50:15.702 --> 00:50:21.121
+Looks faster, finishes about the same, costs a third more effort in workarounds (L4).
+
+593
+00:50:22.471 --> 00:50:23.388
+Watch out:
+
+594
+00:50:23.668 --> 00:50:24.500
+11.
+
+595
+00:50:24.780 --> 00:50:26.188
+Measuring individuals.
+
+596
+00:50:26.468 --> 00:50:31.033
+DORA and flow metrics are for finding system constraints, not ranking people.
+
+597
+00:50:32.383 --> 00:50:33.301
+Watch out:
+
+598
+00:50:33.581 --> 00:50:34.370
+12.
+
+599
+00:50:34.650 --> 00:50:36.485
+Reorganising without evidence.
+
+600
+00:50:36.765 --> 00:50:39.965
+Frequent, intuition-driven reorgs destroy ownership.
+
+601
+00:50:40.245 --> 00:50:44.447
+Use change data and cognitive-load limits, then keep teams stable.
+
+602
+00:50:45.797 --> 00:50:46.672
+Part 8.
+
+603
+00:50:46.952 --> 00:50:48.296
+Interview Q and A.
+
+604
+00:50:49.546 --> 00:50:50.378
+Beginner.
+
+605
+00:50:50.658 --> 00:50:51.682
+Question 1.
+
+606
+00:50:51.962 --> 00:50:53.199
+What is Conway's law?
+
+607
+00:50:53.479 --> 00:50:54.845
+Thirty-second answer:
+
+608
+00:50:55.125 --> 00:50:59.562
+Organisations design systems that mirror their communication structures.
+
+609
+00:50:59.842 --> 00:51:13.261
+If teams are organised by technical layer, the system grows layer-shaped seams and every feature crosses teams; if teams own business capabilities end to end, the system tends toward capability-shaped services.
+
+610
+00:51:13.541 --> 00:51:19.898
+The inverse Conway manoeuvre uses this deliberately: design the teams you need for the architecture you want.
+
+611
+00:51:21.248 --> 00:51:22.251
+Question 2.
+
+612
+00:51:22.531 --> 00:51:25.197
+What are the four team types in Team Topologies?
+
+613
+00:51:25.477 --> 00:51:26.843
+Thirty-second answer:
+
+614
+00:51:27.123 --> 00:51:48.477
+Stream-aligned teams own a slice of the value stream end to end (the default); platform teams provide internal self-service capabilities that reduce stream teams' cognitive load; enabling teams coach other teams to adopt new capabilities and then step away; complicated-subsystem teams own parts needing deep specialist knowledge.
+
+615
+00:51:49.827 --> 00:51:50.873
+Question 3.
+
+616
+00:51:51.153 --> 00:51:53.286
+What is a paved road (golden path)?
+
+617
+00:51:53.566 --> 00:51:54.931
+Thirty-second answer:
+
+618
+00:51:55.211 --> 00:52:08.737
+A supported, well-maintained default way to build and run services, a template, shared libraries, CI pipelines, infrastructure modules and docs, that makes the standard-compliant choice the easiest choice.
+
+619
+00:52:09.017 --> 00:52:12.281
+Teams can leave it with good reason, but most don't need to.
+
+620
+00:52:13.631 --> 00:52:14.697
+Question 4.
+
+621
+00:52:14.977 --> 00:52:16.364
+What are the DORA metrics?
+
+622
+00:52:16.644 --> 00:52:18.009
+Thirty-second answer:
+
+623
+00:52:18.289 --> 00:52:29.553
+Four measures of software delivery performance: deployment frequency, lead time for changes (commit to production), change failure rate, and time to restore service after a failure.
+
+624
+00:52:29.833 --> 00:52:36.788
+Together they capture throughput and stability, and they improve with good team boundaries, automation and platform quality.
+
+625
+00:52:38.138 --> 00:52:39.141
+Intermediate.
+
+626
+00:52:39.421 --> 00:52:40.530
+Question 5.
+
+627
+00:52:40.810 --> 00:52:42.645
+How do you decide team boundaries?
+
+628
+00:52:42.925 --> 00:52:44.290
+Thirty-second answer:
+
+629
+00:52:44.570 --> 00:52:53.743
+Start from how change flows: which services change together (feature and git data), which bounded contexts exist, and which capabilities are shared.
+
+630
+00:52:54.023 --> 00:53:02.685
+Group services so most features need one team, within cognitive-load limits (a few services per team, balanced change and on-call load).
+
+631
+00:53:02.965 --> 00:53:06.570
+Move shared capabilities to a platform team as self-service.
+
+632
+00:53:06.850 --> 00:53:10.626
+Validate with domain language and skills, then keep teams stable.
+
+633
+00:53:11.976 --> 00:53:13.085
+Question 6.
+
+634
+00:53:13.365 --> 00:53:17.227
+What is team cognitive load and why does it matter for architecture?
+
+635
+00:53:17.507 --> 00:53:18.872
+Thirty-second answer:
+
+636
+00:53:19.152 --> 00:53:27.237
+The total mental effort a team needs to understand, change and operate what it owns, domains, services, technologies, on-call.
+
+637
+00:53:27.517 --> 00:53:33.299
+When it exceeds capacity, changes slow, quality drops and on-call becomes unsustainable.
+
+638
+00:53:33.579 --> 00:53:43.136
+Architecture should be split so each team's share fits; platforms exist to remove undifferentiated load (infrastructure, observability, messaging).
+
+639
+00:53:44.486 --> 00:53:45.574
+Question 7.
+
+640
+00:53:45.854 --> 00:53:49.886
+How do you keep 100 services consistent without central control?
+
+641
+00:53:50.166 --> 00:53:51.531
+Thirty-second answer:
+
+642
+00:53:51.811 --> 00:54:06.403
+Put the standard into defaults and automation: a service template, shared versioned libraries (logging, tracing, security, outbox), a CI pipeline, infrastructure modules, and a conformance scanner that produces scorecards.
+
+643
+00:54:06.683 --> 00:54:09.585
+Automate upgrades with Renovate or OpenRewrite.
+
+644
+00:54:09.865 --> 00:54:14.707
+Publish principles and a tech radar for decisions the paved road doesn't cover.
+
+645
+00:54:16.057 --> 00:54:17.081
+Question 8.
+
+646
+00:54:17.361 --> 00:54:19.324
+What makes a platform team successful?
+
+647
+00:54:19.604 --> 00:54:20.969
+Thirty-second answer:
+
+648
+00:54:21.249 --> 00:54:38.337
+Treating the platform as a product for internal users: understand stream teams' needs, provide self-service capabilities with clear APIs and SLOs, measure adoption and satisfaction, keep it the thinnest viable platform, and maintain it (upgrades, deprecations).
+
+649
+00:54:38.617 --> 00:54:41.412
+It should reduce cognitive load, not add gates.
+
+650
+00:54:42.762 --> 00:54:43.829
+Question 9.
+
+651
+00:54:44.109 --> 00:54:47.053
+How do architects govern without becoming a bottleneck?
+
+652
+00:54:47.333 --> 00:54:48.698
+Thirty-second answer:
+
+653
+00:54:48.978 --> 00:55:01.458
+Replace review gates with principles, guardrails (fitness functions, policy-as-code, scanners), paved roads, and the advice process, teams decide after seeking advice, and record ADRs.
+
+654
+00:55:01.738 --> 00:55:04.063
+Reserve light review for one-way doors.
+
+655
+00:55:04.343 --> 00:55:08.098
+Architects facilitate a guild and spend time embedded with teams.
+
+656
+00:55:09.448 --> 00:55:10.216
+Senior.
+
+657
+00:55:10.496 --> 00:55:11.541
+Question 10.
+
+658
+00:55:11.821 --> 00:55:16.707
+How would you lead a Spring Boot 2, then 3 migration across 100 services?
+
+659
+00:55:16.987 --> 00:55:18.352
+Thirty-second answer:
+
+660
+00:55:18.632 --> 00:55:34.525
+Make the case (support dates, CVEs), map dependencies, fund the enablers first (shared libraries migrated, OpenRewrite recipes, a reference migration by one team), then let each team own its services with an enabling team available.
+
+661
+00:55:34.805 --> 00:55:42.763
+Track a fitness function (% of services on Boot 3) on a dashboard, announce an end date for the old path, and plan the long tail.
+
+662
+00:55:44.113 --> 00:55:45.243
+Question 11.
+
+663
+00:55:45.523 --> 00:55:47.721
+Your target architecture keeps drifting.
+
+664
+00:55:48.001 --> 00:55:49.857
+How do you diagnose and fix it?
+
+665
+00:55:50.137 --> 00:55:51.502
+Thirty-second answer:
+
+666
+00:55:51.782 --> 00:55:58.097
+Check the socio-technical causes first: do team boundaries match the architecture's boundaries (Conway)?
+
+667
+00:55:58.377 --> 00:56:00.510
+Are standards defaults or documents?
+
+668
+00:56:00.790 --> 00:56:02.817
+Are rules enforced by guardrails?
+
+669
+00:56:03.097 --> 00:56:09.390
+Measure coordination (multi-team features), drift (fitness functions, dependency drift), and adoption.
+
+670
+00:56:09.670 --> 00:56:15.899
+Then fix structurally: realign teams to change flow, strengthen the paved road, add guardrails.
+
+671
+00:56:17.249 --> 00:56:18.337
+Question 12.
+
+672
+00:56:18.617 --> 00:56:23.119
+When should two teams collaborate closely, and when should they interact as a service?
+
+673
+00:56:23.399 --> 00:56:24.764
+Thirty-second answer:
+
+674
+00:56:25.044 --> 00:56:35.092
+Collaborate (high-bandwidth, joint work) when discovering something new with an unclear interface, a new capability, a redesign across a boundary, and time-box it.
+
+675
+00:56:35.372 --> 00:56:44.375
+Once the interface is clear, move to X-as-a-service: one team provides a stable API, the other consumes it with minimal coordination.
+
+676
+00:56:45.725 --> 00:56:47.005
+Question 13.
+
+677
+00:56:47.285 --> 00:56:50.826
+How do you handle ownership transfers during a reorganisation?
+
+678
+00:56:51.106 --> 00:56:52.471
+Thirty-second answer:
+
+679
+00:56:52.751 --> 00:57:09.967
+Treat each service transfer as a migration: a handover checklist (runbooks, alerts, dashboards, known issues, secrets, on-call shadowing), a period of joint on-call, updated catalog ownership, and a scorecard check (L3) so the receiving team knows what it inherits.
+
+680
+00:57:10.247 --> 00:57:13.853
+Transfer fewer, larger chunks rather than scattering services.
+
+681
+00:57:15.203 --> 00:57:16.397
+Question 14.
+
+682
+00:57:16.677 --> 00:57:20.496
+How do you prioritise platform and tech-debt work against features?
+
+683
+00:57:20.776 --> 00:57:22.141
+Thirty-second answer:
+
+684
+00:57:22.421 --> 00:57:38.208
+Give it a standing capacity allocation (often 15 to 25%) rather than competing item by item, and back specific large investments with data: incidents caused, lead-time impact, security exposure, migration deadlines.
+
+685
+00:57:38.488 --> 00:57:42.307
+Frame debt as risk and cost in business terms, and show results.
+
+686
+00:57:43.657 --> 00:57:44.553
+Architect.
+
+687
+00:57:44.833 --> 00:57:46.027
+Question 15.
+
+688
+00:57:46.307 --> 00:57:51.790
+Design the engineering organisation for a 150-engineer grocery platform.
+
+689
+00:57:52.070 --> 00:57:53.435
+Thirty-second answer:
+
+690
+00:57:53.715 --> 00:58:13.726
+15 to 18 stream-aligned teams of 6 to 9 grouped around value streams (checkout, orders and payments, catalog and discovery, store operations, inventory, delivery, customer), boundaries validated with change data and cognitive-load limits; a platform group (developer platform, data platform,
+
+691
+00:58:14.006 --> 00:58:23.478
+messaging or identity or notification as services); one or two enabling teams; complicated-subsystem teams for routing and search ranking.
+
+692
+00:58:23.758 --> 00:58:30.819
+Govern with principles, paved roads, guardrails and an advice process; measure DORA, coordination and adoption.
+
+693
+00:58:32.169 --> 00:58:33.364
+Question 16.
+
+694
+00:58:33.644 --> 00:58:36.993
+How do you write and drive a multi-year technical strategy?
+
+695
+00:58:37.273 --> 00:58:38.639
+Thirty-second answer:
+
+696
+00:58:38.919 --> 00:58:50.183
+Diagnose honestly with data (coordination costs, drift, reliability, DORA), choose a few guiding policies, and define coherent actions with owners, sequencing and measures.
+
+697
+00:58:50.463 --> 00:58:59.188
+Write it down, socialise it before publishing, tie it to business goals, allocate capacity, and review it at least yearly as evidence changes.
+
+698
+00:59:00.538 --> 00:59:01.882
+Question 17.
+
+699
+00:59:02.162 --> 00:59:05.959
+How do you lead without authority across teams that don't report to you?
+
+700
+00:59:06.239 --> 00:59:07.605
+Thirty-second answer:
+
+701
+00:59:07.885 --> 00:59:25.741
+Earn influence through evidence, writing, and making others successful: bring data that reframes problems, write clear proposals, build consensus before meetings, sponsor and mentor, stay close to the code, choose battles (one-way doors), and disagree-and-commit once decisions are made.
+
+702
+00:59:26.021 --> 00:59:29.050
+Align your work with leaders' goals so they want your help.
+
+703
+00:59:30.400 --> 00:59:31.573
+Question 18.
+
+704
+00:59:31.853 --> 00:59:35.907
+Centralised platform versus team autonomy, where do you draw the line?
+
+705
+00:59:36.187 --> 00:59:37.552
+Thirty-second answer:
+
+706
+00:59:37.832 --> 00:59:57.139
+Centralise what's undifferentiated and where consistency matters (build and deploy, observability, security baselines, identity, messaging, data governance); leave to teams what's specific to their domain (domain models, service design within principles, feature technology choices within the radar).
+
+707
+00:59:57.419 --> 01:00:03.819
+Make the central parts self-service and optional-but-attractive, with guardrails only for true non-negotiables.
+
+708
+01:00:05.169 --> 01:00:06.406
+Question 19.
+
+709
+01:00:06.686 --> 01:00:09.630
+How would you evaluate whether a reorganisation worked?
+
+710
+01:00:09.910 --> 01:00:11.275
+Thirty-second answer:
+
+711
+01:00:11.555 --> 01:00:25.721
+Define measures before it: multi-team features and hand-offs (L1 or L2 method on real data), DORA metrics per team, incident and on-call load, cognitive-load survey results, and golden-path adoption.
+
+712
+01:00:26.001 --> 01:00:32.721
+Compare over two to three quarters, accounting for the dip during transition, and check qualitative signals from teams.
+
+713
+01:00:34.071 --> 01:00:35.180
+Question 20.
+
+714
+01:00:35.460 --> 01:00:39.769
+What distinguishes a principal engineer's impact from a senior engineer's?
+
+715
+01:00:40.049 --> 01:00:41.415
+Thirty-second answer:
+
+716
+01:00:41.695 --> 01:00:42.975
+Scope and leverage.
+
+717
+01:00:43.255 --> 01:00:46.775
+A senior engineer delivers excellent systems within a team.
+
+718
+01:00:47.055 --> 01:01:02.223
+A principal engineer shapes how many teams build systems: team boundaries aligned to change, platforms that make good choices easy, governance that scales, migrations that finish, and a strategy that connects technology to business outcomes.
+
+719
+01:01:02.503 --> 01:01:05.233
+Their output is measured in other teams' results.
+
+720
+01:01:06.583 --> 01:01:07.479
+Part 9.
+
+721
+01:01:07.759 --> 01:01:09.167
+Summary and Practice.
+
+722
+01:01:10.417 --> 01:01:11.505
+Key takeaways.
+
+723
+01:01:11.785 --> 01:01:19.785
+Architecture at scale is socio-technical: team boundaries, defaults and incentives shape the system (§2.1).
+
+724
+01:01:20.065 --> 01:01:26.977
+Conway's law is a force: align teams to how change actually flows, not to layers or nouns (L1).
+
+725
+01:01:27.257 --> 01:01:41.999
+Use Team Topologies' vocabulary: stream-aligned, platform, enabling and complicated-subsystem teams; collaboration, X-as-a-service and facilitating modes; cognitive load as the constraint (§2.3).
+
+726
+01:01:42.279 --> 01:01:49.319
+Derive boundaries from change data within load limits, and treat the result as evidence for human judgement (L2).
+
+727
+01:01:50.669 --> 01:01:57.943
+Run the paved road as a product and keep the fleet on it: versioned libraries, automated upgrades, scorecards (L3).
+
+728
+01:01:58.223 --> 01:02:04.815
+Govern with principles, guardrails and advice, reserving review for one-way doors (§2.6).
+
+729
+01:02:05.095 --> 01:02:12.903
+Lead migrations with a plan and enablers: platform first, team ownership, codemods, a tracking fitness function (L4).
+
+730
+01:02:13.183 --> 01:02:17.301
+Measure flow and adoption, not individuals (§2.9).
+
+731
+01:02:17.581 --> 01:02:22.253
+Lead through evidence, writing and others' success (§2.10).
+
+732
+01:02:23.603 --> 01:02:24.925
+Decision cheat sheet.
+
+733
+01:02:25.205 --> 01:02:26.549
+Here is a quick table:
+
+734
+01:02:26.829 --> 01:02:28.493
+Situation, and Approach.
+
+735
+01:02:28.773 --> 01:02:30.715
+Features constantly cross teams:
+
+736
+01:02:30.995 --> 01:02:35.069
+Measure change coupling; realign teams to flow (L1, L2).
+
+737
+01:02:35.349 --> 01:02:37.205
+A capability everyone needs:
+
+738
+01:02:37.485 --> 01:02:39.533
+Platform team, X-as-a-service.
+
+739
+01:02:39.813 --> 01:02:41.627
+Teams need to adopt something new:
+
+740
+01:02:41.907 --> 01:02:44.147
+Enabling team, facilitating mode.
+
+741
+01:02:44.427 --> 01:02:46.027
+Deep specialist component:
+
+742
+01:02:46.307 --> 01:02:48.035
+Complicated-subsystem team.
+
+743
+01:02:48.315 --> 01:02:50.427
+Services configured inconsistently:
+
+744
+01:02:50.707 --> 01:02:55.933
+Paved road + versioned libraries + scanner + auto-upgrade PRs (L3).
+
+745
+01:02:56.213 --> 01:02:57.451
+Fleet-wide upgrade:
+
+746
+01:02:57.731 --> 01:03:01.933
+Platform-first enablers, team ownership, codemods, tracking (L4).
+
+747
+01:03:02.213 --> 01:03:03.664
+Architecture review queue:
+
+748
+01:03:03.944 --> 01:03:06.589
+Principles + guardrails + advice process.
+
+749
+01:03:06.869 --> 01:03:08.235
+Is the reorg working?:
+
+750
+01:03:08.515 --> 01:03:12.184
+DORA, hand-offs per feature, surveys over 2 to 3 quarters.
+
+751
+01:03:13.534 --> 01:03:14.665
+Exercises.
+
+752
+01:03:14.945 --> 01:03:20.363
+(B3) Export six months of your team's tickets or PRs with the services each touched.
+
+753
+01:03:20.643 --> 01:03:25.657
+Run L1's analysis on them: what share of changes needs more than one team?
+
+754
+01:03:25.937 --> 01:03:31.419
+(B3) In L2, change the limits to 3 to 5 services per team and 6 teams.
+
+755
+01:03:31.699 --> 01:03:33.961
+How do hand-offs and max load change?
+
+756
+01:03:34.241 --> 01:03:35.606
+Where would you draw the line?
+
+757
+01:03:35.886 --> 01:03:45.635
+(B3) Add two checks to L3's scanner, uses the standard base image digest and has a runbook link in catalog-info, and compute per-team scorecards.
+
+758
+01:03:46.985 --> 01:03:55.583
+(B4) In L4, give the platform team two parallel streams and add a reference migration task that must finish before other teams start.
+
+759
+01:03:55.863 --> 01:03:57.484
+Does it change the finish date?
+
+760
+01:03:57.764 --> 01:03:58.660
+The effort?
+
+761
+01:03:58.940 --> 01:04:09.159
+(B4) Write a one-page technical strategy for your organisation using diagnosis or guiding policies or coherent actions, with one measure per action.
+
+762
+01:04:10.509 --> 01:04:11.511
+Further reading.
+
+763
+01:04:11.791 --> 01:04:14.415
+Melvin Conway, How Do Committees Invent?
+
+764
+01:04:14.695 --> 01:04:16.274
+(1968).
+
+765
+01:04:16.554 --> 01:04:19.839
+Matthew Skelton and Manuel Pais, Team Topologies.
+
+766
+01:04:20.119 --> 01:04:24.749
+Nicole Forsgren, Jez Humble and Gene Kim, Accelerate (DORA research).
+
+767
+01:04:25.029 --> 01:04:28.015
+Will Larson, Staff Engineer and An Elegant Puzzle.
+
+768
+01:04:28.295 --> 01:04:30.706
+Tanya Reilly, The Staff Engineer's Path.
+
+769
+01:04:30.986 --> 01:04:33.781
+Richard Rumelt, Good Strategy Bad Strategy.
+
+770
+01:04:34.061 --> 01:04:36.706
+Gregor Hohpe, The Software Architect Elevator.
+
+771
+01:04:38.056 --> 01:04:42.792
+Backstage, Renovate and OpenRewrite documentation for paved-road tooling.
+
+772
+01:04:44.142 --> 01:04:45.379
+Related chapters.
+
+773
+01:04:45.659 --> 01:04:50.779
+Ch 16, Microservices Architecture: services per team and ownership.
+
+774
+01:04:51.059 --> 01:04:54.046
+Ch 31, Architecture Decision Making:
+
+775
+01:04:54.326 --> 01:04:56.865
+ADRs, advice process, fitness functions.
+
+776
+01:04:57.145 --> 01:05:01.262
+Ch 32, Design Documents and Architecture Communication:
+
+777
+01:05:01.542 --> 01:05:04.529
+RFCs, strategy documents, drift detection.
+
+778
+01:05:04.809 --> 01:05:10.675
+Ch 33, Domain-Driven Design: bounded contexts as candidate team boundaries.
+
+779
+01:05:10.955 --> 01:05:17.078
+Ch 34, Modern Architecture Styles: hexagonal template structure, cells and ownership.
+
+780
+01:05:18.428 --> 01:05:24.081
+Ch 35, Cost Engineering and FinOps: paved-road defaults as cost controls.
+
+781
+01:05:25.431 --> 01:05:27.031
+That's the end of this chapter.
+
+782
+01:05:27.311 --> 01:05:33.349
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+783
+01:05:33.629 --> 01:05:35.079
+See you in the next chapter.
+

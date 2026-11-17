@@ -1,0 +1,3278 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:03.681
+Delivery Slot Booking and Capacity.
+
+3
+00:00:03.961 --> 00:00:08.121
+Chapter 48, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:09.871 --> 00:00:10.831
+At a glance:
+
+5
+00:00:11.111 --> 00:00:12.284
+Chapter at a glance.
+
+6
+00:00:12.564 --> 00:00:13.567
+Reader bands:
+
+7
+00:00:13.847 --> 00:00:16.129
+B2, then B4, Prerequisites:
+
+8
+00:00:16.409 --> 00:00:35.673
+Ch 05 (isolation, row locks), Ch 15 (event sourcing, projections), Ch 46 (holds and TTLs), Ch 47 (rider-minutes, ETAs), What you will build: slot-service, which answers which delivery slots can I have, and can I book this one? for scheduled grocery orders.
+
+9
+00:00:35.953 --> 00:00:53.020
+That means capacity that means something, bookings that can't overbook under a Diwali-eve rush, an event-sourced slot aggregate with a history you can audit and rebuild (the design Ch 15 deferred here), and slot screens and prices that move demand to where the riders are.
+
+10
+00:00:53.300 --> 00:01:02.068
+It is also the classic design a booking system (tickets, appointments, hotel rooms) interview question, with capacity that isn't a simple count.
+
+11
+00:01:03.418 --> 00:01:04.485
+The four labs:
+
+12
+00:01:04.765 --> 00:01:07.005
+L1, what full means (simulation).
+
+13
+00:01:07.285 --> 00:01:08.906
+One zone over 30 days:
+
+14
+00:01:09.186 --> 00:01:18.999
+A cap of 40 orders per slot accepted 9,321 orders and delivered 2,444 late (26%).
+
+15
+00:01:19.279 --> 00:01:28.474
+Capacity in rider-minutes from the roster, with each booking deducting its estimated cost (including evening traffic), delivered 21 late.
+
+16
+00:01:29.824 --> 00:01:36.373
+The number delivered on time stayed about the same (~6,900 to 7,050).
+
+17
+00:01:36.653 --> 00:01:41.496
+The rule decides whether customers hear full at booking time or sorry, late at the door.
+
+18
+00:01:41.776 --> 00:01:45.317
+L2, bookings under contention (real PostgreSQL).
+
+19
+00:01:45.597 --> 00:01:51.827
+32 workers made 12,000 attempts on 60 slots, 70% of them on 8 hot slots:
+
+20
+00:01:52.107 --> 00:02:01.877
+Read-check-write in Java overbooked all 60 slots, with 2,965 bookings against ~2,000 slots' worth of capacity.
+
+21
+00:02:02.157 --> 00:02:06.701
+SERIALIZABLE isolation fixed it with 1,043 retries.
+
+22
+00:02:08.051 --> 00:02:09.481
+A conditional UPDATE...
+
+23
+00:02:09.761 --> 00:02:15.819
+WHERE used + m = cap fixed it with 0 retries and the best throughput and p99.
+
+24
+00:02:16.099 --> 00:02:23.331
+An event-sourced append guarded by PK(slot, version) was also exact, with 1,020 retries.
+
+25
+00:02:23.611 --> 00:02:31.569
+L3, the slot as an event-sourced aggregate (real PostgreSQL, 819,306 events).
+
+26
+00:02:31.849 --> 00:02:39.806
+A projector bug made 2,088 of 3,000 slots wrong, and 442 were shown as full while they had room.
+
+27
+00:02:40.086 --> 00:02:44.822
+Rebuilding the read model from the events took ~1 s and fixed all of them.
+
+28
+00:02:46.172 --> 00:02:55.964
+Snapshots cut loading a hot slot from 2,800 rows (1.4 ms p50) to 52 rows (0.12 ms).
+
+29
+00:02:56.244 --> 00:03:01.343
+What did this slot look like earlier and whose hold filled it are 3 to 12 ms queries.
+
+30
+00:03:01.623 --> 00:03:04.033
+L4, moving demand (simulation).
+
+31
+00:03:04.313 --> 00:03:05.615
+With the same riders:
+
+32
+00:03:05.895 --> 00:03:16.583
+Offering the nearest free slots, plus peak fees and shoulder discounts, cut lost customers from 1,631 to 1,357.
+
+33
+00:03:16.863 --> 00:03:22.068
+Moving the same rider-hours into the peak cut them to 1,242.
+
+34
+00:03:23.418 --> 00:03:26.405
+The acceptance rates are stated assumptions (VERIFY).
+
+35
+00:03:26.685 --> 00:03:27.666
+Reading time:
+
+36
+00:03:27.946 --> 00:03:29.567
+100 min + code.
+
+37
+00:03:30.917 --> 00:03:31.771
+Part 1.
+
+38
+00:03:32.051 --> 00:03:33.971
+Introduction and Why It Matters.
+
+39
+00:03:35.221 --> 00:03:38.698
+A story: the 7 pm slot that was always available.
+
+40
+00:03:38.978 --> 00:03:44.439
+The first slot system had a table slot(zone, start, maxorders=40, booked).
+
+41
+00:03:44.719 --> 00:03:55.109
+The app showed slots with booked maxorders; checkout did SELECT booked...; if (booked 40) INSERT booking; UPDATE slot SET booked = bookedread + 1.
+
+42
+00:03:55.389 --> 00:03:56.839
+It went wrong in four ways:
+
+43
+00:03:57.119 --> 00:03:58.421
+Full didn't mean full.
+
+44
+00:03:58.701 --> 00:04:02.285
+Forty orders at 11 am took 25 minutes each.
+
+45
+00:04:02.565 --> 00:04:08.282
+Forty orders at 7 pm, in the jam, to towers with security desks, took 45.
+
+46
+00:04:08.562 --> 00:04:16.071
+The 7 pm slot was available long after the riders were fully booked, and a quarter of those orders arrived after their window.
+
+47
+00:04:17.421 --> 00:04:19.533
+Diwali eve overbooked every slot.
+
+48
+00:04:19.813 --> 00:04:35.024
+Slots for the festival opened at 6 am; thousands of customers booked in the same second, two checkouts read the same booked and both wrote booked + 1, and some slots ended up with 60 orders on a 40-order counter that said 41.
+
+49
+00:04:35.304 --> 00:04:36.989
+Nobody could say what happened.
+
+50
+00:04:37.269 --> 00:04:41.024
+Why was I told the 6 pm slot was full at 9:14?
+
+51
+00:04:41.304 --> 00:04:48.451
+The counter said 40; the bookings table said 38; there was no history of holds, cancellations and reschedules.
+
+52
+00:04:48.731 --> 00:04:50.971
+Support refunded and apologised.
+
+53
+00:04:52.321 --> 00:04:54.070
+Everyone wanted 7 pm.
+
+54
+00:04:54.350 --> 00:04:58.425
+Afternoon riders sat idle while evening customers were turned away.
+
+55
+00:04:58.705 --> 00:05:02.651
+The app greyed out full slots and customers left instead of scrolling.
+
+56
+00:05:02.931 --> 00:05:05.641
+Slots are a promise made hours or days ahead.
+
+57
+00:05:05.921 --> 00:05:13.729
+This chapter designs what a slot's capacity means, how to take it safely, how to keep its history, and how to fill the day evenly.
+
+58
+00:05:15.079 --> 00:05:15.761
+Quote:
+
+59
+00:05:16.041 --> 00:05:17.705
+The thesis of this chapter.
+
+60
+00:05:17.985 --> 00:05:30.145
+A delivery slot is capacity in the unit that actually runs out (rider-minutes from the roster, picker-minutes in the store), consumed by bookings that each deduct their own estimated cost (L1).
+
+61
+00:05:30.425 --> 00:05:39.108
+Taking capacity must be one atomic step (a conditional update or a version-guarded append), because check-then-act overbooks (L2).
+
+62
+00:05:39.388 --> 00:05:46.897
+The slot's history is the source of truth: events rebuild the read model after bugs and answer audit questions (L3).
+
+63
+00:05:47.177 --> 00:05:57.759
+And capacity is only half the problem: showing the right alternatives and pricing peaks moves demand to where the riders are, and the roster should follow demand too (L4).
+
+64
+00:05:59.109 --> 00:06:01.413
+Where this lives in the grocery platform.
+
+65
+00:06:01.693 --> 00:06:03.037
+Here is a quick table:
+
+66
+00:06:03.317 --> 00:06:05.663
+Concern, and Owner, and Data, and Store.
+
+67
+00:06:05.943 --> 00:06:09.037
+Slot templates (zones times hours times days).
+
+68
+00:06:09.317 --> 00:06:10.703
+Owner: slot-service.
+
+69
+00:06:10.983 --> 00:06:11.794
+Data:
+
+70
+00:06:12.074 --> 00:06:13.674
+Rules, cut-offs, fees.
+
+71
+00:06:13.954 --> 00:06:14.743
+Store:
+
+72
+00:06:15.023 --> 00:06:16.261
+PostgreSQL.
+
+73
+00:06:16.541 --> 00:06:17.821
+Capacity per slot.
+
+74
+00:06:18.101 --> 00:06:23.413
+Owner: slot-service from rosters (Ch 47) and store picking capacity.
+
+75
+00:06:23.693 --> 00:06:24.503
+Data:
+
+76
+00:06:24.783 --> 00:06:26.383
+Rider-minutes, picker-minutes.
+
+77
+00:06:26.663 --> 00:06:27.453
+Store:
+
+78
+00:06:27.733 --> 00:06:30.399
+PostgreSQL (events + read model).
+
+79
+00:06:30.679 --> 00:06:32.578
+Slot availability for browsing.
+
+80
+00:06:32.858 --> 00:06:34.799
+Owner: slot-service read model.
+
+81
+00:06:35.079 --> 00:06:35.890
+Data:
+
+82
+00:06:36.170 --> 00:06:37.471
+Free minutes per slot.
+
+83
+00:06:37.751 --> 00:06:38.541
+Store:
+
+84
+00:06:38.821 --> 00:06:40.506
+Redis cache, seconds-stale.
+
+85
+00:06:40.786 --> 00:06:42.045
+Holds and bookings.
+
+86
+00:06:42.325 --> 00:06:43.711
+Owner: slot-service.
+
+87
+00:06:43.991 --> 00:06:44.802
+Data:
+
+88
+00:06:45.082 --> 00:06:45.871
+Events:
+
+89
+00:06:46.151 --> 00:06:50.290
+HELD, BOOKED, EXPIRED, CANCELLED, RESCHEDULED, CAPACITYCHANGED.
+
+90
+00:06:50.570 --> 00:06:51.359
+Store:
+
+91
+00:06:51.639 --> 00:06:53.453
+PostgreSQL event store.
+
+92
+00:06:54.803 --> 00:06:56.296
+Cost estimate per order.
+
+93
+00:06:56.576 --> 00:06:57.280
+Owner:
+
+94
+00:06:57.560 --> 00:06:59.757
+ETA service (Ch 47).
+
+95
+00:07:00.037 --> 00:07:00.848
+Data:
+
+96
+00:07:01.128 --> 00:07:03.475
+Minutes by address, hour, basket size.
+
+97
+00:07:03.755 --> 00:07:04.544
+Store:
+
+98
+00:07:04.824 --> 00:07:07.128
+Model + request-time computation.
+
+99
+00:07:07.408 --> 00:07:08.581
+Events to others.
+
+100
+00:07:08.861 --> 00:07:09.565
+Owner:
+
+101
+00:07:09.845 --> 00:07:14.432
+Kafka slot.slot.booked.v1 (Ch 00 service map).
+
+102
+00:07:14.712 --> 00:07:15.523
+Data:
+
+103
+00:07:15.803 --> 00:07:18.704
+Dispatch planning, picking waves, notifications.
+
+104
+00:07:18.984 --> 00:07:19.773
+Store:
+
+105
+00:07:20.053 --> 00:07:21.461
+Outbox, then Kafka.
+
+106
+00:07:22.811 --> 00:07:24.134
+Learning objectives.
+
+107
+00:07:24.414 --> 00:07:26.313
+By the end you will be able to:
+
+108
+00:07:26.593 --> 00:07:30.859
+Model slot capacity in the right units, per zone and per hour (L1).
+
+109
+00:07:31.139 --> 00:07:38.649
+Book capacity safely under contention, and choose between locking, isolation and optimistic concurrency (L2).
+
+110
+00:07:38.929 --> 00:07:45.201
+Event-source the slot aggregate: projections, rebuilds, snapshots, audit and time travel (L3).
+
+111
+00:07:45.481 --> 00:07:49.513
+Shape demand with slot display, pricing and rostering (L4).
+
+112
+00:07:50.863 --> 00:07:55.727
+Design holds, cut-offs, rescheduling, and the interplay with checkout and dispatch.
+
+113
+00:07:57.077 --> 00:07:57.951
+Part 2.
+
+114
+00:07:58.231 --> 00:08:00.109
+Core Concepts, Beginner to Deep.
+
+115
+00:08:01.359 --> 00:08:03.705
+Intuition: a doctor's appointment book.
+
+116
+00:08:03.985 --> 00:08:06.396
+A clinic doesn't cap appointments at 20 a day.
+
+117
+00:08:06.676 --> 00:08:14.505
+A check-up takes 10 minutes and a procedure takes 45, so the receptionist books time, from the rota of the doctors on duty.
+
+118
+00:08:14.785 --> 00:08:17.815
+Two receptionists must never give away the same time.
+
+119
+00:08:18.095 --> 00:08:22.212
+The book is kept in pen, so who cancelled Tuesday at 3? has an answer.
+
+120
+00:08:22.492 --> 00:08:29.191
+And when everyone wants Saturday morning, a good receptionist offers Friday evening first, before the patient walks out.
+
+121
+00:08:29.471 --> 00:08:33.311
+Slot booking is that appointment book, for thousands of zones at once.
+
+122
+00:08:34.661 --> 00:08:35.621
+Requirements.
+
+123
+00:08:35.901 --> 00:08:36.754
+Functional.
+
+124
+00:08:37.034 --> 00:08:46.250
+Generate slots per zone (for example, hourly or two-hourly, 7 days ahead) from templates, with cut-off times (book by Tminus 90 min).
+
+125
+00:08:46.530 --> 00:08:49.794
+Show available slots for an address, with fees, quickly.
+
+126
+00:08:50.074 --> 00:08:56.111
+Hold a slot during checkout; confirm on payment; expire abandoned holds (Ch 46).
+
+127
+00:08:56.391 --> 00:09:02.279
+Cancel and reschedule; ops can change capacity (roster changes, rain) and close slots.
+
+128
+00:09:03.629 --> 00:09:07.448
+Tell dispatch and stores what's booked (picking waves, rider plans).
+
+129
+00:09:07.728 --> 00:09:08.837
+Non-functional.
+
+130
+00:09:09.117 --> 00:09:13.021
+Slot listing p99 50 ms (it's on the checkout path).
+
+131
+00:09:13.301 --> 00:09:17.739
+Never overbook beyond configured capacity, even at festival peaks.
+
+132
+00:09:18.019 --> 00:09:19.853
+Full audit history of each slot.
+
+133
+00:09:20.133 --> 00:09:23.973
+Availability shown may be seconds stale; booking must be exact.
+
+134
+00:09:25.323 --> 00:09:26.369
+Estimation.
+
+135
+00:09:26.649 --> 00:09:27.993
+Here is a quick table:
+
+136
+00:09:28.273 --> 00:09:29.702
+Quantity, and Estimate.
+
+137
+00:09:29.982 --> 00:09:33.161
+Zones: ~1,500 across cities.
+
+138
+00:09:33.441 --> 00:09:34.273
+Slots:
+
+139
+00:09:34.553 --> 00:09:42.489
+1,500 zones times 16 hourly slots times 7 days about 170k open slots.
+
+140
+00:09:42.769 --> 00:09:48.678
+Scheduled orders: ~600k per day (the rest are express, Ch 47).
+
+141
+00:09:48.958 --> 00:09:49.982
+Slot events:
+
+142
+00:09:50.262 --> 00:10:00.523
+Holds + bookings + expiries about 3 to 4 per order, then ~2M events per day, ~100 B each, then ~200 MB per day.
+
+143
+00:10:00.803 --> 00:10:01.763
+Hot moment:
+
+144
+00:10:02.043 --> 00:10:08.849
+Festival slots opening: tens of thousands of attempts in minutes, concentrated on a few evening slots per zone.
+
+145
+00:10:09.129 --> 00:10:10.195
+Listing reads:
+
+146
+00:10:10.475 --> 00:10:16.001
+Every checkout and cart view: ~5 to 10k per second at peak, served from cache.
+
+147
+00:10:17.351 --> 00:10:22.897
+Storage is small; contention on hot slots and correctness of capacity are the problems.
+
+148
+00:10:24.247 --> 00:10:25.890
+Capacity: what runs out?
+
+149
+00:10:26.170 --> 00:10:30.714
+A slot's capacity is the minimum over the resources the order consumes:
+
+150
+00:10:30.994 --> 00:10:39.911
+Rider-minutes: the riders rostered for the zone in that window times 60, times a utilisation target (for example, 95%).
+
+151
+00:10:40.191 --> 00:10:44.117
+Picker-minutes in the dark store for the picking wave that feeds the slot.
+
+152
+00:10:44.397 --> 00:10:48.087
+Vehicle constraints: cold-chain bags, bulky-item vans.
+
+153
+00:10:48.367 --> 00:10:58.842
+Each booking deducts its estimated cost in the scarce resource: ride out and back for its distance and hour, door time for its building, extra time for bulky baskets.
+
+154
+00:10:59.122 --> 00:11:03.709
+The estimates come from the same models as ETAs (Ch 47 L4).
+
+155
+00:11:03.989 --> 00:11:05.631
+L1 compared four rules:
+
+156
+00:11:06.981 --> 00:11:08.325
+Here is a quick table:
+
+157
+00:11:08.605 --> 00:11:11.955
+Capacity rule, and Booked, and Lost, and Late, and On time.
+
+158
+00:11:12.235 --> 00:11:13.728
+40 orders per slot.
+
+159
+00:11:14.008 --> 00:11:14.712
+Booked:
+
+160
+00:11:14.992 --> 00:11:17.125
+9,321.
+
+161
+00:11:17.405 --> 00:11:18.152
+Lost:
+
+162
+00:11:18.432 --> 00:11:19.819
+162.
+
+163
+00:11:20.099 --> 00:11:20.824
+Late:
+
+164
+00:11:21.104 --> 00:11:23.173
+2,444.
+
+165
+00:11:23.453 --> 00:11:24.285
+On time:
+
+166
+00:11:24.565 --> 00:11:26.784
+6,877.
+
+167
+00:11:27.064 --> 00:11:28.685
+28 orders per slot.
+
+168
+00:11:28.965 --> 00:11:29.669
+Booked:
+
+169
+00:11:29.949 --> 00:11:32.040
+8,596.
+
+170
+00:11:32.320 --> 00:11:33.067
+Lost:
+
+171
+00:11:33.347 --> 00:11:34.712
+887.
+
+172
+00:11:34.992 --> 00:11:35.717
+Late:
+
+173
+00:11:35.997 --> 00:11:38.067
+1,688.
+
+174
+00:11:38.347 --> 00:11:39.179
+On time:
+
+175
+00:11:39.459 --> 00:11:41.251
+6,908.
+
+176
+00:11:41.531 --> 00:11:44.645
+Rider-minutes from roster, estimated minutes per order.
+
+177
+00:11:44.925 --> 00:11:45.629
+Booked:
+
+178
+00:11:45.909 --> 00:11:48.277
+7,759.
+
+179
+00:11:48.557 --> 00:11:49.304
+Lost:
+
+180
+00:11:49.584 --> 00:11:51.845
+1,724.
+
+181
+00:11:52.125 --> 00:11:52.851
+Late:
+
+182
+00:11:53.131 --> 00:11:54.475
+712.
+
+183
+00:11:54.755 --> 00:11:55.587
+On time:
+
+184
+00:11:55.867 --> 00:11:59.749
+7,047. + estimate knows evening traffic.
+
+185
+00:12:00.029 --> 00:12:00.733
+Booked:
+
+186
+00:12:01.013 --> 00:12:02.592
+7,062.
+
+187
+00:12:02.872 --> 00:12:03.619
+Lost:
+
+188
+00:12:03.899 --> 00:12:05.947
+2,421.
+
+189
+00:12:06.227 --> 00:12:06.952
+Late:
+
+190
+00:12:07.232 --> 00:12:08.149
+21.
+
+191
+00:12:08.429 --> 00:12:09.261
+On time:
+
+192
+00:12:09.541 --> 00:12:11.099
+7,041.
+
+193
+00:12:12.449 --> 00:12:14.475
+No capacity rule creates riders.
+
+194
+00:12:14.755 --> 00:12:17.678
+On-time deliveries are about the same in every row.
+
+195
+00:12:17.958 --> 00:12:24.273
+The rule decides whether the customer learns full at booking time (and can choose another slot) or late at the door.
+
+196
+00:12:24.553 --> 00:12:25.982
+A count can't be tuned.
+
+197
+00:12:26.262 --> 00:12:32.449
+40 is too generous at peak, and 28 is still late at peak while turning away off-peak customers.
+
+198
+00:12:32.729 --> 00:12:39.022
+Estimate quality matters: the traffic term alone took late orders from 712 to 21.
+
+199
+00:12:39.302 --> 00:12:45.041
+Winning back lost customers needs demand shaping and rostering (L4), not a looser rule.
+
+200
+00:12:46.391 --> 00:12:47.991
+Taking capacity safely.
+
+201
+00:12:48.271 --> 00:12:55.055
+L2 ran 12,000 booking attempts from 32 concurrent workers against real PostgreSQL:
+
+202
+00:12:56.405 --> 00:12:57.749
+Here is a quick table:
+
+203
+00:12:58.029 --> 00:13:04.066
+Method, and Booked, and Slots over capacity, and Retries, and Attempts per second, and p99.
+
+204
+00:13:04.346 --> 00:13:07.226
+Read, check in Java, write back (READ COMMITTED).
+
+205
+00:13:07.506 --> 00:13:08.210
+Booked:
+
+206
+00:13:08.490 --> 00:13:10.730
+2,965.
+
+207
+00:13:11.010 --> 00:13:12.525
+Slots over capacity:
+
+208
+00:13:12.805 --> 00:13:13.999
+60 of 60.
+
+209
+00:13:14.279 --> 00:13:15.197
+Retries:
+
+210
+00:13:15.477 --> 00:13:16.223
+0.
+
+211
+00:13:16.503 --> 00:13:17.698
+Attempts per second:
+
+212
+00:13:17.978 --> 00:13:20.837
+4,880. p99:
+
+213
+00:13:21.117 --> 00:13:22.845
+31.6 ms.
+
+214
+00:13:23.125 --> 00:13:25.429
+Same, SERIALIZABLE + retry.
+
+215
+00:13:25.709 --> 00:13:26.413
+Booked:
+
+216
+00:13:26.693 --> 00:13:28.719
+1,996.
+
+217
+00:13:28.999 --> 00:13:30.514
+Slots over capacity:
+
+218
+00:13:30.794 --> 00:13:31.541
+0.
+
+219
+00:13:31.821 --> 00:13:32.738
+Retries:
+
+220
+00:13:33.018 --> 00:13:34.490
+1,043.
+
+221
+00:13:34.770 --> 00:13:35.965
+Attempts per second:
+
+222
+00:13:36.245 --> 00:13:39.466
+5,247. p99:
+
+223
+00:13:39.746 --> 00:13:41.602
+36.7 ms.
+
+224
+00:13:41.882 --> 00:13:43.226
+Conditional UPDATE...
+
+225
+00:13:43.506 --> 00:13:45.255
+WHERE used + m = cap.
+
+226
+00:13:45.535 --> 00:13:46.239
+Booked:
+
+227
+00:13:46.519 --> 00:13:48.546
+1,999.
+
+228
+00:13:48.826 --> 00:13:50.341
+Slots over capacity:
+
+229
+00:13:50.621 --> 00:13:51.367
+0.
+
+230
+00:13:51.647 --> 00:13:52.565
+Retries:
+
+231
+00:13:52.845 --> 00:13:53.591
+0.
+
+232
+00:13:53.871 --> 00:13:55.066
+Attempts per second:
+
+233
+00:13:55.346 --> 00:13:58.674
+7,679. p99:
+
+234
+00:13:58.954 --> 00:14:00.469
+20.6 ms.
+
+235
+00:14:00.749 --> 00:14:04.418
+Event-sourced append, PK(slot, version) + retry.
+
+236
+00:14:04.698 --> 00:14:05.402
+Booked:
+
+237
+00:14:05.682 --> 00:14:07.709
+1,998.
+
+238
+00:14:07.989 --> 00:14:09.503
+Slots over capacity:
+
+239
+00:14:09.783 --> 00:14:10.530
+0.
+
+240
+00:14:10.810 --> 00:14:11.727
+Retries:
+
+241
+00:14:12.007 --> 00:14:13.287
+1,020.
+
+242
+00:14:13.567 --> 00:14:14.762
+Attempts per second:
+
+243
+00:14:15.042 --> 00:14:18.157
+5,192. p99:
+
+244
+00:14:18.437 --> 00:14:20.122
+35.4 ms.
+
+245
+00:14:21.472 --> 00:14:27.595
+Check-then-act is the root bug: two transactions read the same used and both decide there's room.
+
+246
+00:14:27.875 --> 00:14:32.909
+READ COMMITTED doesn't prevent it; it also loses updates (the counter under-reports).
+
+247
+00:14:33.189 --> 00:14:36.560
+Conditional update: the check and the write are one statement.
+
+248
+00:14:36.840 --> 00:14:42.685
+The row lock serialises bookings on a hot slot, and a failed condition is an immediate, clean full.
+
+249
+00:14:42.965 --> 00:14:49.088
+SERIALIZABLE is correct without rewriting the logic, but pays in aborts on exactly the hot rows.
+
+250
+00:14:50.438 --> 00:14:56.113
+Optimistic version append (event sourcing): the unique key is the guard; conflicts retry.
+
+251
+00:14:56.393 --> 00:15:00.233
+Retries rise with contention, but you get the history (L3).
+
+252
+00:15:00.513 --> 00:15:10.838
+Very hot slots: split capacity into sub-buckets (Ch 46 L1), or put a Redis gate in front for admission with the database as the source of truth.
+
+253
+00:15:12.188 --> 00:15:14.407
+Holds, confirmations and expiry.
+
+254
+00:15:14.687 --> 00:15:16.863
+A customer picks a slot before paying.
+
+255
+00:15:17.143 --> 00:15:21.729
+The slot service holds the minutes (HELD), and payment success confirms it (BOOKED).
+
+256
+00:15:22.009 --> 00:15:33.252
+Abandoned checkouts expire (HOLDEXPIRED) after a TTL, with the lease pattern from Ch 46 L2: short TTL, extended when payment actually starts.
+
+257
+00:15:33.532 --> 00:15:39.783
+Late payment after expiry either re-books if there's still room, or triggers a refund and apology flow.
+
+258
+00:15:40.063 --> 00:15:44.692
+Holds count against capacity; the listing shows cap minus held minus booked.
+
+259
+00:15:46.042 --> 00:15:47.877
+The event-sourced slot aggregate.
+
+260
+00:15:48.157 --> 00:15:55.090
+Ch 15 promised an event-sourced aggregate per slot, for contention plus an audit of who took which slot.
+
+261
+00:15:55.370 --> 00:15:56.330
+The design:
+
+262
+00:15:56.610 --> 00:16:02.605
+Event store: slotev(slotid, version, type, customer, minutes, at), PRIMARY KEY (slotid, version).
+
+263
+00:16:02.885 --> 00:16:08.751
+Commands load the aggregate, validate (capacity, cut-off), and append with version + 1.
+
+264
+00:16:09.031 --> 00:16:13.106
+A duplicate key means someone else won the race: reload and retry.
+
+265
+00:16:13.386 --> 00:16:18.911
+Read model (projection): slotview(slotid, cap, held, booked) feeds listings (via cache).
+
+266
+00:16:19.191 --> 00:16:22.285
+Projectors consume events via the outbox or Kafka.
+
+267
+00:16:22.565 --> 00:16:26.319
+Snapshots every N events bound the load cost for busy slots.
+
+268
+00:16:27.669 --> 00:16:34.923
+L3, on 819,306 events for 3,000 slots in real PostgreSQL:
+
+269
+00:16:36.273 --> 00:16:37.617
+Here is a quick table:
+
+270
+00:16:37.897 --> 00:16:39.262
+Scenario, and Result.
+
+271
+00:16:39.542 --> 00:16:42.123
+Projector v1 ignores RESCHEDULEDOUT:
+
+272
+00:16:42.403 --> 00:16:48.014
+2,088 of 3,000 slots wrong; 442 shown full with room.
+
+273
+00:16:48.294 --> 00:16:50.662
+Fix the projector, rebuild from the store:
+
+274
+00:16:50.942 --> 00:16:58.878
+819,306 events replayed in ~0.9 to 1.1 s; 0 wrong.
+
+275
+00:16:59.158 --> 00:17:01.121
+Load a hot slot: full replay:
+
+276
+00:17:01.401 --> 00:17:09.102
+2,802 rows, 1.41 ms p50, 3.74 ms p99.
+
+277
+00:17:09.382 --> 00:17:11.771
+Load a hot slot: snapshot + tail:
+
+278
+00:17:12.051 --> 00:17:18.366
+52 rows, 0.12 ms p50, 0.28 ms p99.
+
+279
+00:17:18.646 --> 00:17:21.697
+Time travel: slot state midway through its history:
+
+280
+00:17:21.977 --> 00:17:25.753
+1,492 events, 2.5 ms.
+
+281
+00:17:26.033 --> 00:17:31.750
+Audit: whose hold took the slot to its fullest point: window-function query, ~12 ms.
+
+282
+00:17:33.100 --> 00:17:39.927
+Projection bugs are recoverable: a mutable counter keeps a wrong number forever; an event store can recompute it.
+
+283
+00:17:40.207 --> 00:17:48.463
+Events are business facts (customer X held 22 minutes at 18:04), which is what support and finance ask about.
+
+284
+00:17:48.743 --> 00:17:56.167
+Costs: more moving parts, schema evolution of events (Ch 28), eventual consistency of the read model.
+
+285
+00:17:56.447 --> 00:18:07.156
+A simple alternative is a conditional-update counter (L2 B3) plus an append-only booking log in the same transaction: most of the audit value, less machinery.
+
+286
+00:18:08.506 --> 00:18:09.637
+Demand shaping.
+
+287
+00:18:09.917 --> 00:18:13.586
+L4 held riders fixed and varied what customers see and pay:
+
+288
+00:18:14.936 --> 00:18:16.280
+Here is a quick table:
+
+289
+00:18:16.560 --> 00:18:22.128
+Policy, and Served, and Lost, and Avg hours moved, and Net fee (₹, 30 days).
+
+290
+00:18:22.408 --> 00:18:24.605
+Time-ordered list, full slots greyed.
+
+291
+00:18:24.885 --> 00:18:25.653
+Served:
+
+292
+00:18:25.933 --> 00:18:27.939
+6,238.
+
+293
+00:18:28.219 --> 00:18:28.965
+Lost:
+
+294
+00:18:29.245 --> 00:18:31.293
+1,631.
+
+295
+00:18:31.573 --> 00:18:33.067
+Avg hours moved:
+
+296
+00:18:33.347 --> 00:18:34.669
+0.19.
+
+297
+00:18:34.949 --> 00:18:36.677
+Net fee (₹, 30 days):
+
+298
+00:18:36.957 --> 00:18:37.704
+0.
+
+299
+00:18:37.984 --> 00:18:39.904
+Offer the 2 closest free slots.
+
+300
+00:18:40.184 --> 00:18:40.952
+Served:
+
+301
+00:18:41.232 --> 00:18:43.173
+6,430.
+
+302
+00:18:43.453 --> 00:18:44.200
+Lost:
+
+303
+00:18:44.480 --> 00:18:46.549
+1,439.
+
+304
+00:18:46.829 --> 00:18:48.323
+Avg hours moved:
+
+305
+00:18:48.603 --> 00:18:49.989
+0.26.
+
+306
+00:18:50.269 --> 00:18:51.997
+Net fee (₹, 30 days):
+
+307
+00:18:52.277 --> 00:18:53.024
+0.
+
+308
+00:18:53.304 --> 00:18:57.187
+20 rupeespeak fee or minus 15 rupeesshoulder discount.
+
+309
+00:18:57.467 --> 00:18:58.235
+Served:
+
+310
+00:18:58.515 --> 00:19:00.264
+6,302.
+
+311
+00:19:00.544 --> 00:19:01.291
+Lost:
+
+312
+00:19:01.571 --> 00:19:03.917
+1,567.
+
+313
+00:19:04.197 --> 00:19:05.691
+Avg hours moved:
+
+314
+00:19:05.971 --> 00:19:07.421
+0.37.
+
+315
+00:19:07.701 --> 00:19:12.224
+Net fee (₹, 30 days): +25,650.
+
+316
+00:19:12.504 --> 00:19:13.208
+Both.
+
+317
+00:19:13.488 --> 00:19:14.256
+Served:
+
+318
+00:19:14.536 --> 00:19:16.456
+6,512.
+
+319
+00:19:16.736 --> 00:19:17.483
+Lost:
+
+320
+00:19:17.763 --> 00:19:20.088
+1,357.
+
+321
+00:19:20.368 --> 00:19:21.861
+Avg hours moved:
+
+322
+00:19:22.141 --> 00:19:23.592
+0.46.
+
+323
+00:19:23.872 --> 00:19:28.693
+Net fee (₹, 30 days): +25,945.
+
+324
+00:19:28.973 --> 00:19:32.259
+Both + roster follows demand (same rider-hours).
+
+325
+00:19:32.539 --> 00:19:33.307
+Served:
+
+326
+00:19:33.587 --> 00:19:35.848
+6,627.
+
+327
+00:19:36.128 --> 00:19:36.875
+Lost:
+
+328
+00:19:37.155 --> 00:19:39.181
+1,242.
+
+329
+00:19:39.461 --> 00:19:40.955
+Avg hours moved:
+
+330
+00:19:41.235 --> 00:19:42.664
+0.44.
+
+331
+00:19:42.944 --> 00:19:47.232
+Net fee (₹, 30 days): +33,210.
+
+332
+00:19:48.582 --> 00:19:53.467
+Recommend, don't grey out: offer the nearest free slots, earlier as well as later.
+
+333
+00:19:53.747 --> 00:20:00.979
+Price the peak: fees and discounts move flexible customers before the peak fills, leaving room for those who can't move.
+
+334
+00:20:01.259 --> 00:20:05.121
+Roster to demand: the same rider-hours placed where demand is.
+
+335
+00:20:05.401 --> 00:20:08.558
+Slot booking data is the best input to rostering.
+
+336
+00:20:08.838 --> 00:20:17.307
+Green or batched slots: discounts for slots where the rider is already going to the same building (batching, Ch 47 L3).
+
+337
+00:20:18.657 --> 00:20:27.681
+The acceptance and price-response rates in L4 are assumptions (VERIFY); measure them with experiments (switchback per zone, since slots interact).
+
+338
+00:20:29.031 --> 00:20:30.738
+Listing availability fast.
+
+339
+00:20:31.018 --> 00:20:39.359
+The listing is read-heavy and tolerates seconds of staleness: serve free minutes per slot for the zone from Redis, updated by the projector.
+
+340
+00:20:39.639 --> 00:20:44.482
+Showing available doesn't guarantee booking: the booking command is the exact check.
+
+341
+00:20:44.762 --> 00:20:49.157
+Show almost full when free minutes are below a threshold, to set expectations.
+
+342
+00:20:49.437 --> 00:20:56.242
+Filter per order: a slot with 20 free minutes can take a 15-minute order but not a 35-minute one.
+
+343
+00:20:56.522 --> 00:20:59.850
+Compute availability with this order's estimated cost.
+
+344
+00:21:01.200 --> 00:21:04.379
+Rescheduling, cancellations and capacity changes.
+
+345
+00:21:04.659 --> 00:21:11.571
+Reschedule = book the new slot first, then release the old (never the reverse, or the customer can lose both).
+
+346
+00:21:11.851 --> 00:21:17.845
+Model it as a saga across two aggregates, or one transaction if both live in one database.
+
+347
+00:21:18.125 --> 00:21:30.499
+Capacity drops (rider sick, rain) can leave slots over-committed: flag them, protect already-booked orders, stop new holds, and ask dispatch to borrow riders or notify customers early.
+
+348
+00:21:30.779 --> 00:21:36.773
+Cut-offs: stop booking a slot when picking must start; close slots in zones affected by events.
+
+349
+00:21:38.123 --> 00:21:39.254
+Interview framing.
+
+350
+00:21:39.534 --> 00:21:46.403
+This is the classic design a booking system question (tickets, hotel rooms, doctor appointments, restaurant tables).
+
+351
+00:21:46.683 --> 00:22:02.299
+Cover: the unit of capacity;. atomic capacity checks under contention;. holds with TTL;. history and auditing (event sourcing as an option, with its costs);. fast availability reads with exact booking;. rescheduling as a saga;.
+
+352
+00:22:03.649 --> 00:22:04.780
+demand shaping.
+
+353
+00:22:05.060 --> 00:22:14.041
+Staff-level signals are saying count is the wrong unit, separating browse staleness from booking exactness, and connecting booking data to rostering.
+
+354
+00:22:15.391 --> 00:22:16.287
+Part 3.
+
+355
+00:22:16.567 --> 00:22:18.295
+Architecture and Diagrams.
+
+356
+00:22:19.545 --> 00:22:20.591
+Component view.
+
+357
+00:22:20.871 --> 00:22:22.215
+Here is the diagram.
+
+358
+00:22:26.065 --> 00:22:28.539
+Sequence: happy path, hold then confirm.
+
+359
+00:22:28.819 --> 00:22:31.614
+The sequence diagram walks through it step by step.
+
+360
+00:22:31.894 --> 00:22:36.353
+C to S: list slots for zone 17, basket 22 items.
+
+361
+00:22:36.633 --> 00:22:39.001
+S to E: cost of this order per slot.
+
+362
+00:22:39.281 --> 00:22:40.177
+E to S:
+
+363
+00:22:40.457 --> 00:22:43.934
+24 min at 6 pm, 18 min at 3 pm.
+
+364
+00:22:44.214 --> 00:22:49.163
+S to C: slots with room for 24 min, fees, nearest alternatives.
+
+365
+00:22:49.443 --> 00:22:56.185
+C to S: hold slot 17 to 1800 for order 5521.
+
+366
+00:22:56.465 --> 00:23:02.289
+S to DB: load snapshot plus tail, check free minutes, append HELD v412.
+
+367
+00:23:02.569 --> 00:23:04.254
+DB to S: ok.
+
+368
+00:23:04.534 --> 00:23:07.051
+S to C: hold until now plus 3 min.
+
+369
+00:23:07.331 --> 00:23:08.654
+C to P: pay.
+
+370
+00:23:08.934 --> 00:23:10.427
+P to C: captured.
+
+371
+00:23:10.707 --> 00:23:15.187
+C to S: confirm hold for order 5521.
+
+372
+00:23:15.467 --> 00:23:18.838
+S to DB: append BOOKED v415.
+
+373
+00:23:19.118 --> 00:23:22.062
+DB to K: outbox publishes slot booked.
+
+374
+00:23:25.912 --> 00:23:30.328
+Sequence: failure path, concurrent last capacity and an expired hold.
+
+375
+00:23:30.608 --> 00:23:33.403
+The sequence diagram walks through it step by step.
+
+376
+00:23:33.683 --> 00:23:38.291
+A to S: hold 24 min in slot 17 to 1800.
+
+377
+00:23:38.571 --> 00:23:42.965
+B to S: hold 30 min in slot 17 to 1800.
+
+378
+00:23:43.245 --> 00:23:44.333
+S to DB:
+
+379
+00:23:44.613 --> 00:23:46.939
+A appends HELD at version 412.
+
+380
+00:23:47.219 --> 00:23:48.307
+S to DB:
+
+381
+00:23:48.587 --> 00:23:51.125
+B appends HELD at version 412.
+
+382
+00:23:51.405 --> 00:23:52.493
+DB to S:
+
+383
+00:23:52.773 --> 00:23:54.587
+A ok, B duplicate key.
+
+384
+00:23:54.867 --> 00:23:55.955
+S to DB:
+
+385
+00:23:56.235 --> 00:23:59.541
+B reloads at 412, only 20 min free.
+
+386
+00:23:59.821 --> 00:24:05.880
+S to B: full, offer 17 to 1700 and 17 to 2000.
+
+387
+00:24:06.160 --> 00:24:11.408
+S to DB: timer appends HOLDEXPIRED v418 after 3 min.
+
+388
+00:24:11.688 --> 00:24:12.648
+S to B:
+
+389
+00:24:12.928 --> 00:24:18.176
+17 to 1800 has room again in listings after projection.
+
+390
+00:24:22.026 --> 00:24:23.861
+State: one hold's lifecycle.
+
+391
+00:24:24.141 --> 00:24:25.485
+Here is the diagram.
+
+392
+00:24:29.335 --> 00:24:30.252
+Part 4.
+
+393
+00:24:30.532 --> 00:24:33.519
+Design Document Excerpt: slot-service v2.
+
+394
+00:24:34.769 --> 00:24:35.515
+Note:
+
+395
+00:24:35.795 --> 00:24:41.449
+Design Document (excerpt), slot-service v2: capacity in minutes, event-sourced slots.
+
+396
+00:24:41.729 --> 00:24:42.625
+Status:
+
+397
+00:24:42.905 --> 00:24:44.185
+Accepted, Authors:
+
+398
+00:24:44.465 --> 00:24:46.555
+Fulfilment platform team, Reviewers:
+
+399
+00:24:46.835 --> 00:24:49.694
+Dispatch, Store ops, Checkout, SRE, Finance.
+
+400
+00:24:49.974 --> 00:24:55.457
+Context, Order-count caps made evening slots overfull and daytime slots underused.
+
+401
+00:24:55.737 --> 00:24:58.019
+Check-then-act overbooked festival slots.
+
+402
+00:24:58.299 --> 00:25:01.073
+Counters drifted from bookings with no history.
+
+403
+00:25:01.353 --> 00:25:04.105
+Full slots were greyed out and customers left.
+
+404
+00:25:05.455 --> 00:25:12.559
+Decision, Capacity in rider- and picker-minutes from rosters; bookings deduct estimated cost per order and slot.
+
+405
+00:25:12.839 --> 00:25:20.839
+Event-sourced slot aggregate with version-guarded appends, snapshots every 100 events, and projections to Redis for listings.
+
+406
+00:25:21.119 --> 00:25:24.703
+Holds with 3-minute TTL, extended on payment start.
+
+407
+00:25:24.983 --> 00:25:28.951
+Nearest-alternative recommendations and peak or shoulder pricing.
+
+408
+00:25:29.231 --> 00:25:31.407
+Roster planning uses booking curves.
+
+409
+00:25:32.757 --> 00:25:43.957
+Related ADRs, ADR-340: capacity = min(rider-minutes times 0.95, picker-minutes) per zone-slot, cost from the ETA service (L1).
+
+410
+00:25:44.237 --> 00:25:52.770
+ADR-341: event store PK(slotid, version), optimistic concurrency, outbox to Kafka (L2, L3).
+
+411
+00:25:53.050 --> 00:26:00.133
+ADR-342: snapshots every 100 events; the read model is rebuildable in minutes (L3).
+
+412
+00:26:00.413 --> 00:26:07.261
+ADR-343: holds 3 min, extended to 15 when payment starts (Ch 46).
+
+413
+00:26:07.541 --> 00:26:14.069
+ADR-344: listings from Redis, at most 5 s stale, with an exact check at hold time.
+
+414
+00:26:14.349 --> 00:26:21.197
+ADR-345: demand shaping via recommendations and fees, experiment-gated (L4).
+
+415
+00:26:21.477 --> 00:26:22.437
+Requirements.
+
+416
+00:26:22.717 --> 00:26:23.549
+R1:
+
+417
+00:26:23.829 --> 00:26:27.797
+0 slots booked beyond capacity, audited daily from events.
+
+418
+00:26:29.147 --> 00:26:34.416
+R2: ≥ 98% of booked orders delivered within their slot.
+
+419
+00:26:34.696 --> 00:26:35.549
+R3:
+
+420
+00:26:35.829 --> 00:26:42.656
+Listing p99 50 ms; hold or confirm p99 100 ms at festival peak.
+
+421
+00:26:42.936 --> 00:26:43.832
+R4:
+
+422
+00:26:44.112 --> 00:26:47.995
+Any slot's state at any past time is answerable within seconds.
+
+423
+00:26:48.275 --> 00:26:49.149
+R5:
+
+424
+00:26:49.429 --> 00:26:53.504
+Read model rebuildable from events in 10 minutes for the whole country.
+
+425
+00:26:53.784 --> 00:26:55.192
+Decisions in detail.
+
+426
+00:26:55.472 --> 00:26:57.989
+Capacity (ADR-340).
+
+427
+00:26:58.269 --> 00:27:01.192
+The roster service emits CAPACITYCHANGED events.
+
+428
+00:27:01.472 --> 00:27:06.805
+The ETA service gives order cost per slot, with traffic by hour and door time by building.
+
+429
+00:27:08.155 --> 00:27:10.886
+Concurrency (ADR-341).
+
+430
+00:27:11.166 --> 00:27:15.689
+Hot slots see retries (L2: ~1 per 12 attempts overall).
+
+431
+00:27:15.969 --> 00:27:21.110
+Retries are bounded, and past 5 of them we return try another slot with alternatives.
+
+432
+00:27:21.390 --> 00:27:25.721
+A Redis admission gate is available as a flag for festival openings.
+
+433
+00:27:26.001 --> 00:27:28.518
+Snapshots (ADR-342).
+
+434
+00:27:28.798 --> 00:27:32.531
+Written asynchronously by the projector, never on the booking path.
+
+435
+00:27:32.811 --> 00:27:35.265
+Holds (ADR-343).
+
+436
+00:27:35.545 --> 00:27:40.046
+Expiry is a scheduled command that appends HOLDEXPIRED idempotently.
+
+437
+00:27:40.326 --> 00:27:42.886
+Demand (ADR-345).
+
+438
+00:27:43.166 --> 00:27:47.667
+Fee changes need Finance approval, and are tested by switchback per zone.
+
+439
+00:27:49.017 --> 00:27:50.041
+Consequences.
+
+440
+00:27:50.321 --> 00:28:01.372
+We take on more infrastructure (event store, projector, snapshots), eventual consistency in listings, dependence on the ETA estimator's quality, and event schema governance.
+
+441
+00:28:01.652 --> 00:28:08.777
+In return we get honest slots, zero overbooking, auditable history, recoverable read models, and a demand lever.
+
+442
+00:28:10.127 --> 00:28:11.087
+Part 5.
+
+443
+00:28:11.367 --> 00:28:13.351
+Hands-On Code, Level Ladder.
+
+444
+00:28:14.601 --> 00:28:15.369
+Info:
+
+445
+00:28:15.649 --> 00:28:16.737
+What's real here.
+
+446
+00:28:17.017 --> 00:28:22.287
+L2 and L3 run against a real PostgreSQL 16 (fsync on).
+
+447
+00:28:22.567 --> 00:28:29.521
+They use real concurrent transactions, SERIALIZABLE aborts, unique-key conflicts, batched appends and replays.
+
+448
+00:28:29.801 --> 00:28:34.132
+L1 and L4 are deterministic simulations with fixed seeds.
+
+449
+00:28:34.412 --> 00:28:42.241
+Rosters, order costs, customer acceptance rates and price responses are stated assumptions (VERIFY against your own data).
+
+450
+00:28:42.521 --> 00:28:44.100
+Timings vary by machine.
+
+451
+00:28:45.450 --> 00:28:55.349
+L2 and L3 need PostgreSQL on port 5581 (database shop) and the PostgreSQL JDBC driver.
+
+452
+00:28:55.629 --> 00:29:05.037
+Run every lab with -Dstdout.encoding=UTF-8, and the JDBC labs also with -Duser.timezone=UTC.
+
+453
+00:29:06.387 --> 00:29:07.923
+L1, What full means.
+
+454
+00:29:08.203 --> 00:29:09.141
+Requirement:
+
+455
+00:29:09.421 --> 00:29:12.728
+A slot shown as available must be deliverable on time.
+
+456
+00:29:13.008 --> 00:29:19.728
+One zone, 30 days, a roster that changes by hour, orders that differ in cost, and four capacity rules.
+
+457
+00:29:21.078 --> 00:29:24.427
+Here is the Java code, SlotCapacityL1.java.
+
+458
+00:29:24.707 --> 00:29:28.718
+It runs to 103 lines; the full listing is in the chapter.
+
+459
+00:29:28.998 --> 00:29:37.254
+SlotCapacityL1.java, run with: java SlotCapacityL1.java (JDK 21, no dependencies).
+
+460
+00:29:37.534 --> 00:29:39.177
+WHAT DOES THIS SLOT IS FULL MEAN?
+
+461
+00:29:39.457 --> 00:29:46.049
+One delivery zone, 30 days, 16 one-hour slots a day (7 am, 11 pm), fixed seed.
+
+462
+00:29:46.329 --> 00:29:48.377
+The rider roster varies by hour:
+
+463
+00:29:48.657 --> 00:29:54.545
+6 riders early morning, 8 through the day, 14 in the 5 to 9 pm peak, 8 late.
+
+464
+00:29:57.395 --> 00:29:58.312
+On screen:
+
+465
+00:29:58.592 --> 00:30:14.165
+One zone, 30 days, 16 hourly slots; roster 6 or 8 or 14 (5 to 9 pm) / 8 riders; ~320 orders. wanted per day. slot capacity rule booked lost late on time rider util.
+
+466
+00:30:14.445 --> 00:30:27.011
+C1) 40 orders per slot 9,321 162 2,444 6,877 90.0%.
+
+467
+00:30:27.291 --> 00:30:39.429
+C2) 28 orders per slot 8,596 887 1,688 6,908 90.3%.
+
+468
+00:30:39.709 --> 00:30:53.640
+C3) rider-minutes from roster, est. minutes per order 7,759 1,724 712 7,047 91.1%.
+
+469
+00:30:53.920 --> 00:31:16.149
+C4) C3 + estimate knows evening traffic 7,062 2,421 21 7,041 89.6%. then riders are the bottleneck at peak, so no capacity rule delivers many more orders. on time (~6,900 to 7,050 in all. four).
+
+470
+00:31:16.429 --> 00:31:22.189
+What the rule decides is WHEN the customer hears the truth: an order count. accepts evening towers it.
+
+471
+00:31:22.469 --> 00:31:23.984
+The rest is in the chapter.
+
+472
+00:31:26.834 --> 00:31:27.687
+Reading it:
+
+473
+00:31:27.967 --> 00:31:31.893
+About 7,000 orders are delivered on time under every rule.
+
+474
+00:31:32.173 --> 00:31:35.117
+The riders are the limit, and no rule changes that.
+
+475
+00:31:35.397 --> 00:31:42.138
+C1 accepts 2,444 orders it can't deliver on time, mostly evening towers.
+
+476
+00:31:42.418 --> 00:31:47.943
+C2 (a smaller count) is still late at peak and also turns away customers when there's room.
+
+477
+00:31:48.223 --> 00:31:51.103
+C3 and C4 book what the roster can carry.
+
+478
+00:31:51.383 --> 00:31:57.741
+The traffic term in the estimate removes almost all remaining lateness (712, then 21).
+
+479
+00:31:59.091 --> 00:32:04.232
+The extra lost customers under C4 are the honest cost of saying full at booking time.
+
+480
+00:32:04.512 --> 00:32:06.112
+L4 wins some of them back.
+
+481
+00:32:07.462 --> 00:32:09.403
+L2, Booking under contention.
+
+482
+00:32:09.683 --> 00:32:10.622
+Requirement:
+
+483
+00:32:10.902 --> 00:32:16.918
+Never book a slot beyond its capacity, even when thousands of customers book the same evening at once.
+
+484
+00:32:17.198 --> 00:32:23.470
+60 slots, 32 concurrent workers, 12,000 attempts against a real PostgreSQL.
+
+485
+00:32:24.820 --> 00:32:28.020
+Here is the Java code, SlotBookingL2.java.
+
+486
+00:32:28.300 --> 00:32:32.695
+It runs to 179 lines; the full listing is in the chapter.
+
+487
+00:32:32.975 --> 00:32:52.580
+SlotBookingL2.java, run with (PostgreSQL on:5581, db shop): java -Duser.timezone=UTC -cp or tmp or eslab or postgresql-42.7.4.jar SlotBookingL2.java (JDK 21).
+
+488
+00:32:52.860 --> 00:32:54.695
+SLOTS OPEN FOR DIWALI EVE.
+
+489
+00:32:54.975 --> 00:33:03.103
+60 evening slots (12 zones times 5 hours) open at once; each has 840 rider-minutes (14 riders).
+
+490
+00:33:05.953 --> 00:33:06.870
+On screen:
+
+491
+00:33:07.150 --> 00:33:24.003
+60 slots times 840 rider-minutes; 32 workers; 12,000 booking attempts (70% want 8 hot. slots); real PostgreSQL. booking method booked slots over retries attempts per second p99. capacity.
+
+492
+00:33:24.283 --> 00:33:34.801
+B1) read, check in Java, write back (READ COMMITTED) 2,965 60 0 4,880 31.6 ms.
+
+493
+00:33:35.081 --> 00:33:46.899
+B2) same, SERIALIZABLE + retry 1,996 0 1,043 5,247 36.7 ms.
+
+494
+00:33:47.179 --> 00:33:49.121
+B3) conditional UPDATE...
+
+495
+00:33:49.401 --> 00:33:58.489
+WHERE used + m = cap 1,999 0 0 7,679 20.6 ms.
+
+496
+00:33:58.769 --> 00:34:17.926
+B4) event-sourced append, PK(slot, version) + retry 1,998 0 1,020 5,192 35.4 ms. then B1 is the classic check-then-act race: two workers read the same 'used', both see. room, both book.
+
+497
+00:34:18.206 --> 00:34:23.987
+SERIALIZABLE. detects it but pays in aborted transactions on exactly the hot slots.
+
+498
+00:34:24.267 --> 00:34:24.886
+A.
+
+499
+00:34:25.166 --> 00:34:26.681
+The rest is in the chapter.
+
+500
+00:34:29.531 --> 00:34:30.384
+Reading it:
+
+501
+00:34:30.664 --> 00:34:39.560
+B1 booked 2,965 orders into capacity for about 2,000, and every one of the 60 slots went over.
+
+502
+00:34:39.840 --> 00:34:43.000
+The used column also lost updates, so it under-reports what was booked.
+
+503
+00:34:44.280 --> 00:34:49.251
+B2 is exact, but 1,043 transactions aborted and retried.
+
+504
+00:34:49.531 --> 00:34:55.227
+B3 is exact with no retries, and has the highest throughput and lowest p99.
+
+505
+00:34:55.507 --> 00:34:57.128
+B4 is exact too.
+
+506
+00:34:57.408 --> 00:35:04.917
+Its 1,020 retries are version conflicts on hot slots, and in exchange it has the history L3 uses.
+
+507
+00:35:06.267 --> 00:35:09.147
+L3, The slot as an event-sourced aggregate.
+
+508
+00:35:09.427 --> 00:35:10.366
+Requirement:
+
+509
+00:35:10.646 --> 00:35:13.633
+Be able to explain and recompute every slot's state.
+
+510
+00:35:13.913 --> 00:35:26.734
+819,306 events for 3,000 slots in a real PostgreSQL event table: a buggy projector, a rebuild, snapshots, time travel and an audit query.
+
+511
+00:35:28.084 --> 00:35:31.284
+Here is the Java code, SlotEventsL3.java.
+
+512
+00:35:31.564 --> 00:35:35.809
+It runs to 248 lines; the full listing is in the chapter.
+
+513
+00:35:36.089 --> 00:35:55.801
+SlotEventsL3.java, run with (PostgreSQL on:5581, db shop): java -Duser.timezone=UTC -cp or tmp or eslab or postgresql-42.7.4.jar SlotEventsL3.java (JDK 21).
+
+514
+00:35:56.081 --> 00:36:00.028
+THE SLOT AS AN EVENT-SOURCED AGGREGATE (the Ch 15 promise).
+
+515
+00:36:00.308 --> 00:36:05.257
+3,000 slots (100 zones times 30 hourly slots for one day);.
+
+516
+00:36:08.107 --> 00:36:09.025
+On screen:
+
+517
+00:36:09.305 --> 00:36:18.435
+819,306 events for 3,000 slots (busiest slot 3,994 events). load:
+
+518
+00:36:18.715 --> 00:36:55.189
+819,306 events appended in 6.8 s (120,685 events per second, batched). projector v1 (ignores RESCHEDULEDOUT): replayed 819,306 events in 0.98 s, then 2,088. of 3,000 slots disagree with history; 442 shown FULL that have room. projector v2 rebuilt from the event store: replayed 819,306 events in 0.89 s, then 0 of.
+
+519
+00:36:55.469 --> 00:37:22.157
+3,000 slots disagree with history; 0 shown FULL that have room. loading one aggregate for a booking decision (2,000 loads each, real queries): rows read or load p50 p99. any slot, full replay 259.7 0.09 ms 2.84 ms. any slot, snapshot + tail 48.7 0.07 ms 0.13 ms.
+
+520
+00:37:22.437 --> 00:37:23.952
+The rest is in the chapter.
+
+521
+00:37:26.802 --> 00:37:27.655
+Reading it:
+
+522
+00:37:27.935 --> 00:37:32.501
+A projector that forgets one event type corrupted 2,088 slots.
+
+523
+00:37:32.781 --> 00:37:36.898
+442 of them turned customers away while they had room.
+
+524
+00:37:37.178 --> 00:37:43.023
+Replaying the history (about 1 second for 819k events) repaired every one.
+
+525
+00:37:43.303 --> 00:37:45.906
+A counter-only design would have no way back.
+
+526
+00:37:46.186 --> 00:37:48.021
+Snapshots matter for hot slots:
+
+527
+00:37:48.301 --> 00:37:53.975
+52 rows instead of 2,802, about 12x faster at p50.
+
+528
+00:37:54.255 --> 00:37:55.962
+Quiet slots barely notice.
+
+529
+00:37:56.242 --> 00:38:01.405
+Time travel and audit are ordinary SQL over the events: a few milliseconds each.
+
+530
+00:38:02.755 --> 00:38:05.400
+L4, Moving demand to where the riders are.
+
+531
+00:38:05.680 --> 00:38:06.619
+Requirement:
+
+532
+00:38:06.899 --> 00:38:09.907
+Lose fewer customers without hiring more riders.
+
+533
+00:38:10.187 --> 00:38:12.853
+The same zone, with capacity in rider-minutes.
+
+534
+00:38:13.133 --> 00:38:17.912
+What the customer is shown, what they pay, and where the riders are rostered all vary.
+
+535
+00:38:18.192 --> 00:38:22.565
+Customer acceptance and price response are stated assumptions (VERIFY).
+
+536
+00:38:23.915 --> 00:38:27.329
+Here is the Java code, DemandShapingL4.java.
+
+537
+00:38:27.609 --> 00:38:31.598
+It runs to 110 lines; the full listing is in the chapter.
+
+538
+00:38:31.878 --> 00:38:40.198
+DemandShapingL4.java, run with: java DemandShapingL4.java (JDK 21, no dependencies).
+
+539
+00:38:40.478 --> 00:38:42.867
+WINNING BACK THE CUSTOMERS L1 TURNED AWAY.
+
+540
+00:38:43.147 --> 00:38:56.246
+Same zone, roster and rider-minute capacity as L1 C4 (30 days, fixed seed). with demand close to what the riders can carry over the whole day, but over half of it wants 5 to 9 pm.
+
+541
+00:38:56.526 --> 00:38:57.529
+When the preferred.
+
+542
+00:39:00.379 --> 00:39:01.296
+On screen:
+
+543
+00:39:01.576 --> 00:39:19.944
+One zone, 30 days, 16 hourly slots, rider-minute capacity (L1 C4); ~260 orders. wanted per day, over half for 5 to 9 pm. what the customer is shown served lost avg hours net fee rider util. from. preferred. change.
+
+544
+00:39:20.224 --> 00:39:21.035
+(₹).
+
+545
+00:39:21.315 --> 00:39:32.173
+S1) time-ordered list, full slots greyed 6,238 1,631 0.19 0 80.6%.
+
+546
+00:39:32.453 --> 00:39:42.971
+S2) offer the 2 closest free slots 6,430 1,439 0.26 0 83.6%.
+
+547
+00:39:43.251 --> 00:39:59.400
+S3) S1 + 20 rupeespeak fee or minus 15 rupeesshoulder discount 6,302 1,567 0.37 25,650 82.6%.
+
+548
+00:39:59.680 --> 00:40:12.629
+S4) S2 + S3 6,512 1,357 0.46 25,945 85.5%.
+
+549
+00:40:12.909 --> 00:40:28.333
+S5) S4 + roster follows demand (same rider-hours) 6,627 1,242 0.44 33,210 87.5%.
+
+550
+00:40:28.613 --> 00:40:30.128
+The rest is in the chapter.
+
+551
+00:40:32.978 --> 00:40:33.831
+Reading it:
+
+552
+00:40:34.111 --> 00:40:37.610
+Offering the two nearest free slots beats greying out full ones:
+
+553
+00:40:37.890 --> 00:40:40.279
+192 more orders served.
+
+554
+00:40:40.559 --> 00:40:47.429
+Peak fees move some customers before the peak fills, and the fees more than pay for the shoulder discounts under these assumptions.
+
+555
+00:40:47.709 --> 00:40:50.930
+Together they cut lost customers by 17%.
+
+556
+00:40:51.210 --> 00:40:57.333
+Rostering the same rider-hours toward demand cuts them further, to 1,242.
+
+557
+00:40:57.613 --> 00:40:59.938
+Slot booking curves should drive the roster.
+
+558
+00:41:01.288 --> 00:41:04.275
+The gains are modest because riders are the constraint.
+
+559
+00:41:04.555 --> 00:41:07.819
+Treat the numbers as the shape of the effect, not a forecast.
+
+560
+00:41:09.169 --> 00:41:10.107
+Part 6.
+
+561
+00:41:10.387 --> 00:41:11.667
+Production Concerns.
+
+562
+00:41:12.917 --> 00:41:14.069
+Failure modes.
+
+563
+00:41:14.349 --> 00:41:15.693
+Here is a quick table:
+
+564
+00:41:15.973 --> 00:41:18.256
+Failure, and Symptom, and Mitigation.
+
+565
+00:41:18.536 --> 00:41:19.944
+Count-based capacity.
+
+566
+00:41:20.224 --> 00:41:21.035
+Symptom:
+
+567
+00:41:21.315 --> 00:41:24.408
+Late evening deliveries, idle afternoons (L1).
+
+568
+00:41:24.688 --> 00:41:25.691
+Mitigation:
+
+569
+00:41:25.971 --> 00:41:28.232
+Rider or picker-minutes, per-order cost.
+
+570
+00:41:28.512 --> 00:41:29.600
+Check-then-act.
+
+571
+00:41:29.880 --> 00:41:30.691
+Symptom:
+
+572
+00:41:30.971 --> 00:41:33.701
+Overbooked slots at festival peaks (L2).
+
+573
+00:41:33.981 --> 00:41:34.984
+Mitigation:
+
+574
+00:41:35.264 --> 00:41:37.888
+Conditional update or version-guarded append.
+
+575
+00:41:38.168 --> 00:41:39.768
+SERIALIZABLE everywhere.
+
+576
+00:41:40.048 --> 00:41:40.859
+Symptom:
+
+577
+00:41:41.139 --> 00:41:43.507
+Abort storms on hot slots (L2).
+
+578
+00:41:43.787 --> 00:41:44.789
+Mitigation:
+
+579
+00:41:45.069 --> 00:41:46.691
+Targeted atomic statements.
+
+580
+00:41:46.971 --> 00:41:48.037
+Projector bug.
+
+581
+00:41:48.317 --> 00:41:49.128
+Symptom:
+
+582
+00:41:49.408 --> 00:41:51.584
+Slots shown full with room (L3).
+
+583
+00:41:51.864 --> 00:41:52.867
+Mitigation:
+
+584
+00:41:53.147 --> 00:41:56.901
+Rebuild from events; daily audit of read model against events.
+
+585
+00:41:57.181 --> 00:41:58.696
+Hot slot long history.
+
+586
+00:41:58.976 --> 00:41:59.787
+Symptom:
+
+587
+00:42:00.067 --> 00:42:02.093
+Slow aggregate loads (L3).
+
+588
+00:42:02.373 --> 00:42:03.376
+Mitigation:
+
+589
+00:42:03.656 --> 00:42:04.637
+Snapshots.
+
+590
+00:42:05.987 --> 00:42:07.161
+Abandoned holds.
+
+591
+00:42:07.441 --> 00:42:08.251
+Symptom:
+
+592
+00:42:08.531 --> 00:42:09.854
+Phantom full slots.
+
+593
+00:42:10.134 --> 00:42:11.137
+Mitigation:
+
+594
+00:42:11.417 --> 00:42:14.169
+Short TTLs, extension on payment start.
+
+595
+00:42:14.449 --> 00:42:16.283
+Capacity drop after booking.
+
+596
+00:42:16.563 --> 00:42:17.374
+Symptom:
+
+597
+00:42:17.654 --> 00:42:18.934
+Over-committed slots.
+
+598
+00:42:19.214 --> 00:42:20.217
+Mitigation:
+
+599
+00:42:20.497 --> 00:42:24.273
+Flag, protect booked orders, borrow riders, notify early.
+
+600
+00:42:24.553 --> 00:42:25.683
+Stale listings.
+
+601
+00:42:25.963 --> 00:42:26.774
+Symptom:
+
+602
+00:42:27.054 --> 00:42:28.675
+Available then full at hold.
+
+603
+00:42:28.955 --> 00:42:29.958
+Mitigation:
+
+604
+00:42:30.238 --> 00:42:33.481
+Show almost full; recommend alternatives on failure.
+
+605
+00:42:34.831 --> 00:42:35.919
+Observability.
+
+606
+00:42:36.199 --> 00:42:42.151
+Overbooking audit: sum of booked minutes versus capacity per slot (should be 0 violations).
+
+607
+00:42:42.431 --> 00:42:47.380
+Hold outcomes: confirm rate, expiry rate, late payments after expiry.
+
+608
+00:42:47.660 --> 00:42:53.164
+Contention: version conflicts or retries per slot, p99 of hold commands.
+
+609
+00:42:53.444 --> 00:42:57.945
+Read model drift: sampled comparison with event replay; projector lag.
+
+610
+00:42:58.225 --> 00:43:05.735
+Business: fill rate by hour, lost customers (slot full, no alternative chosen), in-slot delivery rate, fee revenue.
+
+611
+00:43:07.085 --> 00:43:08.642
+Security and privacy.
+
+612
+00:43:08.922 --> 00:43:15.599
+Slot events contain customer ids and addresses by reference only; keep PII in the order service.
+
+613
+00:43:15.879 --> 00:43:22.727
+Ops actions (close slot, change capacity) are events with actor ids, which gives an audit trail for free.
+
+614
+00:43:23.007 --> 00:43:29.023
+Rate-limit hold attempts per customer to stop bots hoarding festival slots (Ch 39).
+
+615
+00:43:30.373 --> 00:43:31.269
+Performance.
+
+616
+00:43:31.549 --> 00:43:35.880
+Listing from Redis per zone (16 slots times 7 days in one hash).
+
+617
+00:43:36.160 --> 00:43:42.624
+Hold path: snapshot + tail load, one insert; p99 dominated by hot-slot conflicts.
+
+618
+00:43:42.904 --> 00:43:47.256
+Projection rebuild is parallelisable by slot (partition by zone).
+
+619
+00:43:48.606 --> 00:43:49.331
+Cost.
+
+620
+00:43:49.611 --> 00:43:56.225
+The event store is small (~200 MB per day); keep 90 days hot and archive the rest to the lake.
+
+621
+00:43:56.505 --> 00:44:04.611
+The real cost is rider time: accurate capacity (L1) and demand shaping (L4) outweigh any infrastructure saving.
+
+622
+00:44:04.891 --> 00:44:10.331
+Peak fees can fund shoulder discounts (L4: net positive under the stated assumptions).
+
+623
+00:44:11.681 --> 00:44:12.620
+Part 7.
+
+624
+00:44:12.900 --> 00:44:14.607
+Anti-Patterns and Pitfalls.
+
+625
+00:44:15.857 --> 00:44:16.774
+Watch out:
+
+626
+00:44:17.054 --> 00:44:17.694
+1.
+
+627
+00:44:17.974 --> 00:44:19.766
+Capacity as an order count.
+
+628
+00:44:20.046 --> 00:44:22.606
+Orders differ threefold in cost (L1).
+
+629
+00:44:23.956 --> 00:44:24.873
+Watch out:
+
+630
+00:44:25.153 --> 00:44:25.857
+2.
+
+631
+00:44:26.137 --> 00:44:27.908
+One capacity for every hour.
+
+632
+00:44:28.188 --> 00:44:30.364
+The roster and traffic change by hour.
+
+633
+00:44:31.714 --> 00:44:32.631
+Watch out:
+
+634
+00:44:32.911 --> 00:44:33.658
+3.
+
+635
+00:44:33.938 --> 00:44:35.901
+Read, check in code, write back.
+
+636
+00:44:36.181 --> 00:44:39.722
+Overbooks under concurrency (L2: all 60 slots).
+
+637
+00:44:41.072 --> 00:44:41.989
+Watch out:
+
+638
+00:44:42.269 --> 00:44:42.973
+4.
+
+639
+00:44:43.253 --> 00:44:45.408
+SERIALIZABLE as a blanket fix.
+
+640
+00:44:45.688 --> 00:44:47.608
+Correct but aborts on hot rows.
+
+641
+00:44:47.888 --> 00:44:49.595
+Prefer an atomic statement.
+
+642
+00:44:50.945 --> 00:44:51.862
+Watch out:
+
+643
+00:44:52.142 --> 00:44:52.910
+5.
+
+644
+00:44:53.190 --> 00:44:54.726
+Holds without expiry.
+
+645
+00:44:55.006 --> 00:44:57.395
+Abandoned checkouts keep slots full forever.
+
+646
+00:44:58.745 --> 00:44:59.663
+Watch out:
+
+647
+00:44:59.943 --> 00:45:00.689
+6.
+
+648
+00:45:00.969 --> 00:45:03.401
+Releasing the old slot before booking the new.
+
+649
+00:45:03.681 --> 00:45:05.601
+A failed reschedule loses both.
+
+650
+00:45:06.951 --> 00:45:07.869
+Watch out:
+
+651
+00:45:08.149 --> 00:45:08.895
+7.
+
+652
+00:45:09.175 --> 00:45:11.565
+A mutable counter as the only record.
+
+653
+00:45:11.845 --> 00:45:14.490
+It can't be audited or recomputed (L3).
+
+654
+00:45:15.840 --> 00:45:16.757
+Watch out:
+
+655
+00:45:17.037 --> 00:45:17.720
+8.
+
+656
+00:45:18.000 --> 00:45:20.389
+Loading busy aggregates by full replay.
+
+657
+00:45:20.669 --> 00:45:23.293
+Thousands of rows per booking; use snapshots.
+
+658
+00:45:24.643 --> 00:45:25.561
+Watch out:
+
+659
+00:45:25.841 --> 00:45:26.587
+9.
+
+660
+00:45:26.867 --> 00:45:29.171
+Snapshots written in the booking transaction.
+
+661
+00:45:29.451 --> 00:45:31.393
+It adds latency to the hot path.
+
+662
+00:45:31.673 --> 00:45:33.166
+Write them asynchronously.
+
+663
+00:45:34.516 --> 00:45:35.433
+Watch out:
+
+664
+00:45:35.713 --> 00:45:36.417
+10.
+
+665
+00:45:36.697 --> 00:45:38.148
+Greying out full slots.
+
+666
+00:45:38.428 --> 00:45:41.095
+The customer does the search and leaves (L4).
+
+667
+00:45:42.445 --> 00:45:43.362
+Watch out:
+
+668
+00:45:43.642 --> 00:45:44.474
+11.
+
+669
+00:45:44.754 --> 00:45:47.463
+Availability that ignores this order's size.
+
+670
+00:45:47.743 --> 00:45:49.855
+It shows slots that will reject the hold.
+
+671
+00:45:51.205 --> 00:45:52.123
+Watch out:
+
+672
+00:45:52.403 --> 00:45:53.192
+12.
+
+673
+00:45:53.472 --> 00:45:55.563
+Rosters planned without booking data.
+
+674
+00:45:55.843 --> 00:46:00.024
+Riders sit idle in the afternoon while evening customers are turned away.
+
+675
+00:46:01.374 --> 00:46:02.249
+Part 8.
+
+676
+00:46:02.529 --> 00:46:03.873
+Interview Q and A.
+
+677
+00:46:05.123 --> 00:46:05.955
+Beginner.
+
+678
+00:46:06.235 --> 00:46:07.259
+Question 1.
+
+679
+00:46:07.539 --> 00:46:10.952
+Design a delivery slot booking system, the main components?
+
+680
+00:46:11.232 --> 00:46:12.597
+Thirty-second answer:
+
+681
+00:46:12.877 --> 00:46:32.589
+A slot service that owns slot templates and capacity; a booking path that holds capacity atomically during checkout and confirms on payment; expiry of abandoned holds; a read model and cache for fast listings; events to dispatch and stores; capacity fed by rosters and cost estimates per order.
+
+682
+00:46:33.939 --> 00:46:34.942
+Question 2.
+
+683
+00:46:35.222 --> 00:46:36.865
+How do you prevent overbooking?
+
+684
+00:46:37.145 --> 00:46:38.510
+Thirty-second answer:
+
+685
+00:46:38.790 --> 00:46:40.454
+Make check-and-take atomic:
+
+686
+00:46:40.734 --> 00:46:45.065
+UPDATE slot SET used = used + m WHERE id =?
+
+687
+00:46:45.345 --> 00:46:55.905
+AND used + m = cap (row lock serialises, a failed condition means full), or optimistic versioned appends where a unique key rejects concurrent writers.
+
+688
+00:46:56.185 --> 00:46:58.595
+Never read, check in code, and write back.
+
+689
+00:46:59.945 --> 00:47:00.991
+Question 3.
+
+690
+00:47:01.271 --> 00:47:03.468
+What's the right unit of slot capacity?
+
+691
+00:47:03.748 --> 00:47:05.113
+Thirty-second answer:
+
+692
+00:47:05.393 --> 00:47:16.465
+Whatever actually runs out: rider-minutes from the roster (and picker-minutes in the store), with each order deducting its estimated cost based on distance, building, basket and hour.
+
+693
+00:47:16.745 --> 00:47:20.116
+Order counts ignore that orders differ threefold in cost.
+
+694
+00:47:21.466 --> 00:47:22.533
+Question 4.
+
+695
+00:47:22.813 --> 00:47:24.690
+How do slot listings stay fast?
+
+696
+00:47:24.970 --> 00:47:26.335
+Thirty-second answer:
+
+697
+00:47:26.615 --> 00:47:37.346
+Serve them from a read model cached in Redis per zone (free minutes per slot), updated by a projector, accepting seconds of staleness; the booking command does the exact check.
+
+698
+00:47:37.626 --> 00:47:40.037
+Filter by this order's estimated cost.
+
+699
+00:47:41.387 --> 00:47:42.389
+Intermediate.
+
+700
+00:47:42.669 --> 00:47:43.779
+Question 5.
+
+701
+00:47:44.059 --> 00:47:46.661
+How do holds work, and how long should they last?
+
+702
+00:47:46.941 --> 00:47:48.307
+Thirty-second answer:
+
+703
+00:47:48.587 --> 00:47:55.264
+A hold reserves the order's minutes at checkout; payment confirms it; a TTL expires abandoned holds.
+
+704
+00:47:55.544 --> 00:48:04.675
+Keep the TTL short (a few minutes) and extend it when payment actually starts, so abandoned carts don't block slots but slow payers aren't punished.
+
+705
+00:48:06.025 --> 00:48:07.134
+Question 6.
+
+706
+00:48:07.414 --> 00:48:09.099
+How do you handle rescheduling?
+
+707
+00:48:09.379 --> 00:48:10.745
+Thirty-second answer:
+
+708
+00:48:11.025 --> 00:48:17.702
+Book the new slot first (hold + confirm), then release the old one; if the new booking fails, the old stays.
+
+709
+00:48:17.982 --> 00:48:21.609
+Across aggregates, it's a small saga with idempotent steps.
+
+710
+00:48:22.959 --> 00:48:24.047
+Question 7.
+
+711
+00:48:24.327 --> 00:48:27.441
+What happens when capacity drops after slots are booked?
+
+712
+00:48:27.721 --> 00:48:29.087
+Thirty-second answer:
+
+713
+00:48:29.367 --> 00:48:44.940
+A CAPACITYCHANGED event can make a slot over-committed: stop new holds, keep existing bookings, alert ops, let dispatch borrow riders from neighbouring zones, and proactively offer affected customers a move with an incentive if the gap remains.
+
+714
+00:48:46.290 --> 00:48:47.314
+Question 8.
+
+715
+00:48:47.594 --> 00:48:49.386
+Why might you event-source a slot?
+
+716
+00:48:49.666 --> 00:48:51.031
+Thirty-second answer:
+
+717
+00:48:51.311 --> 00:49:04.282
+The slot's history (holds, bookings, expiries, cancellations, capacity changes) is the business record: it answers audit questions, lets you rebuild read models after bugs, and supports time travel.
+
+718
+00:49:04.562 --> 00:49:08.189
+Version-guarded appends also give optimistic concurrency.
+
+719
+00:49:09.539 --> 00:49:10.605
+Question 9.
+
+720
+00:49:10.885 --> 00:49:12.955
+Why do busy slots need snapshots?
+
+721
+00:49:13.235 --> 00:49:14.600
+Thirty-second answer:
+
+722
+00:49:14.880 --> 00:49:22.133
+Every command loads the aggregate by replaying its events; hot slots accumulate thousands of holds and expiries.
+
+723
+00:49:22.413 --> 00:49:25.720
+A snapshot every N events bounds the replay to the tail.
+
+724
+00:49:27.070 --> 00:49:27.838
+Senior.
+
+725
+00:49:28.118 --> 00:49:29.163
+Question 10.
+
+726
+00:49:29.443 --> 00:49:34.265
+Conditional update, SERIALIZABLE, or optimistic versioning, which would you choose?
+
+727
+00:49:34.545 --> 00:49:35.910
+Thirty-second answer:
+
+728
+00:49:36.190 --> 00:49:43.251
+A conditional update for a single-row capacity check (simplest, no retries, best p99 in L2).
+
+729
+00:49:43.531 --> 00:49:49.633
+Optimistic versioning when the aggregate is event-sourced or the invariant spans more than one column.
+
+730
+00:49:49.913 --> 00:49:55.801
+SERIALIZABLE when the invariant spans multiple rows and rewriting is hard, accepting aborts.
+
+731
+00:49:57.151 --> 00:49:58.281
+Question 11.
+
+732
+00:49:58.561 --> 00:50:00.951
+How would you handle festival slot openings?
+
+733
+00:50:01.231 --> 00:50:02.596
+Thirty-second answer:
+
+734
+00:50:02.876 --> 00:50:18.812
+Pre-generate slots, warm caches, use a waiting room if needed (Ch 46 L4), rate-limit per customer, put a Redis admission gate in front of the hot slots, keep bookings atomic in the database, and show alternatives immediately on failure.
+
+735
+00:50:20.162 --> 00:50:21.250
+Question 12.
+
+736
+00:50:21.530 --> 00:50:24.282
+How do you estimate an order's cost in capacity?
+
+737
+00:50:24.562 --> 00:50:25.927
+Thirty-second answer:
+
+738
+00:50:26.207 --> 00:50:35.381
+Use the ETA models: ride time for distance and hour, door time per building, extra time for bulky baskets, picking time from basket size.
+
+739
+00:50:35.661 --> 00:50:41.911
+Compute the cost per candidate slot (because traffic differs), and calibrate against actual rider-minutes.
+
+740
+00:50:43.261 --> 00:50:44.541
+Question 13.
+
+741
+00:50:44.821 --> 00:50:47.040
+How do you move customers away from the peak?
+
+742
+00:50:47.320 --> 00:50:48.685
+Thirty-second answer:
+
+743
+00:50:48.965 --> 00:51:00.464
+Recommend the nearest free slots (earlier too) instead of greying out full ones; price the peak and discount shoulders; offer green (batched) slot discounts; and shift rosters toward demand.
+
+744
+00:51:00.744 --> 00:51:03.155
+Validate acceptance rates with experiments.
+
+745
+00:51:04.505 --> 00:51:05.699
+Question 14.
+
+746
+00:51:05.979 --> 00:51:07.942
+How do you keep the read model correct?
+
+747
+00:51:08.222 --> 00:51:09.587
+Thirty-second answer:
+
+748
+00:51:09.867 --> 00:51:23.521
+Idempotent projectors keyed by (slot, version); monitor lag; sample-compare the read model against event replay daily; version projectors and rebuild from events on bugs; blue-green projections for big changes.
+
+749
+00:51:24.871 --> 00:51:25.767
+Architect.
+
+750
+00:51:26.047 --> 00:51:27.241
+Question 15.
+
+751
+00:51:27.521 --> 00:51:31.703
+Design slot-service for 1,500 zones end to end.
+
+752
+00:51:31.983 --> 00:51:33.348
+Thirty-second answer:
+
+753
+00:51:33.628 --> 00:51:54.257
+Capacity in minutes from rosters and picking; event-sourced slots with version-guarded appends and async snapshots; projections to a Redis listing cache; holds with lease TTLs; outbox to Kafka for dispatch, stores and notifications; ETA-based costs; recommendations and fees for demand; audits and rebuild tooling.
+
+754
+00:51:55.607 --> 00:51:56.802
+Question 16.
+
+755
+00:51:57.082 --> 00:52:00.709
+How does slot-service interact with checkout, dispatch and stores?
+
+756
+00:52:00.989 --> 00:52:02.354
+Thirty-second answer:
+
+757
+00:52:02.634 --> 00:52:15.967
+Checkout lists, holds and confirms; payment outcomes drive confirm or expire; booked events feed dispatch planning and store picking waves; roster changes feed capacity; the ETA service feeds costs.
+
+758
+00:52:16.247 --> 00:52:18.530
+Contracts are events with versioned schemas.
+
+759
+00:52:19.880 --> 00:52:21.224
+Question 17.
+
+760
+00:52:21.504 --> 00:52:23.765
+Generalise this to other booking systems.
+
+761
+00:52:24.045 --> 00:52:25.411
+Thirty-second answer:
+
+762
+00:52:25.691 --> 00:52:46.939
+Tickets, hotels, appointments and tables all follow the same pattern: define the unit of capacity (seats, room-nights, clinician minutes); take it atomically; hold with TTL; confirm on payment; keep history; serve availability from a cache; handle overbooking policy explicitly (airlines overbook on purpose, using no-show models).
+
+763
+00:52:48.289 --> 00:52:49.462
+Question 18.
+
+764
+00:52:49.742 --> 00:52:51.662
+Would you ever overbook deliberately?
+
+765
+00:52:51.942 --> 00:52:53.307
+Thirty-second answer:
+
+766
+00:52:53.587 --> 00:53:08.094
+Possibly, if data shows reliable cancellations or no-shows: set the utilisation target above 100% of expected consumption, with a model of cancellations and a recovery plan (borrow riders, incentives).
+
+767
+00:53:08.374 --> 00:53:14.390
+For groceries, lateness is costly, so most teams keep a buffer below 100% instead.
+
+768
+00:53:15.740 --> 00:53:16.977
+Question 19.
+
+769
+00:53:17.257 --> 00:53:20.969
+How would you evolve from a counter to event sourcing without downtime?
+
+770
+00:53:21.249 --> 00:53:22.615
+Thirty-second answer:
+
+771
+00:53:22.895 --> 00:53:38.916
+Start writing events alongside the counter (dual write in one transaction), backfill synthetic opening events per slot, build projections and compare with counters, switch reads, then switch commands to version-guarded appends, and keep the counter as a projection.
+
+772
+00:53:40.266 --> 00:53:41.375
+Question 20.
+
+773
+00:53:41.655 --> 00:53:43.725
+Which metrics tell you slots are healthy?
+
+774
+00:53:44.005 --> 00:53:45.370
+Thirty-second answer:
+
+775
+00:53:45.650 --> 00:54:01.693
+In-slot delivery rate; overbooking audit violations; lost customers (full, no alternative); fill rate by hour versus roster; hold confirm and expiry rates; conflicts and p99 of hold commands; projector lag and drift.
+
+776
+00:54:03.043 --> 00:54:03.939
+Part 9.
+
+777
+00:54:04.219 --> 00:54:05.627
+Summary and Practice.
+
+778
+00:54:06.877 --> 00:54:07.965
+Key takeaways.
+
+779
+00:54:08.245 --> 00:54:13.791
+Capacity is measured in minutes of what runs out; each order deducts its own cost (L1).
+
+780
+00:54:14.071 --> 00:54:19.362
+Take capacity atomically: a conditional update or a version-guarded append (L2).
+
+781
+00:54:19.642 --> 00:54:26.127
+Event-sourced slots give audit, rebuilds and time travel; snapshots keep busy slots fast (L3).
+
+782
+00:54:26.407 --> 00:54:31.399
+Shape demand with recommendations and prices, and roster to demand (L4).
+
+783
+00:54:31.679 --> 00:54:34.410
+Listings can be stale; bookings must be exact.
+
+784
+00:54:35.760 --> 00:54:37.083
+Decision cheat sheet.
+
+785
+00:54:37.363 --> 00:54:38.707
+Here is a quick table:
+
+786
+00:54:38.987 --> 00:54:40.160
+Need, and Choice.
+
+787
+00:54:40.440 --> 00:54:41.571
+Capacity unit:
+
+788
+00:54:41.851 --> 00:54:44.027
+Rider or picker-minutes per zone-slot.
+
+789
+00:54:44.307 --> 00:54:45.053
+Booking:
+
+790
+00:54:45.333 --> 00:54:49.195
+Conditional UPDATE, or event append with PK(slot, version).
+
+791
+00:54:49.475 --> 00:54:50.264
+Holds:
+
+792
+00:54:50.544 --> 00:54:53.232
+Short TTL, extended when payment starts.
+
+793
+00:54:53.512 --> 00:54:54.344
+History:
+
+794
+00:54:54.624 --> 00:54:57.461
+Event store (or counter + append-only log).
+
+795
+00:54:57.741 --> 00:54:58.915
+Busy aggregates:
+
+796
+00:54:59.195 --> 00:55:02.843
+Snapshots every ~100 events, written asynchronously.
+
+797
+00:55:03.123 --> 00:55:04.040
+Listings:
+
+798
+00:55:04.320 --> 00:55:07.691
+Redis per zone, seconds-stale, filtered by order cost.
+
+799
+00:55:07.971 --> 00:55:08.781
+Demand:
+
+800
+00:55:09.061 --> 00:55:12.923
+Nearest alternatives, peak fees, shoulder discounts, rostering.
+
+801
+00:55:14.273 --> 00:55:15.403
+Exercises.
+
+802
+00:55:15.683 --> 00:55:21.806
+(B2) In L1, add a rain day (speeds minus 30%) and compare C1 and C4.
+
+803
+00:55:22.086 --> 00:55:28.465
+(B3) In L2, add a sub-bucket variant (4 rows per hot slot) and measure retries and throughput.
+
+804
+00:55:28.745 --> 00:55:34.206
+(B3) In L3, add an upcaster for a v2 HELD event with a basketsize field.
+
+805
+00:55:34.486 --> 00:55:39.606
+(B4) Design the reschedule saga with idempotency keys and failure handling.
+
+806
+00:55:39.886 --> 00:55:46.243
+(B4) Extend L4 with green-slot discounts for customers in buildings that already have a booking.
+
+807
+00:55:47.593 --> 00:55:48.596
+Further reading.
+
+808
+00:55:48.876 --> 00:55:53.121
+Martin Fowler, Event Sourcing; Greg Young, CQRS Documents.
+
+809
+00:55:53.401 --> 00:55:58.436
+PostgreSQL documentation, Transaction Isolation and Explicit Locking.
+
+810
+00:55:58.716 --> 00:56:04.071
+Instacart and Ocado engineering blogs on delivery slot capacity and pricing.
+
+811
+00:56:04.351 --> 00:56:08.553
+Talluri and van Ryzin, The Theory and Practice of Revenue Management.
+
+812
+00:56:09.903 --> 00:56:11.141
+Related chapters.
+
+813
+00:56:11.421 --> 00:56:15.879
+Ch 05, Relational Databases: isolation and locks.
+
+814
+00:56:16.159 --> 00:56:21.898
+Ch 15, Event-Driven Architecture, CQRS and Event Sourcing: projections.
+
+815
+00:56:22.178 --> 00:56:26.061
+Ch 46, Grocery Checkout: holds and TTLs.
+
+816
+00:56:26.341 --> 00:56:30.138
+Ch 47, Delivery Dispatch: rider-minutes and ETAs.
+
+817
+00:56:31.488 --> 00:56:33.088
+That's the end of this chapter.
+
+818
+00:56:33.368 --> 00:56:39.405
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+819
+00:56:39.685 --> 00:56:41.136
+See you in the next chapter.
+

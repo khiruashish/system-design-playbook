@@ -1,0 +1,3894 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.438
+Observability.
+
+2
+00:00:01.718 --> 00:00:05.878
+Chapter 24, from the Production part of the System Design Playbook.
+
+3
+00:00:07.628 --> 00:00:08.588
+At a glance:
+
+4
+00:00:08.868 --> 00:00:10.041
+Chapter at a glance.
+
+5
+00:00:10.321 --> 00:00:11.324
+Reader bands:
+
+6
+00:00:11.604 --> 00:00:13.887
+B2, then B4, Prerequisites:
+
+7
+00:00:14.167 --> 00:00:19.692
+Ch 09, Ch 17, Ch 18, Ch 19, What you will build:
+
+8
+00:00:19.972 --> 00:00:26.543
+How the grocery platform is watched, logs, metrics and traces, and the SLOs and alerts on top.
+
+9
+00:00:26.823 --> 00:00:33.927
+One lab uses a real Prometheus scraping a real service; the rest build the mechanics from scratch and measure them.
+
+10
+00:00:34.207 --> 00:00:37.129
+L1: structured logs and correlation IDs.
+
+11
+00:00:37.409 --> 00:00:50.977
+Over 24,776 log events, a correlation id reconstructs one failed request's path across 5 services in one query; without it the 5 lines are lost in the pile.
+
+12
+00:00:51.257 --> 00:01:03.375
+Trace-based sampling cut INFO volume to 3% while keeping every error, and a (service, level, userid) label would have made 18,530 time series versus 10.
+
+13
+00:01:04.725 --> 00:01:07.242
+L2: metrics, with real Prometheus.
+
+14
+00:01:07.522 --> 00:01:14.263
+A service exposes a Prometheus histogram; Prometheus scrapes it and computes histogramquantile live.
+
+15
+00:01:14.543 --> 00:01:22.757
+The catch: p99 from the histogram was +26% off the exact value because the tail lands in a wide bucket.
+
+16
+00:01:23.037 --> 00:01:31.805
+The average (74 ms) met a 200 ms SLO while p99 was 1,545 ms.
+
+17
+00:01:32.085 --> 00:01:33.983
+L3: distributed tracing.
+
+18
+00:01:34.263 --> 00:01:42.605
+A span tree finds the critical path, the slow fx-rates call under pricing, and shows that optimizing anything off it changes nothing.
+
+19
+00:01:42.885 --> 00:01:47.087
+Aggregating 10,000 traces names the p99 driver.
+
+20
+00:01:47.367 --> 00:01:55.538
+Head sampling at 1% kept 6 of 554 slow traces; tail sampling kept all 554.
+
+21
+00:01:56.888 --> 00:01:57.763
+L4:
+
+22
+00:01:58.043 --> 00:01:59.963
+SLOs and burn-rate alerting.
+
+23
+00:02:00.243 --> 00:02:19.229
+On 30 days with 3 injected incidents, a naive threshold raised a false page, a single long window flapped into 17 false pages, and Google SRE's multi-window multi-burn-rate paged 4 times, 0 false, ~2-min detect, each page tied to real budget burn.
+
+24
+00:02:19.509 --> 00:02:20.491
+Reading time:
+
+25
+00:02:20.771 --> 00:02:22.691
+120 min + code.
+
+26
+00:02:24.041 --> 00:02:24.894
+Part 1.
+
+27
+00:02:25.174 --> 00:02:27.094
+Introduction and Why It Matters.
+
+28
+00:02:28.344 --> 00:02:30.563
+A story: the dashboard was all green.
+
+29
+00:02:30.843 --> 00:02:35.493
+Checkout conversion dropped 8% one evening, but every dashboard was green.
+
+30
+00:02:35.773 --> 00:02:45.352
+The post-incident review found the platform was monitoring (pre-set dashboards of averages) but not observable (able to ask new questions of the data):
+
+31
+00:02:45.632 --> 00:02:47.915
+The latency dashboard showed the average:
+
+32
+00:02:48.195 --> 00:02:49.496
+74 ms.
+
+33
+00:02:49.776 --> 00:02:51.973
+Well under the 200 ms target.
+
+34
+00:02:52.253 --> 00:03:02.429
+But the average hid the tail, p99 was over 1.5 seconds (L2), because a currency-conversion dependency under pricing was intermittently slow.
+
+35
+00:03:02.709 --> 00:03:04.267
+Averages can't see tails.
+
+36
+00:03:05.617 --> 00:03:09.115
+There was no way to follow one failed checkout across services.
+
+37
+00:03:09.395 --> 00:03:19.379
+Logs were free-text sentences with no shared id, so reconstructing a single request meant grepping five services and guessing by timestamp (L1).
+
+38
+00:03:19.659 --> 00:03:22.539
+The alert was error rate 1% for 5 minutes.
+
+39
+00:03:22.819 --> 00:03:28.985
+It had paged 40 times that month, mostly on harmless off-peak blips, so the on-call had muted it.
+
+40
+00:03:29.265 --> 00:03:33.958
+The one real slow-burn incident it should have caught, it detected late (L4).
+
+41
+00:03:35.308 --> 00:03:37.313
+Nobody could point to the slow service.
+
+42
+00:03:37.593 --> 00:03:50.628
+Metrics said pricing is slow sometimes; only a trace showed the slowness was a nested fx-rates call, on the critical path just 30% of the time but dominating p99 when it was (L3).
+
+43
+00:03:50.908 --> 00:04:08.103
+The rebuild: structured logs with a trace id on every line, RED metrics with proper histograms, distributed tracing with exemplars linking a slow metric to its trace, and SLO-based multi-window burn-rate alerts that page on budget threats, not noise.
+
+44
+00:04:09.453 --> 00:04:10.135
+Quote:
+
+45
+00:04:10.415 --> 00:04:12.079
+The thesis of this chapter.
+
+46
+00:04:12.359 --> 00:04:16.626
+Monitoring answers questions you knew to ask (a dashboard of averages).
+
+47
+00:04:16.906 --> 00:04:27.125
+Observability lets you ask new ones during an incident you didn't foresee, which needs high-cardinality, correlated logs, metrics and traces that share a request id.
+
+48
+00:04:27.405 --> 00:04:31.309
+Measure percentiles, never averages, for anything user-facing.
+
+49
+00:04:31.589 --> 00:04:41.189
+Define SLOs as the contract, spend an error budget, and alert on how fast you're burning it, so pages mean a human must act now, not a number wiggled.
+
+50
+00:04:42.539 --> 00:04:44.843
+Where this lives in the grocery platform.
+
+51
+00:04:45.123 --> 00:04:46.467
+Here is a quick table:
+
+52
+00:04:46.747 --> 00:04:49.051
+Signal, and Tooling (production), and Notes.
+
+53
+00:04:49.331 --> 00:04:50.205
+Metrics.
+
+54
+00:04:50.485 --> 00:04:51.701
+Tooling (production):
+
+55
+00:04:51.981 --> 00:04:55.181
+Micrometer, then Prometheus or Mimir; Grafana.
+
+56
+00:04:55.461 --> 00:04:56.272
+Notes:
+
+57
+00:04:56.552 --> 00:05:01.565
+RED per service, USE per resource; histograms with SLO-aligned buckets.
+
+58
+00:05:01.845 --> 00:05:02.677
+Logs.
+
+59
+00:05:02.957 --> 00:05:04.173
+Tooling (production):
+
+60
+00:05:04.453 --> 00:05:07.611
+Structured JSON, then Loki or Elasticsearch.
+
+61
+00:05:07.891 --> 00:05:08.701
+Notes:
+
+62
+00:05:08.981 --> 00:05:13.184
+Trace id on every line; sampled by trace; PII-redacted.
+
+63
+00:05:13.464 --> 00:05:14.360
+Traces.
+
+64
+00:05:14.640 --> 00:05:15.856
+Tooling (production):
+
+65
+00:05:16.136 --> 00:05:20.104
+OpenTelemetry SDK, then Collector, then Tempo or Jaeger.
+
+66
+00:05:20.384 --> 00:05:21.195
+Notes:
+
+67
+00:05:21.475 --> 00:05:24.952
+W3C traceparent propagation; tail sampling.
+
+68
+00:05:25.232 --> 00:05:26.192
+Dashboards.
+
+69
+00:05:26.472 --> 00:05:27.688
+Tooling (production):
+
+70
+00:05:27.968 --> 00:05:28.864
+Grafana.
+
+71
+00:05:29.144 --> 00:05:29.955
+Notes:
+
+72
+00:05:30.235 --> 00:05:34.565
+RED + USE + SLO burn; exemplars link metrics, then traces.
+
+73
+00:05:34.845 --> 00:05:36.253
+SLOs and alerts.
+
+74
+00:05:36.533 --> 00:05:37.749
+Tooling (production):
+
+75
+00:05:38.029 --> 00:05:41.464
+Sloth or Pyrra, then Prometheus rules; Alertmanager.
+
+76
+00:05:41.744 --> 00:05:42.555
+Notes:
+
+77
+00:05:42.835 --> 00:05:45.693
+Multi-window multi-burn-rate; error budgets.
+
+78
+00:05:47.043 --> 00:05:47.875
+On-call.
+
+79
+00:05:48.155 --> 00:05:49.371
+Tooling (production):
+
+80
+00:05:49.651 --> 00:05:51.422
+PagerDuty or Opsgenie.
+
+81
+00:05:51.702 --> 00:05:52.513
+Notes:
+
+82
+00:05:52.793 --> 00:05:56.419
+Only SLO-threatening pages; everything else is a ticket.
+
+83
+00:05:56.699 --> 00:05:57.617
+Profiling.
+
+84
+00:05:57.897 --> 00:06:03.230
+Tooling (production): async-profiler, JFR (Ch 19, Ch 25).
+
+85
+00:06:03.510 --> 00:06:04.321
+Notes:
+
+86
+00:06:04.601 --> 00:06:07.566
+Continuous profiling for CPU or alloc.
+
+87
+00:06:08.916 --> 00:06:10.239
+Learning objectives.
+
+88
+00:06:10.519 --> 00:06:11.863
+Here is a quick table:
+
+89
+00:06:12.143 --> 00:06:14.340
+Band, and After this chapter you can....
+
+90
+00:06:14.620 --> 00:06:15.495
+B2:
+
+91
+00:06:15.775 --> 00:06:23.369
+Emit structured logs with correlation ids, expose RED metrics with histograms, and read percentiles correctly.
+
+92
+00:06:23.649 --> 00:06:24.545
+B3:
+
+93
+00:06:24.825 --> 00:06:33.188
+Instrument tracing with context propagation, choose histogram buckets and sampling, and design SLIs or SLOs with error budgets.
+
+94
+00:06:33.468 --> 00:06:34.364
+B4:
+
+95
+00:06:34.644 --> 00:06:43.284
+Design multi-window burn-rate alerting, control cardinality and cost, and build an observability strategy that finds unknown-unknowns.
+
+96
+00:06:44.634 --> 00:06:45.509
+Part 2.
+
+97
+00:06:45.789 --> 00:06:47.666
+Core Concepts, Beginner to Deep.
+
+98
+00:06:48.916 --> 00:06:49.833
+Intuition.
+
+99
+00:06:50.113 --> 00:06:56.513
+Metrics are the car's dashboard; logs are the trip diary; traces are the GPS route of one journey.
+
+100
+00:06:56.793 --> 00:07:01.380
+The dashboard (metrics) tells you that something is wrong cheaply and continuously.
+
+101
+00:07:01.660 --> 00:07:04.476
+The diary (logs) tells you what happened in detail.
+
+102
+00:07:04.756 --> 00:07:07.892
+The route (a trace) shows where in the journey the delay was.
+
+103
+00:07:08.172 --> 00:07:11.457
+You need all three, sharing one trip number (the trace id).
+
+104
+00:07:11.737 --> 00:07:13.124
+The average is the lie.
+
+105
+00:07:13.404 --> 00:07:20.871
+If nine customers wait 20 ms and one waits 2 seconds, the average 218 ms describes nobody.
+
+106
+00:07:21.151 --> 00:07:24.180
+The tenth customer is the one who abandons the cart.
+
+107
+00:07:24.460 --> 00:07:25.783
+Watch percentiles.
+
+108
+00:07:27.133 --> 00:07:29.394
+An SLO is a promise with a budget.
+
+109
+00:07:29.674 --> 00:07:36.394
+99.9% of checkouts succeed allows 0.1% to fail, that's the error budget.
+
+110
+00:07:36.674 --> 00:07:41.218
+As long as you're within it, you can ship; when you're burning it fast, you stop and fix.
+
+111
+00:07:41.498 --> 00:07:47.706
+Alerts watch the burn rate, like a fuel gauge that only warns when you'll run dry before the destination.
+
+112
+00:07:49.056 --> 00:07:50.229
+The three signals.
+
+113
+00:07:50.509 --> 00:07:51.853
+Here is a quick table:
+
+114
+00:07:52.133 --> 00:07:55.547
+Signal, and What, and Cost, and Cardinality, and Best for.
+
+115
+00:07:55.827 --> 00:07:56.701
+Metrics.
+
+116
+00:07:56.981 --> 00:07:57.536
+What:
+
+117
+00:07:57.816 --> 00:08:01.336
+Numeric time series (counters, gauges, histograms).
+
+118
+00:08:01.616 --> 00:08:02.341
+Cost:
+
+119
+00:08:02.621 --> 00:08:04.243
+Cheap, constant per series.
+
+120
+00:08:04.523 --> 00:08:05.504
+Cardinality:
+
+121
+00:08:05.784 --> 00:08:08.003
+Must be low (bounded label values).
+
+122
+00:08:08.283 --> 00:08:09.136
+Best for:
+
+123
+00:08:09.416 --> 00:08:10.419
+Is it broken?
+
+124
+00:08:10.699 --> 00:08:11.616
+How much?
+
+125
+00:08:11.896 --> 00:08:13.411
+Trends, SLOs, alerts.
+
+126
+00:08:13.691 --> 00:08:14.523
+Logs.
+
+127
+00:08:14.803 --> 00:08:15.357
+What:
+
+128
+00:08:15.637 --> 00:08:17.237
+Timestamped structured events.
+
+129
+00:08:17.517 --> 00:08:18.243
+Cost:
+
+130
+00:08:18.523 --> 00:08:20.144
+Medium, high (volume).
+
+131
+00:08:20.424 --> 00:08:21.405
+Cardinality:
+
+132
+00:08:21.685 --> 00:08:22.859
+High (any field).
+
+133
+00:08:23.139 --> 00:08:23.992
+Best for:
+
+134
+00:08:24.272 --> 00:08:26.043
+What exactly happened to this thing?
+
+135
+00:08:26.323 --> 00:08:27.219
+Traces.
+
+136
+00:08:27.499 --> 00:08:28.053
+What:
+
+137
+00:08:28.333 --> 00:08:31.405
+Causally-linked spans of one request across services.
+
+138
+00:08:31.685 --> 00:08:32.411
+Cost:
+
+139
+00:08:32.691 --> 00:08:34.056
+Medium (sampled).
+
+140
+00:08:34.336 --> 00:08:35.317
+Cardinality:
+
+141
+00:08:35.597 --> 00:08:36.280
+High.
+
+142
+00:08:36.560 --> 00:08:37.413
+Best for:
+
+143
+00:08:37.693 --> 00:08:40.275
+Where did the time or error go across services?
+
+144
+00:08:41.625 --> 00:08:53.678
+They converge: an exemplar attaches a trace id to a metric bucket (jump from a slow p99 to a slow trace); logs carry the trace id (jump from a trace to its logs).
+
+145
+00:08:53.958 --> 00:08:57.222
+This is the single pane that makes a system observable.
+
+146
+00:08:57.502 --> 00:09:11.241
+OpenTelemetry (OTel) is the vendor-neutral standard: one set of SDKs and a Collector emit all three signals, with W3C Trace Context (traceparent) propagating the trace across services.
+
+147
+00:09:11.521 --> 00:09:17.089
+In Java, Micrometer is the metrics façade (and bridges to OTel or Prometheus).
+
+148
+00:09:17.369 --> 00:09:19.417
+Instrument once; export anywhere.
+
+149
+00:09:20.767 --> 00:09:22.751
+Structured logging and correlation.
+
+150
+00:09:23.031 --> 00:09:33.377
+Structured (JSON or logfmt), not prose. level:ERROR,service:inventory,traceid:...sku:...error:timeout is queryable by field; a sentence is not.
+
+151
+00:09:33.657 --> 00:09:41.231
+L1: which requests failed in inventory, and why is one field filter on structured logs, and brittle regex on text.
+
+152
+00:09:41.511 --> 00:09:44.177
+Correlation or trace id on every line.
+
+153
+00:09:44.457 --> 00:09:52.052
+Generated at the edge, propagated through every service and put in every log line (via MDC or a logging context).
+
+154
+00:09:52.332 --> 00:10:05.175
+L1: with a trace id, one query returns a failed request's ordered path across 5 services; without it, those 5 lines sit anonymously among 24,776.
+
+155
+00:10:06.525 --> 00:10:07.826
+Levels and sampling.
+
+156
+00:10:08.106 --> 00:10:11.583
+Keep ERROR or WARN always; sample INFO or DEBUG.
+
+157
+00:10:11.863 --> 00:10:16.173
+Sample by trace, not by line, so a kept request keeps all its lines.
+
+158
+00:10:16.453 --> 00:10:24.773
+L1: keeping 1% of INFO traces cut volume to 3% while keeping 100% of errors (and error traces whole).
+
+159
+00:10:25.053 --> 00:10:28.530
+Never log secrets or full PII (Ch 23).
+
+160
+00:10:28.810 --> 00:10:31.583
+Redact; log a token's id, not the token.
+
+161
+00:10:31.863 --> 00:10:33.698
+Logs are expensive at volume.
+
+162
+00:10:33.978 --> 00:10:38.458
+They're the highest-cost signal, so structure them, sample them, and set retention.
+
+163
+00:10:39.808 --> 00:10:42.560
+Metrics: counters, gauges, histograms.
+
+164
+00:10:42.840 --> 00:10:45.912
+Counter: monotonically increasing (requests, errors).
+
+165
+00:10:46.192 --> 00:10:49.691
+You query its rate (rate(httprequeststotal5m)).
+
+166
+00:10:49.971 --> 00:10:53.832
+Gauge: a value up or down (in-flight requests, queue depth, memory).
+
+167
+00:10:54.112 --> 00:11:00.896
+Histogram: counts observations into buckets; lets you compute quantiles and how many under 200 ms.
+
+168
+00:11:01.176 --> 00:11:05.720
+Prometheus histograms are cumulative (bucketle=... sum, count).
+
+169
+00:11:05.000 --> 00:11:13.104
+Summary: client-computed quantiles; can't be aggregated across instances, so histograms are usually preferred.
+
+170
+00:11:14.454 --> 00:11:24.417
+Percentiles from histograms are approximate. histogramquantile interpolates within the bucket holding the quantile's rank, so accuracy depends on bucket boundaries.
+
+171
+00:11:24.697 --> 00:11:27.598
+L2 (real Prometheus over a real service):
+
+172
+00:11:28.948 --> 00:11:30.292
+Here is a quick table:
+
+173
+00:11:30.572 --> 00:11:34.391
+Quantile, and From histogram, and Exact, and Error. p50.
+
+174
+00:11:34.671 --> 00:11:35.759
+From histogram:
+
+175
+00:11:36.039 --> 00:11:37.639
+21.2 ms.
+
+176
+00:11:37.919 --> 00:11:38.772
+Exact:
+
+177
+00:11:39.052 --> 00:11:40.673
+20.7 ms.
+
+178
+00:11:40.953 --> 00:11:43.535
+Error: +2%. p95.
+
+179
+00:11:43.815 --> 00:11:44.903
+From histogram:
+
+180
+00:11:45.183 --> 00:11:46.953
+86.7 ms.
+
+181
+00:11:47.233 --> 00:11:48.087
+Exact:
+
+182
+00:11:48.367 --> 00:11:50.159
+79.7 ms.
+
+183
+00:11:50.439 --> 00:11:53.063
+Error: +9%. p99.
+
+184
+00:11:53.343 --> 00:11:54.431
+From histogram:
+
+185
+00:11:54.711 --> 00:11:56.887
+1,930 ms.
+
+186
+00:11:57.167 --> 00:11:58.020
+Exact:
+
+187
+00:11:58.300 --> 00:12:00.860
+1,545 ms.
+
+188
+00:12:01.140 --> 00:12:04.639
+Error: +25%. p99.9.
+
+189
+00:12:04.919 --> 00:12:06.007
+From histogram:
+
+190
+00:12:06.287 --> 00:12:08.655
+2,443 ms.
+
+191
+00:12:08.935 --> 00:12:09.788
+Exact:
+
+192
+00:12:10.068 --> 00:12:12.585
+1,794 ms.
+
+193
+00:12:12.865 --> 00:12:14.785
+Error: +36%.
+
+194
+00:12:16.135 --> 00:12:25.309
+The p50 or p95 are close; the tail is coarse because it falls in the wide 1000 to 2500 ms bucket.
+
+195
+00:12:25.589 --> 00:12:34.847
+Put buckets where your SLO lives (for example, around 200 ms), and remember you cannot recover accuracy the buckets never captured.
+
+196
+00:12:35.127 --> 00:12:43.490
+(Prometheus native histograms, GA-ish in 2024 to 25, largely fix this with exponential auto-buckets.).
+
+197
+00:12:44.840 --> 00:12:45.885
+RED and USE.
+
+198
+00:12:46.165 --> 00:12:49.621
+Two complementary checklists so you instrument the right things:
+
+199
+00:12:49.901 --> 00:12:52.461
+RED (services or request-driven):
+
+200
+00:12:52.741 --> 00:12:59.013
+Rate (requests per second), Errors (failed per second or %), Duration (latency distribution).
+
+201
+00:12:59.293 --> 00:13:02.621
+L2 computes all three from counters and a histogram.
+
+202
+00:13:02.901 --> 00:13:04.181
+USE (resources):
+
+203
+00:13:04.461 --> 00:13:13.293
+Utilization, Saturation (queue depth or wait), Errors, for CPU, memory, disks, connection pools, thread pools (Ch 19).
+
+204
+00:13:13.573 --> 00:13:18.651
+RED tells you the service is unhealthy; USE tells you which resource is the cause.
+
+205
+00:13:18.931 --> 00:13:26.376
+The four golden signals (Google SRE) are latency, traffic, errors, saturation, RED plus saturation.
+
+206
+00:13:27.726 --> 00:13:37.859
+Averages versus percentiles: always chart p50 or p90 or p99 (and p99.9 for critical paths), never the mean.
+
+207
+00:13:38.139 --> 00:13:45.094
+L2: a 74 ms average masked a 1,545 ms p99.
+
+208
+00:13:45.374 --> 00:13:51.305
+Percentiles also don't average across instances, you need histograms to aggregate them correctly.
+
+209
+00:13:52.655 --> 00:13:54.041
+Distributed tracing.
+
+210
+00:13:54.321 --> 00:14:03.089
+A trace is a tree of spans; each span has a trace id, span id, parent id, service, operation, start or end and attributes.
+
+211
+00:14:03.369 --> 00:14:12.607
+Context (traceparent) propagates across HTTP or gRPC or messaging so spans from different services join one trace.
+
+212
+00:14:12.887 --> 00:14:17.345
+Critical path: the chain of spans that determines the end-to-end duration.
+
+213
+00:14:17.625 --> 00:14:27.375
+L3 builds the product-page fan-out (Ch 19) and finds the slow request's critical path is bff, then pricing, then fx-rates.
+
+214
+00:14:27.655 --> 00:14:33.436
+Optimizing anything off the critical path (catalog, inventory) does not shrink the request.
+
+215
+00:14:33.716 --> 00:14:36.767
+This is the single most useful thing a trace tells you.
+
+216
+00:14:38.117 --> 00:14:52.986
+Aggregate analysis: across 10,000 traces, L3 shows pricing or fx-rates sits on the critical path ~68% of the time and carries the whole tail (the 30% of calls that hit the slow currency service).
+
+217
+00:14:53.266 --> 00:14:57.127
+That's the p99 lever, invisible to per-service metrics.
+
+218
+00:14:57.407 --> 00:15:07.605
+Instrumentation: auto-instrumentation (OTel Java agent) covers HTTP or DB or messaging; add manual spans for business steps.
+
+219
+00:15:07.885 --> 00:15:12.514
+Propagate context through async boundaries and thread pools (Ch 19:
+
+220
+00:15:12.794 --> 00:15:15.482
+ScopedValue or context-wrapping executors).
+
+221
+00:15:16.832 --> 00:15:17.685
+Sampling.
+
+222
+00:15:17.965 --> 00:15:21.528
+Tracing every request is expensive at volume, so sample:
+
+223
+00:15:22.878 --> 00:15:24.222
+Here is a quick table:
+
+224
+00:15:24.502 --> 00:15:28.619
+Strategy, and When decided, and Keeps interesting traces?, and Cost.
+
+225
+00:15:28.899 --> 00:15:30.691
+Head-based (probabilistic).
+
+226
+00:15:30.971 --> 00:15:32.038
+When decided:
+
+227
+00:15:32.318 --> 00:15:34.217
+At the start, on the trace id.
+
+228
+00:15:34.497 --> 00:15:36.033
+Keeps interesting traces?:
+
+229
+00:15:36.313 --> 00:15:38.787
+No, drops most slow or error traces.
+
+230
+00:15:39.067 --> 00:15:39.793
+Cost:
+
+231
+00:15:40.073 --> 00:15:42.782
+Cheapest, no buffering; decision propagates.
+
+232
+00:15:43.062 --> 00:15:44.065
+Tail-based.
+
+233
+00:15:44.345 --> 00:15:45.411
+When decided:
+
+234
+00:15:45.691 --> 00:15:47.163
+After the trace completes.
+
+235
+00:15:47.443 --> 00:15:48.979
+Keeps interesting traces?:
+
+236
+00:15:49.259 --> 00:15:52.182
+Yes, keep all errors or slow, sample the rest.
+
+237
+00:15:52.462 --> 00:15:53.187
+Cost:
+
+238
+00:15:53.467 --> 00:15:56.347
+Buffers every trace until done (Collector memory).
+
+239
+00:15:57.697 --> 00:16:12.204
+L3, 10,000 traces: head sampling at 1% kept only 6 of 554 slow traces; tail sampling kept all 554 plus a 1% baseline, at the cost of buffering.
+
+240
+00:16:12.484 --> 00:16:21.508
+The common production setup: head-sample cheaply for baseline volume, and tail-sample in the Collector to guarantee errors and slow traces are kept.
+
+241
+00:16:21.788 --> 00:16:24.177
+Whatever the rate, keep all error traces.
+
+242
+00:16:25.527 --> 00:16:26.935
+Cardinality and cost.
+
+243
+00:16:27.215 --> 00:16:34.938
+Cardinality (distinct label-value combinations) is the number-one cause of observability cost blowups and outages.
+
+244
+00:16:35.218 --> 00:16:39.314
+Each unique combination of metric labels is a separate time series.
+
+245
+00:16:39.594 --> 00:16:48.618
+L1: a counter labelled (service, level, userid) would create ~18,530 series; (service, level) only 10.
+
+246
+00:16:48.898 --> 00:16:58.135
+Never put unbounded values in metric labels: user ids, order ids, trace ids, email, full URLs, raw error messages.
+
+247
+00:16:58.415 --> 00:17:02.021
+They belong in logs and traces (searchable), not metrics.
+
+248
+00:17:03.371 --> 00:17:04.267
+Symptoms:
+
+249
+00:17:04.547 --> 00:17:07.683
+Prometheus OOM, slow queries, huge bills.
+
+250
+00:17:07.963 --> 00:17:14.875
+Guardrails: limit label values, drop high-cardinality labels at scrape or ingest, and review new metrics.
+
+251
+00:17:15.155 --> 00:17:22.813
+Logs and traces tolerate high cardinality (they're indexed differently), which is exactly why request ids go there.
+
+252
+00:17:24.163 --> 00:17:26.937
+SLIs, SLOs, SLAs and error budgets.
+
+253
+00:17:27.217 --> 00:17:36.710
+SLI (indicator): a measured ratio of good events, for example, goodrequests or totalrequests, or requests under 200 ms or total.
+
+254
+00:17:36.990 --> 00:17:38.505
+Define good precisely.
+
+255
+00:17:38.785 --> 00:17:48.043
+SLO (objective): a target for the SLI over a window, for example, 99.9% of checkouts succeed over 30 days.
+
+256
+00:17:48.323 --> 00:17:52.953
+SLA (agreement): a contractual SLO with consequences (credits).
+
+257
+00:17:53.233 --> 00:17:55.665
+Usually looser than the internal SLO.
+
+258
+00:17:57.015 --> 00:17:58.017
+Error budget:
+
+259
+00:17:58.297 --> 00:17:59.663
+1 minus SLO.
+
+260
+00:17:59.943 --> 00:18:03.761
+At 99.9%, 0.1% may fail.
+
+261
+00:18:04.041 --> 00:18:17.503
+L4: over 30 days that's 9,661 failed requests allowed; the month used 13,517 (140%, budget blown by one bad incident).
+
+262
+00:18:17.783 --> 00:18:25.399
+The budget is the shared language between product (ship features) and reliability (stop and stabilize when the budget's gone).
+
+263
+00:18:25.679 --> 00:18:32.079
+Choose SLIs the user feels (checkout success, page latency), not internal proxies (CPU).
+
+264
+00:18:32.359 --> 00:18:40.465
+Aim SLOs at good enough that users are happy, not 100% (which is infinitely expensive and leaves no room to ship).
+
+265
+00:18:41.815 --> 00:18:43.031
+Burn-rate alerting.
+
+266
+00:18:43.311 --> 00:18:46.703
+Burn rate = how fast you're consuming the error budget.
+
+267
+00:18:46.983 --> 00:18:56.775
+A burn rate of 1 exhausts a 30-day budget in exactly 30 days; 14.4 exhausts it in ~2 days; 6 in ~5 days.
+
+268
+00:18:57.055 --> 00:18:59.615
+Alert on burn rate, not on a raw threshold.
+
+269
+00:18:59.895 --> 00:19:05.847
+Google SRE's multi-window, multi-burn-rate pages when a fast and a slow signal agree:
+
+270
+00:19:06.127 --> 00:19:07.215
+Fast (page):
+
+271
+00:19:07.495 --> 00:19:18.354
+14.4 times over 1 h and 14.4 times over 5 min (the short window confirms it's still happening, avoiding alerting on an already-resolved spike).
+
+272
+00:19:18.634 --> 00:19:19.722
+Slow (page):
+
+273
+00:19:20.002 --> 00:19:23.373
+6 times over 6 h and 6 times over 30 min.
+
+274
+00:19:23.653 --> 00:19:28.645
+Ticket (not a page): lower rates over longer windows (1 times, 3 times ).
+
+275
+00:19:29.995 --> 00:19:39.403
+L4 compares strategies on the same 30 days (3 injected incidents: a sharp 20-min outage, a 6-h slow burn, a 3-min blip):
+
+276
+00:19:40.753 --> 00:19:42.097
+Here is a quick table:
+
+277
+00:19:42.377 --> 00:19:46.793
+Strategy, and Pages, and False pages, and Missed, and Median detect.
+
+278
+00:19:47.073 --> 00:19:47.905
+Naive:
+
+279
+00:19:48.185 --> 00:19:50.147
+5-min error rate 1%.
+
+280
+00:19:50.427 --> 00:19:51.345
+Pages:
+
+281
+00:19:51.625 --> 00:19:52.393
+5.
+
+282
+00:19:52.673 --> 00:19:53.761
+False pages:
+
+283
+00:19:54.041 --> 00:19:54.681
+1.
+
+284
+00:19:54.961 --> 00:19:55.686
+Missed:
+
+285
+00:19:55.966 --> 00:19:56.713
+0.
+
+286
+00:19:56.993 --> 00:19:58.166
+Median detect:
+
+287
+00:19:58.446 --> 00:19:59.278
+1 min.
+
+288
+00:19:59.558 --> 00:20:00.582
+Single window:
+
+289
+00:20:00.862 --> 00:20:02.142
+1-h burn 1.
+
+290
+00:20:02.422 --> 00:20:03.339
+Pages:
+
+291
+00:20:03.619 --> 00:20:04.409
+20.
+
+292
+00:20:04.689 --> 00:20:05.777
+False pages:
+
+293
+00:20:06.057 --> 00:20:07.038
+17.
+
+294
+00:20:07.318 --> 00:20:08.043
+Missed:
+
+295
+00:20:08.323 --> 00:20:09.070
+0.
+
+296
+00:20:09.350 --> 00:20:10.523
+Median detect:
+
+297
+00:20:10.803 --> 00:20:11.635
+1 min.
+
+298
+00:20:11.915 --> 00:20:14.155
+Multi-window multi-burn (SRE).
+
+299
+00:20:14.435 --> 00:20:15.353
+Pages:
+
+300
+00:20:15.633 --> 00:20:16.337
+4.
+
+301
+00:20:16.617 --> 00:20:17.705
+False pages:
+
+302
+00:20:17.985 --> 00:20:18.731
+0.
+
+303
+00:20:19.011 --> 00:20:19.737
+Missed:
+
+304
+00:20:20.017 --> 00:20:20.763
+0.
+
+305
+00:20:21.043 --> 00:20:22.217
+Median detect:
+
+306
+00:20:22.497 --> 00:20:23.329
+2 min.
+
+307
+00:20:24.679 --> 00:20:39.356
+Naive fixed threshold: its pages don't map to budget, 1% error is a crisis at 600 rpm and noise at 50 rpm, so it both over- and under-pages, and it raised a false page on the harmless blip.
+
+308
+00:20:39.636 --> 00:20:50.089
+Single long window: it flaps, the condition dips and re-crosses during an incident, turning one incident into 17 pages (the classic alert-fatigue generator).
+
+309
+00:20:51.439 --> 00:21:08.549
+Multi-window multi-burn: fewest pages, zero false pages, ~2-min detection, and every page corresponds to real budget burn (L4's per-incident view: the sharp outage burned 108% of the month's budget; the blip, 1%).
+
+310
+00:21:09.899 --> 00:21:11.285
+Good alerting practice.
+
+311
+00:21:11.565 --> 00:21:19.715
+Page only on symptoms that need a human now (SLO burn, hard-down), not on causes (high CPU) that may be harmless.
+
+312
+00:21:19.995 --> 00:21:22.149
+Causes become dashboards and tickets.
+
+313
+00:21:22.429 --> 00:21:24.947
+Every page is actionable and has a runbook.
+
+314
+00:21:25.227 --> 00:21:27.403
+If a page has no action, delete it.
+
+315
+00:21:27.683 --> 00:21:34.573
+Reduce noise: dedup, group, inhibit downstream alerts when an upstream one fires, and set maintenance windows.
+
+316
+00:21:34.853 --> 00:21:40.208
+Alert on the absence of signal too (no data = broken exporter, not all good).
+
+317
+00:21:41.558 --> 00:21:47.233
+Review alerts after every incident: what paged that shouldn't have, what should have paged and didn't.
+
+318
+00:21:48.583 --> 00:21:50.225
+Dashboards and correlation.
+
+319
+00:21:50.505 --> 00:22:02.708
+Standard layout: an RED row per service (rate, errors, latency percentiles), a USE row for resources, an SLO or error-budget panel, and links out to logs and traces.
+
+320
+00:22:02.988 --> 00:22:12.887
+Exemplars turn a spike on the latency graph into a click-through to the exact slow trace (L2 D emits the trace id of a slow request; L3 opens it).
+
+321
+00:22:13.167 --> 00:22:20.911
+Design for the incident, not the demo: the first dashboard an on-call opens should answer what's burning and where, then drill down.
+
+322
+00:22:21.191 --> 00:22:23.793
+Avoid wall-of-graphs dashboards nobody reads.
+
+323
+00:22:25.143 --> 00:22:26.039
+Part 3.
+
+324
+00:22:26.319 --> 00:22:28.047
+Architecture and Diagrams.
+
+325
+00:22:29.297 --> 00:22:31.985
+Component view: the observability pipeline.
+
+326
+00:22:32.265 --> 00:22:33.609
+Here is the diagram.
+
+327
+00:22:37.459 --> 00:22:40.659
+Sequence: happy path, trace context and exemplars.
+
+328
+00:22:40.939 --> 00:22:43.734
+The sequence diagram walks through it step by step.
+
+329
+00:22:44.014 --> 00:22:47.705
+App to GW: request (new trace, traceparent generated).
+
+330
+00:22:47.985 --> 00:22:51.355
+GW to Pr: call, propagate traceparent.
+
+331
+00:22:51.635 --> 00:22:54.963
+Pr to FX: call, propagate traceparent.
+
+332
+00:22:55.243 --> 00:22:57.867
+FX to Pr: span recorded (slow).
+
+333
+00:22:58.147 --> 00:23:00.707
+Pr to GW: span recorded.
+
+334
+00:23:00.987 --> 00:23:06.470
+GW to App: response, histogram observes duration with an exemplar (traceid).
+
+335
+00:23:10.320 --> 00:23:13.733
+Sequence: failure path, an incident from alert to fix.
+
+336
+00:23:14.013 --> 00:23:16.808
+The sequence diagram walks through it step by step.
+
+337
+00:23:17.088 --> 00:23:22.315
+Prom to Prom: fast burn 14.4x over 1h AND 5m holds.
+
+338
+00:23:22.595 --> 00:23:23.747
+Prom to AM:
+
+339
+00:23:24.027 --> 00:23:25.883
+SLO burn alert (checkout).
+
+340
+00:23:26.163 --> 00:23:29.064
+AM to Eng: page (actionable, with runbook).
+
+341
+00:23:29.344 --> 00:23:33.461
+Eng to G: open SLO dashboard, see p99 spike.
+
+342
+00:23:33.741 --> 00:23:36.237
+G to Eng: exemplar, then slow trace.
+
+343
+00:23:36.517 --> 00:23:40.037
+Eng to G: trace shows fx-rates on the critical path.
+
+344
+00:23:40.317 --> 00:23:44.627
+Eng to Eng: mitigate (fallback or cache fx), budget burn stops.
+
+345
+00:23:48.477 --> 00:23:50.269
+State: an alert's lifecycle.
+
+346
+00:23:50.549 --> 00:23:51.893
+Here is the diagram.
+
+347
+00:23:55.743 --> 00:23:56.660
+Part 4.
+
+348
+00:23:56.940 --> 00:23:58.561
+Design Document Excerpt:
+
+349
+00:23:58.841 --> 00:24:00.996
+Grocery Observability Platform.
+
+350
+00:24:02.246 --> 00:24:03.590
+Here is a quick table:
+
+351
+00:24:03.870 --> 00:24:05.171
+Field, and Value.
+
+352
+00:24:05.451 --> 00:24:06.795
+Author or Reviewers:
+
+353
+00:24:07.075 --> 00:24:10.275
+SRE or platform, all service teams, product.
+
+354
+00:24:10.555 --> 00:24:11.451
+Status:
+
+355
+00:24:11.731 --> 00:24:12.606
+Approved.
+
+356
+00:24:12.886 --> 00:24:14.209
+Related ADRs:
+
+357
+00:24:14.489 --> 00:24:38.659
+ADR-103 OpenTelemetry + Micrometer, one instrumentation, multiple backends; ADR-104 Prometheus histograms with SLO-aligned buckets, no high-cardinality labels; ADR-105 Structured JSON logs with traceid, trace-based sampling, PII redaction; ADR-106 Tail sampling in the Collector,
+
+358
+00:24:38.939 --> 00:24:48.305
+all errors kept; ADR-107 SLOs per critical journey with multi-window burn-rate alerts; pages only on SLO burn.
+
+359
+00:24:49.655 --> 00:24:50.295
+1.
+
+360
+00:24:50.575 --> 00:24:51.983
+Context and Problem.
+
+361
+00:24:52.263 --> 00:25:04.743
+The green-dashboard incident (§1.1): averages hid the tail, no request correlation, threshold alerts caused fatigue and missed a slow burn, and no way to localize the slow service.
+
+362
+00:25:05.023 --> 00:25:05.727
+2.
+
+363
+00:25:06.007 --> 00:25:07.351
+Goals or Non-Goals.
+
+364
+00:25:07.631 --> 00:25:21.497
+Goals: answer what's wrong, how bad, and where for any incident; percentile-based latency; correlated logs or metrics or traces; SLO-driven pages that are all actionable; bounded observability cost.
+
+365
+00:25:21.777 --> 00:25:22.759
+Non-goals:
+
+366
+00:25:23.039 --> 00:25:31.935
+100% trace retention; alerting on every resource metric; a bespoke observability stack (use OTel + CNCF tools).
+
+367
+00:25:33.285 --> 00:25:34.031
+3.
+
+368
+00:25:34.311 --> 00:25:35.271
+Requirements.
+
+369
+00:25:36.621 --> 00:25:37.965
+Here is a quick table:
+
+370
+00:25:38.245 --> 00:25:39.717
+ID, and Requirement.
+
+371
+00:25:39.997 --> 00:25:40.936
+FR-1:
+
+372
+00:25:41.216 --> 00:25:46.784
+Every request has a trace id, propagated and logged on every line across services.
+
+373
+00:25:47.064 --> 00:25:48.003
+FR-2:
+
+374
+00:25:48.283 --> 00:25:54.341
+Each service exposes RED metrics; histograms have buckets around each SLO threshold.
+
+375
+00:25:54.621 --> 00:25:55.603
+FR-3:
+
+376
+00:25:55.883 --> 00:26:01.899
+Traces sampled: head baseline + tail keep-all-errors; context propagates through async code.
+
+377
+00:26:02.179 --> 00:26:03.160
+FR-4:
+
+378
+00:26:03.440 --> 00:26:08.645
+SLOs defined for checkout, product page, search, payment; error budgets tracked.
+
+379
+00:26:08.925 --> 00:26:09.971
+NFR-1:
+
+380
+00:26:10.251 --> 00:26:15.541
+Pages fire only on multi-window burn-rate breaches; every page has a runbook.
+
+381
+00:26:15.821 --> 00:26:16.867
+NFR-2:
+
+382
+00:26:17.147 --> 00:26:21.264
+No metric label with unbounded cardinality; new metrics reviewed.
+
+383
+00:26:21.544 --> 00:26:22.611
+NFR-3:
+
+384
+00:26:22.891 --> 00:26:27.499
+Logs sampled by trace; PII redacted; retention set by class.
+
+385
+00:26:27.779 --> 00:26:28.867
+NFR-4:
+
+386
+00:26:29.147 --> 00:26:34.139
+Metric ingest and trace or log storage within budget; cardinality monitored.
+
+387
+00:26:35.489 --> 00:26:36.193
+4.
+
+388
+00:26:36.473 --> 00:26:37.774
+SLOs (initial).
+
+389
+00:26:39.124 --> 00:26:40.468
+Here is a quick table:
+
+390
+00:26:40.748 --> 00:26:43.713
+Journey, and SLI, and SLO (30d), and Budget.
+
+391
+00:26:43.993 --> 00:26:44.889
+Checkout.
+
+392
+00:26:45.169 --> 00:26:46.727
+SLI: success ratio.
+
+393
+00:26:47.007 --> 00:26:48.265
+SLO (30d):
+
+394
+00:26:48.545 --> 00:26:50.316
+99.9%.
+
+395
+00:26:50.596 --> 00:26:51.407
+Budget:
+
+396
+00:26:51.687 --> 00:26:53.713
+0.1% (L4).
+
+397
+00:26:53.993 --> 00:26:55.060
+Product page.
+
+398
+00:26:55.340 --> 00:26:57.431
+SLI: requests 300 ms.
+
+399
+00:26:57.711 --> 00:26:58.969
+SLO (30d):
+
+400
+00:26:59.249 --> 00:27:00.551
+99%.
+
+401
+00:27:00.831 --> 00:27:01.641
+Budget:
+
+402
+00:27:01.921 --> 00:27:02.903
+1%.
+
+403
+00:27:03.183 --> 00:27:03.951
+Search.
+
+404
+00:27:04.231 --> 00:27:06.279
+SLI: requests 200 ms.
+
+405
+00:27:06.559 --> 00:27:07.817
+SLO (30d):
+
+406
+00:27:08.097 --> 00:27:09.399
+99%.
+
+407
+00:27:09.679 --> 00:27:10.489
+Budget:
+
+408
+00:27:10.769 --> 00:27:11.751
+1%.
+
+409
+00:27:12.031 --> 00:27:13.140
+Payment capture.
+
+410
+00:27:13.420 --> 00:27:14.977
+SLI: success ratio.
+
+411
+00:27:15.257 --> 00:27:16.516
+SLO (30d):
+
+412
+00:27:16.796 --> 00:27:18.908
+99.95%.
+
+413
+00:27:19.188 --> 00:27:19.999
+Budget:
+
+414
+00:27:20.279 --> 00:27:22.220
+0.05%.
+
+415
+00:27:23.570 --> 00:27:24.338
+5.
+
+416
+00:27:24.618 --> 00:27:25.813
+Proposed design.
+
+417
+00:27:26.093 --> 00:27:38.871
+Instrumentation: the OTel Java agent (auto) + Micrometer for custom metrics + manual spans for business steps. traceparent propagation; MDC injects traceid into logs.
+
+418
+00:27:39.151 --> 00:27:40.005
+Metrics:
+
+419
+00:27:40.285 --> 00:27:48.733
+Prometheus or Mimir scrape; SLO-aligned histogram buckets; relabeling drops risky labels; native histograms where supported.
+
+420
+00:27:49.013 --> 00:27:49.887
+Logs:
+
+421
+00:27:50.167 --> 00:27:58.786
+JSON to Loki; trace-based sampling; PII redaction filter (Ch 23); retention 7 to 30 days by class.
+
+422
+00:28:00.136 --> 00:28:01.032
+Traces:
+
+423
+00:28:01.312 --> 00:28:07.264
+OTel Collector with tail sampling (keep errors + slow + 1% baseline) to Tempo.
+
+424
+00:28:07.544 --> 00:28:08.952
+SLOs and alerts:
+
+425
+00:28:09.232 --> 00:28:20.987
+Sloth or Pyrra generate multi-window burn-rate rules from SLO definitions; Alertmanager routes pages (burn) versus tickets (slow burn or warnings); runbooks linked.
+
+426
+00:28:21.267 --> 00:28:28.733
+Dashboards: a standard RED+USE+SLO Grafana template per service, with exemplar links to traces.
+
+427
+00:28:29.013 --> 00:28:29.760
+7.
+
+428
+00:28:30.040 --> 00:28:31.555
+Alternatives considered.
+
+429
+00:28:32.905 --> 00:28:34.249
+Here is a quick table:
+
+430
+00:28:34.529 --> 00:28:37.067
+Option, and Pros, and Cons, and Verdict.
+
+431
+00:28:37.347 --> 00:28:39.267
+Averages + threshold alerts.
+
+432
+00:28:39.547 --> 00:28:40.401
+Pros:
+
+433
+00:28:40.681 --> 00:28:41.449
+Simple.
+
+434
+00:28:41.729 --> 00:28:42.539
+Cons:
+
+435
+00:28:42.819 --> 00:28:46.979
+Hide tails, page on noise (§1.1, L2, L4).
+
+436
+00:28:47.259 --> 00:28:48.070
+Verdict:
+
+437
+00:28:48.350 --> 00:28:49.267
+Rejected.
+
+438
+00:28:49.547 --> 00:28:51.318
+Vendor all-in-one APM.
+
+439
+00:28:51.598 --> 00:28:52.451
+Pros:
+
+440
+00:28:52.731 --> 00:28:53.542
+Turnkey.
+
+441
+00:28:53.822 --> 00:28:54.633
+Cons:
+
+442
+00:28:54.913 --> 00:28:57.174
+Cost, lock-in, cardinality billing.
+
+443
+00:28:57.454 --> 00:28:58.265
+Verdict:
+
+444
+00:28:58.545 --> 00:29:00.763
+Viable; OTel keeps portability.
+
+445
+00:29:01.043 --> 00:29:03.475
+Logs only (no metrics or traces).
+
+446
+00:29:03.755 --> 00:29:04.609
+Pros:
+
+447
+00:29:04.889 --> 00:29:05.827
+One system.
+
+448
+00:29:06.107 --> 00:29:06.918
+Cons:
+
+449
+00:29:07.198 --> 00:29:10.633
+Can't do cheap continuous signals or cross-service latency.
+
+450
+00:29:10.913 --> 00:29:11.723
+Verdict:
+
+451
+00:29:12.003 --> 00:29:12.921
+Rejected.
+
+452
+00:29:13.201 --> 00:29:14.801
+100% tracing.
+
+453
+00:29:15.081 --> 00:29:15.934
+Pros:
+
+454
+00:29:16.214 --> 00:29:17.067
+Complete.
+
+455
+00:29:17.347 --> 00:29:18.158
+Cons:
+
+456
+00:29:18.438 --> 00:29:19.611
+Cost, storage.
+
+457
+00:29:19.891 --> 00:29:20.702
+Verdict:
+
+458
+00:29:20.982 --> 00:29:23.009
+Tail-sample instead (L3).
+
+459
+00:29:23.289 --> 00:29:24.825
+Summaries for quantiles.
+
+460
+00:29:25.105 --> 00:29:25.958
+Pros:
+
+461
+00:29:26.238 --> 00:29:27.241
+Client-side.
+
+462
+00:29:27.521 --> 00:29:28.331
+Cons:
+
+463
+00:29:28.611 --> 00:29:30.531
+Can't aggregate across instances.
+
+464
+00:29:30.811 --> 00:29:31.622
+Verdict:
+
+465
+00:29:31.902 --> 00:29:32.905
+Histograms.
+
+466
+00:29:34.255 --> 00:29:34.937
+8.
+
+467
+00:29:35.217 --> 00:29:36.369
+Failure modes.
+
+468
+00:29:36.649 --> 00:29:39.145
+Exporter down, then alert on missing data.
+
+469
+00:29:39.425 --> 00:29:43.052
+Cardinality explosion, then ingest limits + alerts.
+
+470
+00:29:43.332 --> 00:29:47.129
+Collector overload from tracing, then tail-sample, back-pressure.
+
+471
+00:29:47.409 --> 00:29:51.804
+Alert fatigue, then burn-rate design + post-incident alert review.
+
+472
+00:29:52.084 --> 00:29:52.788
+10.
+
+473
+00:29:53.068 --> 00:29:55.159
+Observability of observability.
+
+474
+00:29:55.439 --> 00:30:06.831
+Meta-metrics: scrape success, ingest rate, series count (cardinality), dropped spans or logs, alert volume and page-to-incident ratio, SLO compliance dashboards.
+
+475
+00:30:08.181 --> 00:30:09.034
+14.
+
+476
+00:30:09.314 --> 00:30:12.813
+Decision (ADR-103 to 107).
+
+477
+00:30:13.093 --> 00:30:16.975
+OTel + Micrometer, one instrumentation for three backends.
+
+478
+00:30:17.255 --> 00:30:21.693
+Percentile metrics with SLO-aligned buckets and controlled cardinality.
+
+479
+00:30:21.973 --> 00:30:25.258
+Correlated structured logs and tail-sampled traces.
+
+480
+00:30:25.538 --> 00:30:29.250
+SLOs with multi-window burn-rate pages, all actionable.
+
+481
+00:30:30.600 --> 00:30:31.560
+Part 5.
+
+482
+00:30:31.840 --> 00:30:33.824
+Hands-On Code, Level Ladder.
+
+483
+00:30:35.074 --> 00:30:36.418
+Here is a quick table:
+
+484
+00:30:36.698 --> 00:30:39.386
+Level, and New requirement that forces the step.
+
+485
+00:30:39.666 --> 00:30:40.498
+L1:
+
+486
+00:30:40.778 --> 00:30:45.557
+We can't follow one failed request across services, and logs are unqueryable.
+
+487
+00:30:45.837 --> 00:30:49.527
+(structured logs, correlation ids, sampling, cardinality).
+
+488
+00:30:49.807 --> 00:30:50.618
+L2:
+
+489
+00:30:50.898 --> 00:30:53.799
+The average says we're fine; users say we're not.
+
+490
+00:30:54.079 --> 00:30:58.709
+(RED metrics + histograms, real Prometheus, quantile accuracy).
+
+491
+00:30:58.989 --> 00:30:59.842
+L3:
+
+492
+00:31:00.122 --> 00:31:03.386
+Metrics say pricing is slow sometimes; where exactly?
+
+493
+00:31:03.666 --> 00:31:06.439
+(distributed tracing, critical path, sampling).
+
+494
+00:31:06.719 --> 00:31:07.594
+L4:
+
+495
+00:31:07.874 --> 00:31:10.583
+The alert paged 40 times and we muted it.
+
+496
+00:31:10.863 --> 00:31:14.255
+(SLOs, error budgets, multi-window burn-rate alerting).
+
+497
+00:31:15.605 --> 00:31:19.723
+All labs run on a 2 vCPU container, Java 21.
+
+498
+00:31:20.003 --> 00:31:25.059
+L2 uses a real Prometheus 2.55 scraping a real service.
+
+499
+00:31:25.339 --> 00:31:30.992
+Outputs are verbatim; lab files are in labs or ch24-observability/.
+
+500
+00:31:32.342 --> 00:31:36.651
+L1, Structured logs, correlation IDs, sampling and cardinality.
+
+501
+00:31:36.931 --> 00:31:37.870
+Requirement:
+
+502
+00:31:38.150 --> 00:31:45.083
+Follow one failed request across five services, and stop logs from being an unqueryable, unbounded cost.
+
+503
+00:31:45.363 --> 00:31:58.441
+The program sends 5,000 requests through gateway, then order, then pricing, then inventory, then payment, emitting a log event per hop (3% fail somewhere), then queries the pile four ways.
+
+504
+00:31:59.791 --> 00:32:02.585
+Here is the Java code, LogsL1.java.
+
+505
+00:32:02.865 --> 00:32:07.196
+It runs to 154 lines; the full listing is in the chapter.
+
+506
+00:32:07.476 --> 00:32:14.857
+LogsL1.java, run with: java LogsL1.java (JDK 17 plus, no dependencies).
+
+507
+00:32:15.137 --> 00:32:17.548
+Structured logging and correlation IDs.
+
+508
+00:32:17.828 --> 00:32:27.855
+Simulate 5,000 requests flowing through 5 services (gateway, then order, then pricing, then. inventory, then payment), each emitting log lines.
+
+509
+00:32:28.135 --> 00:32:30.247
+3 % of requests fail somewhere.
+
+510
+00:32:30.527 --> 00:32:31.295
+Compare:
+
+511
+00:32:34.145 --> 00:32:35.062
+On screen:
+
+512
+00:32:35.342 --> 00:32:42.851
+5,000 requests, then 24,776 log events, 146 ERROR events.
+
+513
+00:32:43.131 --> 00:32:43.750
+A.
+
+514
+00:32:44.030 --> 00:33:01.395
+Querying: which requests failed in inventory, and what was the error? structured JSON: filter level=ERROR AND service=inventory, then 33 events, each with. traceid, userid, sku, error. unstructured: grep 'inventory' grep 'ERROR', then parse free text.
+
+515
+00:33:01.675 --> 00:33:03.126
+One line. looks like:
+
+516
+00:33:03.406 --> 00:33:24.121
+Fri Sep 25 23:19:27 IST 2026 inventory ERROR request failed for user u876 sku. sku-31 - timeout calling payme. then structured logs are queryable by field; text logs force brittle regex and can't. be aggregated reliably.
+
+517
+00:33:24.401 --> 00:33:25.083
+B.
+
+518
+00:33:25.363 --> 00:33:29.737
+Correlation: reconstruct ONE failed request's path across services.
+
+519
+00:33:30.017 --> 00:33:31.531
+The rest is in the chapter.
+
+520
+00:33:34.381 --> 00:33:35.235
+Reading it:
+
+521
+00:33:35.515 --> 00:33:48.101
+Structured versus text: which requests failed in inventory, and why is a single field filter on JSON logs; on free-text it's brittle regex over a positional sentence that can't be aggregated.
+
+522
+00:33:48.381 --> 00:33:54.589
+Correlation: with a traceid, one query returns a failed request's ordered path across services.
+
+523
+00:33:54.869 --> 00:34:02.912
+Without it, those lines are anonymous among ~25,000 events, correlated only by guessing on timestamp and user.
+
+524
+00:34:04.262 --> 00:34:12.283
+Sampling: keeping 1% of INFO traces cut stored volume to 3% while keeping every ERROR (and every error trace whole).
+
+525
+00:34:12.563 --> 00:34:16.105
+Sample by trace, never by line, and never sample errors.
+
+526
+00:34:16.385 --> 00:34:26.774
+Cardinality: a counter labelled by (service, level, userid) would create ~18,530 time series; by (service, level) only 10.
+
+527
+00:34:27.054 --> 00:34:32.174
+High-cardinality identifiers belong in logs and traces, not metric labels.
+
+528
+00:34:33.524 --> 00:34:38.217
+L2, RED metrics and histograms, scraped by a real Prometheus.
+
+529
+00:34:38.497 --> 00:34:39.436
+Requirement:
+
+530
+00:34:39.716 --> 00:34:44.729
+The average latency looks healthy; prove whether users are actually being served fast.
+
+531
+00:34:45.009 --> 00:35:05.447
+A service exposes Prometheus-format metrics on:19701 or metrics (per-route counters, an errors counter, an in-flight gauge, and a latency histogram with explicit buckets), drives ~12 s of load with a heavy tail, and, while it runs, a real Prometheus scrapes it every second.
+
+532
+00:35:05.727 --> 00:35:10.185
+The program then compares histogramquantile against the exact percentiles.
+
+533
+00:35:11.535 --> 00:35:14.458
+Here is the Java code, MetricsL2.java.
+
+534
+00:35:14.738 --> 00:35:19.069
+It runs to 166 lines; the full listing is in the chapter.
+
+535
+00:35:19.349 --> 00:35:27.029
+MetricsL2.java, run with: java -Dsun.net.httpserver.nodelay=true MetricsL2.java.
+
+536
+00:35:27.309 --> 00:35:44.781
+A service that exposes Prometheus-format metrics on:19701 or metrics (counters, gauge, and a latency histogram with. explicit buckets), drives a realistic load with a slow tail, and, while it runs, a REAL Prometheus scrapes it.
+
+537
+00:35:47.631 --> 00:35:48.548
+On screen:
+
+538
+00:35:48.828 --> 00:35:49.447
+A.
+
+539
+00:35:49.727 --> 00:35:54.932
+RED metrics (from counters or gauge on or metrics, scraped by Prometheus).
+
+540
+00:35:55.212 --> 00:35:55.959
+Rate:
+
+541
+00:35:56.239 --> 00:36:00.100
+5,580 requests over ~12 s.
+
+542
+00:36:00.380 --> 00:36:01.233
+Errors:
+
+543
+00:36:01.513 --> 00:36:04.223
+102 (1.83%).
+
+544
+00:36:04.503 --> 00:36:17.516
+Duration: avg 73.4 ms by route /cart=840, /checkout=825, /products=3915.
+
+545
+00:36:17.796 --> 00:37:07.582
+B. histogramquantile versus exact percentile (bucket boundaries decide the error). quantile from histogram exact error. p50 21.2 20.7 +0.5 ms (2%). p90 48.0 44.7 +3.2 ms (7%). p95 86.7 79.7 +7.0 ms (9%). p99 1930.6 1544.7 +385.9 ms (25%). p99.9 2443.1 1793.9 +649.2 ms (36%). then p99 or p99.9 land
+
+546
+00:37:07.862 --> 00:37:14.049
+in the wide 1000 to 2500 ms bucket (and beyond +Inf), so the estimate.
+
+547
+00:37:14.329 --> 00:37:15.843
+The rest is in the chapter.
+
+548
+00:37:18.693 --> 00:37:25.243
+Prometheus scraped the same endpoint and computed the RED numbers and quantiles from its own stored series:
+
+549
+00:37:26.593 --> 00:38:07.120
+On screen: = Prometheus instant queries (its own scraped view) =. sum(httprequeststotal) 1615.0. sum(rate(httprequeststotal30s)) 31.654. histogramquantile(0.95, rate(httprequestdurationmsbucket1m)) 381.25. histogramquantile(0.99, rate(httprequestdurationmsbucket1m)) 2065.968. sum(rate(httprequesterrorstotal1m)) / sum(rate(httprequeststotal1m)) 0.018.
+
+550
+00:38:09.970 --> 00:38:10.823
+Reading it:
+
+551
+00:38:11.103 --> 00:38:17.439
+RED comes straight from the counters and histogram: rate, error ratio, and duration, per route.
+
+552
+00:38:17.719 --> 00:38:36.215
+Histogram quantiles are approximate at the tail. p50 and p95 were within a few percent of exact; p99 was +25% and p99.9 +36%, because the tail lands in the wide 1000 to 2500 ms bucket.
+
+553
+00:38:36.495 --> 00:38:42.341
+Put buckets where your SLO threshold is; you can't recover accuracy the buckets never captured.
+
+554
+00:38:42.621 --> 00:38:52.583
+The average lies: a 74 ms mean would pass a 200 ms SLO while p99 was 1,545 ms.
+
+555
+00:38:52.863 --> 00:38:54.079
+Chart percentiles.
+
+556
+00:38:55.429 --> 00:39:11.813
+Prometheus's own view matches: it reports the same request count and error ratio, and its histogramquantile(0.99,...) (~2,066 ms in that run) shows the same tail-bucket coarseness the from-scratch check quantifies.
+
+557
+00:39:12.093 --> 00:39:18.515
+The exemplar comment on or metrics carries the trace id of a slow request to open in L3.
+
+558
+00:39:19.865 --> 00:39:24.771
+L3, Distributed tracing: critical path, p99 driver, sampling.
+
+559
+00:39:25.051 --> 00:39:25.990
+Requirement:
+
+560
+00:39:26.270 --> 00:39:28.595
+Metrics say pricing is slow sometimes.
+
+561
+00:39:28.875 --> 00:39:32.246
+Find exactly where the time goes, and which service to fix.
+
+562
+00:39:32.526 --> 00:39:48.377
+The program builds spans for the product-page fan-out (Ch 19) with parent or child context, finds the critical path of a slow trace, aggregates 10,000 traces to name the p99 driver, and compares head versus tail sampling.
+
+563
+00:39:49.727 --> 00:39:52.607
+Here is the Java code, TracingL3.java.
+
+564
+00:39:52.887 --> 00:39:57.281
+It runs to 173 lines; the full listing is in the chapter.
+
+565
+00:39:57.561 --> 00:40:05.113
+TracingL3.java, run with: java TracingL3.java (JDK 17 plus, no dependencies).
+
+566
+00:40:05.393 --> 00:40:07.207
+Distributed tracing from scratch.
+
+567
+00:40:07.487 --> 00:40:13.844
+Build spans with parent or child context across the product-page fan-out (Ch 19). then:
+
+568
+00:40:14.124 --> 00:40:19.841
+A. reconstruct the span tree for one slow request and find the CRITICAL PATH (what to fix).
+
+569
+00:40:20.121 --> 00:40:21.999
+B. aggregate 10,000.
+
+570
+00:40:24.849 --> 00:40:25.766
+On screen:
+
+571
+00:40:26.046 --> 00:40:26.665
+A.
+
+572
+00:40:26.945 --> 00:40:30.785
+One slow trace (209.3 ms end to end).
+
+573
+00:40:31.065 --> 00:40:56.601
+The span tree: bff GET or product 209.3 ms. catalog getProduct 9.3 ms. catalog-db SELECT product 7.1 ms. pricing getPrice 208.1 ms. fx-rates convert 206.6 ms. inventory getStock 19.6 ms. critical path: bff 209ms, then pricing 208ms,
+
+574
+00:40:56.881 --> 00:41:09.041
+then fx-rates 206ms. then optimising anything OFF the critical path (for example, catalog) does not shrink the. request; fix the fx-rates call under pricing.
+
+575
+00:41:09.321 --> 00:41:10.003
+B.
+
+576
+00:41:10.283 --> 00:41:25.771
+10,000 traces: which service drives the p99 of the product page? product page: p50 43.7 ms, p95 202.7 ms, p99 261.8 ms.
+
+577
+00:41:26.051 --> 00:41:27.566
+The rest is in the chapter.
+
+578
+00:41:30.416 --> 00:41:31.269
+Reading it:
+
+579
+00:41:31.549 --> 00:41:37.651
+Critical path is the lever: the slow trace's path is bff, then pricing, then fx-rates.
+
+580
+00:41:37.931 --> 00:41:44.949
+Optimizing catalog or inventory (off the path) changes nothing; only the nested fx-rates call does.
+
+581
+00:41:45.229 --> 00:42:00.312
+Aggregate across 10,000 traces localizes p99: pricing or fx-rates is on the critical path ~68% of the time and carries the whole tail (the 30% of calls hitting the slow currency service).
+
+582
+00:42:00.592 --> 00:42:03.685
+Per-service metrics can't see this; the trace tree can.
+
+583
+00:42:05.035 --> 00:42:12.673
+Sampling: head-based at 1% kept only 6 of 554 slow traces, cheap but blind to the tail.
+
+584
+00:42:12.953 --> 00:42:21.017
+Tail-based kept all 554 (plus a 1% baseline) at the cost of buffering every trace until it completes.
+
+585
+00:42:21.297 --> 00:42:24.134
+Keep all error or slow traces however you sample.
+
+586
+00:42:25.484 --> 00:42:28.599
+L4, SLOs, error budgets and burn-rate alerting.
+
+587
+00:42:28.879 --> 00:42:29.817
+Requirement:
+
+588
+00:42:30.097 --> 00:42:33.297
+The old alert paged 40 times a month and got muted.
+
+589
+00:42:33.577 --> 00:42:36.372
+Page only when the SLO is genuinely threatened.
+
+590
+00:42:36.652 --> 00:42:56.236
+The program generates 30 days of minute-by-minute checkout traffic (diurnal load, a tiny baseline error rate, and three injected incidents), computes the SLO and error budget, then runs three alerting strategies over the identical stream and counts pages, false pages, missed incidents and time-to-detect.
+
+591
+00:42:57.586 --> 00:43:00.423
+Here is the Java code, SloL4.java.
+
+592
+00:43:00.703 --> 00:43:04.906
+It runs to 158 lines; the full listing is in the chapter.
+
+593
+00:43:05.186 --> 00:43:12.354
+SloL4.java, run with: java SloL4.java (JDK 17 plus, no dependencies).
+
+594
+00:43:12.634 --> 00:43:14.959
+SLIs, SLOs, error budgets and alerting.
+
+595
+00:43:15.239 --> 00:43:23.666
+A 30-day minute-by-minute stream of good or bad requests for checkout, with a. steady low error rate plus three injected incidents.
+
+596
+00:43:23.946 --> 00:43:27.722
+We compute the SLO or error budget, then compare three alerting.
+
+597
+00:43:30.572 --> 00:43:31.489
+On screen:
+
+598
+00:43:31.769 --> 00:43:32.985
+Checkout SLO:
+
+599
+00:43:33.265 --> 00:43:36.487
+99.9% success over 30 days.
+
+600
+00:43:36.767 --> 00:43:48.031
+Requests 9,661,153, failures 13,517, error. rate 0.1399%.
+
+601
+00:43:48.311 --> 00:43:49.313
+Error budget:
+
+602
+00:43:49.593 --> 00:44:03.503
+0.1000% = 9,661 failed requests allowed in 30 days; used 13,517 (140% of. budget).
+
+603
+00:44:03.783 --> 00:44:16.391
+Comparing alert strategies on the same 30 days (an alert 'fires' when its condition. holds; we page on a rising edge): strategy pages false missed median detect. naive threshold:
+
+604
+00:44:16.671 --> 00:44:20.809
+5-min err 1% 5 1 0 1 min. single window:
+
+605
+00:44:21.089 --> 00:44:36.748
+1-hour burn 1 20 17 0 1 min. multi-window multi-burn (SRE page) 4 0 0 2 min. incidents to catch: day 8 (20 min, 90%, sharp), day 15 (6 h, 4%, slow burn), day.
+
+606
+00:44:37.028 --> 00:44:38.543
+The rest is in the chapter.
+
+607
+00:44:41.393 --> 00:44:42.246
+Reading it:
+
+608
+00:44:42.526 --> 00:44:44.681
+Error budget makes the month legible:
+
+609
+00:44:44.961 --> 00:44:59.211
+99.9% allows 9,661 failed requests; one sharp 20-minute outage burned 108% of the whole month's budget on its own, while the 3-minute blip burned 1%.
+
+610
+00:44:59.491 --> 00:45:02.414
+The strategies diverge sharply on the same data:
+
+611
+00:45:02.694 --> 00:45:12.806
+Naive threshold (5-min error 1%) pages don't map to budget (1% is a crisis at peak, noise off-peak), and it raised a false page.
+
+612
+00:45:14.156 --> 00:45:24.801
+Single long window (1-hour burn 1) flapped into 17 false pages, the condition dips and re-crosses during an incident, so one incident becomes many pages.
+
+613
+00:45:25.081 --> 00:45:26.831
+This is how alerts get muted.
+
+614
+00:45:27.111 --> 00:45:41.212
+Multi-window multi-burn (Google SRE) paged 4 times, 0 false, ~2-min detect: the short window confirms the incident is still live before paging, and every page maps to real budget burn.
+
+615
+00:45:41.492 --> 00:45:51.199
+The lesson is the whole point of SLOs: alert on how fast you're burning the budget, over multiple windows, so a page always means a human must act now.
+
+616
+00:45:52.549 --> 00:45:53.189
+Tip:
+
+617
+00:45:53.469 --> 00:46:05.202
+Spring or Micrometer shapes (VERIFY: libraries not downloadable here). // Micrometer: a timer with SLO-aligned histogram buckets, exported to Prometheus.
+
+618
+00:46:05.482 --> 00:46:28.778
+Timer.builder(http.server.requests).tag(route, route). .serviceLevelObjectives(Duration.ofMillis(100), Duration.ofMillis(200), Duration.ofMillis(300)). .publishPercentileHistogram().register(registry);. // OpenTelemetry manual span with context propagation (auto-agent covers HTTP or DB).
+
+619
+00:46:30.128 --> 00:46:51.141
+Span span = tracer.spanBuilder(pricing.getPrice).startSpan();. try (Scope s = span.makeCurrent()) span.setAttribute(sku, sku); return pricing.price(sku);. finally span.end();. // Logback JSON with traceid from MDC (populated by the OTel or Micrometer context).
+
+620
+00:46:52.491 --> 00:47:02.667
+// logback-spring.xml: encoder class=net.logstash.logback.encoder.LogstashEncoder/, then traceid:...level:...... - alert:
+
+621
+00:47:02.947 --> 00:47:05.657
+CheckoutErrorBudgetFastBurn. expr:
+
+622
+00:47:05.937 --> 00:47:18.929
+(slo:checkouterror:ratiorate1h (14.4 0.001). and slo:checkouterror:ratiorate5m (14.4 0.001)). for:
+
+623
+00:47:19.209 --> 00:47:20.083
+2m.
+
+624
+00:47:21.433 --> 00:47:28.985
+labels: severity: page. annotations: runbook: https://runbooks or checkout-error-budget.
+
+625
+00:47:30.335 --> 00:47:31.274
+Part 6.
+
+626
+00:47:31.554 --> 00:47:32.834
+Production Concerns.
+
+627
+00:47:34.084 --> 00:47:35.236
+Failure modes.
+
+628
+00:47:35.516 --> 00:47:36.860
+Here is a quick table:
+
+629
+00:47:37.140 --> 00:47:40.127
+Failure, and Symptom, and Cause, and Mitigation.
+
+630
+00:47:40.407 --> 00:47:41.559
+Blind to the tail.
+
+631
+00:47:41.839 --> 00:47:42.649
+Symptom:
+
+632
+00:47:42.929 --> 00:47:44.615
+All green while users suffer.
+
+633
+00:47:44.895 --> 00:47:45.663
+Cause:
+
+634
+00:47:45.943 --> 00:47:49.079
+Charting averages (§1.1, L2).
+
+635
+00:47:49.359 --> 00:47:50.361
+Mitigation:
+
+636
+00:47:50.641 --> 00:47:54.225
+Percentile metrics, histograms with SLO-aligned buckets.
+
+637
+00:47:54.505 --> 00:47:55.572
+Can't correlate.
+
+638
+00:47:55.852 --> 00:47:56.663
+Symptom:
+
+639
+00:47:56.943 --> 00:47:59.289
+Hours lost reconstructing one request.
+
+640
+00:47:59.569 --> 00:48:00.337
+Cause:
+
+641
+00:48:00.617 --> 00:48:02.900
+No trace id on logs (L1).
+
+642
+00:48:03.180 --> 00:48:04.183
+Mitigation:
+
+643
+00:48:04.463 --> 00:48:07.663
+Propagate traceparent, log traceid on every line.
+
+644
+00:48:07.943 --> 00:48:09.031
+Alert fatigue.
+
+645
+00:48:09.311 --> 00:48:10.121
+Symptom:
+
+646
+00:48:10.401 --> 00:48:11.980
+On-call mutes the pager.
+
+647
+00:48:12.260 --> 00:48:13.028
+Cause:
+
+648
+00:48:13.308 --> 00:48:15.740
+Threshold or flapping alerts (L4:
+
+649
+00:48:16.020 --> 00:48:17.620
+17 false pages).
+
+650
+00:48:17.900 --> 00:48:18.903
+Mitigation:
+
+651
+00:48:19.183 --> 00:48:22.361
+Multi-window burn-rate, actionable pages only.
+
+652
+00:48:22.641 --> 00:48:23.729
+Missed slow burn.
+
+653
+00:48:24.009 --> 00:48:24.820
+Symptom:
+
+654
+00:48:25.100 --> 00:48:27.361
+SLO blown before anyone notices.
+
+655
+00:48:27.641 --> 00:48:28.409
+Cause:
+
+656
+00:48:28.689 --> 00:48:30.737
+No burn-rate alert on long windows.
+
+657
+00:48:31.017 --> 00:48:32.020
+Mitigation:
+
+658
+00:48:32.300 --> 00:48:34.945
+Slow-burn tier (6 times over 6h).
+
+659
+00:48:35.225 --> 00:48:36.719
+Cardinality explosion.
+
+660
+00:48:36.999 --> 00:48:37.809
+Symptom:
+
+661
+00:48:38.089 --> 00:48:40.201
+Prometheus OOM, huge bill.
+
+662
+00:48:40.481 --> 00:48:41.249
+Cause:
+
+663
+00:48:41.529 --> 00:48:43.748
+Unbounded metric labels (L1:
+
+664
+00:48:44.028 --> 00:48:46.417
+18,530 series).
+
+665
+00:48:46.697 --> 00:48:47.700
+Mitigation:
+
+666
+00:48:47.980 --> 00:48:51.223
+Bound label values; drop risky labels at ingest.
+
+667
+00:48:52.573 --> 00:48:53.853
+Wrong service blamed.
+
+668
+00:48:54.133 --> 00:48:54.943
+Symptom:
+
+669
+00:48:55.223 --> 00:48:56.375
+Fix doesn't help.
+
+670
+00:48:56.655 --> 00:48:57.423
+Cause:
+
+671
+00:48:57.703 --> 00:49:00.306
+Optimizing off the critical path (L3).
+
+672
+00:49:00.586 --> 00:49:01.589
+Mitigation:
+
+673
+00:49:01.869 --> 00:49:03.618
+Trace critical-path analysis.
+
+674
+00:49:03.898 --> 00:49:05.242
+Lost slow traces.
+
+675
+00:49:05.522 --> 00:49:06.333
+Symptom:
+
+676
+00:49:06.613 --> 00:49:07.935
+Can't debug the tail.
+
+677
+00:49:08.215 --> 00:49:08.983
+Cause:
+
+678
+00:49:09.263 --> 00:49:11.162
+Head sampling only (L3:
+
+679
+00:49:11.442 --> 00:49:13.490
+6 or 554).
+
+680
+00:49:13.770 --> 00:49:14.773
+Mitigation:
+
+681
+00:49:15.053 --> 00:49:17.037
+Tail sampling; keep all errors.
+
+682
+00:49:17.317 --> 00:49:19.109
+Exporter down, looks healthy.
+
+683
+00:49:19.389 --> 00:49:20.199
+Symptom:
+
+684
+00:49:20.479 --> 00:49:21.482
+Silent gap.
+
+685
+00:49:21.762 --> 00:49:22.530
+Cause:
+
+686
+00:49:22.810 --> 00:49:24.474
+No absence of data alert.
+
+687
+00:49:24.754 --> 00:49:25.757
+Mitigation:
+
+688
+00:49:26.037 --> 00:49:28.938
+Alert on up==0 or stale series.
+
+689
+00:49:29.218 --> 00:49:30.498
+PII in logs.
+
+690
+00:49:30.778 --> 00:49:31.589
+Symptom:
+
+691
+00:49:31.869 --> 00:49:33.063
+Compliance breach.
+
+692
+00:49:33.343 --> 00:49:34.111
+Cause:
+
+693
+00:49:34.391 --> 00:49:36.055
+Logging raw request bodies.
+
+694
+00:49:36.335 --> 00:49:37.338
+Mitigation:
+
+695
+00:49:37.618 --> 00:49:40.541
+Redaction filter (Ch 23), retention.
+
+696
+00:49:40.821 --> 00:49:42.463
+Clock skew across services.
+
+697
+00:49:42.743 --> 00:49:43.554
+Symptom:
+
+698
+00:49:43.834 --> 00:49:46.458
+Negative span durations, wrong ordering.
+
+699
+00:49:46.738 --> 00:49:47.506
+Cause:
+
+700
+00:49:47.786 --> 00:49:49.194
+Unsynchronized clocks.
+
+701
+00:49:49.474 --> 00:49:50.477
+Mitigation:
+
+702
+00:49:50.757 --> 00:49:55.429
+NTP; rely on span parent or child, not wall-clock (Ch 12).
+
+703
+00:49:56.779 --> 00:49:59.360
+Observability of the observability stack.
+
+704
+00:49:59.640 --> 00:50:11.779
+Meta-metrics: scrape success (up), ingestion rate, active series count (cardinality trend), dropped spans or logs, Collector queue depth, alert volume and the page-to-real-incident ratio.
+
+705
+00:50:12.059 --> 00:50:13.829
+SLOs on the pipeline itself:
+
+706
+00:50:14.109 --> 00:50:19.123
+95% of traces for errors are retained, metrics freshness 30 s.
+
+707
+00:50:19.403 --> 00:50:26.080
+Cost dashboards: series per team, log GB per service, trace storage, with owners, so cost has an owner.
+
+708
+00:50:27.430 --> 00:50:28.369
+Security.
+
+709
+00:50:28.649 --> 00:50:30.718
+Telemetry carries sensitive data.
+
+710
+00:50:30.998 --> 00:50:42.433
+Redact PII or secrets from logs (Ch 23), don't put customer identifiers in metric labels, and scrub span attributes (no tokens, no full addresses).
+
+711
+00:50:42.713 --> 00:50:52.526
+Access control on dashboards and log or trace search: production logs can contain personal data; scope by team and audit access (Ch 36).
+
+712
+00:50:52.806 --> 00:50:59.185
+Integrity: protect the audit-relevant logs (append-only or WORM) separately from debug telemetry.
+
+713
+00:50:59.465 --> 00:51:09.043
+The pipeline is an attack surface: an open or metrics or trace endpoint leaks internals; require auth or network policy on scrape and ingest.
+
+714
+00:51:10.393 --> 00:51:12.057
+Performance and tuning knobs.
+
+715
+00:51:12.337 --> 00:51:13.681
+Here is a quick table:
+
+716
+00:51:13.961 --> 00:51:15.177
+Knob, and Guidance.
+
+717
+00:51:15.457 --> 00:51:16.503
+Scrape interval:
+
+718
+00:51:16.783 --> 00:51:22.841
+15 to 30 s typical; 1 s only for short-lived debugging (L2 used 1 s).
+
+719
+00:51:23.121 --> 00:51:24.444
+Histogram buckets:
+
+720
+00:51:24.724 --> 00:51:30.356
+Cluster around SLO thresholds; use native or exponential histograms where available.
+
+721
+00:51:30.636 --> 00:51:31.980
+Metric cardinality:
+
+722
+00:51:32.260 --> 00:51:36.143
+Hard limits per metric; relabel-drop high-cardinality labels.
+
+723
+00:51:36.423 --> 00:51:37.788
+Log level and sampling:
+
+724
+00:51:38.068 --> 00:51:43.124
+Errors always; sample INFO by trace (L1); dynamic level per service.
+
+725
+00:51:43.404 --> 00:51:44.492
+Trace sampling:
+
+726
+00:51:44.772 --> 00:51:49.828
+Head baseline (1 to 10%) + tail keep-all-errors; cap Collector memory.
+
+727
+00:51:50.108 --> 00:51:51.047
+Retention:
+
+728
+00:51:51.327 --> 00:51:53.972
+Metrics: months (downsampled); logs:
+
+729
+00:51:54.252 --> 00:51:56.748
+7 to 30 days; traces: days.
+
+730
+00:51:57.028 --> 00:51:58.500
+Cardinality of traces:
+
+731
+00:51:58.780 --> 00:52:01.980
+Limit span attributes; don't attach large payloads.
+
+732
+00:52:03.330 --> 00:52:04.055
+Cost.
+
+733
+00:52:04.335 --> 00:52:12.101
+Logs are usually the biggest bill, then traces, then metrics, but metrics blow up fastest via cardinality (L1).
+
+734
+00:52:12.381 --> 00:52:18.077
+Control each: sample logs by trace, tail-sample traces, and bound metric labels.
+
+735
+00:52:18.357 --> 00:52:25.567
+Downsample and tier: raw metrics for weeks, downsampled for a year; hot log storage for days, archived after.
+
+736
+00:52:25.847 --> 00:52:37.858
+Observability commonly runs 5 to 15% of infra spend; the cost of not having it is the §1.1 incident measured in lost conversion and long MTTR.
+
+737
+00:52:39.208 --> 00:52:40.147
+Part 7.
+
+738
+00:52:40.427 --> 00:52:42.133
+Anti-Patterns and Pitfalls.
+
+739
+00:52:43.383 --> 00:52:44.023
+1.
+
+740
+00:52:44.303 --> 00:52:46.394
+Charting and alerting on averages.
+
+741
+00:52:47.744 --> 00:53:01.099
+Here is the PROMQL code. before: the mean hides the tail (L2: avg 74 ms, p99 1,545 ms). after: percentiles from the histogram.
+
+742
+00:53:03.949 --> 00:53:04.653
+2.
+
+743
+00:53:04.933 --> 00:53:07.557
+Logs with no correlation id (L1).
+
+744
+00:53:07.837 --> 00:53:13.149
+Generate a trace id at the edge, propagate it, and log it on every line (MDC).
+
+745
+00:53:13.429 --> 00:53:16.010
+Without it, cross-service debugging is guesswork.
+
+746
+00:53:16.290 --> 00:53:17.037
+3.
+
+747
+00:53:17.317 --> 00:53:25.359
+Free-text logs. log.info(processed order + id + for + user) can't be filtered or aggregated by field.
+
+748
+00:53:25.639 --> 00:53:27.517
+Log structured key or values.
+
+749
+00:53:27.797 --> 00:53:28.501
+4.
+
+750
+00:53:28.781 --> 00:53:31.341
+High-cardinality metric labels (L1:
+
+751
+00:53:31.621 --> 00:53:34.010
+18,530 series).
+
+752
+00:53:35.360 --> 00:53:46.795
+Here is the Java code. before: userid or orderid or traceid as a label, one series each. after: bounded labels only; identifiers go to logs or traces.
+
+753
+00:53:49.645 --> 00:53:50.413
+5.
+
+754
+00:53:50.693 --> 00:53:54.661
+Threshold alerts on raw rates (L4: false pages, flapping).
+
+755
+00:53:54.941 --> 00:53:58.162
+Alert on multi-window burn rate against an SLO.
+
+756
+00:53:58.442 --> 00:53:59.189
+6.
+
+757
+00:53:59.469 --> 00:54:01.559
+Paging on causes, not symptoms.
+
+758
+00:54:01.839 --> 00:54:06.042
+CPU 80% pages at 3am for a healthy batch job.
+
+759
+00:54:06.322 --> 00:54:10.994
+Page on user-facing SLO burn; make CPU a dashboard and a ticket.
+
+760
+00:54:11.274 --> 00:54:12.021
+7.
+
+761
+00:54:12.301 --> 00:54:17.207
+Buckets that miss the SLO (L2: +25% at p99).
+
+762
+00:54:17.487 --> 00:54:22.053
+Put histogram buckets around your target latency, or use native histograms.
+
+763
+00:54:22.333 --> 00:54:23.015
+8.
+
+764
+00:54:23.295 --> 00:54:26.815
+Head sampling only, then trying to debug the tail (L3:
+
+765
+00:54:27.095 --> 00:54:30.146
+6 or 554 slow traces kept).
+
+766
+00:54:30.426 --> 00:54:33.029
+Tail-sample and always keep error traces.
+
+767
+00:54:34.379 --> 00:54:35.125
+9.
+
+768
+00:54:35.405 --> 00:54:38.008
+Optimizing off the critical path (L3).
+
+769
+00:54:38.288 --> 00:54:42.960
+Trace first; speeding up a service that isn't on the critical path is wasted work.
+
+770
+00:54:43.240 --> 00:54:43.944
+10.
+
+771
+00:54:44.224 --> 00:54:46.464
+Alerts with no runbook and no action.
+
+772
+00:54:46.744 --> 00:54:51.437
+If a page doesn't tell the on-call what to do, it trains them to ignore pages.
+
+773
+00:54:51.717 --> 00:54:54.277
+Every alert links a runbook or is deleted.
+
+774
+00:54:54.557 --> 00:54:55.389
+11.
+
+775
+00:54:55.669 --> 00:54:57.205
+Dashboards nobody reads.
+
+776
+00:54:57.485 --> 00:55:00.152
+A 60-panel wall is not observability.
+
+777
+00:55:00.432 --> 00:55:03.803
+Start each dashboard with what's burning and where, then drill down.
+
+778
+00:55:05.153 --> 00:55:05.942
+12.
+
+779
+00:55:06.222 --> 00:55:08.803
+Not propagating context through async code.
+
+780
+00:55:09.083 --> 00:55:16.635
+Spans and trace ids vanish across thread pools and message queues unless you propagate context (Ch 19:
+
+781
+00:55:16.915 --> 00:55:21.886
+ScopedValue, context-wrapping executors; OTel context in Kafka headers).
+
+782
+00:55:23.236 --> 00:55:24.111
+Part 8.
+
+783
+00:55:24.391 --> 00:55:25.735
+Interview Q and A.
+
+784
+00:55:26.985 --> 00:55:27.817
+Beginner.
+
+785
+00:55:28.097 --> 00:55:29.121
+Question 1.
+
+786
+00:55:29.401 --> 00:55:32.003
+Metrics, logs and traces, what's each for?
+
+787
+00:55:32.283 --> 00:55:33.649
+Thirty-second answer:
+
+788
+00:55:33.929 --> 00:55:43.379
+Metrics are cheap numeric time series (rates, gauges, latency histograms) for is it broken and how much, and drive dashboards and alerts.
+
+789
+00:55:43.659 --> 00:55:47.286
+Logs are detailed structured events for what exactly happened.
+
+790
+00:55:47.566 --> 00:55:52.345
+Traces follow one request across services for where did the time or error go.
+
+791
+00:55:52.625 --> 00:55:56.401
+You need all three, sharing a trace id so you can pivot between them.
+
+792
+00:55:57.751 --> 00:55:58.753
+Question 2.
+
+793
+00:55:59.033 --> 00:56:01.209
+Why percentiles instead of averages?
+
+794
+00:56:01.489 --> 00:56:02.855
+Thirty-second answer:
+
+795
+00:56:03.135 --> 00:56:04.607
+Averages hide the tail.
+
+796
+00:56:04.887 --> 00:56:20.908
+If most requests are fast but 1% take seconds, the average looks fine while some users have a terrible experience, and those are often the ones who abandon. p99 or p99.9 show what the worst-served users actually get.
+
+797
+00:56:21.188 --> 00:56:28.420
+L2: a 74 ms average alongside a 1,545 ms p99.
+
+798
+00:56:29.770 --> 00:56:30.815
+Question 3.
+
+799
+00:56:31.095 --> 00:56:34.253
+What is a correlation or trace id and why does it matter?
+
+800
+00:56:34.533 --> 00:56:35.898
+Thirty-second answer:
+
+801
+00:56:36.178 --> 00:56:45.671
+A unique id generated when a request enters the system and propagated to every service it touches, logged on every line and attached to every span.
+
+802
+00:56:45.951 --> 00:56:51.221
+It lets you retrieve everything about one request across all services with a single query.
+
+803
+00:56:51.501 --> 00:56:54.231
+Without it, you can't reconstruct a request's path.
+
+804
+00:56:55.581 --> 00:56:56.648
+Question 4.
+
+805
+00:56:56.928 --> 00:56:58.400
+What are RED and USE?
+
+806
+00:56:58.680 --> 00:57:00.045
+Thirty-second answer:
+
+807
+00:57:00.325 --> 00:57:01.904
+RED for services:
+
+808
+00:57:02.184 --> 00:57:05.427
+Rate, Errors, Duration, the health of request handling.
+
+809
+00:57:05.707 --> 00:57:06.987
+USE for resources:
+
+810
+00:57:07.267 --> 00:57:11.853
+Utilization, Saturation, Errors, for CPU, memory, pools, disks.
+
+811
+00:57:12.133 --> 00:57:17.211
+RED tells you the service is unhealthy; USE tells you which resource is the cause.
+
+812
+00:57:17.491 --> 00:57:24.189
+Google's four golden signals are latency, traffic, errors, saturation (RED + saturation).
+
+813
+00:57:25.539 --> 00:57:26.542
+Intermediate.
+
+814
+00:57:26.822 --> 00:57:27.931
+Question 5.
+
+815
+00:57:28.211 --> 00:57:32.585
+How does a Prometheus histogram work, and why are tail quantiles approximate?
+
+816
+00:57:32.865 --> 00:57:34.230
+Thirty-second answer:
+
+817
+00:57:34.510 --> 00:57:47.630
+A histogram counts observations into cumulative buckets (le), plus sum and count. histogramquantile(q,...) finds the bucket containing the q-th observation and interpolates linearly within it.
+
+818
+00:57:47.910 --> 00:57:53.862
+Accuracy depends on bucket width: where buckets are wide (usually the tail), the estimate is coarse.
+
+819
+00:57:55.212 --> 00:57:56.321
+Question 6.
+
+820
+00:57:56.601 --> 00:57:59.481
+How do you keep logs useful and affordable at scale?
+
+821
+00:57:59.761 --> 00:58:01.127
+Thirty-second answer:
+
+822
+00:58:01.407 --> 00:58:16.105
+Structure them (JSON or logfmt) so they're queryable by field; put a trace id on every line; sample by trace (keep a request's lines together) not by line; keep all errors; redact PII; and set retention by class.
+
+823
+00:58:16.385 --> 00:58:22.231
+L1: sampling 1% of INFO traces cut volume to 3% while keeping every error.
+
+824
+00:58:23.581 --> 00:58:24.669
+Question 7.
+
+825
+00:58:24.949 --> 00:58:27.594
+What is cardinality and why is it dangerous?
+
+826
+00:58:27.874 --> 00:58:29.239
+Thirty-second answer:
+
+827
+00:58:29.519 --> 00:58:35.706
+Cardinality is the number of distinct label-value combinations, and each is a separate time series.
+
+828
+00:58:35.986 --> 00:58:44.733
+Unbounded labels (user id, order id, URL) create millions of series, which OOMs the metrics store and inflates cost.
+
+829
+00:58:45.013 --> 00:58:45.845
+L1:
+
+830
+00:58:46.125 --> 00:58:53.207
+(service, level, userid), then ~18,530 series versus 10 for (service, level).
+
+831
+00:58:53.487 --> 00:58:57.327
+Keep identifiers in logs and traces, not metric labels.
+
+832
+00:58:58.677 --> 00:58:59.701
+Question 8.
+
+833
+00:58:59.981 --> 00:59:03.117
+What is an SLI, SLO, SLA and error budget?
+
+834
+00:59:03.397 --> 00:59:04.763
+Thirty-second answer:
+
+835
+00:59:05.043 --> 00:59:09.907
+SLI is the measured ratio of good events (for example, checkout success).
+
+836
+00:59:10.187 --> 00:59:14.325
+SLO is the target (99.9% over 30 days).
+
+837
+00:59:14.605 --> 00:59:18.595
+SLA is a contractual SLO with penalties, usually looser.
+
+838
+00:59:18.875 --> 00:59:22.331
+The error budget is 1 minus SLO, the allowed failure.
+
+839
+00:59:22.611 --> 00:59:28.669
+It's the shared currency: within budget you ship features; burning it fast, you stop and stabilize.
+
+840
+00:59:30.019 --> 00:59:31.086
+Question 9.
+
+841
+00:59:31.366 --> 00:59:33.670
+Head versus tail sampling for traces?
+
+842
+00:59:33.950 --> 00:59:35.315
+Thirty-second answer:
+
+843
+00:59:35.595 --> 00:59:46.027
+Head sampling decides at the start (on the trace id, a fixed probability), cheap, no buffering, and the decision propagates, but it drops most slow and error traces.
+
+844
+00:59:46.307 --> 00:59:57.379
+Tail sampling decides after the trace completes, so it can keep all errors and slow traces plus a baseline, at the cost of buffering every trace in the Collector until it finishes.
+
+845
+00:59:58.729 --> 00:59:59.497
+Senior.
+
+846
+00:59:59.777 --> 01:00:00.823
+Question 10.
+
+847
+01:00:01.103 --> 01:00:07.161
+Design multi-window multi-burn-rate alerting for a 99.9% checkout SLO.
+
+848
+01:00:07.441 --> 01:00:08.807
+Thirty-second answer:
+
+849
+01:00:09.087 --> 01:00:12.969
+Burn rate = (error ratio in a window) / error budget.
+
+850
+01:00:13.249 --> 01:00:15.788
+Page when a fast and a slow signal agree:
+
+851
+01:00:17.138 --> 01:00:18.269
+Question 11.
+
+852
+01:00:18.549 --> 01:00:22.197
+How do you use tracing to find why p99 latency is high?
+
+853
+01:00:22.477 --> 01:00:23.842
+Thirty-second answer:
+
+854
+01:00:24.122 --> 01:00:30.159
+Take slow traces and compute the critical path, the chain of spans that determines end-to-end time.
+
+855
+01:00:30.439 --> 01:00:32.103
+Optimize only what's on it.
+
+856
+01:00:32.383 --> 01:00:39.487
+Then aggregate many slow traces to see which service or operation is on the critical path most often at the tail.
+
+857
+01:00:39.767 --> 01:00:44.119
+That names the p99 driver, which per-service metrics can't reveal.
+
+858
+01:00:45.469 --> 01:00:46.557
+Question 12.
+
+859
+01:00:46.837 --> 01:00:50.144
+How do you choose SLIs and SLOs for a new service?
+
+860
+01:00:50.424 --> 01:00:51.789
+Thirty-second answer:
+
+861
+01:00:52.069 --> 01:01:03.973
+Pick SLIs the user actually experiences, success ratio and latency of key journeys (checkout success, product-page 300 ms), not internal proxies like CPU.
+
+862
+01:01:04.253 --> 01:01:10.675
+Set SLOs from what keeps users happy and the business healthy, with headroom to ship (not 100%).
+
+863
+01:01:10.955 --> 01:01:15.883
+Define good precisely (which status codes, which latency threshold, measured where).
+
+864
+01:01:17.233 --> 01:01:18.513
+Question 13.
+
+865
+01:01:18.793 --> 01:01:23.123
+How do you propagate trace context across services and async boundaries?
+
+866
+01:01:23.403 --> 01:01:24.769
+Thirty-second answer:
+
+867
+01:01:25.049 --> 01:01:39.449
+Use W3C Trace Context: the traceparent header carries the trace id, parent span id and sampled flag over HTTP or gRPC, and trace headers ride in message metadata (Kafka headers).
+
+868
+01:01:39.729 --> 01:01:54.427
+Within a process, the OTel context flows on the current thread; across thread pools and reactive pipelines you must explicitly propagate it (context-wrapping executors, ScopedValue, Ch 19), or spans detach.
+
+869
+01:01:55.777 --> 01:01:56.972
+Question 14.
+
+870
+01:01:57.252 --> 01:02:00.516
+What makes an alert good, and how do you fight alert fatigue?
+
+871
+01:02:00.796 --> 01:02:02.161
+Thirty-second answer:
+
+872
+01:02:02.441 --> 01:02:11.380
+A good alert is a symptom that needs a human now, is tied to an SLO per user impact, has a runbook, and fires rarely and precisely.
+
+873
+01:02:11.660 --> 01:02:26.785
+Fight fatigue by: alerting on burn rate not thresholds (L4), grouping and inhibiting related alerts, deleting alerts with no action, alerting on missing data, and reviewing every incident's alerts afterward (what over or under-paged).
+
+874
+01:02:28.135 --> 01:02:29.031
+Architect.
+
+875
+01:02:29.311 --> 01:02:30.506
+Question 15.
+
+876
+01:02:30.786 --> 01:02:34.455
+Design the observability strategy for the grocery platform.
+
+877
+01:02:35.805 --> 01:02:37.000
+Question 16.
+
+878
+01:02:37.280 --> 01:02:40.629
+How do you control observability cost without going blind?
+
+879
+01:02:41.979 --> 01:02:43.323
+Question 17.
+
+880
+01:02:43.603 --> 01:02:49.939
+Walk through debugging the §1.1 incident (conversion down, dashboards green) with your stack.
+
+881
+01:02:51.289 --> 01:02:52.463
+Question 18.
+
+882
+01:02:52.743 --> 01:02:57.628
+How do you make a system observable for unknown-unknowns, not just pre-built dashboards?
+
+883
+01:02:57.908 --> 01:02:59.273
+Thirty-second answer:
+
+884
+01:02:59.553 --> 01:03:13.911
+High-cardinality, correlated, queryable telemetry: wide structured events (many attributes per log or span), a trace id linking all signals, and tools that let you slice by arbitrary dimensions after the fact.
+
+885
+01:03:14.191 --> 01:03:20.313
+Monitoring answers pre-set questions; observability lets you ask new ones during a novel incident.
+
+886
+01:03:20.593 --> 01:03:28.913
+The enabler is that identifiers and context live in logs or traces (high cardinality) while metrics stay bounded for cheap alerting.
+
+887
+01:03:30.263 --> 01:03:31.501
+Question 19.
+
+888
+01:03:31.781 --> 01:03:36.026
+What's your rollout plan to add observability to a legacy Java service?
+
+889
+01:03:37.376 --> 01:03:38.485
+Question 20.
+
+890
+01:03:38.765 --> 01:03:43.224
+How does observability relate to reliability and the on-call experience?
+
+891
+01:03:43.504 --> 01:03:44.869
+Thirty-second answer:
+
+892
+01:03:45.149 --> 01:03:48.115
+Observability is what makes reliability operable:
+
+893
+01:03:48.395 --> 01:03:59.531
+SLOs define the target, error budgets govern risk, burn-rate alerts turn budget threats into (rare, actionable) pages, and correlated signals make MTTR short.
+
+894
+01:03:59.811 --> 01:04:14.552
+A good stack means the on-call is paged only when a human must act, opens one dashboard to see what's burning, and pivots via a trace id to the cause, instead of drowning in noise (L4) or staring at averages (L2).
+
+895
+01:04:15.902 --> 01:04:16.798
+Part 9.
+
+896
+01:04:17.078 --> 01:04:18.486
+Summary and Practice.
+
+897
+01:04:19.736 --> 01:04:20.824
+Key takeaways.
+
+898
+01:04:21.104 --> 01:04:29.829
+Monitoring answers known questions; observability lets you ask new ones, via correlated logs, metrics and traces sharing a trace id.
+
+899
+01:04:30.109 --> 01:04:34.312
+Percentiles, never averages for user-facing latency (L2:
+
+900
+01:04:34.592 --> 01:04:40.907
+74 ms avg hid a 1,545 ms p99).
+
+901
+01:04:41.187 --> 01:04:47.117
+Structured logs with a correlation id on every line; sample by trace, keep errors (L1:
+
+902
+01:04:47.397 --> 01:04:50.320
+3% volume, 100% of errors).
+
+903
+01:04:50.600 --> 01:05:00.861
+RED for services, USE for resources; histograms with buckets around your SLO threshold (L2: p99 +25% otherwise).
+
+904
+01:05:02.211 --> 01:05:09.593
+Cardinality is the cost or outage risk, identifiers go in logs or traces, not metric labels (L1:
+
+905
+01:05:09.873 --> 01:05:13.179
+18,530 versus 10 series).
+
+906
+01:05:13.459 --> 01:05:19.881
+Traces find the critical path; fix what's on it, not what looks slow (L3: fx-rates, not catalog).
+
+907
+01:05:20.161 --> 01:05:28.865
+Sample traces tail-first for the interesting ones (L3: head 1% kept 6 or 554 slow; tail kept all).
+
+908
+01:05:29.145 --> 01:05:36.057
+SLIs or SLOs or error budgets are the reliability contract and the ship or stop signal (L4).
+
+909
+01:05:37.407 --> 01:05:40.948
+Alert on multi-window burn rate, not thresholds (L4:
+
+910
+01:05:41.228 --> 01:05:44.407
+4 pages or 0 false versus 17 false).
+
+911
+01:05:44.687 --> 01:05:49.231
+Every page is actionable with a runbook; review alerts after every incident.
+
+912
+01:05:50.581 --> 01:05:51.903
+Decision cheat sheet.
+
+913
+01:05:52.183 --> 01:05:53.527
+Here is a quick table:
+
+914
+01:05:53.807 --> 01:05:54.981
+Need, and Choice.
+
+915
+01:05:55.261 --> 01:05:56.989
+Is it broken, how much, trends:
+
+916
+01:05:57.269 --> 01:06:00.682
+Metrics (RED or USE), cheap, low cardinality.
+
+917
+01:06:00.962 --> 01:06:02.562
+What happened to this request:
+
+918
+01:06:02.842 --> 01:06:04.677
+Structured logs with trace id.
+
+919
+01:06:04.957 --> 01:06:07.623
+Where did time or errors go across services:
+
+920
+01:06:07.903 --> 01:06:09.973
+Traces, critical-path analysis.
+
+921
+01:06:10.253 --> 01:06:11.639
+Latency reporting:
+
+922
+01:06:11.919 --> 01:06:15.098
+Percentiles from histograms, SLO-aligned buckets.
+
+923
+01:06:15.378 --> 01:06:16.850
+Request identifiers:
+
+924
+01:06:17.130 --> 01:06:19.861
+Logs or traces, never metric labels.
+
+925
+01:06:20.141 --> 01:06:21.549
+Trace volume control:
+
+926
+01:06:21.829 --> 01:06:24.069
+Head baseline + tail keep-all-errors.
+
+927
+01:06:24.349 --> 01:06:25.735
+Reliability target:
+
+928
+01:06:26.015 --> 01:06:28.191
+SLO + error budget per journey.
+
+929
+01:06:28.471 --> 01:06:29.303
+Paging:
+
+930
+01:06:29.583 --> 01:06:32.719
+Multi-window multi-burn-rate; actionable only.
+
+931
+01:06:34.069 --> 01:06:35.285
+Instrumentation:
+
+932
+01:06:35.565 --> 01:06:38.808
+OpenTelemetry + Micrometer, export anywhere.
+
+933
+01:06:40.158 --> 01:06:41.289
+Exercises.
+
+934
+01:06:41.569 --> 01:06:42.913
+Here is a quick table:
+
+935
+01:06:43.193 --> 01:06:45.049
+Band, and Exercise, and Hint.
+
+936
+01:06:45.329 --> 01:06:46.203
+B2.
+
+937
+01:06:46.483 --> 01:06:47.550
+Exercise:
+
+938
+01:06:47.830 --> 01:06:57.003
+Add SLO-aligned buckets (100 or 200 or 300 ms) to L2's histogram and re-check p99 accuracy.
+
+939
+01:06:57.283 --> 01:06:59.417
+Hint: narrower buckets at the SLO.
+
+940
+01:06:59.697 --> 01:07:00.571
+B2.
+
+941
+01:07:00.851 --> 01:07:01.918
+Exercise:
+
+942
+01:07:02.198 --> 01:07:06.955
+Add a route label to L1's cardinality analysis and compute the series count.
+
+943
+01:07:07.235 --> 01:07:08.707
+Hint: bounded values.
+
+944
+01:07:08.987 --> 01:07:09.862
+B3.
+
+945
+01:07:10.142 --> 01:07:11.209
+Exercise:
+
+946
+01:07:11.489 --> 01:07:17.526
+Add exemplars to L2 (attach a trace id to a bucket) and wire the flow to L3's trace.
+
+947
+01:07:17.806 --> 01:07:18.489
+Hint:
+
+948
+01:07:18.769 --> 01:07:20.347
+OpenMetrics exemplars.
+
+949
+01:07:20.627 --> 01:07:21.502
+B3.
+
+950
+01:07:21.782 --> 01:07:22.849
+Exercise:
+
+951
+01:07:23.129 --> 01:07:29.614
+Implement tail sampling in L3 that also keeps p99-latency traces, not just errors.
+
+952
+01:07:29.894 --> 01:07:31.579
+Hint: percentile threshold.
+
+953
+01:07:31.859 --> 01:07:32.734
+B4.
+
+954
+01:07:33.014 --> 01:07:34.081
+Exercise:
+
+955
+01:07:34.361 --> 01:07:42.510
+Write burn-rate recording rules for a 99% / 200 ms latency SLO and the page or ticket tiers.
+
+956
+01:07:42.790 --> 01:07:44.710
+Hint: ratio of slow requests.
+
+957
+01:07:46.060 --> 01:07:46.935
+B4.
+
+958
+01:07:47.215 --> 01:07:48.281
+Exercise:
+
+959
+01:07:48.561 --> 01:07:54.364
+Extend L4 with a low-traffic service and show why raw burn rate needs a request-count guard.
+
+960
+01:07:54.644 --> 01:07:56.287
+Hint: small denominators.
+
+961
+01:07:57.637 --> 01:07:58.639
+Further reading.
+
+962
+01:07:58.919 --> 01:08:10.503
+Google, Site Reliability Engineering and The SRE Workbook (SLIs or SLOs or error budgets; Alerting on SLOs, the multi-window multi-burn-rate method).
+
+963
+01:08:10.783 --> 01:08:17.567
+Charity Majors, Liz Fong-Jones, George Miranda, Observability Engineering (wide events, unknown-unknowns).
+
+964
+01:08:17.847 --> 01:08:21.325
+Brendan Gregg, The USE Method; Tom Wilkie, The RED Method.
+
+965
+01:08:21.605 --> 01:08:29.114
+OpenTelemetry docs (traces or metrics or logs, context propagation); W3C Trace Context.
+
+966
+01:08:29.394 --> 01:08:37.671
+Prometheus docs: histograms and histogramquantile, native histograms, recording or alerting rules; Micrometer docs.
+
+967
+01:08:39.021 --> 01:08:42.371
+Cindy Sridharan, Distributed Systems Observability.
+
+968
+01:08:42.651 --> 01:08:48.603
+Grafana Tempo or Loki or Mimir docs; Sloth and Pyrra (SLO rule generators).
+
+969
+01:08:49.953 --> 01:08:51.190
+Related chapters.
+
+970
+01:08:51.470 --> 01:09:11.801
+09, Scalability Fundamentals, 17, Inter-Service Communication, 18, Resilience Patterns, 19, Concurrency at Scale, 21, Data at Scale, 23, Security Architecture, 25, Performance Engineering, 27, Reliability and DR, 29, Testing Distributed Systems.
+
+971
+01:09:13.151 --> 01:09:14.751
+That's the end of this chapter.
+
+972
+01:09:15.031 --> 01:09:21.068
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+973
+01:09:21.348 --> 01:09:22.799
+See you in the next chapter.
+

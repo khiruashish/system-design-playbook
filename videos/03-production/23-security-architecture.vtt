@@ -1,0 +1,4406 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.886
+Security Architecture.
+
+2
+00:00:02.166 --> 00:00:06.283
+Chapter 23, from the Production part of the System Design Playbook.
+
+3
+00:00:08.033 --> 00:00:08.993
+At a glance:
+
+4
+00:00:09.273 --> 00:00:10.447
+Chapter at a glance.
+
+5
+00:00:10.727 --> 00:00:11.729
+Reader bands:
+
+6
+00:00:12.009 --> 00:00:14.292
+B2, then B4, Prerequisites:
+
+7
+00:00:14.572 --> 00:00:21.164
+Ch 04, Ch 08, Ch 16, Ch 17, Ch 20, What you will build:
+
+8
+00:00:21.444 --> 00:00:31.129
+The security backbone of the grocery platform, how customers, riders and staff prove who they are, what they're allowed to do, and how their data is protected.
+
+9
+00:00:31.409 --> 00:00:34.865
+All four labs run real crypto and a real KMS.
+
+10
+00:00:35.145 --> 00:00:35.977
+L1:
+
+11
+00:00:36.257 --> 00:00:38.028
+JWT validation.
+
+12
+00:00:38.308 --> 00:00:49.999
+A naive validator accepted 7 of 9 forged or invalid tokens (alg:none, algorithm confusion, a key embedded in the header, an expired token, wrong audience).
+
+13
+00:00:50.279 --> 00:00:53.884
+A hardened validator accepted only the one valid token.
+
+14
+00:00:54.164 --> 00:01:05.001
+Plus JWKS key rotation and refresh-token reuse detection: a stolen refresh token bought an attacker 43,200 minutes versus 15.
+
+15
+00:01:06.351 --> 00:01:07.759
+L2: login.
+
+16
+00:01:08.039 --> 00:01:28.242
+A control-conformance harness over real HTTP shows the hardened OTP endpoint locking after 5 wrong codes (versus unlimited) and the OAuth flow enforcing PKCE, registered redirect URIs, and single-use codes where the naive one issued tokens to every malformed request.
+
+17
+00:01:28.522 --> 00:01:30.229
+L3: authorization.
+
+18
+00:01:30.509 --> 00:01:33.943
+The same 12 requests through RBAC, ABAC and ReBAC.
+
+19
+00:01:34.223 --> 00:01:43.951
+RBAC alone allowed the IDOR read, a cross-store edit, an over-limit refund and a no-purpose PII read; ABAC and ReBAC denied them.
+
+20
+00:01:44.231 --> 00:01:49.394
+A vulnerable handler that checks the role but not the object leaks other customers' orders.
+
+21
+00:01:50.744 --> 00:01:52.195
+L4: encryption.
+
+22
+00:01:52.475 --> 00:01:55.760
+Envelope encryption with OpenBao (a real KMS):
+
+23
+00:01:56.040 --> 00:02:03.400
+AES-256-GCM per record, DEKs wrapped by a KEK that never leaves the KMS.
+
+24
+00:02:03.680 --> 00:02:16.821
+Tamper detection, KEK rotation that rewraps kilobytes not terabytes, crypto-shredding for delete my data, and DEK caching that was 115x cheaper than a KMS call per record.
+
+25
+00:02:17.101 --> 00:02:18.083
+Reading time:
+
+26
+00:02:18.363 --> 00:02:20.325
+120 min + code.
+
+27
+00:02:21.675 --> 00:02:22.529
+Part 1.
+
+28
+00:02:22.809 --> 00:02:24.729
+Introduction and Why It Matters.
+
+29
+00:02:25.979 --> 00:02:27.685
+A story: five ways in.
+
+30
+00:02:27.965 --> 00:02:37.096
+A security review of the grocery platform, a month before a funding round's due diligence, found five issues that each map to a control in this chapter:
+
+31
+00:02:37.376 --> 00:02:40.427
+The refunds tool trusted the JWT's header.
+
+32
+00:02:40.707 --> 00:02:50.691
+An engineer's hand-rolled validator read the alg field from the token and used it, so a token with alg: none (no signature) and role: admin was accepted.
+
+33
+00:02:50.971 --> 00:02:55.920
+L1 reproduces this and four more forgeries a naive validator waves through.
+
+34
+00:02:56.200 --> 00:02:58.760
+The OTP login had no attempt limit.
+
+35
+00:02:59.040 --> 00:03:02.560
+A six-digit code with unlimited guesses is not a secret.
+
+36
+00:03:02.840 --> 00:03:07.619
+L2 shows the difference between unlimited attempts and a lockout after five.
+
+37
+00:03:08.969 --> 00:03:16.585
+A customer could read another customer's order by changing the ID in the URL (/orders or o-99).
+
+38
+00:03:16.865 --> 00:03:26.443
+The handler checked that the caller was logged in, not that the order was theirs, the classic IDOR (OWASP API 1, Broken Object Level Authorization).
+
+39
+00:03:26.723 --> 00:03:31.587
+L3 shows a role-only check leaking it, and an object-level check stopping it.
+
+40
+00:03:31.867 --> 00:03:34.854
+Store managers could refund any amount, in any store.
+
+41
+00:03:35.134 --> 00:03:40.681
+Roles said manager can refund; they couldn't say up to 5,000, rupeesin your own store.
+
+42
+00:03:40.961 --> 00:03:45.377
+L3 contrasts RBAC with attribute- and relationship-based models.
+
+43
+00:03:46.727 --> 00:03:54.513
+Customer addresses and phone numbers were stored in plaintext, and delete my account left copies in backups for 35 days.
+
+44
+00:03:54.793 --> 00:03:58.015
+L4 builds envelope encryption and crypto-shredding.
+
+45
+00:03:58.295 --> 00:04:00.791
+None of these needed a sophisticated attacker.
+
+46
+00:04:01.071 --> 00:04:11.140
+They're the routine failures that the OWASP API Top 10, the OAuth 2.0 Security BCP and basic key management exist to prevent.
+
+47
+00:04:12.490 --> 00:04:13.173
+Quote:
+
+48
+00:04:13.453 --> 00:04:15.117
+The thesis of this chapter.
+
+49
+00:04:15.397 --> 00:04:20.687
+Security is not a feature you add; it's a set of defaults that fail closed at every layer.
+
+50
+00:04:20.967 --> 00:04:28.114
+Authentication proves who; authorization decides what, and must be checked on every object, not just at the door.
+
+51
+00:04:28.394 --> 00:04:32.383
+Secrets and keys live in a KMS, never in code or config.
+
+52
+00:04:32.663 --> 00:04:37.058
+Data is encrypted so that losing the storage doesn't mean losing the data.
+
+53
+00:04:37.338 --> 00:04:45.914
+And every one of these is testable, the labs here are the kind of conformance checks that belong in CI, because we think it's secure is not evidence.
+
+54
+00:04:46.194 --> 00:04:49.586
+A note on this chapter: it teaches how to build the defenses.
+
+55
+00:04:49.866 --> 00:04:54.026
+Every lab hardens a control and verifies bad inputs are refused.
+
+56
+00:04:54.306 --> 00:04:56.119
+It does not provide attack tooling.
+
+57
+00:04:57.469 --> 00:04:59.773
+Where this lives in the grocery platform.
+
+58
+00:05:00.053 --> 00:05:01.419
+Here is a quick table:
+
+59
+00:05:01.699 --> 00:05:03.811
+Concern, and Mechanism, and Notes.
+
+60
+00:05:04.091 --> 00:05:05.904
+Customer or rider login.
+
+61
+00:05:06.184 --> 00:05:07.123
+Mechanism:
+
+62
+00:05:07.403 --> 00:05:13.717
+Phone OTP, then session, then OAuth2 Authorization Code + PKCE for the app.
+
+63
+00:05:13.997 --> 00:05:14.808
+Notes:
+
+64
+00:05:15.088 --> 00:05:16.411
+L1, L2.
+
+65
+00:05:16.691 --> 00:05:17.757
+Staff login.
+
+66
+00:05:18.037 --> 00:05:18.976
+Mechanism:
+
+67
+00:05:19.256 --> 00:05:23.096
+OIDC via the corporate IdP, SSO, hardware MFA.
+
+68
+00:05:23.376 --> 00:05:24.187
+Notes:
+
+69
+00:05:24.467 --> 00:05:25.747
+Short-lived tokens.
+
+70
+00:05:26.027 --> 00:05:27.200
+Service-to-service.
+
+71
+00:05:27.480 --> 00:05:32.813
+Mechanism: mTLS (SPIFFE identities) + short-lived tokens; zero-trust.
+
+72
+00:05:33.093 --> 00:05:33.904
+Notes:
+
+73
+00:05:34.184 --> 00:05:37.384
+Ch 17; no implicit trust by network.
+
+74
+00:05:37.664 --> 00:05:39.243
+API authorization.
+
+75
+00:05:39.523 --> 00:05:40.461
+Mechanism:
+
+76
+00:05:40.741 --> 00:05:45.691
+Gateway authN + per-service, per-object authZ (ABAC or ReBAC).
+
+77
+00:05:45.971 --> 00:05:46.781
+Notes:
+
+78
+00:05:47.061 --> 00:05:49.045
+L3; never trust the client.
+
+79
+00:05:49.325 --> 00:05:50.243
+Secrets.
+
+80
+00:05:50.523 --> 00:05:51.461
+Mechanism:
+
+81
+00:05:51.741 --> 00:05:57.224
+KMS or Vault (OpenBao), dynamic DB creds, no secrets in env or Git.
+
+82
+00:05:57.504 --> 00:05:58.315
+Notes:
+
+83
+00:05:58.595 --> 00:05:59.469
+L4.
+
+84
+00:06:00.819 --> 00:06:01.929
+Data at rest.
+
+85
+00:06:02.209 --> 00:06:03.147
+Mechanism:
+
+86
+00:06:03.427 --> 00:06:10.915
+Envelope encryption (AES-256-GCM + KMS KEK); per-tenant keys for shredding.
+
+87
+00:06:11.195 --> 00:06:12.006
+Notes:
+
+88
+00:06:12.286 --> 00:06:15.251
+L4, Ch 21, Ch 36.
+
+89
+00:06:15.531 --> 00:06:16.769
+Data in transit.
+
+90
+00:06:17.049 --> 00:06:17.987
+Mechanism:
+
+91
+00:06:18.267 --> 00:06:22.918
+TLS 1.3 everywhere, HSTS, mTLS internally.
+
+92
+00:06:23.198 --> 00:06:24.009
+Notes:
+
+93
+00:06:24.289 --> 00:06:25.590
+Ch 03.
+
+94
+00:06:25.870 --> 00:06:26.659
+PII.
+
+95
+00:06:26.939 --> 00:06:27.878
+Mechanism:
+
+96
+00:06:28.158 --> 00:06:31.891
+Minimise, tokenise, encrypt, access-logged, purpose-limited.
+
+97
+00:06:32.171 --> 00:06:32.982
+Notes:
+
+98
+00:06:33.262 --> 00:06:36.633
+Ch 36 (DPDP or GDPR).
+
+99
+00:06:36.913 --> 00:06:37.595
+Edge.
+
+100
+00:06:37.875 --> 00:06:38.814
+Mechanism:
+
+101
+00:06:39.094 --> 00:06:42.401
+WAF, rate limits, bot defense, TLS termination.
+
+102
+00:06:42.681 --> 00:06:43.491
+Notes:
+
+103
+00:06:43.771 --> 00:06:46.011
+Ch 08, Ch 18.
+
+104
+00:06:47.361 --> 00:06:48.684
+Learning objectives.
+
+105
+00:06:48.964 --> 00:06:50.329
+Here is a quick table:
+
+106
+00:06:50.609 --> 00:06:52.807
+Band, and After this chapter you can....
+
+107
+00:06:53.087 --> 00:06:53.961
+B2:
+
+108
+00:06:54.241 --> 00:07:03.521
+Explain authN versus authZ, validate JWTs safely, describe OAuth2 or OIDC and OTP flows, and use RBAC.
+
+109
+00:07:03.801 --> 00:07:04.697
+B3:
+
+110
+00:07:04.977 --> 00:07:15.345
+Implement PKCE and refresh-token rotation, choose RBAC or ABAC or ReBAC, prevent the OWASP API Top 10, and apply envelope encryption.
+
+111
+00:07:15.625 --> 00:07:16.521
+B4:
+
+112
+00:07:16.801 --> 00:07:25.505
+Design zero-trust service auth, KMS-backed key management with rotation and shredding, and a defense-in-depth architecture with a threat model.
+
+113
+00:07:26.855 --> 00:07:27.730
+Part 2.
+
+114
+00:07:28.010 --> 00:07:29.909
+Core Concepts, Beginner to Deep.
+
+115
+00:07:31.159 --> 00:07:32.076
+Intuition.
+
+116
+00:07:32.356 --> 00:07:38.201
+Authentication is the ID check at the door; authorization is what your wristband lets you into.
+
+117
+00:07:38.481 --> 00:07:48.039
+Being inside the building (logged in) doesn't mean you may enter the cash room (an admin action) or open someone else's locker (another customer's order).
+
+118
+00:07:48.319 --> 00:07:53.268
+The IDOR bug is a guard who checks you have a wristband but never which locker is yours.
+
+119
+00:07:53.548 --> 00:07:56.492
+A JWT is a tamper-evident wristband.
+
+120
+00:07:56.772 --> 00:08:00.228
+It carries claims (who, what role, until when) and a signature.
+
+121
+00:08:00.508 --> 00:08:09.105
+Trusting the writing on the band about how to check the signature (this band says to verify it with no ink at all) is the alg-confusion class of bugs.
+
+122
+00:08:10.455 --> 00:08:15.191
+A KMS is the hotel's key-cutting machine that never leaves the back office.
+
+123
+00:08:15.471 --> 00:08:22.469
+You send it a locked box (a wrapped data key) and it hands back the contents, but the master die never comes out front.
+
+124
+00:08:22.749 --> 00:08:28.253
+Destroy a guest's die and every box cut from it is permanently locked, that's crypto-shredding.
+
+125
+00:08:28.533 --> 00:08:33.717
+Zero trust is show your badge at every door, not you're past reception, so wander freely.
+
+126
+00:08:33.997 --> 00:08:42.039
+On a network, being inside the perimeter grants nothing; each service still proves its identity (mTLS) and checks permissions.
+
+127
+00:08:43.389 --> 00:08:45.885
+Authentication versus authorization.
+
+128
+00:08:46.165 --> 00:08:47.531
+Here is a quick table:
+
+129
+00:08:47.811 --> 00:08:51.288
+Authentication (authN), and Authorization (authZ).
+
+130
+00:08:51.568 --> 00:08:52.443
+Question.
+
+131
+00:08:52.723 --> 00:08:54.472
+Authentication (authN):
+
+132
+00:08:54.752 --> 00:08:55.627
+Who are you?
+
+133
+00:08:55.907 --> 00:08:57.635
+Authorization (authZ):
+
+134
+00:08:57.915 --> 00:08:58.896
+What may you do?
+
+135
+00:08:59.176 --> 00:08:59.923
+Proof.
+
+136
+00:09:00.203 --> 00:09:01.952
+Authentication (authN):
+
+137
+00:09:02.232 --> 00:09:04.515
+Password, OTP, passkey, certificate.
+
+138
+00:09:04.795 --> 00:09:06.523
+Authorization (authZ):
+
+139
+00:09:06.803 --> 00:09:09.683
+Roles, attributes, relationships, policy.
+
+140
+00:09:09.963 --> 00:09:10.624
+Where.
+
+141
+00:09:10.904 --> 00:09:12.653
+Authentication (authN):
+
+142
+00:09:12.933 --> 00:09:15.451
+At the edge or IdP, once per session.
+
+143
+00:09:15.731 --> 00:09:17.459
+Authorization (authZ):
+
+144
+00:09:17.739 --> 00:09:19.936
+On every request and every object.
+
+145
+00:09:20.216 --> 00:09:21.069
+Failure.
+
+146
+00:09:21.349 --> 00:09:23.099
+Authentication (authN):
+
+147
+00:09:23.379 --> 00:09:24.531
+Impersonation.
+
+148
+00:09:24.811 --> 00:09:26.539
+Authorization (authZ):
+
+149
+00:09:26.819 --> 00:09:29.635
+Privilege escalation, data exposure (IDOR).
+
+150
+00:09:30.985 --> 00:09:37.299
+The commonest security bug is conflating them: authenticating a request and treating that as authorization.
+
+151
+00:09:37.579 --> 00:09:45.537
+L3's IDOR control shows a handler that authenticates fine and leaks every customer's orders because it never checks the object.
+
+152
+00:09:46.887 --> 00:09:49.319
+Sessions, tokens and JWTs.
+
+153
+00:09:49.599 --> 00:09:53.759
+Opaque session tokens: a random ID; the server looks up state.
+
+154
+00:09:54.039 --> 00:09:57.473
+Easy to revoke (delete the row), needs a lookup, and is stateful.
+
+155
+00:09:57.753 --> 00:10:03.428
+JWTs (self-contained): signed claims the resource server validates without a lookup.
+
+156
+00:10:03.708 --> 00:10:11.644
+Scales statelessly, but is hard to revoke before expiry, so keep them short-lived and pair them with a revocation list for logout.
+
+157
+00:10:11.924 --> 00:10:18.324
+A JWT is base64url(header).base64url(claims).signature.
+
+158
+00:10:18.604 --> 00:10:19.863
+Validation must:
+
+159
+00:10:20.143 --> 00:10:24.068
+Fix the algorithm from your key config, never from the token's header.
+
+160
+00:10:24.348 --> 00:10:34.161
+Accepting alg: none or letting the token pick RS256 versus HS256 is the alg-confusion vulnerability.
+
+161
+00:10:35.511 --> 00:10:47.991
+Resolve the key by kid against a trusted JWKS, never a key embedded in the header (jwk or jku or x5u) or fetched from a token-supplied URL.
+
+162
+00:10:48.271 --> 00:10:49.722
+Verify the signature.
+
+163
+00:10:50.002 --> 00:10:56.893
+Check registered claims: iss, aud, exp, nbf (with small clock skew), and reject absurd lifetimes.
+
+164
+00:10:57.173 --> 00:11:02.122
+Check revocation (jti against a denylist) for logout or compromise.
+
+165
+00:11:02.402 --> 00:11:06.626
+L1's naive validator skips 1 to 2 and 4 to 5, and accepts:
+
+166
+00:11:07.976 --> 00:11:09.341
+Here is a quick table:
+
+167
+00:11:09.621 --> 00:11:13.568
+Token presented to the payment API, and Naive, and Hardened.
+
+168
+00:11:13.848 --> 00:11:14.915
+Valid token.
+
+169
+00:11:15.195 --> 00:11:16.027
+Naive:
+
+170
+00:11:16.307 --> 00:11:17.245
+ACCEPTED.
+
+171
+00:11:17.525 --> 00:11:18.336
+Hardened:
+
+172
+00:11:18.616 --> 00:11:21.859
+ACCEPTED. alg: none, no signature, role admin.
+
+173
+00:11:22.139 --> 00:11:22.971
+Naive:
+
+174
+00:11:23.251 --> 00:11:24.189
+ACCEPTED.
+
+175
+00:11:24.469 --> 00:11:26.475
+Hardened: rejected (unsigned).
+
+176
+00:11:26.755 --> 00:11:31.917
+HS256 signed with our RSA public key as the secret.
+
+177
+00:11:32.197 --> 00:11:33.029
+Naive:
+
+178
+00:11:33.309 --> 00:11:34.248
+ACCEPTED.
+
+179
+00:11:34.528 --> 00:11:36.661
+Hardened: rejected (alg mismatch).
+
+180
+00:11:36.941 --> 00:11:39.949
+Attacker's key embedded in the header (jwk).
+
+181
+00:11:40.229 --> 00:11:41.061
+Naive:
+
+182
+00:11:41.341 --> 00:11:42.280
+ACCEPTED.
+
+183
+00:11:42.560 --> 00:11:44.651
+Hardened: rejected (key in header).
+
+184
+00:11:44.931 --> 00:11:47.747
+Payload edited to role admin, old signature.
+
+185
+00:11:48.027 --> 00:11:49.435
+Naive: rejected.
+
+186
+00:11:49.715 --> 00:11:51.955
+Hardened: rejected (bad signature).
+
+187
+00:11:52.235 --> 00:11:53.813
+Expired two hours ago.
+
+188
+00:11:54.093 --> 00:11:54.925
+Naive:
+
+189
+00:11:55.205 --> 00:11:56.144
+ACCEPTED.
+
+190
+00:11:56.424 --> 00:11:58.365
+Hardened: rejected (expired).
+
+191
+00:11:58.645 --> 00:12:00.651
+Valid, but audience is rider-app.
+
+192
+00:12:00.931 --> 00:12:01.763
+Naive:
+
+193
+00:12:02.043 --> 00:12:02.981
+ACCEPTED.
+
+194
+00:12:03.261 --> 00:12:04.968
+Hardened: rejected (aud).
+
+195
+00:12:05.248 --> 00:12:07.808
+Valid, but jti revoked at logout.
+
+196
+00:12:08.088 --> 00:12:08.920
+Naive:
+
+197
+00:12:09.200 --> 00:12:10.139
+ACCEPTED.
+
+198
+00:12:10.419 --> 00:12:12.253
+Hardened: rejected (revoked).
+
+199
+00:12:13.603 --> 00:12:15.971
+Valid signature, 30-day lifetime.
+
+200
+00:12:16.251 --> 00:12:17.083
+Naive:
+
+201
+00:12:17.363 --> 00:12:18.302
+ACCEPTED.
+
+202
+00:12:18.582 --> 00:12:20.566
+Hardened: rejected (lifetime).
+
+203
+00:12:21.916 --> 00:12:24.135
+Seven of nine bad tokens accepted.
+
+204
+00:12:24.415 --> 00:12:34.548
+Use a vetted library (Nimbus, java-jwt, jose4j) configured with a fixed algorithm and a JWKS, not a hand-rolled parser.
+
+205
+00:12:34.828 --> 00:12:37.367
+Algorithm choice (L1 D, measured):
+
+206
+00:12:38.717 --> 00:12:40.082
+Here is a quick table:
+
+207
+00:12:40.362 --> 00:12:44.010
+Algorithm, and Sign, and Verify, and Token size, and Use.
+
+208
+00:12:44.290 --> 00:12:48.002
+RS256 (RSA-2048).
+
+209
+00:12:48.282 --> 00:12:49.029
+Sign:
+
+210
+00:12:49.309 --> 00:12:51.933
+1,193 µs.
+
+211
+00:12:52.213 --> 00:12:53.087
+Verify:
+
+212
+00:12:53.367 --> 00:12:54.903
+47 µs.
+
+213
+00:12:55.183 --> 00:12:56.250
+Token size:
+
+214
+00:12:56.530 --> 00:12:58.002
+582 B.
+
+215
+00:12:58.282 --> 00:12:58.986
+Use:
+
+216
+00:12:59.266 --> 00:13:03.021
+Asymmetric; many verifiers, few signers (the common default).
+
+217
+00:13:03.301 --> 00:13:06.607
+ES256 (P-256).
+
+218
+00:13:06.887 --> 00:13:07.634
+Sign:
+
+219
+00:13:07.914 --> 00:13:09.514
+208 µs.
+
+220
+00:13:09.794 --> 00:13:10.669
+Verify:
+
+221
+00:13:10.949 --> 00:13:13.039
+762 µs.
+
+222
+00:13:13.319 --> 00:13:14.386
+Token size:
+
+223
+00:13:14.666 --> 00:13:16.245
+326 B.
+
+224
+00:13:16.525 --> 00:13:17.229
+Use:
+
+225
+00:13:17.509 --> 00:13:20.474
+Smaller tokens, cheaper signing; verify-heavy.
+
+226
+00:13:20.754 --> 00:13:23.442
+HS256 (shared secret).
+
+227
+00:13:23.722 --> 00:13:24.469
+Sign:
+
+228
+00:13:24.749 --> 00:13:25.986
+7 µs.
+
+229
+00:13:26.266 --> 00:13:27.141
+Verify:
+
+230
+00:13:27.421 --> 00:13:28.594
+4 µs.
+
+231
+00:13:28.874 --> 00:13:29.941
+Token size:
+
+232
+00:13:30.221 --> 00:13:31.586
+283 B.
+
+233
+00:13:31.866 --> 00:13:32.570
+Use:
+
+234
+00:13:32.850 --> 00:13:36.733
+Symmetric; only when signer and verifier are the same trust domain.
+
+235
+00:13:38.083 --> 00:13:48.152
+Asymmetric (RS256 or ES256) lets resource servers verify with a public key without holding a signing secret.
+
+236
+00:13:48.432 --> 00:14:00.635
+That's why the HS256 with the public key as the secret attack matters: if the verifier accepts HS256, an attacker signs with the well-known public key.
+
+237
+00:14:01.985 --> 00:14:03.478
+OTP and passwords.
+
+238
+00:14:03.758 --> 00:14:06.019
+The grocery app uses phone OTP.
+
+239
+00:14:06.299 --> 00:14:07.899
+The controls (L2 A):
+
+240
+00:14:08.179 --> 00:14:14.579
+Attempt limit per code (lock after ~5), so a 6-digit code (1,000,000 values) can't be guessed.
+
+241
+00:14:14.859 --> 00:14:16.758
+Naive: unlimited; hardened:
+
+242
+00:14:17.038 --> 00:14:17.806
+5.
+
+243
+00:14:18.086 --> 00:14:24.273
+Send limit per phone (for example, 3 per 10 minutes) to stop SMS-bombing and cost abuse.
+
+244
+00:14:24.553 --> 00:14:29.310
+Store codes hashed (salted) with a short expiry (5 minutes), single-use.
+
+245
+00:14:29.590 --> 00:14:31.681
+Constant-time comparison of the hash.
+
+246
+00:14:31.961 --> 00:14:35.459
+Don't leak whether the phone is registered (uniform responses).
+
+247
+00:14:36.809 --> 00:14:38.772
+For passwords (staff, some flows):
+
+248
+00:14:39.052 --> 00:14:53.815
+Argon2id (or scrypt or bcrypt), never fast hashes or encryption; per-user salt; a pepper in the KMS; check against breached-password lists; and rate-limit plus lockout with care not to enable denial of service.
+
+249
+00:14:54.095 --> 00:14:54.948
+MFA:
+
+250
+00:14:55.228 --> 00:15:00.135
+TOTP or, preferably, passkeys or WebAuthn (phishing-resistant, hardware-backed).
+
+251
+00:15:00.415 --> 00:15:05.919
+SMS OTP is a usability floor, not strong MFA (SIM-swap risk).
+
+252
+00:15:07.269 --> 00:15:09.167
+OAuth 2.0 and OIDC.
+
+253
+00:15:09.447 --> 00:15:17.085
+OAuth 2.0 is authorization delegation (an app gets a token to call an API on the user's behalf).
+
+254
+00:15:17.365 --> 00:15:21.823
+OIDC adds authentication on top (an idtoken proving who logged in).
+
+255
+00:15:22.103 --> 00:15:29.826
+Roles: resource owner (the user), client (the app), authorization server (issues tokens), resource server (the API).
+
+256
+00:15:30.106 --> 00:15:30.981
+Flows:
+
+257
+00:15:31.261 --> 00:15:38.045
+Authorization Code + PKCE, for web and mobile apps, the only recommended interactive flow now.
+
+258
+00:15:38.325 --> 00:15:41.226
+Client Credentials, service-to-service (no user).
+
+259
+00:15:42.576 --> 00:15:44.432
+Device Code, TVs, CLIs.
+
+260
+00:15:44.712 --> 00:15:48.616
+Implicit and Resource Owner Password, deprecated; don't use them.
+
+261
+00:15:48.896 --> 00:16:04.875
+PKCE (RFC 7636): the app generates a random codeverifier, sends its SHA-256 hash (codechallenge) with the authorization request, and presents the verifier when exchanging the code.
+
+262
+00:16:05.155 --> 00:16:08.205
+An intercepted code is useless without the verifier.
+
+263
+00:16:08.485 --> 00:16:10.981
+S256 only, never plain.
+
+264
+00:16:11.261 --> 00:16:16.211
+L2 B verifies the OAuth controls on a real HTTP server:
+
+265
+00:16:17.561 --> 00:16:18.926
+Here is a quick table:
+
+266
+00:16:19.206 --> 00:16:24.582
+Request presented to or token, and Naive server, and Hardened (Security BCP).
+
+267
+00:16:24.862 --> 00:16:27.294
+Correct verifier, registered redirect.
+
+268
+00:16:27.574 --> 00:16:29.537
+Naive server: token issued.
+
+269
+00:16:29.817 --> 00:16:32.718
+Hardened (Security BCP): token issued.
+
+270
+00:16:32.998 --> 00:16:34.662
+Wrong PKCE verifier.
+
+271
+00:16:34.942 --> 00:16:36.905
+Naive server: token issued.
+
+272
+00:16:37.185 --> 00:16:40.555
+Hardened (Security BCP): reject (PKCE).
+
+273
+00:16:40.835 --> 00:16:42.243
+No verifier at all.
+
+274
+00:16:42.523 --> 00:16:44.486
+Naive server: token issued.
+
+275
+00:16:44.766 --> 00:16:48.137
+Hardened (Security BCP): reject (PKCE).
+
+276
+00:16:48.417 --> 00:16:50.209
+Attacker-controlled redirecturi.
+
+277
+00:16:50.489 --> 00:16:52.451
+Naive server: token issued.
+
+278
+00:16:52.731 --> 00:16:56.913
+Hardened (Security BCP): reject (redirect not registered).
+
+279
+00:16:57.193 --> 00:16:59.411
+Same code exchanged a second time.
+
+280
+00:16:59.691 --> 00:17:02.785
+Hardened (Security BCP): reject (replay).
+
+281
+00:17:03.065 --> 00:17:04.942
+First token after that replay.
+
+282
+00:17:05.222 --> 00:17:07.825
+Hardened (Security BCP): revoked.
+
+283
+00:17:09.175 --> 00:17:26.839
+The BCP rules L2 enforces: exact-match registered redirect URIs (no wildcards), PKCE for all clients, single-use codes (and on replay, revoke tokens already issued from that code), the state parameter for CSRF, and short-lived codes.
+
+284
+00:17:28.189 --> 00:17:30.215
+Token lifecycle and rotation.
+
+285
+00:17:30.495 --> 00:17:33.546
+Access tokens: short-lived (5 to 15 min).
+
+286
+00:17:33.826 --> 00:17:35.554
+A leaked one expires quickly.
+
+287
+00:17:35.834 --> 00:17:38.479
+Refresh tokens: longer-lived, rotating.
+
+288
+00:17:38.759 --> 00:17:42.599
+Each use issues a new refresh token and invalidates the old one.
+
+289
+00:17:42.879 --> 00:17:53.461
+If an old (already-used) refresh token appears again, that's reuse detection: someone has a stolen copy, so revoke the whole token family and force re-login.
+
+290
+00:17:53.741 --> 00:17:57.517
+L1 C models a refresh token stolen from a phone backup:
+
+291
+00:17:57.797 --> 00:18:06.671
+Long-lived reusable refresh token: the attacker kept access for 43,200 minutes (the full 30 days), unnoticed.
+
+292
+00:18:08.021 --> 00:18:20.949
+Rotation + reuse detection: the attacker got 15 minutes (one access token); the customer's next refresh presented the now-used token, reuse was detected, and the family was revoked.
+
+293
+00:18:21.229 --> 00:18:32.899
+Key rotation (JWKS): publish the new signing key alongside the old, sign with the new one, keep verifying both until older tokens expire, then retire the old key.
+
+294
+00:18:33.179 --> 00:18:39.387
+L1 B: during the overlap both tokens validate; after retirement, the old kid is rejected.
+
+295
+00:18:39.667 --> 00:18:42.099
+Never rotate by deleting the current key.
+
+296
+00:18:43.449 --> 00:18:45.774
+Zero trust and service-to-service auth.
+
+297
+00:18:46.054 --> 00:18:49.553
+Zero trust: no implicit trust from network location.
+
+298
+00:18:49.833 --> 00:18:55.251
+Every request is authenticated and authorized, inside the perimeter as much as outside.
+
+299
+00:18:55.531 --> 00:19:03.787
+Service identity: each workload gets a cryptographic identity (SPIFFE or SPIRE issues SVIDs), used for mTLS.
+
+300
+00:19:04.067 --> 00:19:10.894
+The service mesh (Ch 17) can enforce mTLS and identity-based policy transparently.
+
+301
+00:19:11.174 --> 00:19:21.051
+Short-lived credentials: certificates and tokens minted per workload, rotated automatically (minutes to hours), so a leaked credential is briefly useful.
+
+302
+00:19:22.401 --> 00:19:38.593
+Authorization between services: the calling service's identity plus the end-user context (a propagated token or a signed request) decide access. payment-service may call ledger-service's POST or postings is policy, not firewall.
+
+303
+00:19:38.873 --> 00:19:52.356
+Least privilege and segmentation: default-deny network policy, per-service DB users with minimal grants, and dynamic DB credentials from the KMS (short TTL) instead of a shared password.
+
+304
+00:19:53.706 --> 00:19:55.157
+Authorization models:
+
+305
+00:19:55.437 --> 00:19:56.930
+RBAC, ABAC, ReBAC.
+
+306
+00:19:57.210 --> 00:20:01.029
+L3 runs the same 12 grocery requests through all three:
+
+307
+00:20:02.379 --> 00:20:03.744
+Here is a quick table:
+
+308
+00:20:04.024 --> 00:20:06.840
+Model, and Decides by, and Good at, and Weak at.
+
+309
+00:20:07.120 --> 00:20:07.973
+RBAC.
+
+310
+00:20:08.253 --> 00:20:09.320
+Decides by:
+
+311
+00:20:09.600 --> 00:20:11.605
+The subject's roles, then permissions.
+
+312
+00:20:11.885 --> 00:20:12.675
+Good at:
+
+313
+00:20:12.955 --> 00:20:15.557
+Simple, auditable, coarse-grained org roles.
+
+314
+00:20:15.837 --> 00:20:16.691
+Weak at:
+
+315
+00:20:16.971 --> 00:20:22.411
+Can't express own, same store, at most limit, with purpose (role explosion if you try).
+
+316
+00:20:22.691 --> 00:20:23.480
+ABAC.
+
+317
+00:20:23.760 --> 00:20:24.827
+Decides by:
+
+318
+00:20:25.107 --> 00:20:29.395
+Attributes of subject or resource or action or env, via policy.
+
+319
+00:20:29.675 --> 00:20:30.464
+Good at:
+
+320
+00:20:30.744 --> 00:20:34.349
+Fine-grained conditions, context (time, amount, purpose).
+
+321
+00:20:34.629 --> 00:20:35.483
+Weak at:
+
+322
+00:20:35.763 --> 00:20:39.432
+Policies get complex; hard to answer who can access X?
+
+323
+00:20:39.712 --> 00:20:40.501
+ReBAC.
+
+324
+00:20:40.781 --> 00:20:41.848
+Decides by:
+
+325
+00:20:42.128 --> 00:20:44.453
+Relationships in a graph (Zanzibar).
+
+326
+00:20:44.733 --> 00:20:45.523
+Good at:
+
+327
+00:20:45.803 --> 00:20:50.645
+Manager of the store that owns this order, inherited or nested access, sharing.
+
+328
+00:20:50.925 --> 00:20:51.779
+Weak at:
+
+329
+00:20:52.059 --> 00:20:55.579
+Needs the graph and a check service; conditions still need ABAC.
+
+330
+00:20:56.929 --> 00:20:58.529
+L3's result table:
+
+331
+00:20:58.809 --> 00:21:12.782
+RBAC alone allowed: the IDOR read (customer, then another's order), the cross-store update, the 8,000 rupeesover-limit refund, the Bengaluru manager reading a Mumbai order, and the PII read with no ticket.
+
+332
+00:21:13.062 --> 00:21:15.089
+Roles simply can't say no to these.
+
+333
+00:21:15.369 --> 00:21:23.902
+ABAC denied all of them via ownership, store scope, a 5,000 rupeesrefund limit, city scope, and an open ticket purpose check.
+
+334
+00:21:25.252 --> 00:21:37.476
+ReBAC answered order reads from the graph: owner, delivering rider, and manager via store, then city inheritance, without the order row carrying storeId or city; the edges carry it.
+
+335
+00:21:37.756 --> 00:21:39.761
+In practice, platforms layer them:
+
+336
+00:21:40.041 --> 00:21:55.935
+RBAC for coarse org roles, ABAC conditions for limits and context, and ReBAC (an authorization service like OpenFGA or SpiceDB, or a policy engine like OPA or Cedar) for object- and relationship-level checks.
+
+337
+00:21:56.215 --> 00:22:01.932
+The decision is centralized (policy) but enforced locally (each service checks before acting).
+
+338
+00:22:03.282 --> 00:22:06.759
+The OWASP API Security Top 10, on this platform.
+
+339
+00:22:07.039 --> 00:22:08.405
+Here is a quick table:
+
+340
+00:22:08.685 --> 00:22:11.117
+Risk, and Grocery example, and Defense.
+
+341
+00:22:11.397 --> 00:22:12.527
+API1.
+
+342
+00:22:12.807 --> 00:22:13.511
+Risk:
+
+343
+00:22:13.791 --> 00:22:16.543
+Broken Object Level Authorization (IDOR).
+
+344
+00:22:16.823 --> 00:22:20.727
+Grocery example: /orders/id returns any order.
+
+345
+00:22:21.007 --> 00:22:21.882
+Defense:
+
+346
+00:22:22.162 --> 00:22:24.807
+Object-level check on every fetch (L3).
+
+347
+00:22:25.087 --> 00:22:26.239
+API2.
+
+348
+00:22:26.519 --> 00:22:27.223
+Risk:
+
+349
+00:22:27.503 --> 00:22:28.975
+Broken Authentication.
+
+350
+00:22:29.255 --> 00:22:32.669
+Grocery example: alg:none, no OTP limit.
+
+351
+00:22:32.949 --> 00:22:33.823
+Defense:
+
+352
+00:22:34.103 --> 00:22:37.389
+Hardened JWT + OTP (L1, L2).
+
+353
+00:22:37.669 --> 00:22:38.842
+API3.
+
+354
+00:22:39.122 --> 00:22:39.826
+Risk:
+
+355
+00:22:40.106 --> 00:22:42.133
+Broken Object Property Level Auth.
+
+356
+00:22:42.413 --> 00:22:43.650
+Grocery example:
+
+357
+00:22:43.930 --> 00:22:47.087
+Client sets role or price in the body (mass assignment).
+
+358
+00:22:47.367 --> 00:22:48.242
+Defense:
+
+359
+00:22:48.522 --> 00:22:52.661
+Allow-list writable fields; never trust client-set authority fields.
+
+360
+00:22:52.941 --> 00:22:54.071
+API4.
+
+361
+00:22:54.351 --> 00:22:55.055
+Risk:
+
+362
+00:22:55.335 --> 00:22:57.319
+Unrestricted Resource Consumption.
+
+363
+00:22:57.599 --> 00:22:58.837
+Grocery example:
+
+364
+00:22:59.117 --> 00:23:01.506
+Unbounded page size, no rate limit.
+
+365
+00:23:01.786 --> 00:23:02.661
+Defense:
+
+366
+00:23:02.941 --> 00:23:06.077
+Limits, quotas, pagination caps (Ch 18).
+
+367
+00:23:06.357 --> 00:23:07.509
+API5.
+
+368
+00:23:07.789 --> 00:23:08.493
+Risk:
+
+369
+00:23:08.773 --> 00:23:10.991
+Broken Function Level Authorization.
+
+370
+00:23:11.271 --> 00:23:12.509
+Grocery example:
+
+371
+00:23:12.789 --> 00:23:14.751
+Customer calls an admin endpoint.
+
+372
+00:23:15.031 --> 00:23:15.906
+Defense:
+
+373
+00:23:16.186 --> 00:23:18.746
+Deny by default; check function permission.
+
+374
+00:23:20.096 --> 00:23:21.312
+API6.
+
+375
+00:23:21.592 --> 00:23:22.296
+Risk:
+
+376
+00:23:22.576 --> 00:23:25.520
+Unrestricted Access to Sensitive Business Flows.
+
+377
+00:23:25.800 --> 00:23:27.037
+Grocery example:
+
+378
+00:23:27.317 --> 00:23:29.216
+Bots draining flash-sale stock.
+
+379
+00:23:29.496 --> 00:23:30.371
+Defense:
+
+380
+00:23:30.651 --> 00:23:32.912
+Bot defense, per-user flow limits.
+
+381
+00:23:33.192 --> 00:23:34.387
+API7.
+
+382
+00:23:34.667 --> 00:23:35.371
+Risk:
+
+383
+00:23:35.651 --> 00:23:36.696
+SSRF.
+
+384
+00:23:36.976 --> 00:23:42.032
+Grocery example: image URL fetched by the server hits internal metadata.
+
+385
+00:23:42.312 --> 00:23:43.187
+Defense:
+
+386
+00:23:43.467 --> 00:23:47.413
+Allow-list egress, no raw URLs (Ch 21 lesson).
+
+387
+00:23:47.693 --> 00:23:48.845
+API8.
+
+388
+00:23:49.125 --> 00:23:49.829
+Risk:
+
+389
+00:23:50.109 --> 00:23:52.072
+Security Misconfiguration.
+
+390
+00:23:52.352 --> 00:23:53.589
+Grocery example:
+
+391
+00:23:53.869 --> 00:23:56.024
+Debug endpoints, permissive CORS.
+
+392
+00:23:56.304 --> 00:23:57.179
+Defense:
+
+393
+00:23:57.459 --> 00:23:59.656
+Hardened baselines, config review.
+
+394
+00:23:59.936 --> 00:24:01.088
+API9.
+
+395
+00:24:01.368 --> 00:24:02.072
+Risk:
+
+396
+00:24:02.352 --> 00:24:04.165
+Improper Inventory Management.
+
+397
+00:24:04.445 --> 00:24:05.683
+Grocery example:
+
+398
+00:24:05.963 --> 00:24:07.925
+Forgotten or v1 with no auth.
+
+399
+00:24:08.205 --> 00:24:09.080
+Defense:
+
+400
+00:24:09.360 --> 00:24:12.048
+API catalog, retire old versions.
+
+401
+00:24:12.328 --> 00:24:13.459
+API10.
+
+402
+00:24:13.739 --> 00:24:14.443
+Risk:
+
+403
+00:24:14.723 --> 00:24:17.475
+Unsafe Consumption of 3rd-party APIs.
+
+404
+00:24:17.755 --> 00:24:18.992
+Grocery example:
+
+405
+00:24:19.272 --> 00:24:21.277
+Trusting a gateway callback blindly.
+
+406
+00:24:21.557 --> 00:24:22.432
+Defense:
+
+407
+00:24:22.712 --> 00:24:26.104
+Verify signatures or idempotency (Ch 20).
+
+408
+00:24:27.454 --> 00:24:38.227
+Injection (SQLi, command injection) sits under secure coding: parameterized queries always (Ch 05), never string-built SQL or shell.
+
+409
+00:24:39.577 --> 00:24:40.943
+Secrets management.
+
+410
+00:24:41.223 --> 00:24:45.084
+Never in code or Git, never in plain env vars or images.
+
+411
+00:24:45.364 --> 00:24:50.484
+Use a secrets manager (Vault or OpenBao, cloud KMS or Secrets Manager).
+
+412
+00:24:50.764 --> 00:25:02.199
+Dynamic secrets: the KMS mints short-lived DB credentials per service on demand and revokes them on TTL, so there's no shared, long-lived DB password to leak.
+
+413
+00:25:02.479 --> 00:25:06.191
+Rotation: automated, with overlap (like JWKS).
+
+414
+00:25:06.471 --> 00:25:12.316
+Access: authenticated by workload identity, least-privilege policies, and every read audited.
+
+415
+00:25:13.666 --> 00:25:20.621
+Detection: secret-scanning in CI and on commits; treat any committed secret as compromised and rotate it.
+
+416
+00:25:21.971 --> 00:25:22.845
+Encryption.
+
+417
+00:25:23.125 --> 00:25:24.064
+In transit:
+
+418
+00:25:24.344 --> 00:25:31.448
+TLS 1.3, HSTS, modern ciphers; mTLS internally (§2.7).
+
+419
+00:25:31.728 --> 00:25:34.267
+Terminate at the edge, re-encrypt internally.
+
+420
+00:25:34.547 --> 00:25:40.477
+At rest: full-disk or volume encryption is table stakes but only protects against stolen disks.
+
+421
+00:25:40.757 --> 00:25:48.651
+Application-level encryption protects specific fields (PII, payment data) against a compromised database or backup.
+
+422
+00:25:48.931 --> 00:25:52.003
+Envelope encryption (L4) is the standard pattern:
+
+423
+00:25:52.283 --> 00:25:57.125
+Generate a data encryption key (DEK) per record (or per tenant or batch).
+
+424
+00:25:58.475 --> 00:26:09.782
+Encrypt the field with the DEK using authenticated encryption (AES-256-GCM), a unique IV per encryption, and a tag that detects tampering.
+
+425
+00:26:10.062 --> 00:26:16.633
+Wrap (encrypt) the DEK with a key-encryption key (KEK) that lives in the KMS and never leaves it.
+
+426
+00:26:16.913 --> 00:26:20.795
+Store ciphertext + wrapped DEK + KEK version.
+
+427
+00:26:21.075 --> 00:26:24.019
+To read, ask the KMS to unwrap the DEK.
+
+428
+00:26:24.299 --> 00:26:26.625
+L4 with OpenBao's transit engine:
+
+429
+00:26:27.975 --> 00:26:39.345
+A 60-byte address, then 76-byte ciphertext + a 12-byte IV + an 89-byte wrapped DEK; the row holds no plaintext and no key material.
+
+430
+00:26:39.625 --> 00:26:49.076
+Tampering: flipping one ciphertext bit makes GCM decryption throw AEADBadTagException, the record is rejected, not silently corrupted.
+
+431
+00:26:49.356 --> 00:27:02.625
+KEK rotation: rotate the KEK in the KMS; old rows still decrypt (the KMS keeps old versions), and you rewrap only the small DEKs (kilobytes), never the data (terabytes).
+
+432
+00:27:02.905 --> 00:27:05.401
+The ciphertext is byte-for-byte unchanged.
+
+433
+00:27:06.751 --> 00:27:22.282
+Cost: a KMS call per record was 1.72 ms or field; reusing one wrapped DEK across records (each with its own IV) was 0.015 ms or field, 115x cheaper.
+
+434
+00:27:22.562 --> 00:27:27.063
+Cache or derive DEKs per tenant or batch; never cache the KEK.
+
+435
+00:27:28.413 --> 00:27:30.717
+Crypto-shredding and the right to erasure.
+
+436
+00:27:30.997 --> 00:27:40.491
+Delete all my data (DPDP or GDPR, Ch 36) is hard because data spreads into backups, replicas, logs and the lake.
+
+437
+00:27:40.771 --> 00:27:46.659
+Crypto-shredding: encrypt a customer's data under a per-customer key; to erase, destroy the key.
+
+438
+00:27:46.939 --> 00:27:51.227
+Every copy, everywhere, becomes permanently unrecoverable ciphertext.
+
+439
+00:27:51.507 --> 00:28:03.005
+L4 D: after destroying the customer's KEK in the KMS, unwrapping the DEK fails, so the data is gone everywhere it was copied, without hunting down every backup.
+
+440
+00:28:03.285 --> 00:28:16.832
+Caveats: it only works if the customer's data was only ever encrypted under that key (no plaintext copies escaped), and you still delete what you can directly; shredding covers the long tail (backups, archives).
+
+441
+00:28:18.182 --> 00:28:20.166
+Defense in depth and threat modeling.
+
+442
+00:28:20.446 --> 00:28:22.302
+No single control is trusted.
+
+443
+00:28:22.582 --> 00:28:37.238
+Layers: edge (WAF, TLS, rate limits), gateway (authN, coarse authZ), service (fine authZ, input validation), data (encryption, least-privilege access), and monitoring (audit logs, anomaly detection).
+
+444
+00:28:37.518 --> 00:28:39.651
+Threat modeling (STRIDE) per feature:
+
+445
+00:28:39.931 --> 00:28:57.766
+Spoofing, then strong authN; Tampering, then signatures, GCM, integrity; Repudiation, then audit logs; Information disclosure, then encryption, authZ; Denial of service, then rate limits (Ch 18); Elevation of privilege, then least privilege, authZ checks.
+
+446
+00:28:58.046 --> 00:29:04.531
+Do it at design time, keep a risk register, and re-test with the conformance harnesses these labs illustrate.
+
+447
+00:29:05.881 --> 00:29:06.777
+Part 3.
+
+448
+00:29:07.057 --> 00:29:08.785
+Architecture and Diagrams.
+
+449
+00:29:10.035 --> 00:29:11.102
+Component view.
+
+450
+00:29:11.382 --> 00:29:12.726
+Here is the diagram.
+
+451
+00:29:16.576 --> 00:29:21.056
+Sequence: happy path, mobile login with OAuth Code + PKCE.
+
+452
+00:29:21.336 --> 00:29:24.003
+The sequence diagram walks through it step by step.
+
+453
+00:29:24.283 --> 00:29:30.427
+App to App: generate codeverifier, codechallenge = S256(verifier).
+
+454
+00:29:30.707 --> 00:29:31.645
+App to AS:
+
+455
+00:29:31.925 --> 00:29:36.277
+OTP login, then or authorize with challenge, registered redirect.
+
+456
+00:29:36.557 --> 00:29:39.075
+AS to App: redirect with one-time code.
+
+457
+00:29:39.355 --> 00:29:42.533
+App to AS: /token with code + codeverifier.
+
+458
+00:29:42.813 --> 00:29:50.088
+AS to AS: verify code unused, redirect matches, S256(verifier) = challenge.
+
+459
+00:29:50.368 --> 00:29:54.656
+AS to App: short-lived access token + rotating refresh token.
+
+460
+00:29:54.936 --> 00:29:57.773
+App to API: request with access token.
+
+461
+00:29:58.053 --> 00:30:07.120
+API to API: validate JWT (fixed alg, JWKS kid, iss or aud or exp), authZ on the object.
+
+462
+00:30:07.400 --> 00:30:09.128
+API to App: data.
+
+463
+00:30:12.978 --> 00:30:16.498
+Sequence: failure path, refresh-token reuse detected.
+
+464
+00:30:16.778 --> 00:30:19.445
+The sequence diagram walks through it step by step.
+
+465
+00:30:19.725 --> 00:30:23.053
+Attacker to AS: refresh with stolen token RT1.
+
+466
+00:30:23.333 --> 00:30:28.517
+AS to Attacker: new access token + RT2, RT1 marked used.
+
+467
+00:30:28.797 --> 00:30:33.127
+Owner to AS: refresh with RT1 (the copy the owner still has).
+
+468
+00:30:33.407 --> 00:30:34.303
+AS to AS:
+
+469
+00:30:34.583 --> 00:30:37.549
+RT1 already used, then reuse detected.
+
+470
+00:30:37.829 --> 00:30:41.733
+AS to Owner: revoke the whole token family, force re-login.
+
+471
+00:30:45.583 --> 00:30:50.084
+State: envelope-encrypted record through KEK rotation and shredding.
+
+472
+00:30:50.364 --> 00:30:51.708
+Here is the diagram.
+
+473
+00:30:55.558 --> 00:30:56.475
+Part 4.
+
+474
+00:30:56.755 --> 00:30:58.377
+Design Document Excerpt:
+
+475
+00:30:58.657 --> 00:31:01.046
+Grocery Platform Security Architecture.
+
+476
+00:31:02.296 --> 00:31:03.661
+Here is a quick table:
+
+477
+00:31:03.941 --> 00:31:05.243
+Field, and Value.
+
+478
+00:31:05.523 --> 00:31:06.867
+Author or Reviewers:
+
+479
+00:31:07.147 --> 00:31:11.861
+Security team or platform, payments, SRE, legal (DPDP).
+
+480
+00:31:12.141 --> 00:31:13.037
+Status:
+
+481
+00:31:13.317 --> 00:31:14.192
+Approved.
+
+482
+00:31:14.472 --> 00:31:15.795
+Related ADRs:
+
+483
+00:31:16.075 --> 00:31:41.035
+ADR-098 OAuth2 Code+PKCE + OIDC, short access tokens, rotating refresh with reuse detection; ADR-099 JWT validation library with fixed alg + JWKS (no hand-rolled parsers); ADR-100 AuthZ = RBAC + ABAC conditions + ReBAC via a central policy service,
+
+484
+00:31:41.315 --> 00:31:56.099
+enforced per object; ADR-101 Zero-trust service auth (mTLS or SPIFFE, dynamic DB creds); ADR-102 Envelope encryption for PII with per-tenant keys and crypto-shredding.
+
+485
+00:31:57.449 --> 00:31:58.089
+1.
+
+486
+00:31:58.369 --> 00:31:59.777
+Context and Problem.
+
+487
+00:32:00.057 --> 00:32:12.323
+The review (§1.1): a token-header-trusting validator, an unlimited-attempt OTP, IDOR, role-only refund authority, and plaintext PII with no real erasure.
+
+488
+00:32:12.603 --> 00:32:13.307
+2.
+
+489
+00:32:13.587 --> 00:32:14.931
+Goals or Non-Goals.
+
+490
+00:32:15.211 --> 00:32:31.809
+Goals: no token forgery accepted; brute-force-resistant login; object- and context-level authorization; secrets and keys in a KMS; encrypted PII with erasure; zero-trust internal calls; everything testable in CI.
+
+491
+00:32:32.089 --> 00:32:39.790
+Non-goals: building our own IdP or crypto primitives; SMS OTP as strong MFA (it's a floor).
+
+492
+00:32:41.140 --> 00:32:41.887
+3.
+
+493
+00:32:42.167 --> 00:32:43.127
+Requirements.
+
+494
+00:32:44.477 --> 00:32:45.842
+Here is a quick table:
+
+495
+00:32:46.122 --> 00:32:47.594
+ID, and Requirement.
+
+496
+00:32:47.874 --> 00:32:48.813
+FR-1:
+
+497
+00:32:49.093 --> 00:32:59.610
+JWTs validated with a vetted library: fixed algorithm, JWKS by kid, iss or aud or exp or nbf, revocation on logout.
+
+498
+00:32:59.890 --> 00:33:00.829
+FR-2:
+
+499
+00:33:01.109 --> 00:33:14.655
+OTP: at most 5 attempts or code, at most 3 sends or phone or 10 min, hashed + expiring codes; app uses Code+PKCE (S256), registered redirects, single-use codes.
+
+500
+00:33:14.935 --> 00:33:15.917
+FR-3:
+
+501
+00:33:16.197 --> 00:33:21.423
+Access tokens at most 15 min; refresh tokens rotate with reuse detection.
+
+502
+00:33:21.703 --> 00:33:22.685
+FR-4:
+
+503
+00:33:22.965 --> 00:33:31.733
+Every object access checks the subject's relation to that object (no IDOR); refunds or edits enforce store scope and amount limits.
+
+504
+00:33:32.013 --> 00:33:33.015
+FR-5:
+
+505
+00:33:33.295 --> 00:33:39.247
+PII fields encrypted with envelope encryption; per-customer keys enable crypto-shredding.
+
+506
+00:33:39.527 --> 00:33:40.573
+NFR-1:
+
+507
+00:33:40.853 --> 00:33:47.573
+Internal calls use mTLS with workload identity; DB credentials are dynamic and short-lived.
+
+508
+00:33:48.923 --> 00:33:49.968
+NFR-2:
+
+509
+00:33:50.248 --> 00:33:58.227
+Conformance tests (token forgeries, OTP limits, IDOR, PKCE) run in CI and block merge on regression.
+
+510
+00:33:58.507 --> 00:33:59.573
+NFR-3:
+
+511
+00:33:59.853 --> 00:34:04.227
+All authN or authZ decisions and PII access are audit-logged.
+
+512
+00:34:05.577 --> 00:34:06.281
+4.
+
+513
+00:34:06.561 --> 00:34:07.947
+Estimates and choices.
+
+514
+00:34:09.297 --> 00:34:10.663
+Here is a quick table:
+
+515
+00:34:10.943 --> 00:34:13.076
+Item, and Choice, and Rationale.
+
+516
+00:34:13.356 --> 00:34:14.465
+Token signing.
+
+517
+00:34:14.745 --> 00:34:15.577
+Choice:
+
+518
+00:34:15.857 --> 00:34:20.252
+RS256 (or ES256 for size).
+
+519
+00:34:20.532 --> 00:34:21.471
+Rationale:
+
+520
+00:34:21.751 --> 00:34:25.484
+Public-key verification at every resource server (L1 D).
+
+521
+00:34:25.764 --> 00:34:27.385
+Access token TTL.
+
+522
+00:34:27.665 --> 00:34:28.497
+Choice:
+
+523
+00:34:28.777 --> 00:34:29.823
+15 min.
+
+524
+00:34:30.103 --> 00:34:31.041
+Rationale:
+
+525
+00:34:31.321 --> 00:34:34.095
+Balances revocation lag and refresh load.
+
+526
+00:34:34.375 --> 00:34:35.036
+KEK.
+
+527
+00:34:35.316 --> 00:34:36.148
+Choice:
+
+528
+00:34:36.428 --> 00:34:39.521
+KMS, non-exportable, per-tenant for PII.
+
+529
+00:34:39.801 --> 00:34:40.740
+Rationale:
+
+530
+00:34:41.020 --> 00:34:43.089
+Rotation + shredding (L4).
+
+531
+00:34:43.369 --> 00:34:44.052
+DEK.
+
+532
+00:34:44.332 --> 00:34:45.164
+Choice:
+
+533
+00:34:45.444 --> 00:34:47.641
+Per record, cached per tenant or batch.
+
+534
+00:34:47.921 --> 00:34:48.860
+Rationale:
+
+535
+00:34:49.140 --> 00:34:53.727
+115x cheaper than per-record KMS calls (L4 E).
+
+536
+00:34:54.007 --> 00:34:55.095
+AuthZ engine.
+
+537
+00:34:55.375 --> 00:34:56.207
+Choice:
+
+538
+00:34:56.487 --> 00:35:02.012
+OPA or Cedar for ABAC + OpenFGA or SpiceDB for ReBAC.
+
+539
+00:35:02.292 --> 00:35:03.231
+Rationale:
+
+540
+00:35:03.511 --> 00:35:05.793
+Central policy, local enforcement.
+
+541
+00:35:07.143 --> 00:35:07.911
+5.
+
+542
+00:35:08.191 --> 00:35:09.386
+Proposed design.
+
+543
+00:35:09.666 --> 00:35:19.522
+AuthN: an authorization server (or managed IdP) issues OIDC tokens via Code+PKCE for apps and Client Credentials for services.
+
+544
+00:35:19.802 --> 00:35:27.866
+A gateway validates JWTs (fixed alg, cached JWKS) and passes verified user context downstream.
+
+545
+00:35:28.146 --> 00:35:35.165
+AuthZ: a shared library calls the policy service for each protected action, always with the object identity.
+
+546
+00:35:35.445 --> 00:35:42.207
+RBAC for roles, ABAC conditions (store, amount, purpose), ReBAC for ownership or hierarchy.
+
+547
+00:35:42.487 --> 00:35:43.511
+Default deny.
+
+548
+00:35:44.861 --> 00:35:53.053
+Service auth: the mesh enforces mTLS with SPIFFE identities; services get dynamic DB creds from the KMS.
+
+549
+00:35:53.333 --> 00:36:03.125
+Data: an encryption library seals PII fields (AES-256-GCM + KMS-wrapped DEKs, per-tenant KEKs).
+
+550
+00:36:03.405 --> 00:36:05.283
+Erasure destroys the tenant key.
+
+551
+00:36:05.563 --> 00:36:15.845
+Assurance: the conformance harnesses (L1, L3 style) run in CI; secret-scanning on commits; periodic pen tests and threat models per feature.
+
+552
+00:36:16.125 --> 00:36:16.872
+7.
+
+553
+00:36:17.152 --> 00:36:18.667
+Alternatives considered.
+
+554
+00:36:20.017 --> 00:36:21.382
+Here is a quick table:
+
+555
+00:36:21.662 --> 00:36:24.222
+Option, and Pros, and Cons, and Verdict.
+
+556
+00:36:24.502 --> 00:36:26.081
+Opaque sessions everywhere.
+
+557
+00:36:26.361 --> 00:36:27.214
+Pros:
+
+558
+00:36:27.494 --> 00:36:28.774
+Easy revocation.
+
+559
+00:36:29.054 --> 00:36:29.865
+Cons:
+
+560
+00:36:30.145 --> 00:36:32.150
+Central lookup, stateful at scale.
+
+561
+00:36:32.430 --> 00:36:33.241
+Verdict:
+
+562
+00:36:33.521 --> 00:36:37.169
+Used for browser sessions; JWTs for APIs.
+
+563
+00:36:37.449 --> 00:36:39.945
+Hand-rolled JWT validation.
+
+564
+00:36:40.225 --> 00:36:41.078
+Pros:
+
+565
+00:36:41.358 --> 00:36:42.531
+No dependency.
+
+566
+00:36:42.811 --> 00:36:43.622
+Cons:
+
+567
+00:36:43.902 --> 00:36:46.377
+Alg-confusion and claim bugs (L1).
+
+568
+00:36:46.657 --> 00:36:47.467
+Verdict:
+
+569
+00:36:47.747 --> 00:36:48.665
+Rejected.
+
+570
+00:36:48.945 --> 00:36:50.033
+RBAC only.
+
+571
+00:36:50.313 --> 00:36:51.166
+Pros:
+
+572
+00:36:51.446 --> 00:36:52.214
+Simple.
+
+573
+00:36:52.494 --> 00:36:53.305
+Cons:
+
+574
+00:36:53.585 --> 00:36:56.337
+Can't express own or scope or limit (L3).
+
+575
+00:36:56.617 --> 00:36:57.427
+Verdict:
+
+576
+00:36:57.707 --> 00:36:59.307
+Rejected as sole model.
+
+577
+00:36:59.587 --> 00:37:00.953
+Encrypt only the disk.
+
+578
+00:37:01.233 --> 00:37:02.086
+Pros:
+
+579
+00:37:02.366 --> 00:37:03.134
+Simple.
+
+580
+00:37:03.414 --> 00:37:04.225
+Cons:
+
+581
+00:37:04.505 --> 00:37:07.577
+No protection from a compromised DB or backup.
+
+582
+00:37:07.857 --> 00:37:08.667
+Verdict:
+
+583
+00:37:08.947 --> 00:37:10.590
+Insufficient for PII.
+
+584
+00:37:10.870 --> 00:37:12.470
+Per-record KMS calls.
+
+585
+00:37:12.750 --> 00:37:13.603
+Pros:
+
+586
+00:37:13.883 --> 00:37:14.737
+Simplest.
+
+587
+00:37:15.017 --> 00:37:15.827
+Cons:
+
+588
+00:37:16.107 --> 00:37:19.734
+115x cost, KMS bottleneck (L4).
+
+589
+00:37:20.014 --> 00:37:20.825
+Verdict:
+
+590
+00:37:21.105 --> 00:37:22.683
+Cache DEKs per tenant.
+
+591
+00:37:24.033 --> 00:37:24.716
+8.
+
+592
+00:37:24.996 --> 00:37:26.148
+Failure modes.
+
+593
+00:37:26.428 --> 00:37:31.548
+Signing key compromise, then rotate via JWKS, revoke families.
+
+594
+00:37:31.828 --> 00:37:37.247
+KMS outage, then cached DEKs keep reads working; fail closed on new writes.
+
+595
+00:37:37.527 --> 00:37:43.713
+Policy service down, then cached decisions with short TTL, fail closed for sensitive actions.
+
+596
+00:37:43.993 --> 00:37:47.535
+Stolen refresh token, then reuse detection (L1 C).
+
+597
+00:37:47.815 --> 00:37:48.519
+10.
+
+598
+00:37:48.799 --> 00:37:49.887
+Observability.
+
+599
+00:37:50.167 --> 00:38:07.255
+AuthN success or failure by reason, OTP lockouts, token validation failures by cause (a spike in alg mismatch is an attack), authZ denials by policy, PII access logs, KMS operations, mTLS handshake failures.
+
+600
+00:38:08.605 --> 00:38:09.458
+14.
+
+601
+00:38:09.738 --> 00:38:13.087
+Decision (ADR-098 to 102).
+
+602
+00:38:13.367 --> 00:38:32.887
+Standard OAuth2 or OIDC with PKCE and rotating refresh; library-based JWT validation; layered RBAC or ABAC or ReBAC enforced per object; zero-trust service auth; envelope encryption with per-tenant keys and crypto-shredding; conformance tests in CI.
+
+603
+00:38:34.237 --> 00:38:35.197
+Part 5.
+
+604
+00:38:35.477 --> 00:38:37.461
+Hands-On Code, Level Ladder.
+
+605
+00:38:38.711 --> 00:38:40.077
+Here is a quick table:
+
+606
+00:38:40.357 --> 00:38:43.045
+Level, and New requirement that forces the step.
+
+607
+00:38:43.325 --> 00:38:44.157
+L1:
+
+608
+00:38:44.437 --> 00:38:47.615
+Our refunds tool accepted a forged admin token.
+
+609
+00:38:47.895 --> 00:38:51.970
+(JWT validation, rotation, refresh reuse detection).
+
+610
+00:38:52.250 --> 00:38:53.061
+L2:
+
+611
+00:38:53.341 --> 00:38:57.991
+Logins can be brute-forced and the app's OAuth flow issues tokens to anyone.
+
+612
+00:38:58.271 --> 00:39:01.813
+(OTP + OAuth or PKCE control conformance).
+
+613
+00:39:02.093 --> 00:39:02.946
+L3:
+
+614
+00:39:03.226 --> 00:39:07.493
+A customer read another customer's order, and managers refund anything.
+
+615
+00:39:07.773 --> 00:39:10.909
+(RBAC versus ABAC versus ReBAC, IDOR).
+
+616
+00:39:11.189 --> 00:39:12.063
+L4:
+
+617
+00:39:12.343 --> 00:39:15.607
+PII is in plaintext and we can't really delete it.
+
+618
+00:39:15.887 --> 00:39:20.346
+(envelope encryption, rotation, crypto-shredding with a real KMS).
+
+619
+00:39:21.696 --> 00:39:27.349
+All labs are defensive: each hardens a control and asserts that bad inputs are refused.
+
+620
+00:39:27.629 --> 00:39:28.440
+Machine:
+
+621
+00:39:28.720 --> 00:39:39.024
+2 vCPU container, Java 21, and OpenBao 2.1 (an open-source Vault, from its GitHub release) as the KMS for L4.
+
+622
+00:39:39.304 --> 00:39:44.808
+Outputs are verbatim; lab files are in labs or ch23-security/.
+
+623
+00:39:46.158 --> 00:39:51.833
+L1, JWT validation, key rotation and refresh-token reuse detection.
+
+624
+00:39:52.113 --> 00:39:53.051
+Requirement:
+
+625
+00:39:53.331 --> 00:39:56.873
+A hand-rolled validator accepted a forged admin token.
+
+626
+00:39:57.153 --> 00:39:59.030
+Show what a safe validator checks.
+
+627
+00:39:59.310 --> 00:40:21.753
+The program builds JWTs with the JDK's own crypto (RS256 or ES256 or HS256), then runs a battery of good and forged tokens through a naive validator (trusts the header) and a hardened one (fixed algorithm per kid, JWKS, all registered claims, denylist).
+
+628
+00:40:22.033 --> 00:40:27.601
+It also rotates keys through a JWKS and models refresh-token rotation.
+
+629
+00:40:28.951 --> 00:40:31.767
+Here is the Java code, TokensL1.java.
+
+630
+00:40:32.047 --> 00:40:36.377
+It runs to 291 lines; the full listing is in the chapter.
+
+631
+00:40:36.657 --> 00:40:44.295
+TokensL1.java, run with: java TokensL1.java (JDK 17 plus, no dependencies).
+
+632
+00:40:44.575 --> 00:41:06.569
+JWTs built from the JDK's own crypto: issue RS256 or ES256 or HS256 tokens, then validate a battery of good and forged tokens. with a NAIVE validator (trusts the header) and a HARDENED one (allow-listed alg per kid, iss or aud or exp or nbf, denylist).
+
+633
+00:41:09.419 --> 00:41:10.337
+On screen:
+
+634
+00:41:10.617 --> 00:41:11.235
+A.
+
+635
+00:41:11.515 --> 00:41:26.747
+Validating tokens presented to payment-api. token naive validator hardened validator. valid token (payment API audience) ACCEPTED ACCEPTED (valid). alg:none, no signature ACCEPTED rejected (unsigned).
+
+636
+00:41:27.027 --> 00:41:48.851
+HS256 signed with our PUBLIC key as secret ACCEPTED rejected (alg mismatch). attacker key embedded in header (jwk) ACCEPTED rejected (key in header). payload edited (role, then admin), old signature rejected rejected (bad signature). expired 2 hours ago ACCEPTED rejected (expired). valid,
+
+637
+00:41:49.131 --> 00:42:02.571
+but audience rider-app ACCEPTED rejected (aud). valid, but jti revoked at logout ACCEPTED rejected (revoked). valid signature, 30-day lifetime ACCEPTED rejected (lifetime too long).
+
+638
+00:42:02.851 --> 00:42:03.534
+B.
+
+639
+00:42:03.814 --> 00:42:15.014
+Key rotation through the JWKS (kid k1, then k2). overlap (JWKS has k1 plusk2): old-key token valid, new-key token valid.
+
+640
+00:42:15.294 --> 00:42:16.809
+The rest is in the chapter.
+
+641
+00:42:19.659 --> 00:42:20.512
+Reading it:
+
+642
+00:42:20.792 --> 00:42:24.397
+The naive validator accepts 7 of 9 bad tokens.
+
+643
+00:42:24.677 --> 00:42:43.941
+Trusting alg from the header gives alg:none and the HS256-with-public-key confusion; trusting an embedded jwk lets the token bring its own key; skipping exp or aud or jti or lifetime lets expired, wrong-audience, revoked and absurdly long-lived tokens through.
+
+644
+00:42:44.221 --> 00:42:48.147
+Only actual signature tampering fails, because that breaks the maths.
+
+645
+00:42:49.497 --> 00:43:06.670
+The hardened validator fixes the algorithm from the trusted key (never the token), resolves the key by kid in the JWKS, refuses keys in the header, and checks issuer, audience, expiry, not-before (with 30 s skew), a sane lifetime and revocation.
+
+646
+00:43:06.950 --> 00:43:18.193
+Rotation: publish the new key first, so both validate during the overlap; retire the old kid only after the maximum token lifetime, so no in-flight token is orphaned.
+
+647
+00:43:19.543 --> 00:43:26.988
+Refresh reuse: a stolen, long-lived reusable token gave 43,200 minutes of access.
+
+648
+00:43:27.268 --> 00:43:37.700
+With rotation and reuse detection, the attacker got one 15-minute access token before the owner's next refresh exposed the reuse and revoked the family.
+
+649
+00:43:37.980 --> 00:43:38.961
+Algorithms:
+
+650
+00:43:39.241 --> 00:43:54.409
+RS256 verifies fast (47 µs) but signs slowly; ES256 has smaller tokens; HS256 is fastest but symmetric (only within one trust boundary).
+
+651
+00:43:55.759 --> 00:43:57.871
+L2, Login control conformance:
+
+652
+00:43:58.151 --> 00:44:00.669
+OTP and OAuth Code + PKCE.
+
+653
+00:44:00.949 --> 00:44:01.887
+Requirement:
+
+654
+00:44:02.167 --> 00:44:07.138
+Prove the login endpoints refuse brute force and malformed OAuth requests.
+
+655
+00:44:07.418 --> 00:44:14.735
+A small authorization server runs over real HTTP with a naive and a hardened variant of each endpoint.
+
+656
+00:44:15.015 --> 00:44:23.015
+The harness is a control-conformance test, the kind you run in CI, that sends valid and invalid requests and asserts the outcome.
+
+657
+00:44:23.295 --> 00:44:30.015
+For OTP it counts how many wrong guesses the endpoint answers before locking (it never learns the real code).
+
+658
+00:44:31.365 --> 00:44:34.267
+Here is the Java code, LoginL2.java.
+
+659
+00:44:34.547 --> 00:44:39.005
+It runs to 341 lines; the full listing is in the chapter.
+
+660
+00:44:39.285 --> 00:44:50.016
+LoginL2.java, run with: java -Dsun.net.httpserver.nodelay=true LoginL2.java (JDK 21, no dependencies).
+
+661
+00:44:50.296 --> 00:44:57.656
+A small authorization server over real HTTP, and a conformance test that checks its defensive controls hold.
+
+662
+00:44:57.936 --> 00:44:59.963
+Part A: phone OTP login.
+
+663
+00:45:00.243 --> 00:45:05.811
+We verify the hardened endpoint enforces: attempt cap per code, send cap per phone.
+
+664
+00:45:08.661 --> 00:45:09.578
+On screen:
+
+665
+00:45:09.858 --> 00:45:10.477
+A.
+
+666
+00:45:10.757 --> 00:45:29.871
+OTP login control conformance (6-digit code, 1,000,000 possibilities). control naive hardened. legitimate owner with the real code, 200 logged in. wrong codes tolerated before lockout unlimited 5. codes issuable per phone or 10 min unlimited 3 (4th,
+
+667
+00:45:30.151 --> 00:45:46.834
+then 429). guessing budget before code expires or locks n or a 5 tries versus 1e6 space about 1 in 200,000. then naive: unlimited attempts make a 6-digit code guessable; hardened: locked after.
+
+668
+00:45:47.114 --> 00:45:49.994
+5, and codes are hashed at rest with expiry.
+
+669
+00:45:50.274 --> 00:45:50.957
+B.
+
+670
+00:45:51.237 --> 00:46:09.242
+OAuth 2.0 Authorization Code + PKCE conformance for the mobile app. request presented to or token naive hardened (BCP). correct verifier, registered redirect token issued token issued. wrong PKCE verifier token issued reject:
+
+671
+00:46:09.522 --> 00:46:13.149
+PKCE. no verifier at all token issued reject:
+
+672
+00:46:13.429 --> 00:46:14.431
+PKCE.
+
+673
+00:46:14.711 --> 00:46:16.226
+The rest is in the chapter.
+
+674
+00:46:19.076 --> 00:46:19.929
+Reading it:
+
+675
+00:46:20.209 --> 00:46:25.479
+OTP: the naive endpoint answers unlimited wrong guesses, so a 6-digit code falls.
+
+676
+00:46:25.759 --> 00:46:35.508
+The hardened endpoint locks after 5, caps sends to 3 per 10 minutes, hashes codes at rest with a 5-minute expiry, and compares in constant time.
+
+677
+00:46:35.788 --> 00:46:42.167
+With a cap of 5 against a million-value space, a blind guess is about 1 in 200,000.
+
+678
+00:46:43.517 --> 00:46:53.565
+OAuth: the naive or token issues an access token for a wrong PKCE verifier, a missing verifier, and an attacker-controlled redirect URI.
+
+679
+00:46:53.845 --> 00:46:57.599
+The hardened server enforces the OAuth Security BCP:
+
+680
+00:46:57.879 --> 00:47:16.226
+S256 PKCE (the verifier must hash to the stored challenge), exact-match registered redirect URIs, and single-use codes, and on a code replay it revokes the token already issued from that code, so an intercepted code that the attacker races on is contained.
+
+681
+00:47:17.576 --> 00:47:19.581
+L3, Authorization models:
+
+682
+00:47:19.861 --> 00:47:23.083
+RBAC versus ABAC versus ReBAC, and IDOR.
+
+683
+00:47:23.363 --> 00:47:24.301
+Requirement:
+
+684
+00:47:24.581 --> 00:47:30.619
+Roles let managers refund any amount in any store, and a customer read another customer's order.
+
+685
+00:47:30.899 --> 00:47:32.051
+Compare the models.
+
+686
+00:47:32.331 --> 00:47:45.429
+The same 12 grocery access requests run through RBAC (roles, then permissions), ABAC (a policy over attributes) and ReBAC (a Zanzibar-style relationship graph with userset rewrites).
+
+687
+00:47:45.709 --> 00:47:51.917
+A final section is the IDOR negative control: a handler that checks the role but not the object.
+
+688
+00:47:53.267 --> 00:47:56.062
+Here is the Java code, AuthzL3.java.
+
+689
+00:47:56.342 --> 00:48:00.651
+It runs to 219 lines; the full listing is in the chapter.
+
+690
+00:48:00.931 --> 00:48:08.270
+AuthzL3.java, run with: java AuthzL3.java (JDK 17 plus, no dependencies).
+
+691
+00:48:08.550 --> 00:48:12.667
+Three authorization models on the grocery platform's own scenarios:
+
+692
+00:48:12.947 --> 00:48:20.158
+RBAC (roles), ABAC (attributes or policy). and ReBAC (relationship graph, Google Zanzibar style).
+
+693
+00:48:20.438 --> 00:48:23.681
+Same 12 access requests through each, so you can see.
+
+694
+00:48:26.531 --> 00:48:27.448
+On screen:
+
+695
+00:48:27.728 --> 00:48:31.077
+Twelve access requests through each model ( allow, deny).
+
+696
+00:48:31.357 --> 00:48:32.915
+The 'no ticket' row flips.
+
+697
+00:48:33.195 --> 00:48:49.429
+ABAC's environment. request RBAC ABAC ReBAC. customer views their own order. customer views someone else's order (IDOR). rider views the order they're delivering. picker updates an order in their store n or a. picker updates an order in another store,
+
+698
+00:48:49.709 --> 00:49:10.979
+n or a. store manager refunds 1,499 rupeesin their store n or a. store manager refunds 8,000 rupees (over limit), n or a. city manager reads a Bengaluru store order. city manager reads a Mumbai order. support reads customer PII (open ticket) n or a.
+
+699
+00:49:11.259 --> 00:49:12.773
+The rest is in the chapter.
+
+700
+00:49:15.623 --> 00:49:16.477
+Reading it:
+
+701
+00:49:16.757 --> 00:49:27.935
+RBAC allows everything the role can ever do, so it can't deny the IDOR read, the cross-store update, the over-limit refund, the out-of-city read, or the no-purpose PII read.
+
+702
+00:49:28.215 --> 00:49:36.023
+Trying to encode those as roles causes role explosion (storemanagerBLR17refundupto5000).
+
+703
+00:49:36.303 --> 00:49:52.389
+ABAC expresses them directly: ownership (subject.id == resource.owner), store scope, a 5,000 rupeesrefund limit, city scope, and an open ticket purpose condition that flips with the environment (the no ticket row denies).
+
+704
+00:49:53.739 --> 00:50:03.445
+ReBAC answers order reads from the relationship graph: owner, delivering rider, and manager reached through order, then parentstore, then parentcity.
+
+705
+00:50:03.725 --> 00:50:08.845
+The order row doesn't need storeId or city columns, the edges carry the structure.
+
+706
+00:50:09.125 --> 00:50:14.736
+Amount limits still need an ABAC-style condition, which is why real systems layer the models.
+
+707
+00:50:15.016 --> 00:50:25.192
+IDOR control: the vulnerable handler leaks every order to any authenticated customer; adding the object-level ownership check denies the ones that aren't theirs.
+
+708
+00:50:25.472 --> 00:50:30.315
+Authentication is not authorization, and the check must be against that object.
+
+709
+00:50:31.665 --> 00:50:36.891
+L4, Envelope encryption, rotation and crypto-shredding with a real KMS.
+
+710
+00:50:37.171 --> 00:50:38.110
+Requirement:
+
+711
+00:50:38.390 --> 00:50:47.393
+Encrypt PII so a stolen database is useless, rotate keys without re-encrypting terabytes, and make 'delete my data' actually stick.
+
+712
+00:50:47.673 --> 00:50:58.979
+The program uses OpenBao's transit engine as a real KMS (the KEK never leaves it) and the JDK's AES-256-GCM for the data.
+
+713
+00:50:59.259 --> 00:51:10.843
+It seals a field, detects tampering, rotates the KEK and rewraps, crypto-shreds a customer key, and compares the cost of a KMS call per record against a cached DEK.
+
+714
+00:51:12.193 --> 00:51:15.052
+Here is the Java code, CryptoL4.java.
+
+715
+00:51:15.332 --> 00:51:19.705
+It runs to 164 lines; the full listing is in the chapter.
+
+716
+00:51:19.985 --> 00:51:33.297
+CryptoL4.java, run with: java CryptoL4.java (JDK 17 plus; needs a Vault or OpenBao transit engine at $BAO, default:8210).
+
+717
+00:51:33.577 --> 00:51:36.863
+Encryption at rest done properly: envelope encryption.
+
+718
+00:51:37.143 --> 00:51:50.711
+A per-record data key (DEK) encrypts the field with AES-256-GCM;. the DEK is wrapped by a key-encryption key (KEK) that never leaves the KMS (OpenBao transit).
+
+719
+00:51:50.991 --> 00:51:52.911
+We store only ciphertext +.
+
+720
+00:51:55.761 --> 00:51:56.678
+On screen:
+
+721
+00:51:56.958 --> 00:51:57.577
+A.
+
+722
+00:51:57.857 --> 00:52:17.398
+Envelope encryption of a customer's address (AES-256-GCM per record, DEK wrapped by. the KMS KEK). plaintext (60 bytes), then ciphertext 76 bytes, iv 12 bytes, wrapped DEK 89 bytes, KEK. version 2. what the database row stores:
+
+723
+00:52:17.678 --> 00:52:24.995
+ACZvPdn9qYOVSgAGu or RqTLnLwRZxOZim...
+
+724
+00:52:25.275 --> 00:52:30.289
+(no plaintext, no. key material). decrypt round-trip matches original: true.
+
+725
+00:52:30.569 --> 00:52:31.251
+B.
+
+726
+00:52:31.531 --> 00:52:41.643
+Authenticated encryption detects tampering (GCM tag). one flipped bit, then AEADBadTagException (record rejected, not silently corrupted).
+
+727
+00:52:41.923 --> 00:52:42.606
+C.
+
+728
+00:52:42.886 --> 00:52:46.001
+KEK rotation without re-encrypting the data.
+
+729
+00:52:46.281 --> 00:52:49.331
+KEK rotated to version 3 in the KMS.
+
+730
+00:52:49.611 --> 00:52:56.331
+Existing rows keep working (KMS keeps old. versions to unwrap): old row still decrypts: true.
+
+731
+00:52:56.611 --> 00:52:58.126
+The rest is in the chapter.
+
+732
+00:53:00.976 --> 00:53:01.829
+Reading it:
+
+733
+00:53:02.109 --> 00:53:10.835
+Envelope: the row stores ciphertext + IV + wrapped DEK + KEK version, and no plaintext or key material.
+
+734
+00:53:11.115 --> 00:53:14.059
+Reading asks the KMS to unwrap the DEK.
+
+735
+00:53:14.339 --> 00:53:20.483
+Tamper detection: one flipped ciphertext bit makes GCM throw AEADBadTagException.
+
+736
+00:53:20.763 --> 00:53:26.843
+Authenticated encryption means corrupted or altered data is rejected, not silently returned.
+
+737
+00:53:28.193 --> 00:53:35.147
+Rotation: rotating the KEK in the KMS leaves old rows readable (the KMS keeps old versions).
+
+738
+00:53:35.427 --> 00:53:40.825
+Rewrapping touches only the small DEK; the ciphertext is byte-for-byte identical.
+
+739
+00:53:41.105 --> 00:53:46.395
+So rotating the master key rewraps kilobytes of DEKs, never terabytes of data.
+
+740
+00:53:46.675 --> 00:54:02.910
+Crypto-shredding: with PII under a per-customer KEK, destroying that key makes every copy of the DEK, and therefore all that customer's ciphertext, in backups and replicas included, permanently unrecoverable, without hunting down every copy.
+
+741
+00:54:04.260 --> 00:54:18.767
+Cost: a KMS round-trip per record was 1.72 ms; reusing one wrapped DEK across records (each with a fresh IV) was 0.015 ms, 115x cheaper.
+
+742
+00:54:19.047 --> 00:54:25.767
+Cache or derive DEKs per tenant or batch; never cache the KEK; always use a unique IV.
+
+743
+00:54:27.117 --> 00:54:27.757
+Tip:
+
+744
+00:54:28.037 --> 00:54:29.637
+Spring shapes (VERIFY:
+
+745
+00:54:29.917 --> 00:54:47.005
+Spring Security or Nimbus or Vault libraries not downloadable here). // JWT: fixed algorithm + JWKS by kid, never the header (Spring Security resource server). @Bean JwtDecoder jwtDecoder().
+
+746
+00:54:47.285 --> 00:55:20.943
+NimbusJwtDecoder d = NimbusJwtDecoder.withJwkSetUri(https://auth.grocery.example/.well-known or jwks.json). .jwsAlgorithm(SignatureAlgorithm.RS256).build(); // pin the algorithm. d.setJwtValidator(new DelegatingOAuth2TokenValidator(. new JwtTimestampValidator(Duration.ofSeconds(30)).
+
+747
+00:55:22.293 --> 00:55:41.621
+new JwtIssuerValidator(https://auth.grocery.example). audienceValidator(payment-api)));. return d;. // Object-level authorization (no IDOR): check the subject's relation to THIS order. @GetMapping(/orders/id).
+
+748
+00:55:42.971 --> 00:56:03.109
+@PreAuthorize(@authz.canView(authentication, 'order', id)) // calls the policy service (ABAC or ReBAC). public OrderView get(@PathVariable String id) return orders.view(id);. // Envelope-encrypted field via Vault or OpenBao transit + a per-tenant KEK.
+
+749
+00:56:03.389 --> 00:56:11.837
+String wrapped = vault.opsForTransit().encrypt(tenant- + tenantId, Base64.encode(dek)).getCiphertext();.
+
+750
+00:56:13.187 --> 00:56:14.126
+Part 6.
+
+751
+00:56:14.406 --> 00:56:15.686
+Production Concerns.
+
+752
+00:56:16.936 --> 00:56:18.088
+Failure modes.
+
+753
+00:56:18.368 --> 00:56:19.733
+Here is a quick table:
+
+754
+00:56:20.013 --> 00:56:22.936
+Failure, and Symptom, and Cause, and Mitigation.
+
+755
+00:56:23.216 --> 00:56:24.880
+Token forgery accepted.
+
+756
+00:56:25.160 --> 00:56:25.971
+Symptom:
+
+757
+00:56:26.251 --> 00:56:29.365
+Privilege escalation, admin actions by users.
+
+758
+00:56:29.645 --> 00:56:30.413
+Cause:
+
+759
+00:56:30.693 --> 00:56:32.848
+Header-trusting validation (L1).
+
+760
+00:56:33.128 --> 00:56:34.131
+Mitigation:
+
+761
+00:56:34.411 --> 00:56:38.507
+Library validation, fixed alg, JWKS, claim checks.
+
+762
+00:56:38.787 --> 00:56:39.981
+Account takeover.
+
+763
+00:56:40.261 --> 00:56:41.072
+Symptom:
+
+764
+00:56:41.352 --> 00:56:43.613
+Logins from new devices, complaints.
+
+765
+00:56:43.893 --> 00:56:44.661
+Cause:
+
+766
+00:56:44.941 --> 00:56:49.037
+No OTP attempt or send limits (L2), password reuse.
+
+767
+00:56:49.317 --> 00:56:50.320
+Mitigation:
+
+768
+00:56:50.600 --> 00:56:54.717
+Lockout, send caps, passkeys or MFA, breached-password checks.
+
+769
+00:56:54.997 --> 00:56:56.661
+IDOR or data exposure.
+
+770
+00:56:56.941 --> 00:56:57.752
+Symptom:
+
+771
+00:56:58.032 --> 00:57:00.080
+One customer sees another's data.
+
+772
+00:57:00.360 --> 00:57:01.128
+Cause:
+
+773
+00:57:01.408 --> 00:57:04.693
+Role-only check, no object-level authZ (L3).
+
+774
+00:57:04.973 --> 00:57:05.976
+Mitigation:
+
+775
+00:57:06.256 --> 00:57:09.691
+Object-level checks on every fetch; deny by default.
+
+776
+00:57:09.971 --> 00:57:11.656
+Privilege via role gaps.
+
+777
+00:57:11.936 --> 00:57:12.747
+Symptom:
+
+778
+00:57:13.027 --> 00:57:15.395
+Over-limit refunds, cross-store edits.
+
+779
+00:57:15.675 --> 00:57:16.443
+Cause:
+
+780
+00:57:16.723 --> 00:57:18.301
+Coarse RBAC (L3).
+
+781
+00:57:18.581 --> 00:57:19.584
+Mitigation:
+
+782
+00:57:19.864 --> 00:57:22.723
+ABAC conditions, ReBAC relationships.
+
+783
+00:57:24.073 --> 00:57:25.609
+Signing key compromise.
+
+784
+00:57:25.889 --> 00:57:26.699
+Symptom:
+
+785
+00:57:26.979 --> 00:57:28.302
+Widespread forgery.
+
+786
+00:57:28.582 --> 00:57:29.350
+Cause:
+
+787
+00:57:29.630 --> 00:57:30.889
+Leaked private key.
+
+788
+00:57:31.169 --> 00:57:32.171
+Mitigation:
+
+789
+00:57:32.451 --> 00:57:38.979
+JWKS rotation, short tokens, family revocation, HSM or KMS-held keys.
+
+790
+00:57:39.259 --> 00:57:40.646
+Refresh token theft.
+
+791
+00:57:40.926 --> 00:57:41.737
+Symptom:
+
+792
+00:57:42.017 --> 00:57:43.233
+Persistent access.
+
+793
+00:57:43.513 --> 00:57:44.281
+Cause:
+
+794
+00:57:44.561 --> 00:57:47.867
+Long-lived, reusable refresh tokens (L1 C).
+
+795
+00:57:48.147 --> 00:57:49.150
+Mitigation:
+
+796
+00:57:49.430 --> 00:57:51.499
+Rotation + reuse detection.
+
+797
+00:57:51.779 --> 00:57:52.803
+Secret leak.
+
+798
+00:57:53.083 --> 00:57:53.894
+Symptom:
+
+799
+00:57:54.174 --> 00:57:55.817
+Creds in a repo or image.
+
+800
+00:57:56.097 --> 00:57:56.865
+Cause:
+
+801
+00:57:57.145 --> 00:57:58.787
+Secrets in code or env.
+
+802
+00:57:59.067 --> 00:58:00.070
+Mitigation:
+
+803
+00:58:00.350 --> 00:58:04.531
+KMS, dynamic secrets, secret scanning, rotate on exposure.
+
+804
+00:58:04.811 --> 00:58:06.689
+Data breach reads plaintext.
+
+805
+00:58:06.969 --> 00:58:07.779
+Symptom:
+
+806
+00:58:08.059 --> 00:58:11.046
+PII exposed from a DB or backup dump.
+
+807
+00:58:11.326 --> 00:58:12.094
+Cause:
+
+808
+00:58:12.374 --> 00:58:13.718
+No field encryption.
+
+809
+00:58:13.998 --> 00:58:15.001
+Mitigation:
+
+810
+00:58:15.281 --> 00:58:18.374
+Envelope encryption; disk encryption is not enough.
+
+811
+00:58:18.654 --> 00:58:19.891
+Cannot erase data.
+
+812
+00:58:20.171 --> 00:58:20.982
+Symptom:
+
+813
+00:58:21.262 --> 00:58:22.606
+Regulatory failure.
+
+814
+00:58:22.886 --> 00:58:23.654
+Cause:
+
+815
+00:58:23.934 --> 00:58:26.345
+PII copied everywhere in plaintext.
+
+816
+00:58:26.625 --> 00:58:27.627
+Mitigation:
+
+817
+00:58:27.907 --> 00:58:29.742
+Crypto-shredding with per-tenant keys.
+
+818
+00:58:31.092 --> 00:58:32.287
+Lateral movement.
+
+819
+00:58:32.567 --> 00:58:33.377
+Symptom:
+
+820
+00:58:33.657 --> 00:58:35.705
+One popped service reaches everything.
+
+821
+00:58:35.985 --> 00:58:36.753
+Cause:
+
+822
+00:58:37.033 --> 00:58:38.868
+Flat trust inside the perimeter.
+
+823
+00:58:39.148 --> 00:58:40.151
+Mitigation:
+
+824
+00:58:40.431 --> 00:58:44.079
+Zero trust, mTLS, segmentation, least privilege.
+
+825
+00:58:45.429 --> 00:58:47.050
+Observability and audit.
+
+826
+00:58:47.330 --> 00:59:08.023
+Security signals: authN failures by reason, token-validation failures by cause (a spike in alg mismatch/bad signature is probing), OTP lockouts, authZ denials by policy and object type, PII-access reads, KMS operations, mTLS handshake failures, WAF blocks.
+
+827
+00:59:08.303 --> 00:59:21.743
+Audit log: immutable, tamper-evident (append-only, hash-chained or shipped to write-once storage), recording who did what to which object when, for sensitive actions (refunds, PII access, role changes).
+
+828
+00:59:22.023 --> 00:59:25.607
+Required for forensics and compliance (Ch 36).
+
+829
+00:59:26.957 --> 00:59:35.576
+Alerting: impossible-travel logins, sudden privilege use, bulk PII reads, a service suddenly calling endpoints it never called.
+
+830
+00:59:35.856 --> 00:59:36.923
+Tie into SIEM.
+
+831
+00:59:37.203 --> 00:59:40.061
+Don't log secrets or full tokens or PII.
+
+832
+00:59:40.341 --> 00:59:43.499
+Redact; log a token's jti, not the token.
+
+833
+00:59:44.849 --> 00:59:47.665
+Security (hardening the security system itself).
+
+834
+00:59:47.945 --> 00:59:52.169
+The authorization service and KMS are now critical dependencies:
+
+835
+00:59:52.449 --> 00:59:59.190
+HA, rate-limited, cached with fail-closed for sensitive actions, and themselves access-controlled and audited.
+
+836
+00:59:59.470 --> 01:00:12.078
+Cache carefully: cached JWKS keys and cached authZ decisions need short TTLs so revocation and rotation take effect; too long a TTL is its own vulnerability.
+
+837
+01:00:12.358 --> 01:00:22.918
+Protect the conformance tests and policies as code: policy changes go through review (a bad policy is a breach), and the CI harness must run on every change.
+
+838
+01:00:24.268 --> 01:00:25.932
+Performance and tuning knobs.
+
+839
+01:00:26.212 --> 01:00:27.577
+Here is a quick table:
+
+840
+01:00:27.857 --> 01:00:29.073
+Knob, and Guidance.
+
+841
+01:00:29.353 --> 01:00:30.633
+Token algorithm:
+
+842
+01:00:30.913 --> 01:00:38.487
+RS256 default; ES256 for smaller tokens or cheaper signing (L1 D).
+
+843
+01:00:38.767 --> 01:00:40.345
+Access token TTL:
+
+844
+01:00:40.625 --> 01:00:45.383
+5 to 15 min; shorter = less revocation lag, more refresh load.
+
+845
+01:00:45.663 --> 01:00:47.071
+JWKS cache:
+
+846
+01:00:47.351 --> 01:00:49.249
+Minutes; refresh on unknown kid.
+
+847
+01:00:49.529 --> 01:00:50.745
+AuthZ decisions:
+
+848
+01:00:51.025 --> 01:00:56.529
+Cache per (subject, action, object) with a short TTL; batch checks for list endpoints.
+
+849
+01:00:56.809 --> 01:00:58.153
+DEK strategy:
+
+850
+01:00:58.433 --> 01:01:02.359
+Per-tenant or batch cached DEKs, per-record IVs (L4:
+
+851
+01:01:02.639 --> 01:01:05.796
+115x versus per-record KMS).
+
+852
+01:01:06.076 --> 01:01:07.249
+KMS calls:
+
+853
+01:01:07.529 --> 01:01:12.863
+Batch; use the KMS for wrap or unwrap and data-key generation, not bulk data.
+
+854
+01:01:13.143 --> 01:01:14.401
+Argon2id:
+
+855
+01:01:14.681 --> 01:01:22.255
+Tune memory or iterations to ~100 to 250 ms per hash on your hardware. mTLS:
+
+856
+01:01:22.535 --> 01:01:26.012
+Session resumption; rotate SVIDs on the order of hours.
+
+857
+01:01:27.362 --> 01:01:28.087
+Cost.
+
+858
+01:01:28.367 --> 01:01:30.245
+Security is cheaper than a breach:
+
+859
+01:01:30.525 --> 01:01:35.837
+DPDP penalties, incident response, and lost trust dwarf the engineering cost.
+
+860
+01:01:36.117 --> 01:01:48.639
+But controls have real cost, KMS calls, extra hops for authZ, MFA friction, so apply them proportionally to data sensitivity (a public product image needs none of L4).
+
+861
+01:01:48.919 --> 01:01:57.645
+The expensive mistakes are architectural: retrofitting object-level authZ or field encryption into a system that assumed neither.
+
+862
+01:01:57.925 --> 01:02:01.039
+Build them in from the start; that's why this is a chapter.
+
+863
+01:02:02.389 --> 01:02:03.328
+Part 7.
+
+864
+01:02:03.608 --> 01:02:05.315
+Anti-Patterns and Pitfalls.
+
+865
+01:02:06.565 --> 01:02:07.205
+1.
+
+866
+01:02:07.485 --> 01:02:14.375
+Trusting the JWT header's algorithm (L1: alg:none and HS or RS confusion accepted).
+
+867
+01:02:15.725 --> 01:02:23.640
+Here is the Java code. after: the algorithm and key come from YOUR config, keyed by kid in a trusted JWKS.
+
+868
+01:02:26.490 --> 01:02:27.194
+2.
+
+869
+01:02:27.474 --> 01:02:29.885
+Hand-rolling JWT or crypto.
+
+870
+01:02:30.165 --> 01:02:35.541
+Use vetted libraries (Nimbus, jose4j; Tink or libsodium for encryption).
+
+871
+01:02:35.821 --> 01:02:38.743
+L1 and L4 write it out to teach, not to ship.
+
+872
+01:02:39.023 --> 01:02:39.770
+3.
+
+873
+01:02:40.050 --> 01:02:45.362
+No brute-force protection on OTP or passwords (L2: unlimited guesses).
+
+874
+01:02:45.642 --> 01:02:49.909
+Lockout, send caps, hashed+expiring codes, and prefer passkeys.
+
+875
+01:02:50.189 --> 01:02:50.893
+4.
+
+876
+01:02:51.173 --> 01:02:55.183
+Authentication mistaken for authorization or IDOR (L3).
+
+877
+01:02:56.533 --> 01:03:03.296
+Here is the Java code. before: logged in ⇒ allowed. after: check the caller's relation to THIS object.
+
+878
+01:03:06.146 --> 01:03:06.914
+5.
+
+879
+01:03:07.194 --> 01:03:09.391
+Mass assignment of authority fields.
+
+880
+01:03:10.741 --> 01:03:22.304
+Here is the Java code. before: binds the whole body, including role or price the client set. after: allow-list what the client may set; authority fields are server-controlled.
+
+881
+01:03:25.154 --> 01:03:25.901
+6.
+
+882
+01:03:26.181 --> 01:03:31.109
+RBAC for everything (L3: can't express own or scope or limit or purpose).
+
+883
+01:03:31.389 --> 01:03:34.759
+Layer ABAC conditions and ReBAC relationships.
+
+884
+01:03:35.039 --> 01:03:35.786
+7.
+
+885
+01:03:36.066 --> 01:03:38.903
+Long-lived, reusable tokens (L1 C:
+
+886
+01:03:39.183 --> 01:03:40.634
+30 days of access).
+
+887
+01:03:40.914 --> 01:03:45.159
+Short access tokens, rotating refresh tokens with reuse detection.
+
+888
+01:03:45.439 --> 01:03:46.122
+8.
+
+889
+01:03:46.402 --> 01:03:48.749
+Secrets in code, env or images.
+
+890
+01:03:50.099 --> 01:03:56.093
+Here is the YAML code. after: fetched at runtime from the KMS, short-lived and rotated.
+
+891
+01:03:58.943 --> 01:03:59.690
+9.
+
+892
+01:03:59.970 --> 01:04:02.039
+Only disk encryption for PII.
+
+893
+01:04:02.319 --> 01:04:06.735
+It protects against stolen disks, not a compromised app or a leaked backup.
+
+894
+01:04:07.015 --> 01:04:10.450
+Encrypt sensitive fields at the application layer (L4).
+
+895
+01:04:10.730 --> 01:04:11.434
+10.
+
+896
+01:04:11.714 --> 01:04:13.997
+Assuming the internal network is trusted.
+
+897
+01:04:14.277 --> 01:04:16.730
+One compromised service then reaches all.
+
+898
+01:04:17.010 --> 01:04:20.999
+Zero trust: mTLS and authZ on internal calls too.
+
+899
+01:04:21.279 --> 01:04:22.111
+11.
+
+900
+01:04:22.391 --> 01:04:25.591
+No unique IV, or a fast hash for passwords.
+
+901
+01:04:25.871 --> 01:04:34.234
+Reusing a GCM IV under one key is catastrophic; SHA-256 for passwords is crackable.
+
+902
+01:04:34.514 --> 01:04:38.439
+Unique IV per encryption, Argon2id for passwords.
+
+903
+01:04:39.789 --> 01:04:40.579
+12.
+
+904
+01:04:40.859 --> 01:04:42.843
+Verbose errors and enumeration.
+
+905
+01:04:43.123 --> 01:04:48.733
+No such user versus wrong password leaks which accounts exist; stack traces leak internals.
+
+906
+01:04:49.013 --> 01:04:52.299
+Return uniform errors; log details server-side.
+
+907
+01:04:53.649 --> 01:04:54.523
+Part 8.
+
+908
+01:04:54.803 --> 01:04:56.147
+Interview Q and A.
+
+909
+01:04:57.397 --> 01:04:58.229
+Beginner.
+
+910
+01:04:58.509 --> 01:04:59.533
+Question 1.
+
+911
+01:04:59.813 --> 01:05:03.184
+What's the difference between authentication and authorization?
+
+912
+01:05:03.464 --> 01:05:04.829
+Thirty-second answer:
+
+913
+01:05:05.109 --> 01:05:08.651
+Authentication proves who you are (login, OTP, certificate).
+
+914
+01:05:08.931 --> 01:05:13.112
+Authorization decides what you're allowed to do (roles, ownership, policy).
+
+915
+01:05:13.392 --> 01:05:19.771
+AuthN happens once per session at the edge; authZ must happen on every request and every object.
+
+916
+01:05:20.051 --> 01:05:26.856
+Confusing them is the root of IDOR: the server checks you're logged in but not that the thing you're accessing is yours.
+
+917
+01:05:28.206 --> 01:05:29.209
+Question 2.
+
+918
+01:05:29.489 --> 01:05:32.177
+How do you validate a JWT safely?
+
+919
+01:05:32.457 --> 01:05:33.822
+Thirty-second answer:
+
+920
+01:05:34.102 --> 01:05:35.787
+Use a vetted library, and:
+
+921
+01:05:37.137 --> 01:05:38.183
+Question 3.
+
+922
+01:05:38.463 --> 01:05:42.047
+Why is a 6-digit OTP safe only with rate limiting?
+
+923
+01:05:42.327 --> 01:05:43.692
+Thirty-second answer:
+
+924
+01:05:43.972 --> 01:05:53.529
+A 6-digit code has a million possibilities, so a single guess has a 1-in-a-million chance, but with unlimited attempts, all million can be tried in minutes.
+
+925
+01:05:53.809 --> 01:06:01.831
+A cap of about 5 attempts, code expiry, and a send limit make guessing infeasible (roughly 1 in 200,000 per code).
+
+926
+01:06:02.111 --> 01:06:06.377
+L2: naive allowed unlimited guesses; hardened locked after 5.
+
+927
+01:06:07.727 --> 01:06:08.794
+Question 4.
+
+928
+01:06:09.074 --> 01:06:10.674
+What is envelope encryption?
+
+929
+01:06:10.954 --> 01:06:12.319
+Thirty-second answer:
+
+930
+01:06:12.599 --> 01:06:22.135
+Encrypt data with a per-record data key (DEK), then encrypt that DEK with a master key (KEK) that lives in a KMS and never leaves it.
+
+931
+01:06:22.415 --> 01:06:24.869
+Store the ciphertext plus the wrapped DEK.
+
+932
+01:06:25.149 --> 01:06:28.093
+To read, ask the KMS to unwrap the DEK.
+
+933
+01:06:28.373 --> 01:06:35.029
+It means the master key never touches your servers, and rotating it only rewraps small keys, not all your data.
+
+934
+01:06:36.379 --> 01:06:37.381
+Intermediate.
+
+935
+01:06:37.661 --> 01:06:38.771
+Question 5.
+
+936
+01:06:39.051 --> 01:06:45.493
+Explain OAuth 2.0 Authorization Code + PKCE and why PKCE matters.
+
+937
+01:06:45.773 --> 01:06:47.139
+Thirty-second answer:
+
+938
+01:06:47.419 --> 01:07:03.099
+The app redirects the user to the authorization server, which (after login) returns a one-time code to a registered redirect URI; the app exchanges the code plus a client secret (or, for public clients, PKCE) for tokens.
+
+939
+01:07:03.379 --> 01:07:11.080
+PKCE: the app sends the hash of a random verifier up front (codechallenge), and presents the verifier at exchange.
+
+940
+01:07:11.360 --> 01:07:16.032
+An intercepted code is useless without the verifier, which never left the device.
+
+941
+01:07:17.382 --> 01:07:18.491
+Question 6.
+
+942
+01:07:18.771 --> 01:07:22.163
+How do refresh tokens work, and what is reuse detection?
+
+943
+01:07:22.443 --> 01:07:23.809
+Thirty-second answer:
+
+944
+01:07:24.089 --> 01:07:30.894
+Access tokens are short-lived; a longer-lived refresh token gets new access tokens without re-login.
+
+945
+01:07:31.174 --> 01:07:36.507
+With rotation, each refresh issues a new refresh token and invalidates the old one.
+
+946
+01:07:36.787 --> 01:07:47.305
+If an already-used refresh token is presented again, that means someone has a stolen copy, reuse detection revokes the whole token family and forces re-login.
+
+947
+01:07:48.655 --> 01:07:49.743
+Question 7.
+
+948
+01:07:50.023 --> 01:07:54.481
+What is the OWASP API Security Top 10, and which matters most here?
+
+949
+01:07:54.761 --> 01:07:56.127
+Thirty-second answer:
+
+950
+01:07:56.407 --> 01:07:59.329
+A list of the most common API security risks.
+
+951
+01:07:59.609 --> 01:08:20.516
+For a grocery platform the top ones are Broken Object Level Authorization (IDOR, API1), Broken Authentication (API2), Broken Object Property Level Authorization or mass assignment (API3), unrestricted resource consumption (API4), and SSRF (API7).
+
+952
+01:08:20.796 --> 01:08:23.889
+API1 is consistently the most exploited.
+
+953
+01:08:25.239 --> 01:08:26.263
+Question 8.
+
+954
+01:08:26.543 --> 01:08:29.381
+RBAC versus ABAC: when do you need attributes?
+
+955
+01:08:29.661 --> 01:08:31.026
+Thirty-second answer:
+
+956
+01:08:31.306 --> 01:08:38.431
+RBAC maps roles to permissions, simple and auditable, but it can only say this role may do this action on this type.
+
+957
+01:08:38.711 --> 01:08:52.599
+When you need conditions, only your own resource, only in your store, only up to 5,000, rupeesonly with an open ticket, you need ABAC, which evaluates attributes of the subject, resource, action and environment.
+
+958
+01:08:53.949 --> 01:08:55.016
+Question 9.
+
+959
+01:08:55.296 --> 01:08:58.453
+Where do secrets belong, and what are dynamic secrets?
+
+960
+01:08:58.733 --> 01:09:00.099
+Thirty-second answer:
+
+961
+01:09:00.379 --> 01:09:08.571
+In a secrets manager or KMS (Vault or OpenBao, cloud Secrets Manager), never in code, Git or plain env vars.
+
+962
+01:09:08.851 --> 01:09:25.448
+Dynamic secrets go further: the KMS generates short-lived credentials on demand, for example a database username or password valid for an hour, unique to the service, and revokes them on expiry, so there's no shared long-lived password to leak.
+
+963
+01:09:26.798 --> 01:09:27.566
+Senior.
+
+964
+01:09:27.846 --> 01:09:28.891
+Question 10.
+
+965
+01:09:29.171 --> 01:09:32.051
+Design authorization for the grocery platform.
+
+966
+01:09:32.331 --> 01:09:34.379
+Which model(s), and how enforced?
+
+967
+01:09:34.659 --> 01:09:36.025
+Thirty-second answer:
+
+968
+01:09:36.305 --> 01:09:37.222
+Layer them:
+
+969
+01:09:37.502 --> 01:09:55.443
+RBAC for coarse org roles (customer, rider, picker, store or city manager, finance), ABAC for conditions (ownership, store or city scope, refund limits, purpose), and ReBAC for object relationships and hierarchy (this order belongs to this store in this city).
+
+970
+01:09:55.723 --> 01:10:07.649
+Centralize policy (OPA or Cedar + OpenFGA or SpiceDB), enforce locally in each service on every object, default deny, and test with a conformance suite.
+
+971
+01:10:08.999 --> 01:10:10.129
+Question 11.
+
+972
+01:10:10.409 --> 01:10:16.233
+How do you encrypt PII so a database breach is useless, and still be able to query and delete it?
+
+973
+01:10:16.513 --> 01:10:17.879
+Thirty-second answer:
+
+974
+01:10:18.159 --> 01:10:28.079
+Envelope-encrypt sensitive fields (AES-256-GCM + KMS-wrapped DEKs) so a DB or backup dump is ciphertext.
+
+975
+01:10:28.359 --> 01:10:39.452
+For querying, keep searchable non-sensitive attributes in the clear or use deterministic encryption or blind indexes for equality lookups (with care, they leak equality).
+
+976
+01:10:39.732 --> 01:10:44.063
+For deletion, use per-customer keys and crypto-shred (destroy the key).
+
+977
+01:10:45.413 --> 01:10:46.501
+Question 12.
+
+978
+01:10:46.781 --> 01:10:49.618
+Explain zero trust for service-to-service calls.
+
+979
+01:10:49.898 --> 01:10:51.263
+Thirty-second answer:
+
+980
+01:10:51.543 --> 01:10:55.021
+No service is trusted because of where it sits on the network.
+
+981
+01:10:55.301 --> 01:11:06.842
+Each workload has a cryptographic identity (SPIFFE SVID), calls use mTLS, and the callee authorizes based on the caller's identity plus the propagated end-user context.
+
+982
+01:11:07.122 --> 01:11:17.149
+Credentials are short-lived and auto-rotated, network policy is default-deny, and each service has least-privilege DB access with dynamic credentials.
+
+983
+01:11:18.499 --> 01:11:19.779
+Question 13.
+
+984
+01:11:20.059 --> 01:11:23.515
+A refund endpoint: walk through every control you'd apply.
+
+985
+01:11:24.865 --> 01:11:26.059
+Question 14.
+
+986
+01:11:26.339 --> 01:11:30.990
+How do you rotate a JWT signing key without breaking live tokens?
+
+987
+01:11:31.270 --> 01:11:32.635
+Thirty-second answer:
+
+988
+01:11:32.915 --> 01:11:38.377
+Publish the new key in the JWKS alongside the old one, each with a distinct kid.
+
+989
+01:11:38.657 --> 01:11:40.854
+Start signing new tokens with the new key.
+
+990
+01:11:41.134 --> 01:11:48.025
+Keep verifying with both until all tokens signed by the old key have expired (past the max token lifetime).
+
+991
+01:11:48.305 --> 01:11:49.755
+Then remove the old key.
+
+992
+01:11:50.035 --> 01:11:55.006
+Never rotate by replacing the current key, which invalidates every in-flight token.
+
+993
+01:11:56.356 --> 01:11:57.252
+Architect.
+
+994
+01:11:57.532 --> 01:11:58.727
+Question 15.
+
+995
+01:11:59.007 --> 01:12:03.636
+Present a defense-in-depth architecture and threat model for the grocery platform.
+
+996
+01:12:03.916 --> 01:12:05.281
+Thirty-second answer:
+
+997
+01:12:05.561 --> 01:12:07.353
+Layers, each failing closed:
+
+998
+01:12:08.703 --> 01:12:09.898
+Question 16.
+
+999
+01:12:10.178 --> 01:12:18.925
+Design PII protection and 'delete my data' for DPDP or GDPR across DB, backups, logs and the data lake.
+
+1000
+01:12:20.275 --> 01:12:21.619
+Question 17.
+
+1001
+01:12:21.899 --> 01:12:24.267
+How do you secure the payment path end to end?
+
+1002
+01:12:24.547 --> 01:12:25.912
+Thirty-second answer:
+
+1003
+01:12:26.192 --> 01:12:34.939
+Don't handle raw card data, use a PCI-compliant gateway and tokenization, so cards never touch your servers (Ch 45).
+
+1004
+01:12:35.219 --> 01:12:36.179
+For the flow:
+
+1005
+01:12:36.459 --> 01:12:55.147
+TLS or mTLS throughout, strong authN, per-object authZ, idempotency keys (Ch 20), server-side amounts, signed webhooks verified on receipt, a tamper-evident ledger, envelope-encrypted stored payment metadata, fraud or anomaly checks, and full audit.
+
+1006
+01:12:55.427 --> 01:12:58.499
+Scope PCI to the smallest possible surface.
+
+1007
+01:12:59.849 --> 01:13:01.022
+Question 18.
+
+1008
+01:13:01.302 --> 01:13:04.779
+Your authorization service is a new single point of failure.
+
+1009
+01:13:05.059 --> 01:13:07.555
+How do you handle its availability and correctness?
+
+1010
+01:13:08.905 --> 01:13:10.143
+Question 19.
+
+1011
+01:13:10.423 --> 01:13:14.092
+What belongs in a security 'definition of done' and CI gate?
+
+1012
+01:13:15.442 --> 01:13:16.551
+Question 20.
+
+1013
+01:13:16.831 --> 01:13:21.482
+Where do you see AI or LLM features changing the security model here?
+
+1014
+01:13:21.762 --> 01:13:23.127
+Thirty-second answer:
+
+1015
+01:13:23.407 --> 01:13:35.439
+New surfaces: prompt injection (untrusted content steering an agent), excessive agency (an assistant with broad tool access), and sensitive-data leakage into prompts or logs.
+
+1016
+01:13:35.719 --> 01:13:55.538
+Defenses reuse this chapter: the agent runs with least-privilege, per-user authZ (it can only do what the user could), tools enforce object-level checks, PII is minimized in prompts, outputs are treated as untrusted, and actions that move money or data need confirmation and are audited.
+
+1017
+01:13:56.888 --> 01:13:57.784
+Part 9.
+
+1018
+01:13:58.064 --> 01:13:59.472
+Summary and Practice.
+
+1019
+01:14:00.722 --> 01:14:01.810
+Key takeaways.
+
+1020
+01:14:02.090 --> 01:14:05.973
+AuthN proves who; authZ decides what, on every object.
+
+1021
+01:14:06.253 --> 01:14:08.493
+Conflating them causes IDOR (L3).
+
+1022
+01:14:08.773 --> 01:14:16.986
+Validate JWTs with a library: fix the algorithm, resolve keys by kid from a JWKS, check all claims.
+
+1023
+01:14:17.266 --> 01:14:21.298
+Naive validation accepted 7 of 9 forgeries (L1).
+
+1024
+01:14:21.578 --> 01:14:22.751
+Login controls:
+
+1025
+01:14:23.031 --> 01:14:31.714
+OTP attempt or send limits and hashing (L2), OAuth Code+PKCE with registered redirects and single-use codes.
+
+1026
+01:14:31.994 --> 01:14:37.263
+Short access tokens, rotating refresh tokens with reuse detection (L1 C:
+
+1027
+01:14:37.543 --> 01:14:41.618
+43,200 versus 15 minutes of exposure).
+
+1028
+01:14:42.968 --> 01:14:44.355
+Layer authorization:
+
+1029
+01:14:44.635 --> 01:14:51.739
+RBAC + ABAC conditions + ReBAC relationships, default deny, enforced per object (L3).
+
+1030
+01:14:52.019 --> 01:14:58.355
+Zero trust internally: mTLS, workload identity, dynamic least-privilege credentials.
+
+1031
+01:14:58.635 --> 01:15:03.307
+Secrets in a KMS, dynamic where possible, never in code or images.
+
+1032
+01:15:03.587 --> 01:15:13.315
+Envelope-encrypt PII (AES-256-GCM + KMS-wrapped DEKs); disk encryption alone is not enough (L4).
+
+1033
+01:15:13.595 --> 01:15:21.147
+Rotation rewraps keys, not data; crypto-shredding erases across backups by destroying per-tenant keys (L4).
+
+1034
+01:15:22.497 --> 01:15:28.811
+Make security testable: conformance suites (L1, L3) in CI, plus threat models and audits.
+
+1035
+01:15:29.091 --> 01:15:31.054
+We think it's secure is not evidence.
+
+1036
+01:15:32.404 --> 01:15:33.727
+Decision cheat sheet.
+
+1037
+01:15:34.007 --> 01:15:35.372
+Here is a quick table:
+
+1038
+01:15:35.652 --> 01:15:37.167
+Situation, and Choice.
+
+1039
+01:15:37.447 --> 01:15:39.260
+API token validation:
+
+1040
+01:15:39.540 --> 01:15:43.359
+Library, fixed alg, JWKS by kid, all claims.
+
+1041
+01:15:43.639 --> 01:15:45.196
+Interactive login (app):
+
+1042
+01:15:45.476 --> 01:15:50.041
+OAuth2 Code + PKCE (S256) + OIDC.
+
+1043
+01:15:50.321 --> 01:15:51.217
+Passwords:
+
+1044
+01:15:51.497 --> 01:15:55.615
+Argon2id + salt + KMS pepper; prefer passkeys.
+
+1045
+01:15:55.895 --> 01:15:57.047
+Coarse org roles:
+
+1046
+01:15:57.327 --> 01:15:58.180
+RBAC.
+
+1047
+01:15:58.460 --> 01:16:01.297
+Conditions (own or scope or limit or purpose):
+
+1048
+01:16:01.577 --> 01:16:02.367
+ABAC.
+
+1049
+01:16:02.647 --> 01:16:04.631
+Ownership or hierarchy or sharing:
+
+1050
+01:16:04.911 --> 01:16:07.449
+ReBAC (OpenFGA or SpiceDB).
+
+1051
+01:16:07.729 --> 01:16:11.761
+Service-to-service: mTLS + SPIFFE + short-lived creds.
+
+1052
+01:16:12.041 --> 01:16:13.663
+Secrets or DB creds:
+
+1053
+01:16:13.943 --> 01:16:15.863
+KMS, dynamic secrets.
+
+1054
+01:16:17.213 --> 01:16:18.471
+PII at rest:
+
+1055
+01:16:18.751 --> 01:16:20.821
+Envelope encryption, per-tenant keys.
+
+1056
+01:16:21.101 --> 01:16:22.295
+Right to erasure:
+
+1057
+01:16:22.575 --> 01:16:23.685
+Crypto-shredding.
+
+1058
+01:16:25.035 --> 01:16:26.165
+Exercises.
+
+1059
+01:16:26.445 --> 01:16:27.811
+Here is a quick table:
+
+1060
+01:16:28.091 --> 01:16:29.947
+Band, and Exercise, and Hint.
+
+1061
+01:16:30.227 --> 01:16:31.101
+B2.
+
+1062
+01:16:31.381 --> 01:16:32.448
+Exercise:
+
+1063
+01:16:32.728 --> 01:16:37.379
+Add an aud-per-service check to L1 and issue a token valid for two audiences.
+
+1064
+01:16:37.659 --> 01:16:38.981
+Hint: array aud.
+
+1065
+01:16:39.261 --> 01:16:40.136
+B2.
+
+1066
+01:16:40.416 --> 01:16:41.483
+Exercise:
+
+1067
+01:16:41.763 --> 01:16:47.949
+Add TOTP as a second factor to L2's login and verify a window of ±1 step.
+
+1068
+01:16:48.229 --> 01:16:48.912
+Hint:
+
+1069
+01:16:49.192 --> 01:16:51.816
+RFC 6238.
+
+1070
+01:16:52.096 --> 01:16:52.971
+B3.
+
+1071
+01:16:53.251 --> 01:16:54.317
+Exercise:
+
+1072
+01:16:54.597 --> 01:17:02.832
+Add ABAC conditions to L3's ReBAC (refund at most 5,000 rupees) so the graph + condition together decide.
+
+1073
+01:17:03.112 --> 01:17:04.541
+Hint: combine models.
+
+1074
+01:17:04.821 --> 01:17:05.696
+B3.
+
+1075
+01:17:05.976 --> 01:17:07.043
+Exercise:
+
+1076
+01:17:07.323 --> 01:17:14.832
+Add a blind index (HMAC of the value) to L4 so encrypted phone numbers are equality-searchable; discuss the leak.
+
+1077
+01:17:15.112 --> 01:17:16.904
+Hint: deterministic MAC.
+
+1078
+01:17:17.184 --> 01:17:18.059
+B4.
+
+1079
+01:17:18.339 --> 01:17:19.405
+Exercise:
+
+1080
+01:17:19.685 --> 01:17:24.229
+Write the STRIDE threat model and a CI conformance matrix for the checkout flow.
+
+1081
+01:17:24.509 --> 01:17:25.192
+Hint:
+
+1082
+01:17:25.472 --> 01:17:27.264
+(subject, action, object).
+
+1083
+01:17:28.614 --> 01:17:29.489
+B4.
+
+1084
+01:17:29.769 --> 01:17:30.835
+Exercise:
+
+1085
+01:17:31.115 --> 01:17:38.369
+Design key hierarchy for 10M customers: per-customer versus per-tenant KEKs, and the shredding implications.
+
+1086
+01:17:38.649 --> 01:17:39.331
+Hint:
+
+1087
+01:17:39.611 --> 01:17:40.763
+KMS limits.
+
+1088
+01:17:42.113 --> 01:17:43.116
+Further reading.
+
+1089
+01:17:43.396 --> 01:17:48.516
+OWASP API Security Top 10 (2023) and OWASP ASVS.
+
+1090
+01:17:48.796 --> 01:17:49.799
+IETF:
+
+1091
+01:17:50.079 --> 01:18:08.020
+OAuth 2.0 Security Best Current Practice (RFC 9700), PKCE (RFC 7636), JWT BCP (RFC 8725), OAuth 2.1 draft; OIDC Core.
+
+1092
+01:18:08.300 --> 01:18:16.321
+Auth0 or Okta and Vault (OpenBao) documentation; the OAuth 2.0 Simplified guide (Aaron Parecki).
+
+1093
+01:18:16.601 --> 01:18:25.711
+Google Zanzibar paper (relationship-based authorization); OpenFGA and SpiceDB docs; OPA and AWS Cedar.
+
+1094
+01:18:25.991 --> 01:18:35.463
+NIST SP 800 to 63 (Digital Identity), SP 800 to 207 (Zero Trust Architecture); SPIFFE or SPIRE.
+
+1095
+01:18:36.813 --> 01:18:42.551
+OWASP Cryptographic Storage and Password Storage cheat sheets; libsodium or Google Tink.
+
+1096
+01:18:42.831 --> 01:18:49.466
+Alice and Bob Learn Application Security (Tanya Janca); Web Application Security (Andrew Hoffman).
+
+1097
+01:18:50.816 --> 01:18:52.053
+Related chapters.
+
+1098
+01:18:52.333 --> 01:19:14.755
+03, Networking (TLS), 04, API Design, 08, Load Balancing and Gateways, 16, Microservices, 17, Inter-Service Communication (mTLS), 18, Resilience (rate limits), 20, Idempotency, IDs and Locks, 21, Data at Scale, 36, Compliance and Data Residency, 45, Payment System.
+
+1099
+01:19:16.105 --> 01:19:17.705
+That's the end of this chapter.
+
+1100
+01:19:17.985 --> 01:19:24.107
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1101
+01:19:24.387 --> 01:19:25.838
+See you in the next chapter.
+

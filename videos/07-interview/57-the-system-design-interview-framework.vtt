@@ -1,0 +1,3382 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.569
+The System Design Interview Framework.
+
+2
+00:00:02.849 --> 00:00:06.902
+Chapter 57, from the Interview part of the System Design Playbook.
+
+3
+00:00:08.652 --> 00:00:09.612
+At a glance:
+
+4
+00:00:09.892 --> 00:00:11.065
+Chapter at a glance.
+
+5
+00:00:11.345 --> 00:00:12.348
+Reader bands:
+
+6
+00:00:12.628 --> 00:00:14.911
+B2, then B4, Prerequisites:
+
+7
+00:00:15.191 --> 00:00:23.447
+Ch 01 (the design process), Ch 02 (estimation), Ch 31 (decisions), and the case studies.
+
+8
+00:00:23.727 --> 00:00:29.081
+What you will build: a repeatable way to run a 45 to 60 minute system design interview.
+
+9
+00:00:29.361 --> 00:00:40.263
+It covers what to do in which minute, which questions to ask first, how precise the numbers need to be, how to defend a choice when the interviewer pushes, and what the rubric is really scoring.
+
+10
+00:00:40.543 --> 00:00:43.209
+The previous 56 chapters are the content.
+
+11
+00:00:43.489 --> 00:00:48.695
+This chapter is how to deliver it under a clock, to a stranger, at a 15-year level.
+
+12
+00:00:48.975 --> 00:00:50.233
+What the labs measured:
+
+13
+00:00:50.513 --> 00:00:52.028
+L1, estimation.
+
+14
+00:00:52.308 --> 00:00:53.951
+Across 8 classic prompts:
+
+15
+00:00:55.301 --> 00:01:06.138
+Rounding every input to 1-or-5 times 10ᵏ missed by up to 7.3 times and changed the implied architecture in 3 of 8 prompts.
+
+16
+00:01:06.418 --> 00:01:12.647
+Keeping one significant figure stayed within 1.8 times and left 8 of 8 decisions unchanged.
+
+17
+00:01:12.927 --> 00:01:14.293
+L2, trade-offs.
+
+18
+00:01:14.573 --> 00:01:18.242
+A weighted decision matrix with 100,000 perturbations:
+
+19
+00:01:18.522 --> 00:01:23.471
+Kafka for the event backbone won 87% of the time: defend it calmly.
+
+20
+00:01:23.751 --> 00:01:31.773
+The cart store was a tie between PostgreSQL and a managed KV store: present it as a close call and name what flips it.
+
+21
+00:01:33.123 --> 00:01:35.192
+L3, clarifying questions.
+
+22
+00:01:35.472 --> 00:01:39.803
+Design a notification system has 48 plausible requirement sets:
+
+23
+00:01:40.083 --> 00:01:45.437
+Designing for the typical reading fits 1 of them, and misses an essential component in 40.
+
+24
+00:01:45.717 --> 00:01:48.576
+Asking just scale and latency leaves 0 missing.
+
+25
+00:01:48.856 --> 00:01:50.179
+L4, the rubric.
+
+26
+00:01:50.459 --> 00:01:52.208
+Three illustrative transcripts:
+
+27
+00:01:52.488 --> 00:01:55.005
+The fast box-drawer scored 24%.
+
+28
+00:01:55.285 --> 00:02:00.725
+A solid senior scored 79%, which passes a senior bar but not a staff one.
+
+29
+00:02:02.075 --> 00:02:08.326
+The staff transcript scored 97%, using the same framework with every phase done deliberately.
+
+30
+00:02:08.606 --> 00:02:09.587
+Reading time:
+
+31
+00:02:09.867 --> 00:02:11.254
+80 min + code.
+
+32
+00:02:12.604 --> 00:02:13.457
+Part 1.
+
+33
+00:02:13.737 --> 00:02:15.657
+Introduction and Why It Matters.
+
+34
+00:02:16.907 --> 00:02:19.510
+A story: the architect who failed the interview.
+
+35
+00:02:19.790 --> 00:02:24.910
+Ravi had led the platform team for six years and designed half the systems in this handbook.
+
+36
+00:02:25.190 --> 00:02:28.753
+In a staff-level loop, he got design a notification system.
+
+37
+00:02:29.033 --> 00:02:35.091
+Within ninety seconds he was drawing Kafka, three provider adapters, a preference service and a scheduler.
+
+38
+00:02:35.371 --> 00:02:37.483
+It was his real system, beautifully.
+
+39
+00:02:37.763 --> 00:02:38.723
+The feedback:
+
+40
+00:02:39.003 --> 00:02:40.689
+Didn't clarify requirements.
+
+41
+00:02:40.969 --> 00:02:42.931
+Over-engineered for the stated scale.
+
+42
+00:02:43.211 --> 00:02:48.289
+When asked why Kafka over a database queue, repeated that Kafka is industry standard.
+
+43
+00:02:49.639 --> 00:02:52.135
+Ran out of time before discussing failures.
+
+44
+00:02:52.415 --> 00:03:00.031
+The interviewer had in mind 1,000 push notifications a second, best-effort, and wanted to see OTP latency handled.
+
+45
+00:03:00.311 --> 00:03:03.148
+Experience is necessary, but not sufficient.
+
+46
+00:03:03.428 --> 00:03:11.385
+An interview measures whether you can make your reasoning visible: find out which system is being asked for;. size it;. choose, and say why;.
+
+47
+00:03:12.735 --> 00:03:16.533
+break it on purpose and fix it;. do all of that in 45 minutes.
+
+48
+00:03:16.813 --> 00:03:18.263
+That is a skill of its own.
+
+49
+00:03:18.543 --> 00:03:19.909
+This chapter trains it.
+
+50
+00:03:21.259 --> 00:03:21.941
+Quote:
+
+51
+00:03:22.221 --> 00:03:23.885
+The thesis of this chapter.
+
+52
+00:03:24.165 --> 00:03:25.509
+Ask before you draw.
+
+53
+00:03:25.789 --> 00:03:32.339
+The prompt describes many systems, and two questions (scale and latency) eliminate most of them (L3).
+
+54
+00:03:32.619 --> 00:03:37.696
+Estimate to one significant figure and let the numbers pick the architecture (L1).
+
+55
+00:03:37.976 --> 00:03:44.717
+Make trade-offs inspectable: know which choices are robust and which are close calls, and what would flip them (L2).
+
+56
+00:03:44.997 --> 00:03:51.205
+Spend the clock on the deep dive and failures, because that's where senior and staff signals live (L4).
+
+57
+00:03:52.555 --> 00:03:53.942
+The interview landscape.
+
+58
+00:03:54.222 --> 00:03:55.587
+Here is a quick table:
+
+59
+00:03:55.867 --> 00:03:59.003
+Format, and Duration, and What's scored, and Common at.
+
+60
+00:03:59.283 --> 00:04:00.926
+Product or system design.
+
+61
+00:04:01.206 --> 00:04:02.187
+Duration:
+
+62
+00:04:02.467 --> 00:04:04.067
+45 to 60 min.
+
+63
+00:04:04.347 --> 00:04:05.307
+What's scored:
+
+64
+00:04:05.587 --> 00:04:08.723
+Requirements, architecture, trade-offs, depth, failures.
+
+65
+00:04:09.003 --> 00:04:09.857
+Common at:
+
+66
+00:04:10.137 --> 00:04:12.441
+All levels ≥ senior.
+
+67
+00:04:12.721 --> 00:04:14.491
+Deep dive on your past system.
+
+68
+00:04:14.771 --> 00:04:15.753
+Duration:
+
+69
+00:04:16.033 --> 00:04:17.633
+45 to 60 min.
+
+70
+00:04:17.913 --> 00:04:18.873
+What's scored:
+
+71
+00:04:19.153 --> 00:04:21.307
+Ownership, decisions, what you'd change.
+
+72
+00:04:21.587 --> 00:04:22.441
+Common at:
+
+73
+00:04:22.721 --> 00:04:23.723
+Staff+.
+
+74
+00:04:24.003 --> 00:04:25.881
+Low-level or OO design.
+
+75
+00:04:26.161 --> 00:04:27.142
+Duration:
+
+76
+00:04:27.422 --> 00:04:28.617
+45 min.
+
+77
+00:04:28.897 --> 00:04:29.857
+What's scored:
+
+78
+00:04:30.137 --> 00:04:32.142
+Classes, patterns, concurrency.
+
+79
+00:04:32.422 --> 00:04:33.275
+Common at:
+
+80
+00:04:33.555 --> 00:04:34.686
+Mid or senior.
+
+81
+00:04:34.966 --> 00:04:37.206
+Architecture review or take-home doc.
+
+82
+00:04:37.486 --> 00:04:38.467
+Duration:
+
+83
+00:04:38.747 --> 00:04:39.515
+Days.
+
+84
+00:04:39.795 --> 00:04:40.755
+What's scored:
+
+85
+00:04:41.035 --> 00:04:42.294
+Written design, ADRs.
+
+86
+00:04:42.574 --> 00:04:43.427
+Common at:
+
+87
+00:04:43.707 --> 00:04:44.966
+Staff or principal.
+
+88
+00:04:45.246 --> 00:04:46.206
+Behavioural.
+
+89
+00:04:46.486 --> 00:04:47.467
+Duration:
+
+90
+00:04:47.747 --> 00:04:48.942
+45 min.
+
+91
+00:04:49.222 --> 00:04:50.182
+What's scored:
+
+92
+00:04:50.462 --> 00:04:52.275
+Leadership, conflict, impact.
+
+93
+00:04:52.555 --> 00:04:53.409
+Common at:
+
+94
+00:04:53.689 --> 00:04:55.203
+All (Ch 61).
+
+95
+00:04:56.553 --> 00:04:57.876
+Learning objectives.
+
+96
+00:04:58.156 --> 00:05:00.033
+By the end you will be able to:
+
+97
+00:05:00.313 --> 00:05:03.449
+Run the eight-step framework on a 45-minute clock.
+
+98
+00:05:03.729 --> 00:05:06.545
+Ask the highest-value questions first (L3).
+
+99
+00:05:06.825 --> 00:05:09.065
+Estimate fast and well enough (L1).
+
+100
+00:05:09.345 --> 00:05:11.628
+Present and defend trade-offs (L2).
+
+101
+00:05:11.908 --> 00:05:15.364
+Know what each level is scored on (L4, Ch 58).
+
+102
+00:05:16.714 --> 00:05:17.589
+Part 2.
+
+103
+00:05:17.869 --> 00:05:19.767
+Core Concepts, Beginner to Deep.
+
+104
+00:05:21.017 --> 00:05:23.449
+Intuition: a doctor's consultation.
+
+105
+00:05:23.729 --> 00:05:26.801
+A good doctor doesn't prescribe the moment you sit down.
+
+106
+00:05:27.081 --> 00:05:38.111
+They ask the few questions that separate the likely conditions, take the measurements that matter, explain the options and their side effects, commit to a plan, and tell you what to watch for.
+
+107
+00:05:38.391 --> 00:05:40.716
+A design interview is that consultation:
+
+108
+00:05:40.996 --> 00:05:42.767
+The questions are requirements.
+
+109
+00:05:43.047 --> 00:05:44.753
+The measurements are estimation.
+
+110
+00:05:45.033 --> 00:05:46.527
+The options are trade-offs.
+
+111
+00:05:46.807 --> 00:05:48.257
+The plan is the design.
+
+112
+00:05:49.607 --> 00:05:51.847
+The warning signs are failure handling.
+
+113
+00:05:53.197 --> 00:05:54.520
+The eight-step framework.
+
+114
+00:05:54.800 --> 00:05:56.165
+Here is a quick table:
+
+115
+00:05:56.445 --> 00:06:00.285
+Step, and Minutes (45-min interview), and Output on the board.
+
+116
+00:06:00.565 --> 00:06:01.205
+1.
+
+117
+00:06:01.485 --> 00:06:02.168
+Step:
+
+118
+00:06:02.448 --> 00:06:05.989
+Clarify scope, users, scale, latency, consistency.
+
+119
+00:06:06.269 --> 00:06:08.168
+Minutes (45-min interview):
+
+120
+00:06:08.448 --> 00:06:09.557
+0 to 5.
+
+121
+00:06:09.837 --> 00:06:11.117
+Output on the board:
+
+122
+00:06:11.397 --> 00:06:14.597
+5 to 8 bullet requirements, explicit non-goals.
+
+123
+00:06:14.877 --> 00:06:15.581
+2.
+
+124
+00:06:15.861 --> 00:06:16.544
+Step:
+
+125
+00:06:16.824 --> 00:06:19.469
+Estimate traffic, storage, bandwidth, peaks.
+
+126
+00:06:19.749 --> 00:06:21.648
+Minutes (45-min interview):
+
+127
+00:06:21.928 --> 00:06:23.016
+5 to 8.
+
+128
+00:06:23.296 --> 00:06:24.576
+Output on the board:
+
+129
+00:06:24.856 --> 00:06:27.715
+4 to 6 numbers, 1 significant figure.
+
+130
+00:06:27.995 --> 00:06:28.741
+3.
+
+131
+00:06:29.021 --> 00:06:29.704
+Step:
+
+132
+00:06:29.984 --> 00:06:32.139
+API (key endpoints or events).
+
+133
+00:06:32.419 --> 00:06:34.317
+Minutes (45-min interview):
+
+134
+00:06:34.597 --> 00:06:35.728
+8 to 11.
+
+135
+00:06:36.008 --> 00:06:37.288
+Output on the board:
+
+136
+00:06:37.568 --> 00:06:41.280
+3 to 5 signatures with idempotency and pagination.
+
+137
+00:06:41.560 --> 00:06:42.264
+4.
+
+138
+00:06:42.544 --> 00:06:43.227
+Step:
+
+139
+00:06:43.507 --> 00:06:46.344
+Data model (entities, keys, access patterns).
+
+140
+00:06:46.624 --> 00:06:48.523
+Minutes (45-min interview):
+
+141
+00:06:48.803 --> 00:06:50.104
+11 to 14.
+
+142
+00:06:50.384 --> 00:06:51.664
+Output on the board:
+
+143
+00:06:51.944 --> 00:06:54.888
+Tables or keys and the store chosen per pattern.
+
+144
+00:06:56.238 --> 00:06:57.006
+5.
+
+145
+00:06:57.286 --> 00:06:57.969
+Step:
+
+146
+00:06:58.249 --> 00:06:59.529
+High-level design.
+
+147
+00:06:59.809 --> 00:07:01.707
+Minutes (45-min interview):
+
+148
+00:07:01.987 --> 00:07:03.246
+14 to 20.
+
+149
+00:07:03.526 --> 00:07:04.806
+Output on the board:
+
+150
+00:07:05.086 --> 00:07:07.753
+Boxes and arrows; the critical path named.
+
+151
+00:07:08.033 --> 00:07:08.779
+6.
+
+152
+00:07:09.059 --> 00:07:09.742
+Step:
+
+153
+00:07:10.022 --> 00:07:13.969
+Deep dive on 1 to 2 hard parts (interviewer's choice or yours).
+
+154
+00:07:14.249 --> 00:07:16.147
+Minutes (45-min interview):
+
+155
+00:07:16.427 --> 00:07:17.750
+20 to 35.
+
+156
+00:07:18.030 --> 00:07:19.310
+Output on the board:
+
+157
+00:07:19.590 --> 00:07:22.641
+Algorithms, concurrency, consistency, numbers.
+
+158
+00:07:22.921 --> 00:07:23.667
+7.
+
+159
+00:07:23.947 --> 00:07:24.630
+Step:
+
+160
+00:07:24.910 --> 00:07:28.601
+Failures and scaling: what breaks, how you detect and recover.
+
+161
+00:07:28.881 --> 00:07:30.779
+Minutes (45-min interview):
+
+162
+00:07:31.059 --> 00:07:32.617
+35 to 41.
+
+163
+00:07:32.897 --> 00:07:34.177
+Output on the board:
+
+164
+00:07:34.457 --> 00:07:37.038
+Failure table, degradation, bottlenecks.
+
+165
+00:07:37.318 --> 00:07:38.001
+8.
+
+166
+00:07:38.281 --> 00:07:38.963
+Step:
+
+167
+00:07:39.243 --> 00:07:43.233
+Wrap-up: trade-offs made, what you'd do next, operability or cost.
+
+168
+00:07:43.513 --> 00:07:45.411
+Minutes (45-min interview):
+
+169
+00:07:45.691 --> 00:07:47.270
+41 to 45.
+
+170
+00:07:47.550 --> 00:07:48.830
+Output on the board:
+
+171
+00:07:49.110 --> 00:07:50.582
+3 to 4 sentences.
+
+172
+00:07:51.932 --> 00:07:53.191
+Timebox out loud:
+
+173
+00:07:53.471 --> 00:07:55.348
+I'll take two minutes on requirements.
+
+174
+00:07:55.628 --> 00:07:56.951
+Drive, but check in:
+
+175
+00:07:57.231 --> 00:08:00.132
+I'd like to deep dive on inventory reservation.
+
+176
+00:08:00.412 --> 00:08:02.012
+Is that where you'd like to go?
+
+177
+00:08:02.292 --> 00:08:04.575
+Write numbers and decisions on the board.
+
+178
+00:08:04.855 --> 00:08:06.945
+The interviewer's notes follow the board.
+
+179
+00:08:08.295 --> 00:08:11.879
+Step 1: clarify, and ask the valuable questions first.
+
+180
+00:08:12.159 --> 00:08:15.274
+L3 enumerated design a notification system:
+
+181
+00:08:16.624 --> 00:08:17.989
+Here is a quick table:
+
+182
+00:08:18.269 --> 00:08:21.960
+Strategy, and Design right for, and Over-built, and Missing a need.
+
+183
+00:08:22.240 --> 00:08:24.160
+No questions (typical set).
+
+184
+00:08:24.440 --> 00:08:25.656
+Design right for:
+
+185
+00:08:25.936 --> 00:08:27.131
+1 of 48.
+
+186
+00:08:27.411 --> 00:08:28.307
+Over-built:
+
+187
+00:08:28.587 --> 00:08:29.333
+7.
+
+188
+00:08:29.613 --> 00:08:30.659
+Missing a need:
+
+189
+00:08:30.939 --> 00:08:31.728
+40.
+
+190
+00:08:32.008 --> 00:08:32.989
+Ask scale.
+
+191
+00:08:33.269 --> 00:08:34.485
+Design right for:
+
+192
+00:08:34.765 --> 00:08:35.960
+3 of 48.
+
+193
+00:08:36.240 --> 00:08:37.136
+Over-built:
+
+194
+00:08:37.416 --> 00:08:38.333
+21.
+
+195
+00:08:38.613 --> 00:08:39.659
+Missing a need:
+
+196
+00:08:39.939 --> 00:08:40.941
+24.
+
+197
+00:08:41.221 --> 00:08:42.907
+Ask scale, then latency.
+
+198
+00:08:43.187 --> 00:08:44.403
+Design right for:
+
+199
+00:08:44.683 --> 00:08:45.941
+6 of 48.
+
+200
+00:08:46.221 --> 00:08:47.117
+Over-built:
+
+201
+00:08:47.397 --> 00:08:48.336
+42.
+
+202
+00:08:48.616 --> 00:08:49.661
+Missing a need:
+
+203
+00:08:49.941 --> 00:08:50.688
+0.
+
+204
+00:08:50.968 --> 00:08:52.077
+Ask all five.
+
+205
+00:08:52.357 --> 00:08:53.573
+Design right for:
+
+206
+00:08:53.853 --> 00:08:55.368
+48 of 48.
+
+207
+00:08:55.648 --> 00:08:56.544
+Over-built:
+
+208
+00:08:56.824 --> 00:08:57.571
+0.
+
+209
+00:08:57.851 --> 00:08:58.896
+Missing a need:
+
+210
+00:08:59.176 --> 00:08:59.923
+0.
+
+211
+00:09:01.273 --> 00:09:07.843
+Ask what splits the design space: scale (orders of magnitude) and latency or consistency needs.
+
+212
+00:09:08.123 --> 00:09:13.777
+Then state assumptions for the rest (I'll assume at-least-once, multi-channel; stop me if not).
+
+213
+00:09:14.057 --> 00:09:20.371
+Functional questions: who are the users, what are the 3 core use cases, and what is explicitly out of scope?
+
+214
+00:09:20.651 --> 00:09:22.209
+Non-functional questions:
+
+215
+00:09:22.489 --> 00:09:32.601
+DAU or QPS, read or write ratio, latency targets, consistency (money? inventory?), availability, data retention, regions (Ch 01).
+
+216
+00:09:32.881 --> 00:09:33.969
+Write them down.
+
+217
+00:09:34.249 --> 00:09:36.681
+They become the acceptance tests for your design.
+
+218
+00:09:38.031 --> 00:09:40.825
+Step 2: estimate to one significant figure.
+
+219
+00:09:41.105 --> 00:09:46.076
+L1 compared exact arithmetic with interview-style estimates on eight prompts:
+
+220
+00:09:47.426 --> 00:09:48.791
+Here is a quick table:
+
+221
+00:09:49.071 --> 00:09:53.807
+Rounding, and Worst ratio versus exact, and Design decisions unchanged.
+
+222
+00:09:54.087 --> 00:09:58.013
+Each input to 1 or 5 or 10 times 10ᵏ.
+
+223
+00:09:58.293 --> 00:10:00.149
+Worst ratio versus exact:
+
+224
+00:10:00.429 --> 00:10:01.858
+7.3 times.
+
+225
+00:10:02.138 --> 00:10:03.823
+Design decisions unchanged:
+
+226
+00:10:04.103 --> 00:10:05.127
+5 of 8.
+
+227
+00:10:05.407 --> 00:10:07.711
+Each input to 1 significant figure.
+
+228
+00:10:07.991 --> 00:10:09.847
+Worst ratio versus exact:
+
+229
+00:10:10.127 --> 00:10:11.471
+1.8 times.
+
+230
+00:10:11.751 --> 00:10:13.437
+Design decisions unchanged:
+
+231
+00:10:13.717 --> 00:10:14.655
+8 of 8.
+
+232
+00:10:16.005 --> 00:10:16.923
+Shortcuts:
+
+233
+00:10:17.203 --> 00:10:24.947
+1 day about 10⁵ s; 1 month about 2.5 times 10⁶ s; 1 year about 3 times 10⁷ s.
+
+234
+00:10:25.227 --> 00:10:28.619
+1M requests per day about 12 per second average.
+
+235
+00:10:28.899 --> 00:10:31.245
+Peak = average times peak factor.
+
+236
+00:10:31.525 --> 00:10:36.304
+Compute what decides: peak writes (can one primary take it?), peak reads (cache?
+
+237
+00:10:36.584 --> 00:10:42.771
+CDN?), storage over retention (one machine? sharded?), bandwidth (egress cost, CDN).
+
+238
+00:10:43.051 --> 00:10:46.635
+Thresholds to know (rules of thumb, VERIFY for your hardware):
+
+239
+00:10:47.985 --> 00:11:02.534
+~5k writes per second for a comfortable single PostgreSQL primary;. ~100k ops per second per Redis instance;. ~1 GB per second per NIC;. ~10 TB per machine.
+
+240
+00:11:02.814 --> 00:11:07.891
+Say near a threshold out loud, and design for the higher side (Ch 02).
+
+241
+00:11:09.241 --> 00:11:10.457
+Steps 3 to 5:
+
+242
+00:11:10.737 --> 00:11:13.340
+API, data model, high-level design.
+
+243
+00:11:13.620 --> 00:11:20.532
+API: resource-oriented or RPC, idempotency keys on mutations, pagination, versioning.
+
+244
+00:11:20.812 --> 00:11:23.521
+Events for async flows (Ch 04).
+
+245
+00:11:23.801 --> 00:11:39.247
+Data model: start from access patterns, then choose stores per pattern (relational for money and inventory, KV for carts and sessions, search engine for text, object storage for media) (Ch 05, Ch 06).
+
+246
+00:11:39.527 --> 00:11:45.820
+High-level design: clients, then edge, then services, then stores, with async via a queue or log.
+
+247
+00:11:46.100 --> 00:11:51.049
+Name the critical path, and mark sync versus async edges (Ch 56).
+
+248
+00:11:52.399 --> 00:11:53.743
+Keep it simple first.
+
+249
+00:11:54.023 --> 00:12:03.559
+Add components only when a requirement or number demands them, and say which one (reads are 100 times writes at 40k per second, so a cache).
+
+250
+00:12:04.909 --> 00:12:06.552
+Step 6: the deep dive.
+
+251
+00:12:06.832 --> 00:12:08.624
+This is where most of the score is.
+
+252
+00:12:08.904 --> 00:12:12.232
+Pick the part with scarcity, money, concurrency or scale:
+
+253
+00:12:13.582 --> 00:12:14.947
+Here is a quick table:
+
+254
+00:12:15.227 --> 00:12:17.830
+Prompt, and Typical deep dives, and Chapter.
+
+255
+00:12:18.110 --> 00:12:19.390
+URL shortener.
+
+256
+00:12:19.670 --> 00:12:20.971
+Typical deep dives:
+
+257
+00:12:21.251 --> 00:12:24.409
+ID generation, hot keys, redirects at scale.
+
+258
+00:12:24.689 --> 00:12:25.542
+Chapter:
+
+259
+00:12:25.822 --> 00:12:26.995
+Ch 38.
+
+260
+00:12:27.275 --> 00:12:28.278
+Rate limiter.
+
+261
+00:12:28.558 --> 00:12:29.859
+Typical deep dives:
+
+262
+00:12:30.139 --> 00:12:33.659
+Algorithms, distributed counters, fail-open or closed.
+
+263
+00:12:33.939 --> 00:12:34.793
+Chapter:
+
+264
+00:12:35.073 --> 00:12:36.310
+Ch 39.
+
+265
+00:12:36.590 --> 00:12:37.721
+Notifications.
+
+266
+00:12:38.001 --> 00:12:39.302
+Typical deep dives:
+
+267
+00:12:39.582 --> 00:12:42.718
+Priority lanes, retries, dedup, provider failover.
+
+268
+00:12:42.998 --> 00:12:43.851
+Chapter:
+
+269
+00:12:44.131 --> 00:12:45.177
+Ch 40.
+
+270
+00:12:45.457 --> 00:12:46.161
+Chat.
+
+271
+00:12:46.441 --> 00:12:47.742
+Typical deep dives:
+
+272
+00:12:48.022 --> 00:12:50.838
+Ordering, presence, fan-out, offline delivery.
+
+273
+00:12:51.118 --> 00:12:51.971
+Chapter:
+
+274
+00:12:52.251 --> 00:12:53.489
+Ch 41.
+
+275
+00:12:53.769 --> 00:12:55.283
+Search or autocomplete.
+
+276
+00:12:55.563 --> 00:12:56.865
+Typical deep dives:
+
+277
+00:12:57.145 --> 00:12:59.619
+Tries versus index, ranking, freshness.
+
+278
+00:12:59.899 --> 00:13:00.753
+Chapter:
+
+279
+00:13:01.033 --> 00:13:02.270
+Ch 42.
+
+280
+00:13:02.550 --> 00:13:03.339
+Feed.
+
+281
+00:13:03.619 --> 00:13:04.921
+Typical deep dives:
+
+282
+00:13:05.201 --> 00:13:07.526
+Fan-out on write versus read, ranking.
+
+283
+00:13:07.806 --> 00:13:08.659
+Chapter:
+
+284
+00:13:08.939 --> 00:13:10.219
+Ch 43.
+
+285
+00:13:10.499 --> 00:13:11.353
+Payments.
+
+286
+00:13:11.633 --> 00:13:12.934
+Typical deep dives:
+
+287
+00:13:13.214 --> 00:13:15.838
+Idempotency, ledger, reconciliation.
+
+288
+00:13:16.118 --> 00:13:16.971
+Chapter:
+
+289
+00:13:17.251 --> 00:13:18.553
+Ch 45.
+
+290
+00:13:18.833 --> 00:13:20.155
+Checkout or booking.
+
+291
+00:13:20.435 --> 00:13:21.737
+Typical deep dives:
+
+292
+00:13:22.017 --> 00:13:24.534
+Reservations, hot SKUs, holds.
+
+293
+00:13:24.814 --> 00:13:25.667
+Chapter:
+
+294
+00:13:25.947 --> 00:13:28.251
+Ch 46, Ch 48.
+
+295
+00:13:29.601 --> 00:13:30.881
+Uber or dispatch.
+
+296
+00:13:31.161 --> 00:13:32.463
+Typical deep dives:
+
+297
+00:13:32.743 --> 00:13:34.577
+Geo index, matching, ETAs.
+
+298
+00:13:34.857 --> 00:13:35.711
+Chapter:
+
+299
+00:13:35.991 --> 00:13:37.313
+Ch 47.
+
+300
+00:13:37.593 --> 00:13:39.087
+KV store or cache.
+
+301
+00:13:39.367 --> 00:13:40.668
+Typical deep dives:
+
+302
+00:13:40.948 --> 00:13:44.105
+Partitioning, replication, LSM, consistency.
+
+303
+00:13:44.385 --> 00:13:45.239
+Chapter:
+
+304
+00:13:45.519 --> 00:13:47.972
+Ch 44, Ch 54.
+
+305
+00:13:48.252 --> 00:13:49.169
+Exchange.
+
+306
+00:13:49.449 --> 00:13:50.751
+Typical deep dives:
+
+307
+00:13:51.031 --> 00:13:52.972
+Book, sequencer, determinism.
+
+308
+00:13:53.252 --> 00:13:54.105
+Chapter:
+
+309
+00:13:54.385 --> 00:13:55.708
+Ch 55.
+
+310
+00:13:57.058 --> 00:14:04.034
+Go concrete: data structures, the exact SQL or Lua for the atomic step, the state machine, the numbers.
+
+311
+00:14:04.314 --> 00:14:09.711
+Anticipate the what if: two users on the last unit, a crash between steps, a hot key.
+
+312
+00:14:11.061 --> 00:14:13.237
+Step 7: failures and scaling.
+
+313
+00:14:13.517 --> 00:14:22.264
+For each component on the critical path, cover: what happens when it's slow or down;. how you detect it;. what the user sees;. how you recover.
+
+314
+00:14:22.544 --> 00:14:31.248
+Money and inventory: say a timeout means unknown, then idempotency, sagas and reconciliation (Ch 56 L2).
+
+315
+00:14:31.528 --> 00:14:35.496
+Scaling: the next bottleneck at 10 times load, and what you'd change.
+
+316
+00:14:36.846 --> 00:14:44.910
+Staff signals: blast radius, degradation modes, SLOs by composition, cells (Ch 56 L3, L4).
+
+317
+00:14:46.260 --> 00:14:47.583
+Presenting trade-offs.
+
+318
+00:14:47.863 --> 00:14:51.425
+L2 perturbed each decision matrix 100,000 times:
+
+319
+00:14:52.775 --> 00:14:54.141
+Here is a quick table:
+
+320
+00:14:54.421 --> 00:14:59.327
+Decision, and Base winner, and Wins under perturbation, and Margin, and What flips it.
+
+321
+00:14:59.607 --> 00:15:00.567
+Cart store.
+
+322
+00:15:00.847 --> 00:15:01.786
+Base winner:
+
+323
+00:15:02.066 --> 00:15:04.775
+PostgreSQL = managed KV.
+
+324
+00:15:05.055 --> 00:15:06.506
+Wins under perturbation:
+
+325
+00:15:06.786 --> 00:15:09.367
+45% versus 43%.
+
+326
+00:15:09.647 --> 00:15:10.501
+Margin:
+
+327
+00:15:10.781 --> 00:15:11.527
+TIE.
+
+328
+00:15:11.807 --> 00:15:12.767
+What flips it:
+
+329
+00:15:13.047 --> 00:15:16.866
+More weight on write throughput or ops burden, then managed KV.
+
+330
+00:15:17.146 --> 00:15:18.234
+Event backbone.
+
+331
+00:15:18.514 --> 00:15:19.453
+Base winner:
+
+332
+00:15:19.733 --> 00:15:20.586
+Kafka.
+
+333
+00:15:20.866 --> 00:15:22.317
+Wins under perturbation:
+
+334
+00:15:22.597 --> 00:15:23.855
+87%.
+
+335
+00:15:24.135 --> 00:15:24.989
+Margin:
+
+336
+00:15:25.269 --> 00:15:26.293
+6 points.
+
+337
+00:15:26.573 --> 00:15:27.533
+What flips it:
+
+338
+00:15:27.813 --> 00:15:28.858
+Nothing single.
+
+339
+00:15:29.138 --> 00:15:30.247
+Product search.
+
+340
+00:15:30.527 --> 00:15:31.466
+Base winner:
+
+341
+00:15:31.746 --> 00:15:32.919
+Managed SaaS.
+
+342
+00:15:33.199 --> 00:15:34.650
+Wins under perturbation:
+
+343
+00:15:34.930 --> 00:15:36.295
+95%.
+
+344
+00:15:36.575 --> 00:15:37.429
+Margin:
+
+345
+00:15:37.709 --> 00:15:38.797
+11 points.
+
+346
+00:15:39.077 --> 00:15:40.037
+What flips it:
+
+347
+00:15:40.317 --> 00:15:41.362
+Nothing single.
+
+348
+00:15:42.712 --> 00:15:43.693
+The formula:
+
+349
+00:15:43.973 --> 00:15:46.533
+I choose X because of requirements A and B.
+
+350
+00:15:46.813 --> 00:15:47.901
+The cost is C.
+
+351
+00:15:48.181 --> 00:15:50.080
+If D were true, I'd choose Y.
+
+352
+00:15:50.360 --> 00:15:52.685
+Robust choices: defend them calmly.
+
+353
+00:15:52.965 --> 00:15:55.867
+Close calls: say so, and name the flip condition.
+
+354
+00:15:56.147 --> 00:15:58.813
+Interviewers probe to see whether you know the difference.
+
+355
+00:15:59.093 --> 00:16:09.397
+When your choice differs from a naive matrix (the handbook chose self-run OpenSearch), name the missing criterion: control, cost at scale, data residency.
+
+356
+00:16:10.747 --> 00:16:12.070
+What the rubric scores.
+
+357
+00:16:12.350 --> 00:16:14.889
+L4 scored three illustrative transcripts:
+
+358
+00:16:16.239 --> 00:16:17.604
+Here is a quick table:
+
+359
+00:16:17.884 --> 00:16:23.153
+Transcript, and Senior (bar 70%), and Staff (bar 85%), and Missing.
+
+360
+00:16:23.433 --> 00:16:24.884
+Draws boxes fast.
+
+361
+00:16:25.164 --> 00:16:26.913
+Senior (bar 70%):
+
+362
+00:16:27.193 --> 00:16:28.431
+24%.
+
+363
+00:16:28.711 --> 00:16:30.524
+Staff (bar 85%):
+
+364
+00:16:30.804 --> 00:16:31.849
+20%.
+
+365
+00:16:32.129 --> 00:16:32.897
+Missing:
+
+366
+00:16:33.177 --> 00:16:35.887
+Requirements, estimation, depth, failures.
+
+367
+00:16:36.167 --> 00:16:37.255
+Solid senior.
+
+368
+00:16:37.535 --> 00:16:39.284
+Senior (bar 70%):
+
+369
+00:16:39.564 --> 00:16:41.143
+79%, hire.
+
+370
+00:16:41.423 --> 00:16:43.236
+Staff (bar 85%):
+
+371
+00:16:43.516 --> 00:16:45.137
+75%, no.
+
+372
+00:16:45.417 --> 00:16:46.185
+Missing:
+
+373
+00:16:46.465 --> 00:16:48.172
+Operability or cost weak.
+
+374
+00:16:48.452 --> 00:16:49.497
+Staff signals.
+
+375
+00:16:49.777 --> 00:16:51.527
+Senior (bar 70%):
+
+376
+00:16:51.807 --> 00:16:53.129
+96%.
+
+377
+00:16:53.409 --> 00:16:55.223
+Staff (bar 85%):
+
+378
+00:16:55.503 --> 00:16:57.188
+97%, hire.
+
+379
+00:16:58.538 --> 00:17:02.762
+Senior: correct, complete design; a good deep dive; trade-offs named.
+
+380
+00:17:03.042 --> 00:17:16.503
+Staff: drives ambiguity; argues trade-offs under pressure; failure handling and operability are first-class; connects to cost and organisation (Ch 58 covers level expectations in detail).
+
+381
+00:17:16.783 --> 00:17:21.669
+Communication is scored implicitly: structure, clarity, and listening to hints.
+
+382
+00:17:23.019 --> 00:17:24.341
+Adapting the framework.
+
+383
+00:17:24.621 --> 00:17:30.445
+60-minute interviews: longer deep dive, plus a second deep dive or an evolution discussion.
+
+384
+00:17:30.725 --> 00:17:38.363
+Design your past system: context, then constraints, then decisions with alternatives, then what went wrong, then what you'd change.
+
+385
+00:17:38.643 --> 00:17:40.605
+Honesty about mistakes scores well.
+
+386
+00:17:40.885 --> 00:17:42.997
+Interviewer steers early: follow them.
+
+387
+00:17:43.277 --> 00:17:45.667
+The framework is a default, not a script.
+
+388
+00:17:45.947 --> 00:17:48.443
+Unfamiliar domain: lean on the framework.
+
+389
+00:17:48.723 --> 00:17:51.645
+Requirements and numbers transfer across domains.
+
+390
+00:17:52.995 --> 00:17:53.891
+Part 3.
+
+391
+00:17:54.171 --> 00:17:55.899
+Architecture and Diagrams.
+
+392
+00:17:57.149 --> 00:17:58.600
+The interview as a flow.
+
+393
+00:17:58.880 --> 00:18:00.224
+Here is the diagram.
+
+394
+00:18:04.074 --> 00:18:05.951
+Sequence: a well-run interview.
+
+395
+00:18:06.231 --> 00:18:08.898
+The sequence diagram walks through it step by step.
+
+396
+00:18:09.178 --> 00:18:11.759
+I to C: design a notification system.
+
+397
+00:18:12.039 --> 00:18:17.522
+C to I: roughly how many per second, and any latency-critical types like OTP.
+
+398
+00:18:17.802 --> 00:18:18.655
+I to C:
+
+399
+00:18:18.935 --> 00:18:22.221
+1k per second normally, OTPs must be fast.
+
+400
+00:18:22.501 --> 00:18:23.397
+C to I:
+
+401
+00:18:23.677 --> 00:18:27.666
+I will assume at-least-once and push plus SMS, correct me if not.
+
+402
+00:18:27.946 --> 00:18:31.573
+C to C: estimate on the board, one significant figure.
+
+403
+00:18:31.853 --> 00:18:32.749
+C to I:
+
+404
+00:18:33.029 --> 00:18:37.381
+API and data model, then high-level design with a priority lane.
+
+405
+00:18:37.661 --> 00:18:42.077
+C to I: shall I deep dive on the OTP path and provider failover.
+
+406
+00:18:42.357 --> 00:18:46.133
+I to C: yes, and what if the SMS provider is down.
+
+407
+00:18:46.413 --> 00:18:50.594
+C to I: failover, idempotency, what the user sees, metrics.
+
+408
+00:18:50.874 --> 00:18:55.055
+C to I: wrap-up - trade-offs, what changes at 50k per second.
+
+409
+00:18:58.905 --> 00:19:01.849
+Sequence: an interview going wrong, and the recovery.
+
+410
+00:19:02.129 --> 00:19:04.796
+The sequence diagram walks through it step by step.
+
+411
+00:19:05.076 --> 00:19:07.401
+I to C: design a grocery checkout.
+
+412
+00:19:07.681 --> 00:19:11.031
+C to C: draws twelve microservices in two minutes.
+
+413
+00:19:11.311 --> 00:19:14.511
+I to C: how many orders per second are we talking about.
+
+414
+00:19:14.791 --> 00:19:17.905
+C to C: realises no requirements were asked.
+
+415
+00:19:18.185 --> 00:19:23.647
+C to I: good point, let me step back - 1.5M orders a day, 20x peak.
+
+416
+00:19:23.927 --> 00:19:29.132
+C to C: estimate - about 350 per second peak, one primary is fine.
+
+417
+00:19:29.412 --> 00:19:30.308
+C to I:
+
+418
+00:19:30.588 --> 00:19:33.788
+I will simplify - checkout, inventory, payment, order.
+
+419
+00:19:34.068 --> 00:19:36.756
+I to C: two customers buy the last unit.
+
+420
+00:19:37.036 --> 00:19:40.940
+C to I: conditional update in one statement, show the SQL.
+
+421
+00:19:44.790 --> 00:19:46.411
+State: the interview clock.
+
+422
+00:19:46.691 --> 00:19:48.035
+Here is the diagram.
+
+423
+00:19:51.885 --> 00:19:52.803
+Part 4.
+
+424
+00:19:53.083 --> 00:19:54.704
+Design Document Excerpt:
+
+425
+00:19:54.984 --> 00:19:56.541
+One-Page Interview Plan.
+
+426
+00:19:57.791 --> 00:19:58.538
+Note:
+
+427
+00:19:58.818 --> 00:20:04.834
+Design Document (excerpt), One-Page Plan for 'Design a Grocery Checkout' (practice template).
+
+428
+00:20:05.114 --> 00:20:06.010
+Status:
+
+429
+00:20:06.290 --> 00:20:10.578
+Practice template, Use: fill in within the first 14 minutes on the board.
+
+430
+00:20:10.858 --> 00:20:12.863
+Context, Quick-commerce checkout.
+
+431
+00:20:13.143 --> 00:20:22.445
+1.5M orders per day on sale days, 20 times peak minute, 500 dark stores, UPI or cards via a payment gateway.
+
+432
+00:20:22.725 --> 00:20:31.749
+Decision, Checkout orchestrates a saga: reserve stock (conditional update), then hold slot, then charge (idempotent), then create order.
+
+433
+00:20:32.029 --> 00:20:34.887
+Outbox events for fulfilment and notifications.
+
+434
+00:20:35.167 --> 00:20:36.874
+Waiting room for the sale minute.
+
+435
+00:20:37.154 --> 00:20:45.709
+Related decisions, Stock in PostgreSQL per store with conditional updates; Redis gate for hot SKUs (Ch 46).
+
+436
+00:20:45.989 --> 00:20:50.191
+Payment timeouts resolved by status API (Ch 45).
+
+437
+00:20:50.471 --> 00:20:53.458
+Sweeper for abandoned sagas (Ch 56).
+
+438
+00:20:54.808 --> 00:20:55.768
+Requirements.
+
+439
+00:20:56.048 --> 00:20:56.880
+R1:
+
+440
+00:20:57.160 --> 00:20:58.227
+Never oversell.
+
+441
+00:20:58.507 --> 00:20:59.339
+R2:
+
+442
+00:20:59.619 --> 00:21:01.901
+Never charge without an order, or twice.
+
+443
+00:21:02.181 --> 00:21:05.000
+R3: p99 2.5 s including the gateway.
+
+444
+00:21:06.280 --> 00:21:07.176
+R4:
+
+445
+00:21:07.456 --> 00:21:11.296
+99.95% availability of the journey.
+
+446
+00:21:11.576 --> 00:21:12.451
+R5:
+
+447
+00:21:12.731 --> 00:21:16.741
+Sale-minute surge handled without errors (a queue, not a failure).
+
+448
+00:21:18.091 --> 00:21:18.923
+Numbers.
+
+449
+00:21:19.203 --> 00:21:28.377
+1.5M per day ÷ 10⁵ s about 15 per second average; times 20 peak about 300 per second writes.
+
+450
+00:21:28.657 --> 00:21:33.179
+Reads ~ 40 times, then ~10k per second (cache catalog).
+
+451
+00:21:33.459 --> 00:21:34.355
+Storage:
+
+452
+00:21:34.635 --> 00:21:42.315
+1.5M times 4 KB times 365 times 3 copies about 7 TB per year.
+
+453
+00:21:42.595 --> 00:21:44.003
+Decisions in detail.
+
+454
+00:21:44.283 --> 00:21:48.614
+Scarcity: a conditional update for stock; buckets for hot SKUs.
+
+455
+00:21:48.894 --> 00:21:53.374
+Money: idempotency key = order id; unknown is not failed.
+
+456
+00:21:53.654 --> 00:21:55.638
+Coupling: side effects via events.
+
+457
+00:21:55.918 --> 00:21:58.222
+Surge: a waiting room and pre-scaling.
+
+458
+00:21:59.572 --> 00:22:00.596
+Consequences.
+
+459
+00:22:00.876 --> 00:22:07.745
+More moving parts than a single transaction, in return for correctness under failure and a bounded blast radius.
+
+460
+00:22:08.025 --> 00:22:09.476
+Mention it and move on.
+
+461
+00:22:10.826 --> 00:22:11.786
+Part 5.
+
+462
+00:22:12.066 --> 00:22:14.050
+Hands-On Code, Level Ladder.
+
+463
+00:22:15.300 --> 00:22:16.068
+Info:
+
+464
+00:22:16.348 --> 00:22:17.436
+What's real here.
+
+465
+00:22:17.716 --> 00:22:22.580
+All four labs are JDK 21 programs with real computation.
+
+466
+00:22:22.860 --> 00:22:27.511
+L1 uses stated assumptions per prompt and rule-of-thumb thresholds (VERIFY).
+
+467
+00:22:27.791 --> 00:22:32.335
+L2 uses scores and weights that are illustrative judgements, not benchmarks.
+
+468
+00:22:32.615 --> 00:22:37.628
+L3 has a requirement space and architecture rules drawn from Ch 40.
+
+469
+00:22:37.908 --> 00:22:41.897
+L4 uses illustrative transcripts and bars written for this lab.
+
+470
+00:22:42.177 --> 00:22:45.505
+They are not real candidates or a real company's rubric.
+
+471
+00:22:46.855 --> 00:22:52.317
+All four labs are single-file JDK 21 programs with no dependencies.
+
+472
+00:22:52.597 --> 00:22:58.037
+Run each with java -Dstdout.encoding=UTF-8 File.java.
+
+473
+00:22:59.387 --> 00:23:01.819
+L1, How precise must estimates be?
+
+474
+00:23:02.099 --> 00:23:03.037
+Requirement:
+
+475
+00:23:03.317 --> 00:23:06.795
+Estimate fast, and never let rounding change the architecture.
+
+476
+00:23:07.075 --> 00:23:11.960
+Eight prompts, exact versus two rounding styles, checked against design thresholds.
+
+477
+00:23:13.310 --> 00:23:16.169
+Here is the Java code, EstimateL1.java.
+
+478
+00:23:16.449 --> 00:23:20.182
+It runs to 93 lines; the full listing is in the chapter.
+
+479
+00:23:20.462 --> 00:23:27.822
+EstimateL1.java, run with: java EstimateL1.java (JDK 21, no dependencies).
+
+480
+00:23:28.102 --> 00:23:29.702
+ESTIMATION IN THE INTERVIEW:
+
+481
+00:23:29.982 --> 00:23:31.497
+IS MENTAL MATH GOOD ENOUGH?
+
+482
+00:23:31.777 --> 00:23:33.078
+Eight classic prompts.
+
+483
+00:23:33.358 --> 00:23:44.921
+For each, the exact arithmetic from. stated assumptions versus two interview-style estimates (every input rounded COARSELY to 1, 5 or 10 times a power of ten, or.
+
+484
+00:23:47.771 --> 00:23:48.688
+On screen:
+
+485
+00:23:48.968 --> 00:24:05.416
+COARSE rounding (each input to 1, 5 or 10 times 10^k): prompt peak writes per second peak reads per second storage (3 copies) decision from exact, then from. estimate. exact or estimate exact or estimate exact /. estimate.
+
+486
+00:24:05.696 --> 00:24:20.608
+URL shortener (writes = new links) 417 or 500 41.7k or 50.0k 32.9 TB or 22.5 TB same: distributed storage.
+
+487
+00:24:20.888 --> 00:24:34.648
+Grocery orders (this handbook) 347 or 250 13.9k or 12.5k 19.7 TB or 33.8 TB same: distributed storage.
+
+488
+00:24:34.928 --> 00:24:53.509
+Chat messages 92.6k or 125.0k 138.9k or 125.0k 1.3 PB or 2.3 PB same: shard per partition. writes, cache tier, distributed storage, stream ingest.
+
+489
+00:24:53.789 --> 00:25:11.411
+Rider GPS pings (writes) 15.0k or 5.0k 3.0k or 500 15.1 TB or 3.6 TB shard per partition. writes, distributed storage, then single primary + replicas.
+
+490
+00:25:11.691 --> 00:25:13.205
+The rest is in the chapter.
+
+491
+00:25:16.055 --> 00:25:16.909
+Reading it:
+
+492
+00:25:17.189 --> 00:25:21.370
+Coarse rounding compounds across five inputs into a 7 times miss.
+
+493
+00:25:21.650 --> 00:25:25.170
+It flipped the decision for GPS pings: shard or not.
+
+494
+00:25:25.450 --> 00:25:27.989
+It flipped photos: whether writes need sharding.
+
+495
+00:25:28.269 --> 00:25:31.277
+It flipped ad clicks: whether ingest needs a stream.
+
+496
+00:25:31.557 --> 00:25:36.421
+One significant figure is still head-arithmetic, and it never changed a decision here.
+
+497
+00:25:37.771 --> 00:25:40.053
+L2, Robust choice or close call?
+
+498
+00:25:40.333 --> 00:25:41.272
+Requirement:
+
+499
+00:25:41.552 --> 00:25:45.925
+Defend each choice under 'why not X?', and know which ones are genuinely close.
+
+500
+00:25:46.205 --> 00:25:49.875
+Three decision matrices, perturbed 100,000 times.
+
+501
+00:25:51.225 --> 00:25:54.105
+Here is the Java code, TradeoffL2.java.
+
+502
+00:25:54.385 --> 00:25:57.947
+It runs to 88 lines; the full listing is in the chapter.
+
+503
+00:25:58.227 --> 00:26:05.267
+TradeoffL2.java, run with: java TradeoffL2.java (JDK 21, no dependencies).
+
+504
+00:26:05.547 --> 00:26:07.531
+DEFENDING A CHOICE UNDER QUESTIONING.
+
+505
+00:26:07.811 --> 00:26:09.753
+Interviewers push: why not X?
+
+506
+00:26:10.033 --> 00:26:17.371
+A weighted decision matrix makes the reasoning. explicit, but is the winner robust, or an artefact of the weights you picked?
+
+507
+00:26:17.651 --> 00:26:19.358
+Three decisions from this handbook.
+
+508
+00:26:22.208 --> 00:26:23.125
+On screen:
+
+509
+00:26:23.405 --> 00:26:27.117
+Cart store (read-your-writes, 5M active carts, sale spikes).
+
+510
+00:26:27.397 --> 00:26:33.392
+PostgreSQL (partitioned) base score 67.0 ← base-case winner.
+
+511
+00:26:33.672 --> 00:26:37.533
+Redis + PG snapshot base score 63.0.
+
+512
+00:26:37.813 --> 00:26:42.357
+Managed KV (DynamoDB-like) base score 67.0.
+
+513
+00:26:42.637 --> 00:26:46.691
+Cassandra base score 51.0. wins under perturbation:
+
+514
+00:26:46.971 --> 00:26:55.632
+PostgreSQL 45% Redis 12% Managed 43% Cassandra 0%. margin over runner-up:
+
+515
+00:26:55.912 --> 00:26:57.853
+TIE; doubling one weight flips it:
+
+516
+00:26:58.133 --> 00:26:59.371
+'write throughput', then.
+
+517
+00:26:59.651 --> 00:27:05.603
+Managed KV (DynamoDB-like); 'ops burden', then Managed KV (DynamoDB-like).
+
+518
+00:27:05.883 --> 00:27:09.168
+Event backbone (order events, replay, 20 consumers).
+
+519
+00:27:09.448 --> 00:27:13.523
+Kafka base score 81.0 ← base-case winner.
+
+520
+00:27:13.803 --> 00:27:16.683
+RabbitMQ base score 55.0.
+
+521
+00:27:16.963 --> 00:27:20.312
+SQS or SNS base score 49.0.
+
+522
+00:27:20.592 --> 00:27:22.107
+The rest is in the chapter.
+
+523
+00:27:24.957 --> 00:27:25.810
+Reading it:
+
+524
+00:27:26.090 --> 00:27:29.567
+Kafka and managed search win under most reasonable weightings.
+
+525
+00:27:29.847 --> 00:27:31.085
+Defend them calmly.
+
+526
+00:27:31.365 --> 00:27:32.794
+The cart store is a tie.
+
+527
+00:27:33.074 --> 00:27:35.677
+Present it as a close call and name what flips it.
+
+528
+00:27:35.957 --> 00:27:37.898
+Search: the matrix picks SaaS.
+
+529
+00:27:38.178 --> 00:27:47.202
+The handbook chose self-run OpenSearch, which is a prompt to name the criterion the matrix is missing (control, cost at scale, residency).
+
+530
+00:27:48.552 --> 00:27:50.877
+L3, The value of the first questions.
+
+531
+00:27:51.157 --> 00:27:52.096
+Requirement:
+
+532
+00:27:52.376 --> 00:27:55.789
+Design the system the interviewer means, not the one in your head.
+
+533
+00:27:56.069 --> 00:28:01.147
+Every plausible reading of design a notification system, and the design each needs.
+
+534
+00:28:02.497 --> 00:28:05.590
+Here is the Java code, ClarifyL3.java.
+
+535
+00:28:05.870 --> 00:28:09.518
+It runs to 98 lines; the full listing is in the chapter.
+
+536
+00:28:09.798 --> 00:28:17.350
+ClarifyL3.java, run with: java ClarifyL3.java (JDK 21, no dependencies).
+
+537
+00:28:17.630 --> 00:28:19.678
+WHY THE FIRST FIVE MINUTES ARE QUESTIONS.
+
+538
+00:28:19.958 --> 00:28:20.726
+Prompt:
+
+539
+00:28:21.006 --> 00:28:22.969
+Design a notification system.
+
+540
+00:28:23.249 --> 00:28:31.526
+Five things the prompt doesn't. say, each with plausible answers (every combination is a requirement set an interviewer might have in mind):
+
+541
+00:28:34.376 --> 00:28:35.293
+On screen:
+
+542
+00:28:35.573 --> 00:28:44.661
+48 plausible requirement sets for design a notification system; each implies an. architecture. distinct architectures implied:
+
+543
+00:28:44.941 --> 00:29:05.955
+48 (uncertainty 5.58 bits). information gain per question: scale 1.58 bits latency 1.00 bits guarantee 1.00. bits channels 1.00 bits preferences 1.00 bits. strategy design right for over-built missing a need.
+
+544
+00:29:06.235 --> 00:29:11.269
+Q0) no questions: assume the typical set 1 of 48 7 40.
+
+545
+00:29:11.549 --> 00:29:17.608
+Q1) ask the 1 most informative question (scale) 3 of 48 21 24.
+
+546
+00:29:17.888 --> 00:29:24.373
+Q2) ask the 2 most informative questions (scale, latency) 6 of 48 42 0.
+
+547
+00:29:24.653 --> 00:29:28.280
+Q5) ask all five 48 of 48 0 0.
+
+548
+00:29:28.560 --> 00:29:30.075
+The rest is in the chapter.
+
+549
+00:29:32.925 --> 00:29:33.778
+Reading it:
+
+550
+00:29:34.058 --> 00:29:39.391
+Without questions, the design misses an essential component in 40 of 48 readings.
+
+551
+00:29:39.671 --> 00:29:43.042
+Asking scale, then latency removes every missing case.
+
+552
+00:29:43.322 --> 00:29:47.034
+Stating the remaining assumptions aloud removes the over-building.
+
+553
+00:29:48.384 --> 00:29:50.432
+L4, What the rubric rewards.
+
+554
+00:29:50.712 --> 00:29:51.651
+Requirement:
+
+555
+00:29:51.931 --> 00:29:54.640
+Know which behaviours move the score, at your level.
+
+556
+00:29:54.920 --> 00:29:58.909
+Three illustrative transcripts scored against senior and staff rubrics.
+
+557
+00:30:00.259 --> 00:30:03.267
+Here is the Java code, RubricL4.java.
+
+558
+00:30:03.547 --> 00:30:07.238
+It runs to 78 lines; the full listing is in the chapter.
+
+559
+00:30:07.518 --> 00:30:14.665
+RubricL4.java, run with: java RubricL4.java (JDK 21, no dependencies).
+
+560
+00:30:14.945 --> 00:30:17.654
+HOW A 45-MINUTE DESIGN INTERVIEW IS SCORED.
+
+561
+00:30:17.934 --> 00:30:27.662
+A rubric of 8 signals (the ones this chapter's framework is built to. produce), each needing specific evidence, weighted by level, plus time discipline.
+
+562
+00:30:27.942 --> 00:30:29.841
+Three ILLUSTRATIVE transcripts of.
+
+563
+00:30:32.691 --> 00:30:38.387
+On screen: transcript (illustrative) senior staff missing or weak signals time discipline.
+
+564
+00:30:38.667 --> 00:30:41.568
+(bar 70%) (bar 85%).
+
+565
+00:30:41.848 --> 00:30:53.517
+A, draws boxes fast 24% no 20% no requirements (absent), estimation (absent). api+data model (weak) +4 designed before asking.
+
+566
+00:30:53.797 --> 00:31:00.859
+B, solid senior 79% hire 75% no operability or cost (weak) on plan.
+
+567
+00:31:01.139 --> 00:31:13.853
+C, staff signals 96% hire 97% hire, on plan. bars (illustrative): senior ≥ 70%, staff ≥ 85%.
+
+568
+00:31:14.133 --> 00:31:30.133
+The two rubrics also weigh the same. evidence differently: staff puts more weight on trade-offs, failure handling and operability, less on API. detail. then the fast box-drawer loses on everything the boxes don't show: no requirements, no.
+
+569
+00:31:30.413 --> 00:31:31.928
+The rest is in the chapter.
+
+570
+00:31:34.778 --> 00:31:35.631
+Reading it:
+
+571
+00:31:35.911 --> 00:31:40.263
+Speed without requirements, numbers or failures scores poorly at any level.
+
+572
+00:31:40.543 --> 00:31:46.218
+The senior-to-staff gap is trade-offs, failure handling and operability done as first-class work.
+
+573
+00:31:46.498 --> 00:31:48.717
+The transcripts and bars are illustrative.
+
+574
+00:31:50.067 --> 00:31:51.005
+Part 6.
+
+575
+00:31:51.285 --> 00:31:52.672
+Interview-Day Concerns.
+
+576
+00:31:53.922 --> 00:31:55.074
+Failure modes.
+
+577
+00:31:55.354 --> 00:31:56.719
+Here is a quick table:
+
+578
+00:31:56.999 --> 00:31:58.855
+Failure, and Symptom, and Fix.
+
+579
+00:31:59.135 --> 00:32:00.565
+Designing before asking.
+
+580
+00:32:00.845 --> 00:32:01.655
+Symptom:
+
+581
+00:32:01.935 --> 00:32:03.493
+Wrong system (L3).
+
+582
+00:32:03.773 --> 00:32:04.498
+Fix:
+
+583
+00:32:04.778 --> 00:32:06.933
+Two questions first, then assumptions.
+
+584
+00:32:07.213 --> 00:32:08.322
+Coarse estimates.
+
+585
+00:32:08.602 --> 00:32:09.413
+Symptom:
+
+586
+00:32:09.693 --> 00:32:11.314
+Wrong decisions (L1).
+
+587
+00:32:11.594 --> 00:32:12.319
+Fix:
+
+588
+00:32:12.599 --> 00:32:15.095
+One significant figure, name the thresholds.
+
+589
+00:32:15.375 --> 00:32:16.677
+No numbers at all.
+
+590
+00:32:16.957 --> 00:32:17.767
+Symptom:
+
+591
+00:32:18.047 --> 00:32:19.413
+Hand-wavy feedback.
+
+592
+00:32:19.693 --> 00:32:20.418
+Fix:
+
+593
+00:32:20.698 --> 00:32:22.511
+4 to 6 numbers on the board.
+
+594
+00:32:22.791 --> 00:32:23.879
+Over-engineering.
+
+595
+00:32:24.159 --> 00:32:24.970
+Symptom:
+
+596
+00:32:25.250 --> 00:32:26.381
+Didn't fit the scale.
+
+597
+00:32:26.661 --> 00:32:27.386
+Fix:
+
+598
+00:32:27.666 --> 00:32:30.162
+Add components only when a number demands it.
+
+599
+00:32:30.442 --> 00:32:31.658
+Shallow everywhere.
+
+600
+00:32:31.938 --> 00:32:32.749
+Symptom:
+
+601
+00:32:33.029 --> 00:32:33.882
+No depth.
+
+602
+00:32:34.162 --> 00:32:34.887
+Fix:
+
+603
+00:32:35.167 --> 00:32:37.919
+One real deep dive with code-level detail.
+
+604
+00:32:38.199 --> 00:32:39.330
+Losing the clock.
+
+605
+00:32:39.610 --> 00:32:40.421
+Symptom:
+
+606
+00:32:40.701 --> 00:32:42.749
+No failure discussion (L4).
+
+607
+00:32:43.029 --> 00:32:43.754
+Fix:
+
+608
+00:32:44.034 --> 00:32:45.293
+Timebox out loud.
+
+609
+00:32:45.573 --> 00:32:47.343
+Defending everything equally.
+
+610
+00:32:47.623 --> 00:32:48.434
+Symptom:
+
+611
+00:32:48.714 --> 00:32:49.525
+Rigid.
+
+612
+00:32:49.805 --> 00:32:50.530
+Fix:
+
+613
+00:32:50.810 --> 00:32:53.605
+Robust versus close-call trade-offs (L2).
+
+614
+00:32:54.955 --> 00:32:56.021
+Ignoring hints.
+
+615
+00:32:56.301 --> 00:32:57.112
+Symptom:
+
+616
+00:32:57.392 --> 00:32:58.331
+Didn't listen.
+
+617
+00:32:58.611 --> 00:32:59.336
+Fix:
+
+618
+00:32:59.616 --> 00:33:01.195
+Treat questions as steering.
+
+619
+00:33:02.545 --> 00:33:03.825
+Preparation plan.
+
+620
+00:33:04.105 --> 00:33:09.779
+Weeks 1 to 2: the foundations and core chapters on your path (Ch 00 paths).
+
+621
+00:33:10.059 --> 00:33:16.225
+Weeks 3 to 4: one case study a day, timed at 45 minutes on paper, before reading the chapter.
+
+622
+00:33:16.505 --> 00:33:22.606
+Weeks 5 to 6: mock interviews (Ch 60) with the rubric (L4), recorded and reviewed.
+
+623
+00:33:23.956 --> 00:33:25.919
+Whiteboard and virtual hygiene.
+
+624
+00:33:26.199 --> 00:33:33.068
+Layout: requirements top-left, numbers top-right, diagram in the centre, decisions and failure tables below.
+
+625
+00:33:33.348 --> 00:33:36.655
+Virtual: pre-agree on a tool (Excalidraw, a doc).
+
+626
+00:33:36.935 --> 00:33:39.004
+Share early, and narrate what you draw.
+
+627
+00:33:40.354 --> 00:33:41.207
+Pacing.
+
+628
+00:33:41.487 --> 00:33:46.287
+Glance at the clock at minutes 5, 14, 20, 35 and 41.
+
+629
+00:33:46.567 --> 00:33:48.402
+If you're behind, say what you'll skip.
+
+630
+00:33:48.682 --> 00:33:54.079
+If the interviewer dives early, follow them, and return to the skipped steps briefly at the end.
+
+631
+00:33:55.429 --> 00:33:56.304
+Mindset.
+
+632
+00:33:56.584 --> 00:33:58.376
+The interviewer wants you to succeed.
+
+633
+00:33:58.656 --> 00:34:01.109
+Treat it as a design review with a colleague.
+
+634
+00:34:01.389 --> 00:34:03.544
+Say I don't know plus how you would find out.
+
+635
+00:34:03.824 --> 00:34:04.997
+It beats bluffing.
+
+636
+00:34:06.347 --> 00:34:07.286
+Part 7.
+
+637
+00:34:07.566 --> 00:34:09.273
+Anti-Patterns and Pitfalls.
+
+638
+00:34:10.523 --> 00:34:11.440
+Watch out:
+
+639
+00:34:11.720 --> 00:34:12.360
+1.
+
+640
+00:34:12.640 --> 00:34:14.112
+Drawing in the first minute.
+
+641
+00:34:14.392 --> 00:34:17.059
+Designing an unspecified system (L3).
+
+642
+00:34:18.409 --> 00:34:19.326
+Watch out:
+
+643
+00:34:19.606 --> 00:34:20.310
+2.
+
+644
+00:34:20.590 --> 00:34:22.105
+Asking twenty questions.
+
+645
+00:34:22.385 --> 00:34:25.435
+Ask the few that split the space, then state assumptions.
+
+646
+00:34:26.785 --> 00:34:27.703
+Watch out:
+
+647
+00:34:27.983 --> 00:34:28.729
+3.
+
+648
+00:34:29.009 --> 00:34:30.247
+Arithmetic theatre.
+
+649
+00:34:30.527 --> 00:34:32.105
+Precision without decisions.
+
+650
+00:34:33.455 --> 00:34:34.373
+Watch out:
+
+651
+00:34:34.653 --> 00:34:35.357
+4.
+
+652
+00:34:35.637 --> 00:34:37.365
+Coarse rounding near thresholds.
+
+653
+00:34:37.645 --> 00:34:39.565
+Flipped architectures (L1).
+
+654
+00:34:40.915 --> 00:34:41.832
+Watch out:
+
+655
+00:34:42.112 --> 00:34:42.880
+5.
+
+656
+00:34:43.160 --> 00:34:44.568
+Buzzword architecture.
+
+657
+00:34:44.848 --> 00:34:49.541
+Kafka, Kubernetes and microservices with no requirement behind them.
+
+658
+00:34:50.891 --> 00:34:51.809
+Watch out:
+
+659
+00:34:52.089 --> 00:34:52.835
+6.
+
+660
+00:34:53.115 --> 00:34:54.310
+Never going deep.
+
+661
+00:34:54.590 --> 00:34:57.022
+Senior interviews are won in the deep dive.
+
+662
+00:34:58.372 --> 00:34:59.289
+Watch out:
+
+663
+00:34:59.569 --> 00:35:00.316
+7.
+
+664
+00:35:00.596 --> 00:35:02.111
+Ignoring failure handling.
+
+665
+00:35:02.391 --> 00:35:03.457
+The staff signal.
+
+666
+00:35:04.807 --> 00:35:05.725
+Watch out:
+
+667
+00:35:06.005 --> 00:35:06.687
+8.
+
+668
+00:35:06.967 --> 00:35:09.549
+'Industry standard' as a justification.
+
+669
+00:35:09.829 --> 00:35:12.154
+Name requirements and costs (L2).
+
+670
+00:35:13.504 --> 00:35:14.421
+Watch out:
+
+671
+00:35:14.701 --> 00:35:15.448
+9.
+
+672
+00:35:15.728 --> 00:35:17.307
+Arguing with the interviewer.
+
+673
+00:35:17.587 --> 00:35:19.997
+Probes are invitations, not attacks.
+
+674
+00:35:21.347 --> 00:35:22.265
+Watch out:
+
+675
+00:35:22.545 --> 00:35:23.249
+10.
+
+676
+00:35:23.529 --> 00:35:24.531
+Monologuing.
+
+677
+00:35:24.811 --> 00:35:26.390
+Check in at step boundaries.
+
+678
+00:35:27.740 --> 00:35:28.657
+Watch out:
+
+679
+00:35:28.937 --> 00:35:29.769
+11.
+
+680
+00:35:30.049 --> 00:35:32.481
+Recreating your employer's system verbatim.
+
+681
+00:35:32.761 --> 00:35:34.980
+Fit the design to the stated requirements.
+
+682
+00:35:36.330 --> 00:35:37.247
+Watch out:
+
+683
+00:35:37.527 --> 00:35:38.317
+12.
+
+684
+00:35:38.597 --> 00:35:40.175
+Running out of time silently.
+
+685
+00:35:40.455 --> 00:35:42.055
+Say what you would cover next.
+
+686
+00:35:43.405 --> 00:35:44.280
+Part 8.
+
+687
+00:35:44.560 --> 00:35:45.904
+Interview Q and A.
+
+688
+00:35:47.154 --> 00:35:47.986
+Beginner.
+
+689
+00:35:48.266 --> 00:35:49.290
+Question 1.
+
+690
+00:35:49.570 --> 00:35:53.239
+How do you structure a 45-minute system design interview?
+
+691
+00:35:53.519 --> 00:35:54.885
+Thirty-second answer:
+
+692
+00:35:55.165 --> 00:36:12.317
+Clarify (5 min), estimate (3), API and data model (6), high-level design (6), deep dive (15), failures and scaling (6), wrap-up (4), timeboxed out loud, with requirements and numbers on the board and check-ins at each transition.
+
+693
+00:36:13.667 --> 00:36:14.669
+Question 2.
+
+694
+00:36:14.949 --> 00:36:16.741
+Which questions do you ask first?
+
+695
+00:36:17.021 --> 00:36:18.387
+Thirty-second answer:
+
+696
+00:36:18.667 --> 00:36:30.933
+The ones that change the architecture most: scale (orders of magnitude) and latency or consistency needs, plus the core use cases; then state assumptions for the rest and invite correction.
+
+697
+00:36:32.283 --> 00:36:33.329
+Question 3.
+
+698
+00:36:33.609 --> 00:36:35.742
+How precise do estimates need to be?
+
+699
+00:36:36.022 --> 00:36:37.387
+Thirty-second answer:
+
+700
+00:36:37.667 --> 00:36:49.614
+Precise enough not to change decisions: one significant figure per input, standard shortcuts (a day about 10⁵ s), and explicit thresholds; flag results near a threshold.
+
+701
+00:36:50.964 --> 00:36:52.031
+Question 4.
+
+702
+00:36:52.311 --> 00:36:54.359
+How do you choose what to deep dive on?
+
+703
+00:36:54.639 --> 00:36:56.004
+Thirty-second answer:
+
+704
+00:36:56.284 --> 00:37:06.055
+Where scarcity, money, concurrency or extreme scale meet, the part most likely to break or be wrong, or what the interviewer steers to; propose it and confirm.
+
+705
+00:37:07.405 --> 00:37:08.407
+Intermediate.
+
+706
+00:37:08.687 --> 00:37:09.797
+Question 5.
+
+707
+00:37:10.077 --> 00:37:12.381
+How do you justify a technology choice?
+
+708
+00:37:12.661 --> 00:37:14.026
+Thirty-second answer:
+
+709
+00:37:14.306 --> 00:37:20.727
+Tie it to requirements and numbers, state its costs, and name the condition under which you'd choose the alternative:
+
+710
+00:37:21.007 --> 00:37:32.122
+Kafka because we need replay and per-key ordering at 50k per second; it costs operational complexity; for 1k per second without replay, a database queue would do.
+
+711
+00:37:33.472 --> 00:37:34.581
+Question 6.
+
+712
+00:37:34.861 --> 00:37:37.357
+What if you realise mid-interview that you went wrong?
+
+713
+00:37:37.637 --> 00:37:39.003
+Thirty-second answer:
+
+714
+00:37:39.283 --> 00:37:47.603
+Say so explicitly, explain what changed your mind, and adjust, noticing and correcting is a positive signal; hiding it is not.
+
+715
+00:37:48.953 --> 00:37:50.041
+Question 7.
+
+716
+00:37:50.321 --> 00:37:52.518
+How much of the design should be on the board?
+
+717
+00:37:52.798 --> 00:37:54.163
+Thirty-second answer:
+
+718
+00:37:54.443 --> 00:38:05.601
+Requirements, key numbers, a clear diagram with the critical path and sync or async edges, the data model's keys, and a short failure table, the interviewer's write-up follows the board.
+
+719
+00:38:06.951 --> 00:38:07.975
+Question 8.
+
+720
+00:38:08.255 --> 00:38:10.260
+How do you handle a domain you don't know?
+
+721
+00:38:10.540 --> 00:38:11.905
+Thirty-second answer:
+
+722
+00:38:12.185 --> 00:38:24.687
+Use the framework, requirements and numbers are domain-independent; ask domain questions as requirements; map to known patterns (booking, feed, ledger, matching); be explicit about assumptions.
+
+723
+00:38:26.037 --> 00:38:27.103
+Question 9.
+
+724
+00:38:27.383 --> 00:38:29.261
+How do you avoid over-engineering?
+
+725
+00:38:29.541 --> 00:38:30.906
+Thirty-second answer:
+
+726
+00:38:31.186 --> 00:38:43.943
+Start with the simplest design that meets the requirements and add each component only when a requirement or number demands it, saying which; mention the evolution path for 10 times instead of building it now.
+
+727
+00:38:45.293 --> 00:38:46.061
+Senior.
+
+728
+00:38:46.341 --> 00:38:47.387
+Question 10.
+
+729
+00:38:47.667 --> 00:38:50.803
+What distinguishes a senior answer from a mid-level one?
+
+730
+00:38:51.083 --> 00:38:52.448
+Thirty-second answer:
+
+731
+00:38:52.728 --> 00:39:08.941
+Completeness and correctness under realistic constraints: explicit requirements and numbers, a coherent design, one deep dive with code-level precision (atomic operations, state machines), named trade-offs, and failure handling on the critical path.
+
+732
+00:39:10.291 --> 00:39:11.422
+Question 11.
+
+733
+00:39:11.702 --> 00:39:14.433
+How do you discuss failures without running out of time?
+
+734
+00:39:14.713 --> 00:39:16.078
+Thirty-second answer:
+
+735
+00:39:16.358 --> 00:39:29.691
+A compact failure table for the critical path, component, failure, detection, user impact, recovery, plus money or inventory specifics (unknown outcomes, idempotency, sagas); 5 to 6 minutes.
+
+736
+00:39:31.041 --> 00:39:32.129
+Question 12.
+
+737
+00:39:32.409 --> 00:39:34.543
+How do you present data model choices?
+
+738
+00:39:34.823 --> 00:39:36.188
+Thirty-second answer:
+
+739
+00:39:36.468 --> 00:39:48.287
+From access patterns: list the queries and writes, pick keys or partitioning for them, choose the store per pattern with a reason, and note consistency needs (transactions for money or stock).
+
+740
+00:39:49.637 --> 00:39:50.917
+Question 13.
+
+741
+00:39:51.197 --> 00:39:52.989
+How do you use the interviewer's hints?
+
+742
+00:39:53.269 --> 00:39:54.634
+Thirty-second answer:
+
+743
+00:39:54.914 --> 00:40:05.047
+Treat every question as steering: acknowledge, answer briefly, and adjust the plan, a question about X usually means they want depth on X or think you missed it.
+
+744
+00:40:06.397 --> 00:40:07.592
+Question 14.
+
+745
+00:40:07.872 --> 00:40:09.920
+How should you prepare in the last two weeks?
+
+746
+00:40:10.200 --> 00:40:11.565
+Thirty-second answer:
+
+747
+00:40:11.845 --> 00:40:25.605
+Timed practice of 8 to 10 core prompts on paper before reading solutions, mock interviews scored against a rubric, a personal list of thresholds and shortcuts, and 2 to 3 stories of real systems you can deep dive on.
+
+748
+00:40:26.955 --> 00:40:27.851
+Architect.
+
+749
+00:40:28.131 --> 00:40:29.326
+Question 15.
+
+750
+00:40:29.606 --> 00:40:32.123
+What distinguishes a staff or principal answer?
+
+751
+00:40:32.403 --> 00:40:33.769
+Thirty-second answer:
+
+752
+00:40:34.049 --> 00:40:50.006
+Driving ambiguity (scoping, phasing), trade-offs argued with flip conditions, failure handling and operability as first-class design (blast radius, SLOs, cost), organisational awareness (teams, migration), and knowing what not to build.
+
+753
+00:40:51.356 --> 00:40:52.551
+Question 16.
+
+754
+00:40:52.831 --> 00:40:55.519
+How do you run a 'design your past system' interview?
+
+755
+00:40:55.799 --> 00:40:57.164
+Thirty-second answer:
+
+756
+00:40:57.444 --> 00:41:08.836
+Context and constraints, the key decisions with alternatives considered, what went wrong and how you found out, metrics of impact, and what you would change now, owning mistakes and showing learning.
+
+757
+00:41:10.186 --> 00:41:11.530
+Question 17.
+
+758
+00:41:11.810 --> 00:41:14.989
+How do you handle an interviewer who challenges a correct choice?
+
+759
+00:41:15.269 --> 00:41:16.634
+Thirty-second answer:
+
+760
+00:41:16.914 --> 00:41:31.719
+Engage with their criterion, ask what they're weighing, restate your reasoning with the requirement it serves, concede where their point changes the balance, and state the flip condition; it's a test of reasoning, not of stubbornness or capitulation.
+
+761
+00:41:33.069 --> 00:41:34.243
+Question 18.
+
+762
+00:41:34.523 --> 00:41:37.000
+How do you bring cost and operations into a design interview?
+
+763
+00:41:38.280 --> 00:41:39.645
+Thirty-second answer:
+
+764
+00:41:39.925 --> 00:41:54.923
+A sentence per major component on cost drivers (egress, storage, compute at peak), unit cost (per order per request), the operability plan (SLOs, dashboards, on-call), and where you'd accept degraded behaviour to save money.
+
+765
+00:41:56.273 --> 00:41:57.510
+Question 19.
+
+766
+00:41:57.790 --> 00:41:59.966
+How do you show organisational thinking?
+
+767
+00:42:00.246 --> 00:42:01.611
+Thirty-second answer:
+
+768
+00:42:01.891 --> 00:42:15.587
+Mention team boundaries aligned with services (Conway), migration strategies (strangler, dual writes), rollout plans (flags, canaries), and governance (ADRs, SLO ownership) where they affect the design.
+
+769
+00:42:16.937 --> 00:42:18.047
+Question 20.
+
+770
+00:42:18.327 --> 00:42:22.508
+What are the most common reasons strong engineers fail design interviews?
+
+771
+00:42:22.788 --> 00:42:24.153
+Thirty-second answer:
+
+772
+00:42:24.433 --> 00:42:38.172
+Designing their own past system instead of the prompt, skipping requirements and numbers, no deep dive, defending choices by authority, and running out of time before failures, all fixable with the framework and timed practice.
+
+773
+00:42:39.522 --> 00:42:40.418
+Part 9.
+
+774
+00:42:40.698 --> 00:42:42.106
+Summary and Practice.
+
+775
+00:42:43.356 --> 00:42:44.444
+Key takeaways.
+
+776
+00:42:44.724 --> 00:42:45.897
+Clarify first.
+
+777
+00:42:46.177 --> 00:42:48.140
+Scale and latency split the space.
+
+778
+00:42:48.420 --> 00:42:50.703
+State the rest as assumptions (L3).
+
+779
+00:42:50.983 --> 00:42:53.159
+Estimate to one significant figure.
+
+780
+00:42:53.439 --> 00:42:55.167
+Name the thresholds (L1).
+
+781
+00:42:55.447 --> 00:42:59.820
+Trade-offs: know robust from close calls, and the flip conditions (L2).
+
+782
+00:43:00.100 --> 00:43:02.020
+Win in the deep dive and failures.
+
+783
+00:43:02.300 --> 00:43:04.412
+That's where the rubric weights are (L4).
+
+784
+00:43:04.692 --> 00:43:07.657
+Timebox out loud and keep the board as the record.
+
+785
+00:43:09.007 --> 00:43:09.989
+Cheat sheet.
+
+786
+00:43:10.269 --> 00:43:11.634
+Here is a quick table:
+
+787
+00:43:11.914 --> 00:43:14.047
+Minute, and Step, and Must-have output.
+
+788
+00:43:14.327 --> 00:43:15.437
+0 to 5.
+
+789
+00:43:15.717 --> 00:43:16.399
+Step:
+
+790
+00:43:16.679 --> 00:43:17.618
+Clarify.
+
+791
+00:43:17.898 --> 00:43:19.071
+Must-have output:
+
+792
+00:43:19.351 --> 00:43:21.655
+Requirements, non-goals, assumptions.
+
+793
+00:43:21.935 --> 00:43:23.023
+5 to 8.
+
+794
+00:43:23.303 --> 00:43:23.986
+Step:
+
+795
+00:43:24.266 --> 00:43:25.119
+Estimate.
+
+796
+00:43:25.399 --> 00:43:26.573
+Must-have output:
+
+797
+00:43:26.853 --> 00:43:29.413
+Peak writes or reads, storage, bandwidth.
+
+798
+00:43:29.693 --> 00:43:30.823
+8 to 14.
+
+799
+00:43:31.103 --> 00:43:31.786
+Step:
+
+800
+00:43:32.066 --> 00:43:33.517
+API + data.
+
+801
+00:43:33.797 --> 00:43:34.970
+Must-have output:
+
+802
+00:43:35.250 --> 00:43:38.151
+Signatures with idempotency, keys and stores.
+
+803
+00:43:38.431 --> 00:43:39.690
+14 to 20.
+
+804
+00:43:39.970 --> 00:43:40.653
+Step:
+
+805
+00:43:40.933 --> 00:43:41.807
+High-level.
+
+806
+00:43:42.087 --> 00:43:43.261
+Must-have output:
+
+807
+00:43:43.541 --> 00:43:46.143
+Diagram, critical path, sync or async.
+
+808
+00:43:46.423 --> 00:43:47.746
+20 to 35.
+
+809
+00:43:48.026 --> 00:43:48.709
+Step:
+
+810
+00:43:48.989 --> 00:43:49.949
+Deep dive.
+
+811
+00:43:50.229 --> 00:43:51.402
+Must-have output:
+
+812
+00:43:51.682 --> 00:43:53.943
+Atomic ops, state machines, numbers.
+
+813
+00:43:54.223 --> 00:43:55.781
+35 to 41.
+
+814
+00:43:56.061 --> 00:43:56.743
+Step:
+
+815
+00:43:57.023 --> 00:43:57.962
+Failures.
+
+816
+00:43:58.242 --> 00:43:59.415
+Must-have output:
+
+817
+00:43:59.695 --> 00:44:02.639
+Table: failure, detection, impact, recovery.
+
+818
+00:44:02.919 --> 00:44:04.498
+41 to 45.
+
+819
+00:44:04.778 --> 00:44:05.461
+Step:
+
+820
+00:44:05.741 --> 00:44:06.573
+Wrap-up.
+
+821
+00:44:06.853 --> 00:44:08.026
+Must-have output:
+
+822
+00:44:08.306 --> 00:44:11.122
+Trade-offs, 10 times plan, cost or ops.
+
+823
+00:44:12.472 --> 00:44:13.603
+Exercises.
+
+824
+00:44:13.883 --> 00:44:17.936
+(B2) Run L1 with your own assumptions for design Instagram.
+
+825
+00:44:18.216 --> 00:44:20.221
+Which decisions are near thresholds?
+
+826
+00:44:20.501 --> 00:44:25.856
+(B3) Build a decision matrix for SQL or NoSQL for orders in L2.
+
+827
+00:44:26.136 --> 00:44:27.480
+Is your choice robust?
+
+828
+00:44:27.760 --> 00:44:33.072
+(B3) Enumerate the requirement space for design a rate limiter in L3's style.
+
+829
+00:44:33.352 --> 00:44:34.931
+Which question comes first?
+
+830
+00:44:35.211 --> 00:44:41.483
+(B4) Record a 45-minute mock, then score it with L4's rubric: which signals were missing?
+
+831
+00:44:41.763 --> 00:44:46.584
+(B4) Write the one-page plan (§4) for three case studies from memory.
+
+832
+00:44:47.934 --> 00:44:48.937
+Further reading.
+
+833
+00:44:49.217 --> 00:44:51.734
+Alex Xu, System Design Interview (Vols.
+
+834
+00:44:52.014 --> 00:44:53.849
+1 to 2), prompt catalogue.
+
+835
+00:44:54.129 --> 00:44:59.462
+Martin Kleppmann, Designing Data-Intensive Applications, the depth behind the answers.
+
+836
+00:44:59.742 --> 00:45:03.710
+Google SRE Book, failure handling and SLO vocabulary.
+
+837
+00:45:03.990 --> 00:45:09.963
+This handbook's case studies (Ch 38 to 55) and capstone (Ch 56).
+
+838
+00:45:11.313 --> 00:45:12.551
+Related chapters.
+
+839
+00:45:12.831 --> 00:45:16.841
+Ch 01, What System Design Is: the design process.
+
+840
+00:45:17.121 --> 00:45:20.876
+Ch 02, Back-of-the-Envelope Estimation: numbers.
+
+841
+00:45:21.156 --> 00:45:24.868
+Ch 31, Architecture Decision-Making: trade-offs.
+
+842
+00:45:25.148 --> 00:45:27.900
+Ch 56, Capstone: the whole system.
+
+843
+00:45:29.250 --> 00:45:30.850
+That's the end of this chapter.
+
+844
+00:45:31.130 --> 00:45:37.253
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+845
+00:45:37.533 --> 00:45:38.983
+See you in the next chapter.
+

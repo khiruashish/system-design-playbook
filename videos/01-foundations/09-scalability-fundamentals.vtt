@@ -1,0 +1,6462 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.057
+Scalability Fundamentals.
+
+2
+00:00:02.337 --> 00:00:06.646
+Chapter 09, from the Foundations part of the System Design Playbook.
+
+3
+00:00:08.396 --> 00:00:09.356
+At a glance:
+
+4
+00:00:09.636 --> 00:00:10.809
+Chapter at a glance.
+
+5
+00:00:11.089 --> 00:00:12.092
+Reader bands:
+
+6
+00:00:12.372 --> 00:00:14.676
+B1, then B4, Prerequisites:
+
+7
+00:00:14.956 --> 00:00:21.100
+Ch 02, Ch 05, Ch 07, Ch 08, What you will build:
+
+8
+00:00:21.380 --> 00:00:42.479
+The cart service, taken from an Amdahl or USL model fitted to load-test data (L1) to stateless pods with externalized sessions (L2), first-class Redis carts with atomic guest-to-customer merge and scale-safe jobs (L3), and city-level Z-axis partitioning with online shard moves (L4), Reading time:
+
+9
+00:00:42.759 --> 00:00:44.380
+100 min + code.
+
+10
+00:00:45.730 --> 00:00:46.583
+Part 1.
+
+11
+00:00:46.863 --> 00:00:48.783
+Introduction and Why It Matters.
+
+12
+00:00:50.033 --> 00:00:52.508
+A story: we added pods and it got slower.
+
+13
+00:00:52.788 --> 00:00:55.689
+The grocery platform had grown 10 times in a year.
+
+14
+00:00:55.969 --> 00:01:05.911
+For the festival sale, the cart team did what had always worked: they raised the Horizontal Pod Autoscaler's maximum from 20 to 80 pods for cart-service.
+
+15
+00:01:06.191 --> 00:01:12.697
+At 8:00 pm the HPA did its job and scaled from 20 to 64 pods.
+
+16
+00:01:12.977 --> 00:01:21.041
+Cart throughput dropped from ~17,000 to ~13,000 requests per second, and p99 latency tripled.
+
+17
+00:01:21.321 --> 00:01:23.988
+Three hidden costs grew faster than the pod count:
+
+18
+00:01:24.268 --> 00:01:25.207
+Contention.
+
+19
+00:01:25.487 --> 00:01:31.695
+Every add to cart took a Redis lock on a global cart:config key to read the per-customer item limit.
+
+20
+00:01:31.975 --> 00:01:34.300
+More pods meant more waiters on the same key.
+
+21
+00:01:35.650 --> 00:01:36.674
+Coherency.
+
+22
+00:01:36.954 --> 00:01:44.463
+Each pod held an in-memory promotion cache and broadcast an invalidation to every other pod whenever a promotion changed.
+
+23
+00:01:44.743 --> 00:01:48.903
+With N pods that's N times (N minus 1) messages per change.
+
+24
+00:01:49.183 --> 00:01:55.455
+At 64 pods, promotion churn during the sale alone generated millions of messages per minute.
+
+25
+00:01:55.735 --> 00:01:56.866
+Connection limits.
+
+26
+00:01:57.146 --> 00:02:09.647
+64 pods times a PostgreSQL pool of 20 = 1,280 connections against a maxconnections of 500 (behind PgBouncer, which was now queueing).
+
+27
+00:02:09.927 --> 00:02:13.874
+Cart snapshots to PostgreSQL waited seconds for a connection.
+
+28
+00:02:15.224 --> 00:02:17.869
+Scaling back to 40 pods improved throughput.
+
+29
+00:02:18.149 --> 00:02:31.739
+Afterwards, a 30-minute load test at 1, 2, 4, 8, 16 and 24 pods, fitted with the Universal Scalability Law, would have predicted this: peak capacity at about 43 pods, then decline.
+
+30
+00:02:33.089 --> 00:02:33.771
+Quote:
+
+31
+00:02:34.051 --> 00:02:35.715
+The thesis of this chapter.
+
+32
+00:02:35.995 --> 00:02:40.006
+Horizontal scaling is a property you design in, not a knob you turn.
+
+33
+00:02:40.286 --> 00:02:49.758
+A system scales only as far as its shared parts allow: the locks everyone waits on, the coordination everyone does, and the connections everyone holds.
+
+34
+00:02:50.038 --> 00:02:54.667
+Find those, remove or partition them, and measure before you buy capacity.
+
+35
+00:02:56.017 --> 00:02:58.321
+Where this lives in the grocery platform.
+
+36
+00:02:58.601 --> 00:02:59.945
+Here is a quick table:
+
+37
+00:03:00.225 --> 00:03:05.388
+Service, and What limits its scaling, and Scaling move. catalog-service, search-service.
+
+38
+00:03:05.668 --> 00:03:06.991
+What limits its scaling:
+
+39
+00:03:07.271 --> 00:03:08.465
+Read QPS.
+
+40
+00:03:08.745 --> 00:03:09.812
+Scaling move:
+
+41
+00:03:10.092 --> 00:03:14.444
+X-axis clones + caches (Ch 07). cart-service.
+
+42
+00:03:14.724 --> 00:03:16.047
+What limits its scaling:
+
+43
+00:03:16.327 --> 00:03:19.740
+Session state, per-customer atomicity, connection budgets.
+
+44
+00:03:20.020 --> 00:03:21.087
+Scaling move:
+
+45
+00:03:21.367 --> 00:03:26.401
+Stateless pods + Redis carts + Z-axis by city. inventory-service.
+
+46
+00:03:26.681 --> 00:03:28.004
+What limits its scaling:
+
+47
+00:03:28.284 --> 00:03:32.529
+Hot rows (Ch 05), single-writer per store or SKU.
+
+48
+00:03:32.809 --> 00:03:33.876
+Scaling move:
+
+49
+00:03:34.156 --> 00:03:37.868
+Short transactions, then Z-axis by store. order-service.
+
+50
+00:03:38.148 --> 00:03:39.471
+What limits its scaling:
+
+51
+00:03:39.751 --> 00:03:41.521
+Write throughput on one primary.
+
+52
+00:03:41.801 --> 00:03:42.868
+Scaling move:
+
+53
+00:03:43.148 --> 00:03:48.375
+Partition by time, then Z-axis by region (Ch 11). tracking-service.
+
+54
+00:03:48.655 --> 00:03:49.977
+What limits its scaling:
+
+55
+00:03:50.257 --> 00:03:52.647
+Write-heavy pings (Ch 06).
+
+56
+00:03:52.927 --> 00:03:53.993
+Scaling move:
+
+57
+00:03:54.273 --> 00:03:56.620
+Kafka partitions + independent sinks.
+
+58
+00:03:57.970 --> 00:03:59.442
+notification-service.
+
+59
+00:03:59.722 --> 00:04:01.045
+What limits its scaling:
+
+60
+00:04:01.325 --> 00:04:04.525
+Third-party provider rate limits (SMS, WhatsApp).
+
+61
+00:04:04.805 --> 00:04:05.871
+Scaling move:
+
+62
+00:04:06.151 --> 00:04:08.157
+Queues with rate-limited consumers.
+
+63
+00:04:08.437 --> 00:04:11.871
+Scheduled jobs (abandoned-cart reminders, slot release).
+
+64
+00:04:12.151 --> 00:04:13.474
+What limits its scaling:
+
+65
+00:04:13.754 --> 00:04:15.802
+Runs on every pod duplication.
+
+66
+00:04:16.082 --> 00:04:17.149
+Scaling move:
+
+67
+00:04:17.429 --> 00:04:20.181
+Leader election or distributed job locks.
+
+68
+00:04:21.531 --> 00:04:22.853
+Learning objectives.
+
+69
+00:04:23.133 --> 00:04:24.477
+Here is a quick table:
+
+70
+00:04:24.757 --> 00:04:26.955
+Band, and After this chapter you can....
+
+71
+00:04:27.235 --> 00:04:28.067
+B1:
+
+72
+00:04:28.347 --> 00:04:35.024
+Explain vertical versus horizontal scaling, why stateless services scale, and where session state should live.
+
+73
+00:04:35.304 --> 00:04:36.179
+B2:
+
+74
+00:04:36.459 --> 00:04:43.285
+Externalize sessions, find hidden state, use read replicas, and apply the X or Y or Z scale cube.
+
+75
+00:04:43.565 --> 00:04:44.461
+B3:
+
+76
+00:04:44.741 --> 00:04:51.867
+Use Amdahl and the USL to explain and predict scaling limits, budget connections, and make jobs scale-safe.
+
+77
+00:04:52.147 --> 00:04:53.043
+B4:
+
+78
+00:04:53.323 --> 00:05:00.320
+Plan a platform's 1, then 1M-user journey, choose partition keys and cells, and defend when not to scale out.
+
+79
+00:05:01.670 --> 00:05:02.545
+Part 2.
+
+80
+00:05:02.825 --> 00:05:04.702
+Core Concepts, Beginner to Deep.
+
+81
+00:05:05.952 --> 00:05:09.301
+Intuition: billing counters and the manager's approval.
+
+82
+00:05:09.581 --> 00:05:12.589
+A supermarket adds billing counters for the festival.
+
+83
+00:05:12.869 --> 00:05:15.301
+Throughput rises, until two things happen:
+
+84
+00:05:15.581 --> 00:05:19.955
+Every bill over 5,000 rupeesneeds the floor manager's signature.
+
+85
+00:05:20.235 --> 00:05:24.907
+One manager, many counters: queues form at the manager, not at the counters.
+
+86
+00:05:25.187 --> 00:05:26.787
+That's contention (σ).
+
+87
+00:05:27.067 --> 00:05:30.928
+Every counter must tell every other counter whenever a price changes.
+
+88
+00:05:31.208 --> 00:05:33.576
+With 5 counters that's 20 messages.
+
+89
+00:05:33.856 --> 00:05:41.067
+With 40 counters it's 1,560, and cashiers spend their time on messages instead of customers.
+
+90
+00:05:41.347 --> 00:05:43.096
+That's coherency (κ).
+
+91
+00:05:44.446 --> 00:05:47.369
+Adding counters helps while counters are the bottleneck.
+
+92
+00:05:47.649 --> 00:05:51.809
+Past a point, it makes the queue at the manager longer and the chatter louder.
+
+93
+00:05:52.089 --> 00:05:53.689
+The fix isn't more counters.
+
+94
+00:05:53.969 --> 00:06:01.073
+It's more managers (partition the approval) and fewer broadcasts (publish price changes to a board everyone reads).
+
+95
+00:06:02.423 --> 00:06:03.788
+What scalability means.
+
+96
+00:06:04.068 --> 00:06:05.412
+Here is a quick table:
+
+97
+00:06:05.692 --> 00:06:08.167
+Term, and Meaning, and Grocery example.
+
+98
+00:06:08.447 --> 00:06:09.343
+Performance.
+
+99
+00:06:09.623 --> 00:06:10.412
+Meaning:
+
+100
+00:06:10.692 --> 00:06:12.292
+How fast one request is.
+
+101
+00:06:12.572 --> 00:06:13.809
+Grocery example:
+
+102
+00:06:14.089 --> 00:06:17.012
+Cart add p99 = 40 ms.
+
+103
+00:06:17.292 --> 00:06:18.359
+Scalability.
+
+104
+00:06:18.639 --> 00:06:19.428
+Meaning:
+
+105
+00:06:19.708 --> 00:06:22.097
+How capacity grows as you add resources.
+
+106
+00:06:22.377 --> 00:06:23.615
+Grocery example:
+
+107
+00:06:23.895 --> 00:06:27.436
+2 times pods, then ~1.9 times throughput.
+
+108
+00:06:27.716 --> 00:06:28.761
+Elasticity.
+
+109
+00:06:29.041 --> 00:06:29.831
+Meaning:
+
+110
+00:06:30.111 --> 00:06:33.161
+How quickly capacity follows demand, up and down.
+
+111
+00:06:33.441 --> 00:06:34.679
+Grocery example:
+
+112
+00:06:34.959 --> 00:06:40.121
+Pre-scale at 7:30 pm, scale in at 11 pm (Ch 02).
+
+113
+00:06:40.401 --> 00:06:41.383
+Efficiency.
+
+114
+00:06:41.663 --> 00:06:42.452
+Meaning:
+
+115
+00:06:42.732 --> 00:06:44.012
+Capacity per rupee.
+
+116
+00:06:44.292 --> 00:06:47.983
+Grocery example: ₹ per 1,000 cart operations.
+
+117
+00:06:49.333 --> 00:06:51.466
+Scalability always has a dimension:
+
+118
+00:06:52.816 --> 00:06:54.160
+Here is a quick table:
+
+119
+00:06:54.440 --> 00:06:56.936
+Dimension, and Question, and Typical limit.
+
+120
+00:06:57.216 --> 00:06:58.603
+Load (req per second).
+
+121
+00:06:58.883 --> 00:06:59.757
+Question:
+
+122
+00:07:00.037 --> 00:07:01.915
+Can we serve 10 times traffic?
+
+123
+00:07:02.195 --> 00:07:03.261
+Typical limit:
+
+124
+00:07:03.541 --> 00:07:06.293
+Shared locks, databases, connection budgets.
+
+125
+00:07:06.573 --> 00:07:07.640
+Data volume.
+
+126
+00:07:07.920 --> 00:07:08.795
+Question:
+
+127
+00:07:09.075 --> 00:07:10.803
+Can we hold 10 times data?
+
+128
+00:07:11.083 --> 00:07:12.149
+Typical limit:
+
+129
+00:07:12.429 --> 00:07:16.397
+Single-primary storage, index size, backup or restore time.
+
+130
+00:07:16.677 --> 00:07:17.680
+Geography.
+
+131
+00:07:17.960 --> 00:07:18.835
+Question:
+
+132
+00:07:19.115 --> 00:07:21.184
+Can we serve new cities or regions?
+
+133
+00:07:21.464 --> 00:07:22.531
+Typical limit:
+
+134
+00:07:22.811 --> 00:07:25.648
+Latency, data residency, per-region ops.
+
+135
+00:07:25.928 --> 00:07:27.187
+Tenants or sellers.
+
+136
+00:07:27.467 --> 00:07:28.341
+Question:
+
+137
+00:07:28.621 --> 00:07:30.520
+Can we onboard 10 times sellers?
+
+138
+00:07:30.800 --> 00:07:31.867
+Typical limit:
+
+139
+00:07:32.147 --> 00:07:35.069
+Noisy neighbours, per-tenant config (Ch 30).
+
+140
+00:07:35.349 --> 00:07:36.416
+Organization.
+
+141
+00:07:36.696 --> 00:07:37.571
+Question:
+
+142
+00:07:37.851 --> 00:07:40.176
+Can 10 times engineers work in parallel?
+
+143
+00:07:40.456 --> 00:07:41.523
+Typical limit:
+
+144
+00:07:41.803 --> 00:07:45.344
+Shared codebase and deploys (Ch 16, 37).
+
+145
+00:07:46.694 --> 00:07:49.019
+Vertical versus horizontal scaling.
+
+146
+00:07:49.299 --> 00:07:50.643
+Here is a quick table:
+
+147
+00:07:50.923 --> 00:07:53.910
+Vertical (scale up), and Horizontal (scale out).
+
+148
+00:07:54.190 --> 00:07:54.851
+How.
+
+149
+00:07:55.131 --> 00:07:56.475
+Vertical (scale up):
+
+150
+00:07:56.755 --> 00:07:59.955
+Bigger machine: more vCPU, RAM, faster disk.
+
+151
+00:08:00.235 --> 00:08:01.814
+Horizontal (scale out):
+
+152
+00:08:02.094 --> 00:08:03.566
+More machines or pods.
+
+153
+00:08:03.846 --> 00:08:04.934
+Code changes.
+
+154
+00:08:05.214 --> 00:08:06.558
+Vertical (scale up):
+
+155
+00:08:06.838 --> 00:08:07.521
+None.
+
+156
+00:08:07.801 --> 00:08:09.379
+Horizontal (scale out):
+
+157
+00:08:09.659 --> 00:08:12.262
+Needs stateless design or partitioned state.
+
+158
+00:08:12.542 --> 00:08:13.353
+Ceiling.
+
+159
+00:08:13.633 --> 00:08:14.977
+Vertical (scale up):
+
+160
+00:08:15.257 --> 00:08:17.070
+The largest instance you can buy.
+
+161
+00:08:17.350 --> 00:08:18.929
+Horizontal (scale out):
+
+162
+00:08:19.209 --> 00:08:21.470
+Set by shared components (USL).
+
+163
+00:08:21.750 --> 00:08:23.094
+Failure isolation.
+
+164
+00:08:23.374 --> 00:08:24.718
+Vertical (scale up):
+
+165
+00:08:24.998 --> 00:08:26.406
+One big failure domain.
+
+166
+00:08:26.686 --> 00:08:28.265
+Horizontal (scale out):
+
+167
+00:08:28.545 --> 00:08:29.697
+Many small ones.
+
+168
+00:08:29.977 --> 00:08:30.915
+Cost curve.
+
+169
+00:08:31.195 --> 00:08:32.539
+Vertical (scale up):
+
+170
+00:08:32.819 --> 00:08:34.462
+Superlinear at the top end.
+
+171
+00:08:34.742 --> 00:08:36.321
+Horizontal (scale out):
+
+172
+00:08:36.601 --> 00:08:39.161
+Roughly linear, plus coordination overhead.
+
+173
+00:08:39.441 --> 00:08:40.422
+Time to add.
+
+174
+00:08:40.702 --> 00:08:42.046
+Vertical (scale up):
+
+175
+00:08:42.326 --> 00:08:44.438
+Minutes to hours (often a restart).
+
+176
+00:08:44.718 --> 00:08:46.297
+Horizontal (scale out):
+
+177
+00:08:46.577 --> 00:08:49.350
+Seconds to minutes (Ch 02 warm-up).
+
+178
+00:08:50.700 --> 00:08:51.575
+Best for.
+
+179
+00:08:51.855 --> 00:08:53.199
+Vertical (scale up):
+
+180
+00:08:53.479 --> 00:08:57.255
+Databases before sharding, stateful systems, early stage.
+
+181
+00:08:57.535 --> 00:08:59.113
+Horizontal (scale out):
+
+182
+00:08:59.393 --> 00:09:03.425
+Stateless services, read paths, anything behind a load balancer.
+
+183
+00:09:04.775 --> 00:09:05.415
+Tip:
+
+184
+00:09:05.695 --> 00:09:07.679
+Vertical scaling is underrated.
+
+185
+00:09:07.959 --> 00:09:15.575
+A modern 64-vCPU, 512 GB database server handles a surprising amount of load.
+
+186
+00:09:15.855 --> 00:09:22.426
+Moving the orders database from 16 to 32 vCPU buys a year of growth in an afternoon.
+
+187
+00:09:22.706 --> 00:09:27.677
+Sharding it costs two quarters of engineering and permanent complexity (Ch 11).
+
+188
+00:09:27.957 --> 00:09:32.735
+Scale up the stateful parts while it's cheap, and scale out the stateless parts from day one.
+
+189
+00:09:34.085 --> 00:09:36.965
+Amdahl's law and the Universal Scalability Law.
+
+190
+00:09:37.245 --> 00:09:38.248
+Amdahl's law.
+
+191
+00:09:38.528 --> 00:09:43.755
+If a fraction s of the work is serial, speed-up with N workers is capped at 1 per second:
+
+192
+00:09:45.105 --> 00:09:46.086
+The formula:
+
+193
+00:09:46.366 --> 00:09:52.659
+S(N) = (N) / (1 + s(N-1)) lim Ntoinfty S(N) = (1) / (s).
+
+194
+00:09:54.009 --> 00:09:56.185
+Universal Scalability Law (Gunther).
+
+195
+00:09:56.465 --> 00:10:03.505
+It adds a coherency term for the cost of keeping workers consistent with each other, which grows with the number of pairs:
+
+196
+00:10:04.855 --> 00:10:05.837
+The formula:
+
+197
+00:10:06.117 --> 00:10:10.554
+C(N) = (N) / (1 + sigma(N-1) + kappa N(N-1)).
+
+198
+00:10:11.904 --> 00:10:13.248
+Here is a quick table:
+
+199
+00:10:13.528 --> 00:10:16.877
+Parameter, and Meaning, and Effect. σ (contention).
+
+200
+00:10:17.157 --> 00:10:17.947
+Meaning:
+
+201
+00:10:18.227 --> 00:10:20.744
+Fraction of time waiting on a shared resource.
+
+202
+00:10:21.024 --> 00:10:21.813
+Effect:
+
+203
+00:10:22.093 --> 00:10:25.784
+Throughput plateaus (Amdahl). κ (coherency or crosstalk).
+
+204
+00:10:26.064 --> 00:10:26.853
+Meaning:
+
+205
+00:10:27.133 --> 00:10:28.968
+Cost of pairwise coordination.
+
+206
+00:10:29.248 --> 00:10:30.037
+Effect:
+
+207
+00:10:30.317 --> 00:10:32.963
+Throughput peaks, then declines (retrograde).
+
+208
+00:10:33.243 --> 00:10:36.656
+N = √((1 minus σ) / κ).
+
+209
+00:10:36.936 --> 00:10:37.725
+Meaning:
+
+210
+00:10:38.005 --> 00:10:39.797
+Pod count at peak capacity.
+
+211
+00:10:40.077 --> 00:10:40.867
+Effect:
+
+212
+00:10:41.147 --> 00:10:43.408
+Adding pods beyond it makes things worse.
+
+213
+00:10:44.758 --> 00:10:50.326
+L1 (§5) computes both and fits σ and κ from load-test measurements.
+
+214
+00:10:50.606 --> 00:10:51.758
+The real output:
+
+215
+00:10:53.108 --> 00:10:54.025
+On screen:
+
+216
+00:10:54.305 --> 00:10:54.988
+B.
+
+217
+00:10:55.268 --> 00:11:03.716
+USL: σ = 0.03 (contention), κ = 0.0005 (coherency).
+
+218
+00:11:03.996 --> 00:11:06.919
+8 pods, then 6.5x capacity.
+
+219
+00:11:07.199 --> 00:11:10.569
+32 pods, then 13.2x capacity.
+
+220
+00:11:10.849 --> 00:11:15.287
+44 pods, then 13.6x capacity ← peak:
+
+221
+00:11:15.567 --> 00:11:18.809
+N = √((1minus σ)/κ).
+
+222
+00:11:19.089 --> 00:11:45.351
+96 pods, then 11.4x capacity. fitted σ = 0.0303, κ = 0.000523, then peak at ~43 pods, max about 19,634 req per second. halving κ (for example, stop broadcasting to every pod), then peak at ~60 pods, max about 23,733. req per second.
+
+223
+00:11:48.201 --> 00:11:50.974
+Where σ and κ come from in real systems:
+
+224
+00:11:52.324 --> 00:11:53.668
+Here is a quick table:
+
+225
+00:11:53.948 --> 00:11:57.020
+Source, and σ or κ, and Example, and Fix.
+
+226
+00:11:57.300 --> 00:12:01.268
+Global lock or single hot key. σ or κ: σ.
+
+227
+00:12:01.548 --> 00:12:07.649
+Example: cart:config lock (§1.1), a hot DB row (Ch 05).
+
+228
+00:12:07.929 --> 00:12:08.655
+Fix:
+
+229
+00:12:08.935 --> 00:12:12.391
+Remove the lock, read immutable config, partition the key.
+
+230
+00:12:12.671 --> 00:12:15.977
+Single-writer database. σ or κ: σ.
+
+231
+00:12:16.257 --> 00:12:17.132
+Example:
+
+232
+00:12:17.412 --> 00:12:19.375
+All pods writing one primary.
+
+233
+00:12:19.655 --> 00:12:20.380
+Fix:
+
+234
+00:12:20.660 --> 00:12:23.348
+Batch, partition, move writes off the hot path.
+
+235
+00:12:23.628 --> 00:12:27.511
+Serialized sections in code. σ or κ: σ.
+
+236
+00:12:27.791 --> 00:12:30.265
+Example: synchronized around a shared map.
+
+237
+00:12:30.545 --> 00:12:31.271
+Fix:
+
+238
+00:12:31.551 --> 00:12:33.599
+Lock-free structures, per-key locks.
+
+239
+00:12:33.879 --> 00:12:38.188
+Broadcast invalidation to all pods. σ or κ: κ.
+
+240
+00:12:38.468 --> 00:12:39.343
+Example:
+
+241
+00:12:39.623 --> 00:12:43.356
+N times (N minus 1) messages (§1.1).
+
+242
+00:12:43.636 --> 00:12:44.361
+Fix:
+
+243
+00:12:44.641 --> 00:12:47.991
+Publish to a log everyone reads (one write, N reads).
+
+244
+00:12:49.341 --> 00:12:52.818
+Cluster membership or gossip. σ or κ: κ.
+
+245
+00:12:53.098 --> 00:12:53.973
+Example:
+
+246
+00:12:54.253 --> 00:12:57.069
+Embedded caches that replicate to every member.
+
+247
+00:12:57.349 --> 00:12:58.074
+Fix:
+
+248
+00:12:58.354 --> 00:13:00.466
+External cache, or smaller clusters.
+
+249
+00:13:00.746 --> 00:13:04.885
+Distributed locks and consensus. σ or κ: κ.
+
+250
+00:13:05.165 --> 00:13:06.039
+Example:
+
+251
+00:13:06.319 --> 00:13:09.114
+Every request coordinating through a lock service.
+
+252
+00:13:09.394 --> 00:13:10.119
+Fix:
+
+253
+00:13:10.399 --> 00:13:13.194
+Avoid per-request coordination (Ch 20).
+
+254
+00:13:13.474 --> 00:13:16.439
+Cross-shard queries. σ or κ: κ.
+
+255
+00:13:16.719 --> 00:13:17.594
+Example:
+
+256
+00:13:17.874 --> 00:13:19.730
+Scatter-gather to every partition.
+
+257
+00:13:20.010 --> 00:13:20.735
+Fix:
+
+258
+00:13:21.015 --> 00:13:23.405
+Route by partition key; read models.
+
+259
+00:13:23.685 --> 00:13:28.229
+Connection pools to one DB. σ or κ: σ + κ.
+
+260
+00:13:28.509 --> 00:13:29.383
+Example:
+
+261
+00:13:29.663 --> 00:13:32.543
+Pods times pool the DB's useful concurrency.
+
+262
+00:13:32.823 --> 00:13:33.549
+Fix:
+
+263
+00:13:33.829 --> 00:13:36.986
+Pool budgets, PgBouncer (Ch 05).
+
+264
+00:13:38.336 --> 00:13:39.083
+Warning:
+
+265
+00:13:39.363 --> 00:13:41.773
+Fitting the USL needs real measurements.
+
+266
+00:13:42.053 --> 00:13:53.851
+Measure throughput at several pod counts (1, 2, 4, 8, 16,...) with the same workload mix, with each run saturated (enough load to keep the pods busy) and long enough to be stable.
+
+267
+00:13:54.131 --> 00:13:56.200
+Fit σ and κ, then predict.
+
+268
+00:13:56.480 --> 00:14:03.691
+Treat the prediction as a warning light, not a guarantee: the model assumes the bottlenecks don't change shape between measurements.
+
+269
+00:14:05.041 --> 00:14:06.385
+Stateless services.
+
+270
+00:14:06.665 --> 00:14:13.875
+A service is stateless when any instance can serve any request, and losing an instance loses nothing but in-flight work.
+
+271
+00:14:14.155 --> 00:14:17.825
+State still exists; it just lives in a store designed to hold it.
+
+272
+00:14:19.175 --> 00:14:20.519
+Here is a quick table:
+
+273
+00:14:20.799 --> 00:14:24.127
+Hidden state, and Why it breaks scaling, and Where it should live.
+
+274
+00:14:24.407 --> 00:14:26.369
+In-memory HTTP sessions.
+
+275
+00:14:26.649 --> 00:14:27.972
+Why it breaks scaling:
+
+276
+00:14:28.252 --> 00:14:31.836
+Sticky sessions required; a pod loss logs users out.
+
+277
+00:14:32.116 --> 00:14:33.204
+Where it should live:
+
+278
+00:14:33.484 --> 00:14:35.980
+Redis (Spring Session) or signed tokens.
+
+279
+00:14:36.260 --> 00:14:37.561
+Carts in pod memory.
+
+280
+00:14:37.841 --> 00:14:39.164
+Why it breaks scaling:
+
+281
+00:14:39.444 --> 00:14:41.236
+Lost on scale-in or deploy.
+
+282
+00:14:41.516 --> 00:14:42.604
+Where it should live:
+
+283
+00:14:42.884 --> 00:14:44.740
+Redis (+ DB snapshot).
+
+284
+00:14:45.020 --> 00:14:46.940
+Uploaded files on local disk.
+
+285
+00:14:47.220 --> 00:14:48.543
+Why it breaks scaling:
+
+286
+00:14:48.823 --> 00:14:50.316
+Only one pod has them.
+
+287
+00:14:50.596 --> 00:14:51.684
+Where it should live:
+
+288
+00:14:51.964 --> 00:14:54.396
+Object storage (S3-compatible).
+
+289
+00:14:54.676 --> 00:14:57.151
+In-process caches without invalidation.
+
+290
+00:14:57.431 --> 00:14:58.753
+Why it breaks scaling:
+
+291
+00:14:59.033 --> 00:15:01.529
+Pods disagree (Ch 07).
+
+292
+00:15:01.809 --> 00:15:02.897
+Where it should live:
+
+293
+00:15:03.177 --> 00:15:06.356
+Short TTL + broadcast, or an external cache.
+
+294
+00:15:06.636 --> 00:15:09.004
+Scheduled jobs running on every pod.
+
+295
+00:15:09.284 --> 00:15:10.607
+Why it breaks scaling:
+
+296
+00:15:10.887 --> 00:15:13.276
+Duplicate reminders, double processing.
+
+297
+00:15:13.556 --> 00:15:14.644
+Where it should live:
+
+298
+00:15:14.924 --> 00:15:18.380
+Leader election or a job lock (§2.7).
+
+299
+00:15:18.660 --> 00:15:19.983
+Per-pod rate limits.
+
+300
+00:15:20.263 --> 00:15:21.585
+Why it breaks scaling:
+
+301
+00:15:21.865 --> 00:15:23.849
+Limit multiplies with pod count.
+
+302
+00:15:24.129 --> 00:15:25.217
+Where it should live:
+
+303
+00:15:25.497 --> 00:15:27.695
+Central limiter (Ch 08).
+
+304
+00:15:29.045 --> 00:15:30.858
+Local counters and sequences.
+
+305
+00:15:31.138 --> 00:15:32.461
+Why it breaks scaling:
+
+306
+00:15:32.741 --> 00:15:33.999
+Duplicate ids.
+
+307
+00:15:34.279 --> 00:15:35.367
+Where it should live:
+
+308
+00:15:35.647 --> 00:15:39.637
+DB sequences, UUIDv7 or Snowflake (Ch 20).
+
+309
+00:15:39.917 --> 00:15:42.157
+WebSocket or SSE connections.
+
+310
+00:15:42.437 --> 00:15:43.759
+Why it breaks scaling:
+
+311
+00:15:44.039 --> 00:15:45.469
+Inherent per connection.
+
+312
+00:15:45.749 --> 00:15:46.837
+Where it should live:
+
+313
+00:15:47.117 --> 00:15:50.615
+Resumable streams, no stickiness (Ch 03).
+
+314
+00:15:51.965 --> 00:16:10.909
+The 12-factor rules that matter most for scaling: processes are stateless and share nothing (factor VI), config comes from the environment (III), backing services are attached resources (IV), and processes are disposable, meaning fast startup and graceful shutdown (IX).
+
+315
+00:16:12.259 --> 00:16:13.817
+Session externalization.
+
+316
+00:16:14.097 --> 00:16:15.441
+Here is a quick table:
+
+317
+00:16:15.721 --> 00:16:18.601
+Option, and How, and Pros, and Cons, and Use.
+
+318
+00:16:18.881 --> 00:16:19.990
+Sticky sessions.
+
+319
+00:16:20.270 --> 00:16:20.931
+How:
+
+320
+00:16:21.211 --> 00:16:23.046
+LB pins a user to a pod.
+
+321
+00:16:23.326 --> 00:16:24.179
+Pros:
+
+322
+00:16:24.459 --> 00:16:25.675
+No code change.
+
+323
+00:16:25.955 --> 00:16:26.766
+Cons:
+
+324
+00:16:27.046 --> 00:16:31.121
+Uneven load; lost on pod loss or deploy (Ch 08).
+
+325
+00:16:31.401 --> 00:16:32.105
+Use:
+
+326
+00:16:32.385 --> 00:16:33.217
+Avoid.
+
+327
+00:16:33.497 --> 00:16:35.374
+Replicated in-memory sessions.
+
+328
+00:16:35.654 --> 00:16:36.315
+How:
+
+329
+00:16:36.595 --> 00:16:38.729
+App servers copy sessions to peers.
+
+330
+00:16:39.009 --> 00:16:39.862
+Pros:
+
+331
+00:16:40.142 --> 00:16:41.465
+No external store.
+
+332
+00:16:41.745 --> 00:16:45.307
+Cons: κ grows with cluster size; memory times N.
+
+333
+00:16:45.587 --> 00:16:46.291
+Use:
+
+334
+00:16:46.571 --> 00:16:47.659
+Avoid at scale.
+
+335
+00:16:47.939 --> 00:16:49.390
+External session store.
+
+336
+00:16:49.670 --> 00:16:50.331
+How:
+
+337
+00:16:50.611 --> 00:16:53.321
+Spring Session with Redis (or JDBC).
+
+338
+00:16:53.601 --> 00:16:54.454
+Pros:
+
+339
+00:16:54.734 --> 00:16:57.763
+Any pod serves any request; survives restarts.
+
+340
+00:16:58.043 --> 00:16:58.854
+Cons:
+
+341
+00:16:59.134 --> 00:17:02.355
+A Redis round trip per request; session blob size.
+
+342
+00:17:02.635 --> 00:17:03.339
+Use:
+
+343
+00:17:03.619 --> 00:17:05.262
+Web apps with server sessions.
+
+344
+00:17:05.542 --> 00:17:07.931
+Client-side tokens (JWT).
+
+345
+00:17:08.211 --> 00:17:08.873
+How:
+
+346
+00:17:09.153 --> 00:17:11.265
+Signed claims travel with each request.
+
+347
+00:17:11.545 --> 00:17:12.398
+Pros:
+
+348
+00:17:12.678 --> 00:17:14.406
+Zero server session lookups.
+
+349
+00:17:14.686 --> 00:17:15.497
+Cons:
+
+350
+00:17:15.777 --> 00:17:19.425
+Revocation is harder; size limits; claims must be small.
+
+351
+00:17:19.705 --> 00:17:20.409
+Use:
+
+352
+00:17:20.689 --> 00:17:24.379
+APIs and mobile apps (Ch 08, 23).
+
+353
+00:17:25.729 --> 00:17:35.073
+For the grocery platform: identity is a JWT validated at the gateway (Ch 08), so there's no server-side login session.
+
+354
+00:17:35.353 --> 00:17:37.145
+The cart is not session data.
+
+355
+00:17:37.425 --> 00:17:46.364
+It's first-class state keyed by customer (or by a device-issued guest cart id) in Redis, with a periodic snapshot to PostgreSQL.
+
+356
+00:17:46.644 --> 00:17:54.047
+That distinction matters: a session blob is rewritten whole on every change and can't be updated atomically from two tabs.
+
+357
+00:17:54.327 --> 00:17:59.767
+Guest cart, then customer cart merge is the classic correctness problem of externalized state:
+
+358
+00:18:01.117 --> 00:18:04.743
+A guest adds items on the web, then logs in with OTP.
+
+359
+00:18:05.023 --> 00:18:07.946
+The customer already has a cart from the app last week.
+
+360
+00:18:08.226 --> 00:18:15.543
+Both carts must merge exactly once, atomically, even if two pods receive login and add item at the same moment.
+
+361
+00:18:15.823 --> 00:18:21.263
+L3 implements it as a single Redis Lua script with a merge marker for idempotency.
+
+362
+00:18:22.613 --> 00:18:25.984
+Scheduled jobs and singletons in a horizontal world.
+
+363
+00:18:26.264 --> 00:18:29.187
+With 40 pods, @Scheduled runs 40 times.
+
+364
+00:18:30.537 --> 00:18:31.881
+Here is a quick table:
+
+365
+00:18:32.161 --> 00:18:33.718
+Approach, and How, and When.
+
+366
+00:18:33.998 --> 00:18:38.009
+Job lock (ShedLock, Redis SET NX PX, DB row lock).
+
+367
+00:18:38.289 --> 00:18:38.950
+How:
+
+368
+00:18:39.230 --> 00:18:42.558
+Each run acquires a named lock with a lease; others skip.
+
+369
+00:18:42.838 --> 00:18:43.457
+When:
+
+370
+00:18:43.737 --> 00:18:46.723
+Periodic jobs that must run once per interval.
+
+371
+00:18:47.003 --> 00:18:50.502
+Leader election (Kubernetes Lease, ZooKeeper or etcd).
+
+372
+00:18:50.782 --> 00:18:51.443
+How:
+
+373
+00:18:51.723 --> 00:18:54.155
+One pod is leader and runs singletons.
+
+374
+00:18:54.435 --> 00:18:55.054
+When:
+
+375
+00:18:55.334 --> 00:18:57.318
+Long-running singleton processes.
+
+376
+00:18:57.598 --> 00:19:01.161
+Partitioned work (FOR UPDATE SKIP LOCKED, Kafka partitions).
+
+377
+00:19:01.441 --> 00:19:02.102
+How:
+
+378
+00:19:02.382 --> 00:19:04.366
+Every pod takes a disjoint slice.
+
+379
+00:19:04.646 --> 00:19:05.265
+When:
+
+380
+00:19:05.545 --> 00:19:07.913
+Large batches that should use all pods.
+
+381
+00:19:08.193 --> 00:19:11.051
+External scheduler (Kubernetes CronJob).
+
+382
+00:19:11.331 --> 00:19:11.993
+How:
+
+383
+00:19:12.273 --> 00:19:13.937
+Runs a separate job pod.
+
+384
+00:19:14.217 --> 00:19:14.835
+When:
+
+385
+00:19:15.115 --> 00:19:17.505
+Batch jobs that don't belong in the service.
+
+386
+00:19:18.855 --> 00:19:21.692
+Whatever the mechanism, make jobs idempotent.
+
+387
+00:19:21.972 --> 00:19:29.332
+Leases expire, and a slow or paused pod can still be running when another acquires the lock (fencing, Ch 20).
+
+388
+00:19:30.682 --> 00:19:32.261
+Scaling reads and writes.
+
+389
+00:19:32.541 --> 00:19:33.885
+Here is a quick table:
+
+390
+00:19:34.165 --> 00:19:36.149
+To scale..., and In order of cost.
+
+391
+00:19:36.429 --> 00:19:37.218
+Reads:
+
+392
+00:19:37.498 --> 00:19:50.511
+Fix queries, then cache (Ch 07), then CDN, then read replicas (Ch 05), then read models or CQRS (Ch 15), then search engine (Ch 22).
+
+393
+00:19:50.791 --> 00:19:51.602
+Writes:
+
+394
+00:19:51.882 --> 00:20:04.746
+Fix queries and indexes, then batch and coalesce, then move non-critical writes async (queue), then vertical scale, then functional split (a DB per service), then partition or shard (Ch 11).
+
+395
+00:20:06.096 --> 00:20:08.976
+Reads are easy to scale because copies are cheap.
+
+396
+00:20:09.256 --> 00:20:11.965
+Writes are hard because every copy must agree.
+
+397
+00:20:12.245 --> 00:20:15.339
+Most scaling work is moving writes off shared hot paths.
+
+398
+00:20:16.689 --> 00:20:18.758
+Connection limits: the hidden ceiling.
+
+399
+00:20:19.038 --> 00:20:23.561
+Adding pods multiplies every per-pod resource that points at something shared:
+
+400
+00:20:24.911 --> 00:20:26.255
+Here is a quick table:
+
+401
+00:20:26.535 --> 00:20:29.927
+Resource, and Limit, and What happens at scale-out, and Guard.
+
+402
+00:20:30.207 --> 00:20:31.487
+DB connections.
+
+403
+00:20:31.767 --> 00:20:36.673
+Limit: maxconnections, and far lower useful concurrency (Ch 05).
+
+404
+00:20:36.953 --> 00:20:38.340
+What happens at scale-out:
+
+405
+00:20:38.620 --> 00:20:42.460
+Pods times pool exceeds budget; queueing, context switching.
+
+406
+00:20:42.740 --> 00:20:43.487
+Guard:
+
+407
+00:20:43.767 --> 00:20:48.332
+Pool from Little's Law; PgBouncer; budget checks (Ch 02).
+
+408
+00:20:48.612 --> 00:20:49.807
+Redis connections.
+
+409
+00:20:50.087 --> 00:20:53.564
+Limit: maxclients (10 K default), per-shard CPU.
+
+410
+00:20:53.844 --> 00:20:55.231
+What happens at scale-out:
+
+411
+00:20:55.511 --> 00:20:57.196
+Connection storms on deploy.
+
+412
+00:20:57.476 --> 00:20:58.223
+Guard:
+
+413
+00:20:58.503 --> 00:21:01.383
+Shared multiplexed clients (Lettuce), limits.
+
+414
+00:21:01.663 --> 00:21:02.921
+Kafka consumers.
+
+415
+00:21:03.201 --> 00:21:03.969
+Limit:
+
+416
+00:21:04.249 --> 00:21:06.404
+Consumers per group at most partitions.
+
+417
+00:21:06.684 --> 00:21:08.071
+What happens at scale-out:
+
+418
+00:21:08.351 --> 00:21:10.761
+Pods beyond the partition count sit idle.
+
+419
+00:21:11.041 --> 00:21:11.788
+Guard:
+
+420
+00:21:12.068 --> 00:21:15.503
+Partitions sized for max consumers (Ch 14).
+
+421
+00:21:15.783 --> 00:21:17.233
+Third-party APIs.
+
+422
+00:21:17.513 --> 00:21:18.281
+Limit:
+
+423
+00:21:18.561 --> 00:21:22.103
+Razorpay, SMS or WhatsApp providers' rate limits.
+
+424
+00:21:22.383 --> 00:21:23.769
+What happens at scale-out:
+
+425
+00:21:24.049 --> 00:21:27.804
+More pods = more 429s, not more throughput.
+
+426
+00:21:28.084 --> 00:21:28.831
+Guard:
+
+427
+00:21:29.111 --> 00:21:30.668
+Central rate-limited queue.
+
+428
+00:21:32.018 --> 00:21:33.575
+NAT gateway ports.
+
+429
+00:21:33.855 --> 00:21:34.623
+Limit:
+
+430
+00:21:34.903 --> 00:21:37.890
+Connections per destination (Ch 03).
+
+431
+00:21:38.170 --> 00:21:39.557
+What happens at scale-out:
+
+432
+00:21:39.837 --> 00:21:41.778
+Outbound failures to one partner.
+
+433
+00:21:42.058 --> 00:21:42.805
+Guard:
+
+434
+00:21:43.085 --> 00:21:44.898
+Pooling, more egress IPs.
+
+435
+00:21:45.178 --> 00:21:46.437
+File descriptors.
+
+436
+00:21:46.717 --> 00:21:48.125
+Limit: ulimit -n.
+
+437
+00:21:48.405 --> 00:21:49.791
+What happens at scale-out:
+
+438
+00:21:50.071 --> 00:21:52.930
+Streaming or pooled services hit FD limits.
+
+439
+00:21:53.210 --> 00:21:53.957
+Guard:
+
+440
+00:21:54.237 --> 00:21:55.858
+Raise limits, load test.
+
+441
+00:21:56.138 --> 00:21:57.461
+LB or gateway.
+
+442
+00:21:57.741 --> 00:21:58.509
+Limit:
+
+443
+00:21:58.789 --> 00:22:01.050
+Connections, new connections per second.
+
+444
+00:22:01.330 --> 00:22:02.717
+What happens at scale-out:
+
+445
+00:22:02.997 --> 00:22:05.727
+Rejected connections during reconnect storms.
+
+446
+00:22:06.007 --> 00:22:06.754
+Guard:
+
+447
+00:22:07.034 --> 00:22:09.445
+Pre-scaling, jitter (Ch 03).
+
+448
+00:22:10.795 --> 00:22:11.712
+Watch out:
+
+449
+00:22:11.992 --> 00:22:16.152
+The fastest way to take down a database is to autoscale its clients.
+
+450
+00:22:16.432 --> 00:22:18.437
+An HPA with maxReplicas:
+
+451
+00:22:18.717 --> 00:22:23.411
+100 and a pool of 20 is a promise of up to 2,000 connections.
+
+452
+00:22:23.691 --> 00:22:28.683
+Set maxReplicas from the connection budget and the USL peak, not from hope.
+
+453
+00:22:30.033 --> 00:22:31.889
+The scale cube (X, Y, Z).
+
+454
+00:22:32.169 --> 00:22:33.513
+Here is the diagram.
+
+455
+00:22:37.363 --> 00:22:38.707
+Here is a quick table:
+
+456
+00:22:38.987 --> 00:22:42.656
+Axis, and How, and Scales, and Costs, and Grocery example.
+
+457
+00:22:42.936 --> 00:22:44.877
+X (horizontal duplication).
+
+458
+00:22:45.157 --> 00:22:45.819
+How:
+
+459
+00:22:46.099 --> 00:22:47.635
+Clone stateless instances.
+
+460
+00:22:47.915 --> 00:22:48.811
+Scales:
+
+461
+00:22:49.091 --> 00:22:50.243
+Request volume.
+
+462
+00:22:50.523 --> 00:22:51.333
+Costs:
+
+463
+00:22:51.613 --> 00:22:53.363
+Shared data stays a bottleneck.
+
+464
+00:22:53.643 --> 00:22:54.880
+Grocery example:
+
+465
+00:22:55.160 --> 00:22:57.059
+40 catalog-service pods.
+
+466
+00:22:57.339 --> 00:22:59.301
+Y (functional decomposition).
+
+467
+00:22:59.581 --> 00:23:00.243
+How:
+
+468
+00:23:00.523 --> 00:23:03.189
+Split by capability or bounded context.
+
+469
+00:23:03.469 --> 00:23:04.365
+Scales:
+
+470
+00:23:04.645 --> 00:23:08.016
+Team autonomy, independent scaling, fault isolation.
+
+471
+00:23:08.296 --> 00:23:09.107
+Costs:
+
+472
+00:23:09.387 --> 00:23:13.568
+Distributed transactions, network calls (Ch 13, 16).
+
+473
+00:23:13.848 --> 00:23:17.709
+Grocery example: cart, order, payment as separate services.
+
+474
+00:23:17.989 --> 00:23:19.525
+Z (data partitioning).
+
+475
+00:23:19.805 --> 00:23:20.467
+How:
+
+476
+00:23:20.747 --> 00:23:23.925
+Each copy owns a subset of data, routed by a key.
+
+477
+00:23:24.205 --> 00:23:25.101
+Scales:
+
+478
+00:23:25.381 --> 00:23:27.941
+Data volume, writes, blast radius.
+
+479
+00:23:28.221 --> 00:23:29.032
+Costs:
+
+480
+00:23:29.312 --> 00:23:33.088
+Routing, rebalancing, cross-partition queries (Ch 11).
+
+481
+00:23:33.368 --> 00:23:34.605
+Grocery example:
+
+482
+00:23:34.885 --> 00:23:39.963
+Carts and inventory partitioned by city; cells per region (Ch 34).
+
+483
+00:23:41.313 --> 00:23:52.065
+Choosing a Z-axis key for the grocery platform: city (or zone within a mega-city) is natural because orders, stores, riders and inventory rarely cross cities.
+
+484
+00:23:52.345 --> 00:23:56.441
+It keeps most queries partition-local and limits a failure to one city.
+
+485
+00:23:56.721 --> 00:24:05.510
+The risk is skew (Bengaluru is far bigger than Mysuru), handled by giving big cities their own partitions and packing small cities together.
+
+486
+00:24:06.860 --> 00:24:09.356
+Elasticity: scaling on the right signal.
+
+487
+00:24:09.636 --> 00:24:10.980
+Here is a quick table:
+
+488
+00:24:11.260 --> 00:24:13.287
+Signal, and Good for, and Pitfall.
+
+489
+00:24:13.567 --> 00:24:14.505
+CPU.
+
+490
+00:24:14.785 --> 00:24:15.617
+Good for:
+
+491
+00:24:15.897 --> 00:24:17.540
+CPU-bound services.
+
+492
+00:24:17.820 --> 00:24:18.652
+Pitfall:
+
+493
+00:24:18.932 --> 00:24:24.201
+I or O-bound services saturate on connections or latency at low CPU.
+
+494
+00:24:24.481 --> 00:24:26.401
+In-flight requests or concurrency.
+
+495
+00:24:26.681 --> 00:24:27.513
+Good for:
+
+496
+00:24:27.793 --> 00:24:29.756
+Most request-response services.
+
+497
+00:24:30.036 --> 00:24:30.868
+Pitfall:
+
+498
+00:24:31.148 --> 00:24:32.641
+Needs a custom metric.
+
+499
+00:24:32.921 --> 00:24:34.585
+Requests per second per pod.
+
+500
+00:24:34.865 --> 00:24:35.697
+Good for:
+
+501
+00:24:35.977 --> 00:24:37.684
+Predictable per-request cost.
+
+502
+00:24:37.964 --> 00:24:38.796
+Pitfall:
+
+503
+00:24:39.076 --> 00:24:41.017
+Doesn't reflect slow dependencies.
+
+504
+00:24:41.297 --> 00:24:43.473
+Queue depth or consumer lag (KEDA).
+
+505
+00:24:43.753 --> 00:24:44.585
+Good for:
+
+506
+00:24:44.865 --> 00:24:46.380
+Workers and consumers.
+
+507
+00:24:46.660 --> 00:24:47.492
+Pitfall:
+
+508
+00:24:47.772 --> 00:24:50.353
+Consumers beyond the partition count do nothing.
+
+509
+00:24:50.633 --> 00:24:51.892
+Schedule (cron).
+
+510
+00:24:52.172 --> 00:24:53.004
+Good for:
+
+511
+00:24:53.284 --> 00:24:55.353
+Known events (Ch 02).
+
+512
+00:24:55.633 --> 00:24:56.465
+Pitfall:
+
+513
+00:24:56.745 --> 00:24:57.919
+Needs a forecast.
+
+514
+00:24:59.269 --> 00:25:09.509
+Autoscaling has reaction time (metric scrape, HPA sync, node provisioning, JVM warm-up), so it handles gradual growth and not step changes.
+
+515
+00:25:09.789 --> 00:25:20.861
+Always pair it with a maxReplicas derived from connection budgets and the USL peak, and with admission control or load shedding for what can't be scaled in time (Ch 18).
+
+516
+00:25:22.211 --> 00:25:24.557
+The 1, then 1 M users journey, then.
+
+517
+00:25:24.837 --> 00:25:28.229
+Each stage is triggered by a measured limit, not by fashion.
+
+518
+00:25:28.509 --> 00:25:37.512
+The numbers use the Ch 00 assumptions (~20 API calls per user per day on average; peak 5 times average).
+
+519
+00:25:38.862 --> 00:25:40.206
+Here is a quick table:
+
+520
+00:25:40.486 --> 00:25:44.987
+Stage, and Users (DAU), and Peak req per second, and What breaks, and Move.
+
+521
+00:25:45.267 --> 00:25:46.014
+0.
+
+522
+00:25:46.294 --> 00:25:47.275
+One box.
+
+523
+00:25:47.555 --> 00:25:48.793
+Users (DAU):
+
+524
+00:25:49.073 --> 00:25:50.011
+100.
+
+525
+00:25:50.291 --> 00:25:51.593
+Peak req per second:
+
+526
+00:25:51.873 --> 00:25:52.513
+1.
+
+527
+00:25:52.793 --> 00:25:53.710
+What breaks:
+
+528
+00:25:53.990 --> 00:25:56.358
+Nothing yet; a single point of failure.
+
+529
+00:25:56.638 --> 00:25:57.427
+Move:
+
+530
+00:25:57.707 --> 00:26:01.270
+App + PostgreSQL on one VM; daily backups.
+
+531
+00:26:01.550 --> 00:26:02.190
+1.
+
+532
+00:26:02.470 --> 00:26:03.793
+Separate the database.
+
+533
+00:26:04.073 --> 00:26:05.310
+Users (DAU):
+
+534
+00:26:05.590 --> 00:26:06.422
+1 K.
+
+535
+00:26:06.702 --> 00:26:08.750
+Peak req per second: ~1.
+
+536
+00:26:09.030 --> 00:26:09.947
+What breaks:
+
+537
+00:26:10.227 --> 00:26:12.979
+App deploys restart the DB; resource fights.
+
+538
+00:26:13.259 --> 00:26:14.049
+Move:
+
+539
+00:26:14.329 --> 00:26:17.550
+Managed PostgreSQL; app on its own VM.
+
+540
+00:26:17.830 --> 00:26:18.534
+2.
+
+541
+00:26:18.814 --> 00:26:20.563
+Stateless app behind a LB.
+
+542
+00:26:20.843 --> 00:26:22.081
+Users (DAU):
+
+543
+00:26:22.361 --> 00:26:23.193
+10 K.
+
+544
+00:26:23.473 --> 00:26:25.521
+Peak req per second: ~10.
+
+545
+00:26:25.801 --> 00:26:26.718
+What breaks:
+
+546
+00:26:26.998 --> 00:26:31.030
+One app instance = downtime on deploy; sessions in memory.
+
+547
+00:26:31.310 --> 00:26:32.099
+Move:
+
+548
+00:26:32.379 --> 00:26:38.139
+2 plus app instances, LB, sessions or carts in Redis, uploads in object storage.
+
+549
+00:26:38.419 --> 00:26:39.166
+3.
+
+550
+00:26:39.446 --> 00:26:40.726
+Cache and CDN.
+
+551
+00:26:41.006 --> 00:26:42.243
+Users (DAU):
+
+552
+00:26:42.523 --> 00:26:43.462
+50 K.
+
+553
+00:26:43.742 --> 00:26:45.982
+Peak req per second: ~60.
+
+554
+00:26:46.262 --> 00:26:47.179
+What breaks:
+
+555
+00:26:47.459 --> 00:26:50.083
+Catalog reads dominate DB CPU.
+
+556
+00:26:50.363 --> 00:26:51.153
+Move:
+
+557
+00:26:51.433 --> 00:26:56.467
+CDN for images; Redis cache (Ch 07); fix slow queries.
+
+558
+00:26:57.817 --> 00:26:58.521
+4.
+
+559
+00:26:58.801 --> 00:27:00.636
+Async work and read replicas.
+
+560
+00:27:00.916 --> 00:27:02.153
+Users (DAU):
+
+561
+00:27:02.433 --> 00:27:03.564
+200 K.
+
+562
+00:27:03.844 --> 00:27:06.660
+Peak req per second: ~250.
+
+563
+00:27:06.940 --> 00:27:07.857
+What breaks:
+
+564
+00:27:08.137 --> 00:27:13.449
+Invoices, SMS and emails block requests; report queries slow the primary.
+
+565
+00:27:13.729 --> 00:27:14.519
+Move:
+
+566
+00:27:14.799 --> 00:27:20.175
+Queue + workers (Kafka or RabbitMQ); read replica for reports or history.
+
+567
+00:27:20.455 --> 00:27:21.223
+5.
+
+568
+00:27:21.503 --> 00:27:23.828
+Split hot capabilities (Y-axis).
+
+569
+00:27:24.108 --> 00:27:25.345
+Users (DAU):
+
+570
+00:27:25.625 --> 00:27:26.820
+500 K.
+
+571
+00:27:27.100 --> 00:27:29.553
+Peak req per second: ~600.
+
+572
+00:27:29.833 --> 00:27:30.751
+What breaks:
+
+573
+00:27:31.031 --> 00:27:38.540
+One deployable for 6 teams; search needs a different datastore; tracking writes swamp the DB (Ch 06).
+
+574
+00:27:38.820 --> 00:27:39.609
+Move:
+
+575
+00:27:39.889 --> 00:27:44.689
+Modular monolith, then extract search, tracking, payments; DB per service.
+
+576
+00:27:44.969 --> 00:27:45.716
+6.
+
+577
+00:27:45.996 --> 00:27:49.473
+Multi-AZ, pre-scaling, data partitioning (Z-axis).
+
+578
+00:27:49.753 --> 00:27:50.991
+Users (DAU):
+
+579
+00:27:51.271 --> 00:27:52.103
+1 M.
+
+580
+00:27:52.383 --> 00:27:57.268
+Peak req per second: ~1.2 K (sale starts 20 to 40 times ).
+
+581
+00:27:57.548 --> 00:27:58.465
+What breaks:
+
+582
+00:27:58.745 --> 00:28:05.188
+AZ outage = platform outage; sale spikes; single-primary writes for carts and inventory.
+
+583
+00:28:05.468 --> 00:28:06.257
+Move:
+
+584
+00:28:06.537 --> 00:28:13.321
+3-AZ everything, cron pre-scaling (Ch 02), city partitioning for carts and inventory.
+
+585
+00:28:14.671 --> 00:28:15.418
+7.
+
+586
+00:28:15.698 --> 00:28:17.021
+Cells and regions.
+
+587
+00:28:17.301 --> 00:28:18.538
+Users (DAU):
+
+588
+00:28:18.818 --> 00:28:19.991
+5 M+.
+
+589
+00:28:20.271 --> 00:28:21.573
+Peak req per second:
+
+590
+00:28:21.853 --> 00:28:23.005
+6 K+.
+
+591
+00:28:23.285 --> 00:28:24.202
+What breaks:
+
+592
+00:28:24.482 --> 00:28:28.493
+Blast radius of a bad deploy or noisy city; DR region.
+
+593
+00:28:28.773 --> 00:28:29.562
+Move:
+
+594
+00:28:29.842 --> 00:28:36.818
+Cell-based architecture per region or city group (Ch 34); DR region (Ch 27).
+
+595
+00:28:38.168 --> 00:28:39.512
+Here is the diagram.
+
+596
+00:28:43.362 --> 00:28:44.109
+Note:
+
+597
+00:28:44.389 --> 00:28:46.522
+The journey isn't a ladder you must climb.
+
+598
+00:28:46.802 --> 00:28:50.535
+Many profitable businesses stay at stage 3 to 4 forever.
+
+599
+00:28:50.815 --> 00:28:53.375
+Each stage adds permanent operating cost.
+
+600
+00:28:53.655 --> 00:29:02.829
+Move up only when a measured limit (Ch 02 estimates, load tests, USL fits) says the current stage can't meet the next year's forecast.
+
+601
+00:29:04.179 --> 00:29:05.075
+Part 3.
+
+602
+00:29:05.355 --> 00:29:07.083
+Architecture and Diagrams.
+
+603
+00:29:08.333 --> 00:29:11.533
+Component view: a stateless, partitioned cart service.
+
+604
+00:29:11.813 --> 00:29:13.157
+Here is the diagram.
+
+605
+00:29:17.007 --> 00:29:22.404
+Sequence: happy path, guest adds items, logs in on a different pod, carts merge once.
+
+606
+00:29:22.684 --> 00:29:25.479
+The sequence diagram walks through it step by step.
+
+607
+00:29:25.759 --> 00:29:27.039
+W to P1:
+
+608
+00:29:27.319 --> 00:29:34.956
+PUT or carts or guest or items or ATTA-5KG qty 1 (guest cart id g-91, signed).
+
+609
+00:29:35.236 --> 00:29:36.324
+P1 to R:
+
+610
+00:29:36.604 --> 00:29:40.657
+EVALSHA setqty(cart:g-91, ATTA-5KG, 1).
+
+611
+00:29:40.937 --> 00:29:43.241
+R to P1: ok (1 line).
+
+612
+00:29:43.521 --> 00:29:44.780
+W to W:
+
+613
+00:29:45.060 --> 00:29:48.644
+OTP login, then JWT for cust-42.
+
+614
+00:29:48.924 --> 00:29:50.204
+W to P2:
+
+615
+00:29:50.484 --> 00:29:54.281
+POST or carts or merge guestCartId: g-91.
+
+616
+00:29:54.561 --> 00:29:55.692
+P2 to R:
+
+617
+00:29:55.972 --> 00:30:01.860
+EVALSHA merge(cart:cust-42, cart:g-91, marker merged:g-91).
+
+618
+00:30:02.140 --> 00:30:07.495
+R to P2: merged 1 line (customer cart now 3 lines), guest cart deleted.
+
+619
+00:30:07.775 --> 00:30:09.076
+P2 to W:
+
+620
+00:30:09.356 --> 00:30:11.191
+200 cart (3 lines).
+
+621
+00:30:15.041 --> 00:30:19.585
+Sequence: failure path, retry of a merge and a pod dying mid-request.
+
+622
+00:30:19.865 --> 00:30:22.659
+The sequence diagram walks through it step by step.
+
+623
+00:30:22.939 --> 00:30:24.219
+W to P2:
+
+624
+00:30:24.499 --> 00:30:27.102
+POST or carts or merge g-91.
+
+625
+00:30:27.382 --> 00:30:28.513
+P2 to R:
+
+626
+00:30:28.793 --> 00:30:31.353
+EVALSHA merge(...), then committed atomically.
+
+627
+00:30:31.633 --> 00:30:35.366
+P2 to W: pod killed (scale-in) before responding.
+
+628
+00:30:35.646 --> 00:30:40.169
+W to P3: retry POST or carts or merge g-91.
+
+629
+00:30:40.449 --> 00:30:41.579
+P3 to R:
+
+630
+00:30:41.859 --> 00:30:43.118
+EVALSHA merge(...).
+
+631
+00:30:43.398 --> 00:30:49.969
+R to P3: marker merged:g-91 exists, then 0 lines merged (no double quantities).
+
+632
+00:30:50.249 --> 00:30:51.614
+P3 to W:
+
+633
+00:30:51.894 --> 00:30:54.049
+200 cart (same 3 lines).
+
+634
+00:30:57.899 --> 00:30:58.645
+Note:
+
+635
+00:30:58.925 --> 00:31:01.699
+What the system guarantees after this failure path.
+
+636
+00:31:01.979 --> 00:31:10.064
+The merge happens exactly once, because the Lua script checks and sets the merge marker in the same atomic step as the merge itself.
+
+637
+00:31:10.344 --> 00:31:14.483
+A retry on any pod returns the same cart without doubling quantities.
+
+638
+00:31:14.763 --> 00:31:19.051
+Scale-in or a crash loses only the in-flight response, never cart state.
+
+639
+00:31:20.401 --> 00:31:21.979
+State: cart lifecycle.
+
+640
+00:31:22.259 --> 00:31:23.603
+Here is the diagram.
+
+641
+00:31:27.453 --> 00:31:28.371
+Part 4.
+
+642
+00:31:28.651 --> 00:31:30.272
+Design Document Excerpt:
+
+643
+00:31:30.552 --> 00:31:32.557
+Cart Service Scaling to 10 times.
+
+644
+00:31:33.807 --> 00:31:35.151
+Here is a quick table:
+
+645
+00:31:35.431 --> 00:31:36.733
+Field, and Value.
+
+646
+00:31:37.013 --> 00:31:38.357
+Author or Reviewers:
+
+647
+00:31:38.637 --> 00:31:41.325
+Cart team or Platform, SRE, Checkout.
+
+648
+00:31:41.605 --> 00:31:42.501
+Status:
+
+649
+00:31:42.781 --> 00:31:43.655
+Approved.
+
+650
+00:31:43.935 --> 00:31:45.258
+Related ADRs:
+
+651
+00:31:45.538 --> 00:31:56.567
+ADR-035 Carts as first-class Redis state, partitioned by city; ADR-036 maxReplicas from connection budget and USL fit.
+
+652
+00:31:57.917 --> 00:31:58.557
+1.
+
+653
+00:31:58.837 --> 00:32:00.245
+Context and Problem.
+
+654
+00:32:00.525 --> 00:32:13.325
+Scaling cart-service from 20 to 64 pods reduced throughput (§1.1): a global config lock (σ), all-pod broadcast invalidation (κ), and a connection budget overrun.
+
+655
+00:32:13.605 --> 00:32:17.552
+Carts lived in server sessions, requiring sticky routing for guests.
+
+656
+00:32:17.832 --> 00:32:18.536
+2.
+
+657
+00:32:18.816 --> 00:32:20.160
+Goals or Non-Goals.
+
+658
+00:32:20.440 --> 00:32:21.272
+Goals:
+
+659
+00:32:21.552 --> 00:32:33.648
+10 times cart throughput headroom over last festival; no scaling cliff below the planned max replicas; any pod serves any request; exactly-once guest merge; carts survive pod loss.
+
+660
+00:32:34.998 --> 00:32:44.278
+Non-goals: checkout pricing (the SoR re-prices, Ch 07); cross-city carts (a customer's cart belongs to the delivery city).
+
+661
+00:32:44.558 --> 00:32:45.305
+3.
+
+662
+00:32:45.585 --> 00:32:46.545
+Requirements.
+
+663
+00:32:47.895 --> 00:32:49.239
+Here is a quick table:
+
+664
+00:32:49.519 --> 00:32:50.991
+ID, and Requirement.
+
+665
+00:32:51.271 --> 00:32:52.209
+FR-1:
+
+666
+00:32:52.489 --> 00:32:58.036
+Add, update, remove cart lines; view cart; merge guest into customer cart on login.
+
+667
+00:32:58.316 --> 00:32:59.361
+NFR-1:
+
+668
+00:32:59.641 --> 00:33:06.297
+60 K cart ops per second at P90 sale peak, p99 at most 30 ms in-service.
+
+669
+00:33:06.577 --> 00:33:07.623
+NFR-2:
+
+670
+00:33:07.903 --> 00:33:12.681
+USL-fitted peak N ≥ 2 times planned max replicas.
+
+671
+00:33:12.961 --> 00:33:18.807
+NFR-3: Σ (pods times pool) at most connection budget for every shared store.
+
+672
+00:33:19.087 --> 00:33:20.175
+NFR-4:
+
+673
+00:33:20.455 --> 00:33:24.017
+Merge is idempotent and atomic under concurrent requests.
+
+674
+00:33:24.297 --> 00:33:25.343
+NFR-5:
+
+675
+00:33:25.623 --> 00:33:32.300
+Losing any pod or zone loses no cart state; losing a Redis shard affects one partition only.
+
+676
+00:33:33.650 --> 00:33:34.354
+4.
+
+677
+00:33:34.634 --> 00:33:37.151
+Capacity estimates and scaling analysis.
+
+678
+00:33:38.501 --> 00:33:39.845
+Here is a quick table:
+
+679
+00:33:40.125 --> 00:33:42.429
+Item, and Calculation, and Result.
+
+680
+00:33:42.709 --> 00:33:44.736
+Cart ops at P90 sale peak.
+
+681
+00:33:45.016 --> 00:33:46.083
+Calculation:
+
+682
+00:33:46.363 --> 00:33:53.637
+Ch 02: ~14.5 K cart req per second times ~4 Redis ops per request.
+
+683
+00:33:53.917 --> 00:33:56.840
+Result: ~60 K Redis ops per second.
+
+684
+00:33:57.120 --> 00:33:58.165
+Carts in Redis.
+
+685
+00:33:58.445 --> 00:33:59.512
+Calculation:
+
+686
+00:33:59.792 --> 00:34:03.035
+1.5 M active times ~1 KB.
+
+687
+00:34:03.315 --> 00:34:06.771
+Result: ~1.5 GB (+ replicas).
+
+688
+00:34:07.051 --> 00:34:09.568
+Load test (pods, then req per second).
+
+689
+00:34:09.848 --> 00:34:10.915
+Calculation:
+
+690
+00:34:11.195 --> 00:34:13.840
+1, then 1,470...
+
+691
+00:34:14.120 --> 00:34:16.851
+24, then 17,800.
+
+692
+00:34:17.131 --> 00:34:26.581
+Result: σ about 0.030, κ about 0.00052, N about 43 (L1 fit).
+
+693
+00:34:26.861 --> 00:34:29.699
+Planned peak pods (Ch 02 method).
+
+694
+00:34:29.979 --> 00:34:31.045
+Calculation:
+
+695
+00:34:31.325 --> 00:34:39.176
+14.5 K req per second ÷ ~1.2 K per pod times 1.5 AZ headroom.
+
+696
+00:34:39.456 --> 00:34:42.059
+Result: ~18 to 24 pods.
+
+697
+00:34:42.339 --> 00:34:44.280
+NFR-2 check before fixes.
+
+698
+00:34:44.560 --> 00:34:45.627
+Calculation:
+
+699
+00:34:45.907 --> 00:34:49.448
+N 43 ≥ 2 times 24?
+
+700
+00:34:49.728 --> 00:34:50.539
+Result:
+
+701
+00:34:50.819 --> 00:34:52.696
+Fails (43 48).
+
+702
+00:34:52.976 --> 00:35:02.235
+After removing the config lock (σ, then ~0.01) and broadcasts (κ, then ~0.0001).
+
+703
+00:35:02.515 --> 00:35:04.179
+Calculation: re-test.
+
+704
+00:35:04.459 --> 00:35:05.269
+Result:
+
+705
+00:35:05.549 --> 00:35:09.624
+Target N ≥ 90 (verified by load test).
+
+706
+00:35:10.974 --> 00:35:13.235
+DB connection budget (snapshots).
+
+707
+00:35:13.515 --> 00:35:14.582
+Calculation:
+
+708
+00:35:14.862 --> 00:35:19.427
+Snapshot writes ~100 per second times 20 ms about 2 busy.
+
+709
+00:35:19.707 --> 00:35:20.518
+Result:
+
+710
+00:35:20.798 --> 00:35:24.147
+Pool of 2 per pod, then 48 at 24 pods.
+
+711
+00:35:24.427 --> 00:35:25.622
+Redis connections.
+
+712
+00:35:25.902 --> 00:35:26.969
+Calculation:
+
+713
+00:35:27.249 --> 00:35:28.081
+Lettuce:
+
+714
+00:35:28.361 --> 00:35:31.006
+1 multiplexed connection per shard per pod.
+
+715
+00:35:31.286 --> 00:35:32.097
+Result:
+
+716
+00:35:32.377 --> 00:35:35.769
+24 pods times 3 shards = 72.
+
+717
+00:35:37.119 --> 00:35:38.036
+Success:
+
+718
+00:35:38.316 --> 00:35:39.895
+What the analysis tells us.
+
+719
+00:35:40.175 --> 00:35:42.073
+The fleet was never short of pods.
+
+720
+00:35:42.353 --> 00:35:43.996
+It was short of independence.
+
+721
+00:35:44.276 --> 00:35:53.279
+Fixing σ and κ roughly doubles the useful pod count and raises the throughput ceiling, while adding pods to the old design would have lowered it.
+
+722
+00:35:54.629 --> 00:35:55.397
+5.
+
+723
+00:35:55.677 --> 00:35:56.871
+Proposed design.
+
+724
+00:35:57.151 --> 00:35:58.325
+Stateless pods.
+
+725
+00:35:58.605 --> 00:36:01.079
+Identity from the gateway JWT.
+
+726
+00:36:01.359 --> 00:36:07.589
+Guest carts are identified by a server-issued, HMAC-signed guest cart id (no server session).
+
+727
+00:36:07.869 --> 00:36:09.170
+No sticky sessions.
+
+728
+00:36:09.450 --> 00:36:11.349
+Carts are first-class Redis state.
+
+729
+00:36:11.629 --> 00:36:22.167
+One HASH per cart (sku, then qty), with atomic Lua scripts for set-quantity (with max lines and max quantity per line) and merge (with an idempotency marker).
+
+730
+00:36:22.447 --> 00:36:24.090
+TTL refreshed on write.
+
+731
+00:36:24.370 --> 00:36:28.935
+A snapshot job writes changed carts to PostgreSQL every 5 minutes.
+
+732
+00:36:30.285 --> 00:36:32.269
+Remove σ and κ sources.
+
+733
+00:36:32.549 --> 00:36:42.064
+Cart limits come from immutable config loaded at startup and refreshed through a versioned snapshot (the Ch 01 pattern), with no per-request lock.
+
+734
+00:36:42.344 --> 00:36:50.429
+Promotion changes are published once to a Kafka topic, and pods read it (one write, N reads) instead of pod-to-pod broadcasts.
+
+735
+00:36:50.709 --> 00:36:52.053
+Z-axis by city.
+
+736
+00:36:52.333 --> 00:36:57.027
+A CityShardRouter maps city to Redis shard via a versioned shard map.
+
+737
+00:36:57.307 --> 00:37:01.616
+Bengaluru and Mumbai get dedicated shards, and small cities share one.
+
+738
+00:37:01.896 --> 00:37:06.184
+A city can move between shards online (lazy copy-on-read, L4).
+
+739
+00:37:07.534 --> 00:37:08.878
+Scale-safe jobs.
+
+740
+00:37:09.158 --> 00:37:17.286
+The abandoned-cart reminder runs once per interval under a Redis job lock with a lease, and it's idempotent (a reminder marker per cart).
+
+741
+00:37:17.566 --> 00:37:19.038
+Elasticity guardrails.
+
+742
+00:37:19.318 --> 00:37:26.486
+HPA on in-flight requests per pod. maxReplicas = min(connection-budget limit, N/2).
+
+743
+00:37:26.766 --> 00:37:27.513
+7.
+
+744
+00:37:27.793 --> 00:37:29.307
+Alternatives considered.
+
+745
+00:37:30.657 --> 00:37:32.001
+Here is a quick table:
+
+746
+00:37:32.281 --> 00:37:34.820
+Option, and Pros, and Cons, and Verdict.
+
+747
+00:37:35.100 --> 00:37:38.044
+Keep carts in server sessions, add sticky sessions.
+
+748
+00:37:38.324 --> 00:37:39.177
+Pros:
+
+749
+00:37:39.457 --> 00:37:40.673
+No code change.
+
+750
+00:37:40.953 --> 00:37:41.764
+Cons:
+
+751
+00:37:42.044 --> 00:37:46.161
+Uneven load; carts lost on deploy; session blob contention.
+
+752
+00:37:46.441 --> 00:37:47.252
+Verdict:
+
+753
+00:37:47.532 --> 00:37:48.449
+Rejected.
+
+754
+00:37:48.729 --> 00:37:51.289
+Spring Session (Redis) with cart in the session.
+
+755
+00:37:51.569 --> 00:37:52.423
+Pros:
+
+756
+00:37:52.703 --> 00:37:54.153
+Stateless pods quickly.
+
+757
+00:37:54.433 --> 00:37:55.244
+Cons:
+
+758
+00:37:55.524 --> 00:38:00.089
+Whole-session rewrites; last-write-wins across tabs; no atomic merge.
+
+759
+00:38:00.369 --> 00:38:01.180
+Verdict:
+
+760
+00:38:01.460 --> 00:38:04.511
+Interim step (L2), rejected as the end state.
+
+761
+00:38:04.791 --> 00:38:06.839
+Carts in PostgreSQL only.
+
+762
+00:38:07.119 --> 00:38:07.972
+Pros:
+
+763
+00:38:08.252 --> 00:38:09.831
+One store, transactional.
+
+764
+00:38:10.111 --> 00:38:10.921
+Cons:
+
+765
+00:38:11.201 --> 00:38:14.999
+60 K ops per second of small writes on the orders cluster.
+
+766
+00:38:15.279 --> 00:38:16.089
+Verdict:
+
+767
+00:38:16.369 --> 00:38:18.268
+Rejected (snapshot only).
+
+768
+00:38:18.548 --> 00:38:23.348
+Carts as Redis HASHes + Lua + city partitioning + DB snapshots.
+
+769
+00:38:23.628 --> 00:38:24.481
+Pros:
+
+770
+00:38:24.761 --> 00:38:28.196
+Atomic ops, fast, partitionable, survives pod loss.
+
+771
+00:38:28.476 --> 00:38:29.287
+Cons:
+
+772
+00:38:29.567 --> 00:38:33.940
+Redis is a critical store: needs replicas, a snapshot for recovery.
+
+773
+00:38:34.220 --> 00:38:35.031
+Verdict:
+
+774
+00:38:35.311 --> 00:38:36.143
+Chosen.
+
+775
+00:38:37.493 --> 00:38:39.157
+Just raise maxReplicas.
+
+776
+00:38:39.437 --> 00:38:40.290
+Pros:
+
+777
+00:38:40.570 --> 00:38:41.381
+Instant.
+
+778
+00:38:41.661 --> 00:38:42.471
+Cons:
+
+779
+00:38:42.751 --> 00:38:45.567
+Retrograde scaling (§1.1).
+
+780
+00:38:45.847 --> 00:38:46.658
+Verdict:
+
+781
+00:38:46.938 --> 00:38:47.855
+Rejected.
+
+782
+00:38:49.205 --> 00:38:49.888
+8.
+
+783
+00:38:50.168 --> 00:38:51.320
+Failure modes.
+
+784
+00:38:51.600 --> 00:38:55.589
+A Redis shard failover: a few seconds of errors for that city only.
+
+785
+00:38:55.869 --> 00:39:01.011
+Carts are replicated, and in the worst case they're restored from the last 5-minute snapshot.
+
+786
+00:39:01.291 --> 00:39:07.925
+Shard map misconfiguration: the router refuses unknown cities and uses the last good map version.
+
+787
+00:39:08.205 --> 00:39:15.160
+A job lock lease expires mid-run: the job's per-cart idempotency markers prevent duplicate reminders.
+
+788
+00:39:15.440 --> 00:39:16.144
+10.
+
+789
+00:39:16.424 --> 00:39:17.512
+Observability.
+
+790
+00:39:17.792 --> 00:39:34.027
+Throughput per pod versus pod count (a live USL view), lock wait time, broadcast or message rates per pod, connection counts per store versus budget, Redis ops per shard, merge outcomes (merged, alreadymerged, empty), job lock acquisitions.
+
+791
+00:39:35.377 --> 00:39:36.230
+14.
+
+792
+00:39:36.510 --> 00:39:40.905
+Decision (ADR-035 or 036 summary).
+
+793
+00:39:41.185 --> 00:39:49.462
+Carts are first-class Redis state, partitioned by city, mutated only through atomic scripts, with DB snapshots for recovery.
+
+794
+00:39:49.742 --> 00:40:00.793
+Every horizontally scaled service publishes a USL fit from its latest load test, and its maxReplicas is the lower of the connection-budget limit and half the fitted peak.
+
+795
+00:40:01.073 --> 00:40:05.659
+Per-request global locks and all-pod broadcasts are prohibited on hot paths.
+
+796
+00:40:07.009 --> 00:40:07.969
+Part 5.
+
+797
+00:40:08.249 --> 00:40:10.233
+Hands-On Code, Level Ladder.
+
+798
+00:40:11.483 --> 00:40:14.278
+We build the cart service's scalability four times:
+
+799
+00:40:15.628 --> 00:40:16.972
+Here is a quick table:
+
+800
+00:40:17.252 --> 00:40:19.940
+Level, and New requirement that forces the step.
+
+801
+00:40:20.220 --> 00:40:21.052
+L1:
+
+802
+00:40:21.332 --> 00:40:24.319
+How far can adding pods take us, and why does it stop?
+
+803
+00:40:24.599 --> 00:40:26.817
+(Amdahl, USL, fitting a load test).
+
+804
+00:40:27.097 --> 00:40:27.908
+L2:
+
+805
+00:40:28.188 --> 00:40:30.065
+Any pod must serve any request.
+
+806
+00:40:30.345 --> 00:40:33.545
+(externalized sessions with Spring Session + Redis).
+
+807
+00:40:33.825 --> 00:40:34.679
+L3:
+
+808
+00:40:34.959 --> 00:40:42.511
+Carts are real state: atomic line updates from any pod, exactly-once guest merge, limits, jobs that run once.
+
+809
+00:40:42.791 --> 00:40:43.665
+L4:
+
+810
+00:40:43.945 --> 00:40:51.007
+Partition carts by city (Z-axis) and move a city between shards online, with stale pods and no lost lines.
+
+811
+00:40:52.357 --> 00:40:53.679
+L1, Concept:
+
+812
+00:40:53.959 --> 00:40:57.287
+Amdahl, USL and fitting a load test (plain Java).
+
+813
+00:40:57.567 --> 00:40:59.082
+Here is the Java code.
+
+814
+00:40:59.362 --> 00:41:03.053
+It runs to 78 lines; the full listing is in the chapter.
+
+815
+00:41:03.333 --> 00:41:08.261
+ScalabilityL1.java, run with: java ScalabilityL1.java.
+
+816
+00:41:08.541 --> 00:41:10.418
+Why just add pods stops working:
+
+817
+00:41:10.698 --> 00:41:11.317
+A.
+
+818
+00:41:11.597 --> 00:41:14.455
+Amdahl's law: a serial fraction caps speed-up.
+
+819
+00:41:17.305 --> 00:41:19.097
+Actual output from running it:
+
+820
+00:41:20.447 --> 00:41:21.365
+On screen:
+
+821
+00:41:21.645 --> 00:41:22.263
+A.
+
+822
+00:41:22.543 --> 00:41:25.274
+Amdahl: speed-up with 5% serial work.
+
+823
+00:41:25.554 --> 00:41:30.695
+1 workers, then 1.0x (ceiling 1 per second = 20x).
+
+824
+00:41:30.975 --> 00:41:36.074
+4 workers, then 3.5x (ceiling 1 per second = 20x).
+
+825
+00:41:36.354 --> 00:41:41.794
+16 workers, then 9.1x (ceiling 1 per second = 20x).
+
+826
+00:41:42.074 --> 00:41:48.005
+64 workers, then 15.4x (ceiling 1 per second = 20x).
+
+827
+00:41:48.285 --> 00:41:54.706
+256 workers, then 18.6x (ceiling 1 per second = 20x).
+
+828
+00:41:54.986 --> 00:41:55.669
+B.
+
+829
+00:41:55.949 --> 00:42:04.397
+USL: σ = 0.03 (contention), κ = 0.0005 (coherency).
+
+830
+00:42:04.677 --> 00:42:07.685
+1 pods, then 1.0x capacity.
+
+831
+00:42:07.965 --> 00:42:10.887
+8 pods, then 6.5x capacity.
+
+832
+00:42:11.167 --> 00:42:14.239
+16 pods, then 10.2x capacity.
+
+833
+00:42:14.519 --> 00:42:17.890
+32 pods, then 13.2x capacity.
+
+834
+00:42:18.170 --> 00:42:22.607
+44 pods, then 13.6x capacity ← peak:
+
+835
+00:42:22.887 --> 00:42:26.130
+N = √((1minus σ)/κ).
+
+836
+00:42:26.410 --> 00:42:30.165
+64 pods, then 13.0x capacity.
+
+837
+00:42:30.445 --> 00:42:31.959
+The rest is in the chapter.
+
+838
+00:42:34.809 --> 00:42:41.465
+What L1 shows: a 5 % serial fraction caps you at 20 times no matter how many workers you add.
+
+839
+00:42:41.745 --> 00:42:47.313
+Any coherency cost (κ 0) creates a peak, and past it more pods mean less throughput.
+
+840
+00:42:47.593 --> 00:42:56.767
+Seven load-test points are enough to recover σ and κ within a few percent and predict the peak, before an HPA finds it for you in production.
+
+841
+00:42:57.047 --> 00:43:02.999
+Reducing κ (removing all-pod broadcasts) moves the peak further than any amount of hardware.
+
+842
+00:43:03.279 --> 00:43:06.116
+What L1 can't do: it only models the system.
+
+843
+00:43:06.396 --> 00:43:09.873
+The next levels remove the actual σ and κ sources.
+
+844
+00:43:11.223 --> 00:43:14.146
+L2, Stateless pods with externalized sessions.
+
+845
+00:43:14.426 --> 00:43:20.399
+The quickest way to stop needing sticky sessions: keep the HttpSession but store it in Redis.
+
+846
+00:43:21.749 --> 00:43:26.635
+Here is the Kotlin code. build.gradle.kts (module l2-spring).
+
+847
+00:43:29.485 --> 00:43:32.365
+Repository, Service, Delegate, Controller.
+
+848
+00:43:32.645 --> 00:43:34.159
+Here is the Java code.
+
+849
+00:43:34.439 --> 00:43:38.066
+It runs to 21 lines; the full listing is in the chapter.
+
+850
+00:43:38.346 --> 00:43:43.999
+L2: the cart lives INSIDE the HTTP session, which Spring Session stores in Redis.
+
+851
+00:43:46.849 --> 00:43:48.364
+Here is the Java code.
+
+852
+00:43:48.644 --> 00:43:52.121
+It runs to 20 lines; the full listing is in the chapter.
+
+853
+00:43:52.401 --> 00:44:00.209
+Read-modify-write of a session attribute: two tabs, then last write wins (Ch 05, same lost-update shape).
+
+854
+00:44:03.059 --> 00:44:04.574
+Here is the Java code.
+
+855
+00:44:07.424 --> 00:44:08.939
+Here is the Java code.
+
+856
+00:44:09.219 --> 00:44:12.845
+It runs to 21 lines; the full listing is in the chapter.
+
+857
+00:44:15.695 --> 00:44:16.869
+Configuration.
+
+858
+00:44:17.149 --> 00:44:18.621
+Here is the YAML code.
+
+859
+00:44:18.901 --> 00:44:22.570
+It runs to 17 lines; the full listing is in the chapter.
+
+860
+00:44:25.420 --> 00:44:26.935
+Here is the Java code.
+
+861
+00:44:27.215 --> 00:44:35.151
+JSON instead of JDK serialization: readable in Redis, and safe across class changes during rolling deploys.
+
+862
+00:44:38.001 --> 00:44:39.835
+Test: two pods, one session.
+
+863
+00:44:40.115 --> 00:44:41.630
+Here is the Java code.
+
+864
+00:44:41.910 --> 00:44:45.579
+It runs to 51 lines; the full listing is in the chapter.
+
+865
+00:44:45.859 --> 00:44:49.571
+Two independent app instances (pods) share only Redis.
+
+866
+00:44:49.851 --> 00:44:52.390
+A session created on pod A works on pod B.
+
+867
+00:44:55.240 --> 00:45:03.987
+What L2 fixed: no sticky sessions, pod loss or deploys don't lose carts, and any pod serves any request, with a small amount of code.
+
+868
+00:45:04.267 --> 00:45:08.939
+What L2 still gets wrong (and why session state isn't the end state for carts):
+
+869
+00:45:10.289 --> 00:45:11.633
+Here is a quick table:
+
+870
+00:45:11.913 --> 00:45:13.129
+Problem, and Why.
+
+871
+00:45:13.409 --> 00:45:15.862
+Lost updates across tabs or devices:
+
+872
+00:45:16.142 --> 00:45:20.537
+Whole-attribute read-modify-write: tab A's write overwrites tab B's.
+
+873
+00:45:20.817 --> 00:45:22.886
+Whole blob rewritten on every change:
+
+874
+00:45:23.166 --> 00:45:25.854
+Write amplification; hot sessions contend.
+
+875
+00:45:26.134 --> 00:45:28.609
+No atomic guest, then customer merge:
+
+876
+00:45:28.889 --> 00:45:35.097
+Session ids change on login (session fixation protection); merge is multi-step app code.
+
+877
+00:45:35.377 --> 00:45:37.681
+Cart lifetime tied to session lifetime:
+
+878
+00:45:37.961 --> 00:45:39.966
+Session expiry deletes the cart.
+
+879
+00:45:40.246 --> 00:45:44.257
+Can't partition by city or query carts (abandoned-cart job):
+
+880
+00:45:44.537 --> 00:45:47.630
+A session is an opaque blob keyed by a random id.
+
+881
+00:45:48.980 --> 00:45:52.905
+L3, Carts as first-class, atomically updated Redis state.
+
+882
+00:45:53.185 --> 00:45:55.468
+Design choices (from the design doc):
+
+883
+00:45:55.748 --> 00:46:01.145
+Identity is stateless: the customer id comes from the gateway (Ch 08).
+
+884
+00:46:01.425 --> 00:46:03.836
+Guests carry a server-signed guest cart id.
+
+885
+00:46:04.116 --> 00:46:13.695
+A cart is a Redis HASH (sku, then qty) in the city's hash-tag slot: blr:cart:c:customerId or blr:cart:g:guestId.
+
+886
+00:46:13.975 --> 00:46:22.871
+Every mutation is one Lua script: per-line updates can't lose each other, limits are enforced atomically, and the merge happens exactly once.
+
+887
+00:46:23.151 --> 00:46:28.932
+Jobs run once: a Redis job lock with an owner token and a lease, plus idempotent work.
+
+888
+00:46:30.282 --> 00:46:32.629
+Lua scripts (verified on Redis 7).
+
+889
+00:46:32.909 --> 00:46:34.466
+Here is the LUA code.
+
+890
+00:46:34.746 --> 00:46:38.415
+It runs to 17 lines; the full listing is in the chapter.
+
+891
+00:46:38.695 --> 00:46:40.658
+KEYS1 = cart hash ARGV:
+
+892
+00:46:40.938 --> 00:46:57.471
+1=sku 2=qty 3=maxLines 4=maxQtyPerLine 5=ttlSeconds. returns: =0 number of lines after the change -1 too many lines -2 quantity above limit.
+
+893
+00:47:00.321 --> 00:47:01.879
+Here is the LUA code.
+
+894
+00:47:02.159 --> 00:47:05.871
+It runs to 25 lines; the full listing is in the chapter.
+
+895
+00:47:06.151 --> 00:47:14.364
+KEYS1 = customer cart KEYS2 = guest cart KEYS3 = merge marker (same city hash tag, then same slot).
+
+896
+00:47:14.644 --> 00:47:15.412
+ARGV:
+
+897
+00:47:15.692 --> 00:47:29.516
+1=maxLines 2=maxQtyPerLine 3=cartTtlSeconds 4=markerTtlSeconds. returns merged, skipped, linesAfter, alreadyMerged(0 or 1).
+
+898
+00:47:32.366 --> 00:47:33.923
+Here is the LUA code.
+
+899
+00:47:34.203 --> 00:47:37.702
+KEYS1 = lock key ARGV1 = owner token.
+
+900
+00:47:37.982 --> 00:47:39.817
+Delete only if we still own it.
+
+901
+00:47:42.667 --> 00:47:59.008
+Run against a real Redis 7.0 server (redis-cli --eval): with maxLines = 3 and maxQty = 10, a 4th distinct line returns -1, quantity 11 returns -2, and quantity 0 removes the line.
+
+902
+00:47:59.288 --> 00:48:09.955
+Merging a guest cart MILK:9, ATTA:1, OIL:1 into MILK:2, RICE:1 gives MILK:10 (capped), RICE:1, ATTA:1, skips OIL (line limit), and deletes the guest cart.
+
+903
+00:48:10.235 --> 00:48:14.587
+A retried merge returns alreadyMerged = 1 and changes nothing.
+
+904
+00:48:14.867 --> 00:48:19.987
+A lock release with the wrong token returns 0, and with the right token returns 1.
+
+905
+00:48:21.337 --> 00:48:22.617
+Guest cart ids.
+
+906
+00:48:22.897 --> 00:48:24.411
+Here is the Java code.
+
+907
+00:48:24.691 --> 00:48:28.318
+It runs to 52 lines; the full listing is in the chapter.
+
+908
+00:48:28.598 --> 00:48:31.606
+Guest carts need an identity without a server session.
+
+909
+00:48:31.886 --> 00:48:38.926
+The server issues city.randomId.signature;. the client stores it (cookie or app storage) and sends it back.
+
+910
+00:48:39.206 --> 00:48:41.681
+Forged or tampered ids are rejected.
+
+911
+00:48:44.531 --> 00:48:52.509
+Verified: an issued id round-trips, and changing the city prefix (blr, then mum), garbage, and null are all rejected.
+
+912
+00:48:53.859 --> 00:48:54.926
+Repository.
+
+913
+00:48:55.206 --> 00:48:56.721
+Here is the Java code.
+
+914
+00:48:57.001 --> 00:49:00.691
+It runs to 56 lines; the full listing is in the chapter.
+
+915
+00:49:03.541 --> 00:49:05.056
+Here is the Java code.
+
+916
+00:49:05.336 --> 00:49:08.963
+It runs to 14 lines; the full listing is in the chapter.
+
+917
+00:49:09.243 --> 00:49:17.968
+Scripts live in src or main or resources or lua/.lua; Spring sends EVALSHA and falls back to EVAL once per node.
+
+918
+00:49:20.818 --> 00:49:22.333
+Here is the Java code.
+
+919
+00:49:22.613 --> 00:49:30.677
+Immutable config: loaded at startup (and refreshed via a versioned snapshot), no per-request lock (§1.1 σ).
+
+920
+00:49:33.527 --> 00:49:35.425
+Service, Delegate, Controller.
+
+921
+00:49:35.705 --> 00:49:37.220
+Here is the Java code.
+
+922
+00:49:37.500 --> 00:49:41.212
+It runs to 45 lines; the full listing is in the chapter.
+
+923
+00:49:44.062 --> 00:49:45.577
+Here is the Java code.
+
+924
+00:49:48.427 --> 00:49:49.941
+Here is the Java code.
+
+925
+00:49:50.221 --> 00:49:53.912
+It runs to 36 lines; the full listing is in the chapter.
+
+926
+00:49:54.192 --> 00:49:59.397
+Resolves WHICH cart a request addresses (customer versus guest), then calls the service.
+
+927
+00:50:02.247 --> 00:50:03.762
+Here is the Java code.
+
+928
+00:50:04.042 --> 00:50:07.605
+It runs to 70 lines; the full listing is in the chapter.
+
+929
+00:50:07.885 --> 00:50:13.986
+Anonymous: issue a signed guest cart id for the city chosen from the pincode (Ch 01).
+
+930
+00:50:16.836 --> 00:50:18.180
+Jobs that run once.
+
+931
+00:50:18.460 --> 00:50:19.975
+Here is the Java code.
+
+932
+00:50:20.255 --> 00:50:23.903
+It runs to 31 lines; the full listing is in the chapter.
+
+933
+00:50:24.183 --> 00:50:26.487
+Named lock with an owner token and a lease.
+
+934
+00:50:26.767 --> 00:50:35.961
+Not a correctness guarantee on its own (a paused pod can. outlive its lease, Ch 20 fencing), so the job it guards must be idempotent.
+
+935
+00:50:38.811 --> 00:50:40.326
+Here is the Java code.
+
+936
+00:50:40.606 --> 00:50:44.361
+It runs to 47 lines; the full listing is in the chapter.
+
+937
+00:50:44.641 --> 00:50:51.361
+Runs on every pod's scheduler; only the lock holder does the work; each reminder is sent at most once.
+
+938
+00:50:51.641 --> 00:51:02.286
+AbandonedCartScanner (reads cartsnapshot) and ReminderSender (publishes notification events) are small. interfaces with obvious implementations, omitted here.
+
+939
+00:51:05.136 --> 00:51:05.883
+Note:
+
+940
+00:51:06.163 --> 00:51:08.680
+Snapshots without breaking the connection budget.
+
+941
+00:51:08.960 --> 00:51:16.363
+A companion CartSnapshotJob copies carts changed in the last 5 minutes to cartsnapshot in PostgreSQL.
+
+942
+00:51:16.643 --> 00:51:21.293
+It's used for abandoned-cart scans and for recovery if a Redis shard is lost.
+
+943
+00:51:21.573 --> 00:51:34.181
+It runs under the same job lock, writes in batches of 500 with a pool of 2 connections (design doc §4), and tracks changed carts in a per-city ZSET of cartKey, then lastUpdated.
+
+944
+00:51:34.461 --> 00:51:37.576
+That's the only place carts touch the relational database.
+
+945
+00:51:38.926 --> 00:51:40.099
+Configuration.
+
+946
+00:51:40.379 --> 00:51:41.851
+Here is the YAML code.
+
+947
+00:51:42.131 --> 00:51:45.822
+It runs to 22 lines; the full listing is in the chapter.
+
+948
+00:51:48.672 --> 00:51:50.187
+Here is the Java code.
+
+949
+00:51:50.467 --> 00:51:53.987
+It runs to 15 lines; the full listing is in the chapter.
+
+950
+00:51:56.837 --> 00:51:59.098
+Integration tests (Testcontainers).
+
+951
+00:51:59.378 --> 00:52:00.893
+Here is the Java code.
+
+952
+00:52:01.173 --> 00:52:04.927
+It runs to 68 lines; the full listing is in the chapter.
+
+953
+00:52:07.777 --> 00:52:12.471
+What L3 guarantees: any pod serves any request with no sticky routing.
+
+954
+00:52:12.751 --> 00:52:19.513
+Concurrent line updates from many pods are never lost (per-line atomic writes instead of whole-blob rewrites).
+
+955
+00:52:19.793 --> 00:52:21.607
+Limits are enforced atomically.
+
+956
+00:52:21.887 --> 00:52:25.343
+The guest merge is exactly-once under concurrent retries.
+
+957
+00:52:25.623 --> 00:52:30.295
+Scheduled work runs once per interval and is idempotent if it ever overlaps.
+
+958
+00:52:30.575 --> 00:52:33.945
+The PostgreSQL footprint is 2 connections per pod.
+
+959
+00:52:34.225 --> 00:52:41.905
+What L3 still lacks: all carts live in one Redis deployment, a single failure domain and a single shard's write ceiling.
+
+960
+00:52:42.185 --> 00:52:46.879
+There's no way to give Bengaluru its own capacity, or to move it without downtime.
+
+961
+00:52:48.229 --> 00:52:52.154
+L4, Z-axis: carts partitioned by city, moved online.
+
+962
+00:52:52.434 --> 00:52:53.778
+Here is the diagram.
+
+963
+00:52:57.628 --> 00:52:58.844
+The move protocol:
+
+964
+00:52:59.124 --> 00:53:04.671
+Publish shard map v7: blr is MIGRATING blr-a, then blr-b.
+
+965
+00:53:04.951 --> 00:53:08.385
+Pods reload the map on a timer and on any MOVED reply.
+
+966
+00:53:08.665 --> 00:53:11.439
+Set the fence blr:fence on blr-a.
+
+967
+00:53:11.719 --> 00:53:20.188
+From now on, every write script on the old shard returns MOVED (-3) for Bengaluru, so pods still on v6 can't write there.
+
+968
+00:53:20.468 --> 00:53:22.153
+They reload the map and retry.
+
+969
+00:53:22.433 --> 00:53:33.868
+Every request touching a Bengaluru cart first runs ensureMoved: an atomic EXPORT (read + delete) on the old shard, then IMPORTMERGE (HSETNX per line) on the new shard.
+
+970
+00:53:35.218 --> 00:53:39.997
+A sweeper SCANs the old shard for blr:cart: and moves whatever is left.
+
+971
+00:53:40.277 --> 00:53:46.101
+When the old shard holds no Bengaluru carts, publish v8: blr, then blr-b.
+
+972
+00:53:46.381 --> 00:53:47.959
+The fence expires later.
+
+973
+00:53:49.309 --> 00:53:50.739
+Shard map and router.
+
+974
+00:53:51.019 --> 00:53:52.533
+Here is the Java code.
+
+975
+00:53:52.813 --> 00:53:56.525
+It runs to 33 lines; the full listing is in the chapter.
+
+976
+00:53:56.805 --> 00:53:59.024
+Versioned city, then shard assignment.
+
+977
+00:53:59.304 --> 00:54:02.355
+A city being moved has a Migration (from, then to).
+
+978
+00:54:02.635 --> 00:54:10.123
+Published by the platform (config service or GitOps); pods reload it on a timer and on a MOVED (-3) reply.
+
+979
+00:54:10.403 --> 00:54:15.843
+Where to read and write for a city right now. fallback is present only while the city is moving.
+
+980
+00:54:18.693 --> 00:54:21.210
+Mover (verified by a concurrent harness).
+
+981
+00:54:21.490 --> 00:54:23.005
+Here is the Java code.
+
+982
+00:54:23.285 --> 00:54:26.975
+It runs to 22 lines; the full listing is in the chapter.
+
+983
+00:54:27.255 --> 00:54:29.197
+Operations one shard offers.
+
+984
+00:54:29.477 --> 00:54:47.973
+The Redis implementation maps each call to a Lua script (atomic per call). setqtyfenced.lua: returns lines after change, -1/-2 for limits, MOVED if the city is fenced here. export.lua: atomically read and delete a cart (movers only; ignores the fence).
+
+985
+00:54:50.823 --> 00:54:52.337
+Here is the Java code.
+
+986
+00:54:52.617 --> 00:54:56.265
+It runs to 58 lines; the full listing is in the chapter.
+
+987
+00:54:56.545 --> 00:54:59.809
+Lazy, online move of a city's carts between shards:
+
+988
+00:55:00.089 --> 00:55:06.383
+1. publish shard map with Migration(from, to) 2. fence from for the city (stale pods get MOVED).
+
+989
+00:55:06.663 --> 00:55:14.620
+3. every request: ensureMoved(cart) before touching it 4. a sweeper exports what's left 5. publish final map.
+
+990
+00:55:17.470 --> 00:55:18.793
+Redis shard (Lua).
+
+991
+00:55:19.073 --> 00:55:20.630
+Here is the LUA code.
+
+992
+00:55:20.910 --> 00:55:24.451
+It runs to 19 lines; the full listing is in the chapter.
+
+993
+00:55:24.731 --> 00:55:30.363
+KEYS1 = cart hash KEYS2 = city fence key (same city tag, then same slot).
+
+994
+00:55:30.643 --> 00:55:31.411
+ARGV:
+
+995
+00:55:31.691 --> 00:55:50.913
+1=sku 2=qty 3=maxLines 4=maxQtyPerLine 5=ttlSeconds. returns: =0 lines after the change -1 too many lines -2 qty above limit -3 city moved (reload shard map).
+
+996
+00:55:53.763 --> 00:55:55.320
+Here is the LUA code.
+
+997
+00:55:55.600 --> 00:55:56.709
+OLD shard.
+
+998
+00:55:56.989 --> 00:55:58.675
+KEYS1 = cart hash.
+
+999
+00:55:58.955 --> 00:56:03.243
+Atomically read and delete (ignores the fence: only movers call this).
+
+1000
+00:56:06.093 --> 00:56:07.650
+Here is the LUA code.
+
+1001
+00:56:07.930 --> 00:56:09.274
+NEW shard.
+
+1002
+00:56:09.554 --> 00:56:11.239
+KEYS1 = cart hash.
+
+1003
+00:56:11.519 --> 00:56:12.287
+ARGV:
+
+1004
+00:56:12.567 --> 00:56:16.407
+1=ttlSeconds, then sku, qty pairs.
+
+1005
+00:56:16.687 --> 00:56:24.069
+HSETNX per line: a line already written on the new shard (newer) wins; nothing is lost if two movers race.
+
+1006
+00:56:26.919 --> 00:56:28.433
+Here is the Java code.
+
+1007
+00:56:28.713 --> 00:56:32.447
+It runs to 63 lines; the full listing is in the chapter.
+
+1008
+00:56:32.727 --> 00:56:35.841
+One Redis deployment (cluster) = one shard.
+
+1009
+00:56:36.121 --> 00:56:39.108
+Every method is a single atomic script or command.
+
+1010
+00:56:41.958 --> 00:56:42.705
+Note:
+
+1011
+00:56:42.985 --> 00:56:44.883
+The merge script needs the fence too.
+
+1012
+00:56:45.163 --> 00:56:58.774
+L3's merge.lua gains the same first line as setqtyfenced.lua (if redis.call('EXISTS', KEYS4) == 1 then return -3, 0, 0, 0 end, with the fence as KEYS4).
+
+1013
+00:56:59.054 --> 00:57:05.219
+Every write path on a shard must honour the fence, or a stale pod can still write to a city that has left.
+
+1014
+00:57:06.569 --> 00:57:07.871
+Sweeper and runbook.
+
+1015
+00:57:08.151 --> 00:57:09.665
+Here is the Java code.
+
+1016
+00:57:09.945 --> 00:57:13.636
+It runs to 22 lines; the full listing is in the chapter.
+
+1017
+00:57:13.916 --> 00:57:17.244
+Moves every remaining cart of one city from the old shard.
+
+1018
+00:57:17.524 --> 00:57:20.425
+Throttled; safe to run alongside live traffic.
+
+1019
+00:57:23.275 --> 00:57:24.619
+Here is a quick table:
+
+1020
+00:57:24.899 --> 00:57:27.886
+Step, and Action, and Verify before continuing.
+
+1021
+00:57:28.166 --> 00:57:28.913
+0.
+
+1022
+00:57:29.193 --> 00:57:29.982
+Action:
+
+1023
+00:57:30.262 --> 00:57:34.059
+Provision blr-b (3 AZ, replicas), load-test it.
+
+1024
+00:57:34.339 --> 00:57:36.003
+Verify before continuing:
+
+1025
+00:57:36.283 --> 00:57:39.889
+Capacity ≥ 2 times Bengaluru peak.
+
+1026
+00:57:40.169 --> 00:57:40.809
+1.
+
+1027
+00:57:41.089 --> 00:57:41.878
+Action:
+
+1028
+00:57:42.158 --> 00:57:45.998
+Publish shard map v7 (blr MIGRATING a, then b).
+
+1029
+00:57:46.278 --> 00:57:47.942
+Verify before continuing:
+
+1030
+00:57:48.222 --> 00:57:52.318
+All pods report map v7 (cart.shardmap.version gauge).
+
+1031
+00:57:52.598 --> 00:57:53.302
+2.
+
+1032
+00:57:53.582 --> 00:57:54.371
+Action:
+
+1033
+00:57:54.651 --> 00:57:58.897
+SET blr:fence blr-b on blr-a (TTL 7 d).
+
+1034
+00:57:59.177 --> 00:58:05.705
+Verify before continuing: cart.shard.movedredirects 0 only from stale pods, then 0.
+
+1035
+00:58:05.985 --> 00:58:06.731
+3.
+
+1036
+00:58:07.011 --> 00:58:07.801
+Action:
+
+1037
+00:58:08.081 --> 00:58:10.619
+Run the sweeper at 2,000 carts per second.
+
+1038
+00:58:10.899 --> 00:58:12.563
+Verify before continuing:
+
+1039
+00:58:12.843 --> 00:58:16.491
+SCAN count of blr:cart: on blr-a reaches 0.
+
+1040
+00:58:16.771 --> 00:58:17.475
+4.
+
+1041
+00:58:17.755 --> 00:58:18.545
+Action:
+
+1042
+00:58:18.825 --> 00:58:22.238
+Publish shard map v8 (blr, then blr-b).
+
+1043
+00:58:22.518 --> 00:58:24.182
+Verify before continuing:
+
+1044
+00:58:24.462 --> 00:58:26.851
+No reads with a fallback in the last 10 min.
+
+1045
+00:58:27.131 --> 00:58:27.899
+5.
+
+1046
+00:58:28.179 --> 00:58:28.969
+Action:
+
+1047
+00:58:29.249 --> 00:58:33.323
+Leave the fence until its TTL (stale caches, forgotten jobs).
+
+1048
+00:58:34.673 --> 00:58:35.527
+Rollback.
+
+1049
+00:58:35.807 --> 00:58:36.596
+Action:
+
+1050
+00:58:36.876 --> 00:58:42.551
+Before step 4: publish a map moving blr back (b, then a) and fence blr-b.
+
+1051
+00:58:42.831 --> 00:58:44.495
+Verify before continuing:
+
+1052
+00:58:44.775 --> 00:58:46.439
+Same protocol in reverse.
+
+1053
+00:58:47.789 --> 00:58:49.261
+Elasticity guardrails.
+
+1054
+00:58:49.541 --> 00:58:51.013
+Here is the YAML code.
+
+1055
+00:58:51.293 --> 00:58:54.919
+It runs to 21 lines; the full listing is in the chapter.
+
+1056
+00:58:55.199 --> 00:59:03.690
+KEDA ScaledObject: scale on in-flight requests per pod, capped by the budget or USL rule (ADR-036).
+
+1057
+00:59:06.540 --> 00:59:08.055
+Here is the Java code.
+
+1058
+00:59:08.335 --> 00:59:12.153
+It runs to 37 lines; the full listing is in the chapter.
+
+1059
+00:59:12.433 --> 00:59:18.833
+Fails loudly at startup if the deployment's scaling limits break the connection budget (§2.9).
+
+1060
+00:59:19.113 --> 00:59:26.879
+HPAMAXREPLICAS and DBCONNECTIONBUDGET are injected by the Helm chart from the same values file as the HPA.
+
+1061
+00:59:29.729 --> 00:59:30.369
+Tip:
+
+1062
+00:59:30.649 --> 00:59:32.419
+Also enforce it in CI.
+
+1063
+00:59:32.699 --> 00:59:37.030
+Throwing at startup catches the mistake on the first pod of a bad rollout.
+
+1064
+00:59:37.310 --> 00:59:51.347
+A CI check over the Helm values (maxReplicas times pool at most budget for every service pointing at the same database) catches it before merge, and it's the only place that can sum all services sharing one database.
+
+1065
+00:59:52.697 --> 00:59:53.508
+Tests.
+
+1066
+00:59:53.788 --> 01:00:04.903
+The mover is pure Java over the CartShard interface, so its correctness is tested with an in-memory shard that has the same one-atomic-step-per-call semantics as the Lua scripts:
+
+1067
+01:00:06.253 --> 01:00:07.767
+Here is the Java code.
+
+1068
+01:00:08.047 --> 01:00:11.461
+It runs to 50 lines; the full listing is in the chapter.
+
+1069
+01:00:11.741 --> 01:00:17.671
+Test double with the same atomic semantics as the Lua scripts (each method is one atomic step).
+
+1070
+01:00:20.521 --> 01:00:22.036
+Here is the Java code.
+
+1071
+01:00:22.316 --> 01:00:26.049
+It runs to 59 lines; the full listing is in the chapter.
+
+1072
+01:00:26.329 --> 01:00:29.188
+1,000 carts on blr-a before the move.
+
+1073
+01:00:32.038 --> 01:00:33.233
+Actual output:
+
+1074
+01:00:33.513 --> 01:00:41.193
+1,000 carts, 8 concurrent pods (one stale, still on map v6) writing to every cart while a sweeper moves them:
+
+1075
+01:00:42.543 --> 01:00:54.788
+On screen: before move: blr-a carts=1000 blr-b=0. after move: blr-a carts=0 blr-b=1000 carts missing a line:
+
+1076
+01:00:55.068 --> 01:00:56.284
+0 write errors:
+
+1077
+01:00:56.564 --> 01:00:59.337
+0. stale pod now on map v7.
+
+1078
+01:01:02.187 --> 01:01:07.350
+And a deterministic negative control, where a stale pod writes after the sweep has finished:
+
+1079
+01:01:08.700 --> 01:01:24.743
+On screen: without fence: stale-pod writes lost = 100 or 100, orphan carts left on old shard = 100. with fence: stale-pod writes lost = 0 or 100, orphan carts left on old shard = 0.
+
+1080
+01:01:27.593 --> 01:01:36.126
+The fence is what makes the move safe: without it, every write from a pod with a stale map lands on the old shard and is silently orphaned.
+
+1081
+01:01:36.406 --> 01:01:57.057
+The same interleavings were checked against a real Redis 7.0 server with redis-cli --eval: a stale write to the fenced shard returns -3, and when two movers race while a pod updates the new shard, RICE (only on the old shard) survives, MILK keeps its newer value 5, and EGGS (only on the new shard) is kept.
+
+1082
+01:01:58.407 --> 01:01:59.153
+Warning:
+
+1083
+01:01:59.433 --> 01:02:00.948
+One accepted anomaly.
+
+1084
+01:02:01.228 --> 01:02:14.220
+If a customer removes a line on the new shard in the milliseconds between another pod's EXPORT and IMPORTMERGE of the same cart, the import re-adds that line (the new shard no longer has it, so HSETNX writes it).
+
+1085
+01:02:14.500 --> 01:02:21.519
+For carts this is harmless (the customer sees the item and removes it again) and far cheaper than per-line tombstones.
+
+1086
+01:02:21.799 --> 01:02:31.975
+For data where a resurrected delete matters (money, entitlements), don't use lazy moves: use a write freeze per key range, or move through the log (Ch 11).
+
+1087
+01:02:33.325 --> 01:02:34.071
+Note:
+
+1088
+01:02:34.351 --> 01:02:37.125
+ADR-035 or 036:
+
+1089
+01:02:37.405 --> 01:02:41.970
+City-partitioned Redis carts; scaling limits from budgets and the USL.
+
+1090
+01:02:42.250 --> 01:02:43.167
+Context.
+
+1091
+01:02:43.447 --> 01:02:46.605
+Adding pods reduced throughput (§1.1).
+
+1092
+01:02:46.885 --> 01:02:51.898
+Carts in sessions needed stickiness, couldn't be merged atomically, and couldn't be partitioned.
+
+1093
+01:02:53.248 --> 01:02:54.123
+Decision.
+
+1094
+01:02:54.403 --> 01:03:01.656
+(1) Pods are stateless: identity from the gateway JWT, and guests hold server-signed guest cart ids.
+
+1095
+01:03:01.936 --> 01:03:10.363
+(2) Carts are Redis HASHes under a city hash tag, mutated only through Lua scripts (set quantity with limits, exactly-once merge).
+
+1096
+01:03:10.643 --> 01:03:16.552
+A snapshot job keeps a recoverable copy in PostgreSQL using 2 connections per pod.
+
+1097
+01:03:16.832 --> 01:03:21.909
+(3) Cities map to shards through a versioned shard map, and big cities get their own shard.
+
+1098
+01:03:22.189 --> 01:03:28.867
+Cities move online with the fence + lazy move + sweeper protocol, and every write script honours the fence.
+
+1099
+01:03:29.147 --> 01:03:33.883
+(4) Scheduled jobs run under a token-owned lease lock and are idempotent.
+
+1100
+01:03:34.163 --> 01:03:45.704
+(5) maxReplicas = min(connection budget ÷ pool, USL N ÷ 2), recomputed after every load test and enforced at startup and in CI.
+
+1101
+01:03:45.984 --> 01:03:50.336
+Per-request global locks and all-pod broadcasts are banned on hot paths.
+
+1102
+01:03:51.686 --> 01:03:52.710
+Consequences.
+
+1103
+01:03:52.990 --> 01:03:57.449
+(+) Cart capacity grows by adding shards, not by hoping pods scale.
+
+1104
+01:03:57.729 --> 01:04:00.225
+(+) A Redis incident affects one city.
+
+1105
+01:04:00.505 --> 01:04:02.361
+(+) Moves need no downtime.
+
+1106
+01:04:02.641 --> 01:04:06.246
+(minus ) A shard map service and a move runbook to operate.
+
+1107
+01:04:06.526 --> 01:04:15.230
+(minus ) Guest and customer carts are per city (a customer who switches cities sees that city's cart, which matches per-city stock and prices).
+
+1108
+01:04:15.510 --> 01:04:17.857
+(minus ) The accepted anomaly above.
+
+1109
+01:04:18.137 --> 01:04:30.403
+Revisit when: a single city outgrows one shard (split by zone within the city, the same protocol at finer grain), or cells per region (Ch 34) replace per-service partitioning.
+
+1110
+01:04:31.753 --> 01:04:33.887
+What changed from L1 to L4.
+
+1111
+01:04:34.167 --> 01:04:35.511
+Here is a quick table:
+
+1112
+01:04:35.791 --> 01:04:39.247
+Concern, and L1, and L2, and L3, and L4.
+
+1113
+01:04:39.527 --> 01:04:40.615
+Scaling model.
+
+1114
+01:04:40.895 --> 01:04:41.727
+L1:
+
+1115
+01:04:42.007 --> 01:04:44.481
+Amdahl or USL fitted to a load test.
+
+1116
+01:04:44.761 --> 01:04:48.708
+L4: maxReplicas from USL + budget, enforced.
+
+1117
+01:04:48.988 --> 01:04:50.161
+Where state lives.
+
+1118
+01:04:50.441 --> 01:04:51.252
+L2:
+
+1119
+01:04:51.532 --> 01:04:53.452
+HTTP session in Redis.
+
+1120
+01:04:53.732 --> 01:04:54.585
+L3:
+
+1121
+01:04:54.865 --> 01:04:57.361
+Cart HASH per customer or guest in Redis.
+
+1122
+01:04:57.641 --> 01:04:58.516
+L4:
+
+1123
+01:04:58.796 --> 01:05:01.207
+Same, partitioned by city across shards.
+
+1124
+01:05:01.487 --> 01:05:02.596
+Sticky sessions.
+
+1125
+01:05:02.876 --> 01:05:03.687
+L2:
+
+1126
+01:05:03.967 --> 01:05:04.905
+Not needed.
+
+1127
+01:05:05.185 --> 01:05:06.039
+L3:
+
+1128
+01:05:06.319 --> 01:05:07.257
+Not needed.
+
+1129
+01:05:07.537 --> 01:05:08.412
+L4:
+
+1130
+01:05:08.692 --> 01:05:09.631
+Not needed.
+
+1131
+01:05:09.911 --> 01:05:11.105
+Concurrent updates.
+
+1132
+01:05:11.385 --> 01:05:12.196
+L2:
+
+1133
+01:05:12.476 --> 01:05:14.396
+Last write wins (whole blob).
+
+1134
+01:05:14.676 --> 01:05:15.529
+L3:
+
+1135
+01:05:15.809 --> 01:05:17.324
+Per-line atomic scripts.
+
+1136
+01:05:17.604 --> 01:05:18.479
+L4:
+
+1137
+01:05:18.759 --> 01:05:20.593
+Same, plus MOVED redirects.
+
+1138
+01:05:20.873 --> 01:05:22.196
+Guest, then customer.
+
+1139
+01:05:22.476 --> 01:05:23.287
+L2:
+
+1140
+01:05:23.567 --> 01:05:25.337
+Multi-step, not atomic.
+
+1141
+01:05:25.617 --> 01:05:26.471
+L3:
+
+1142
+01:05:26.751 --> 01:05:28.415
+Exactly-once merge script.
+
+1143
+01:05:28.695 --> 01:05:29.569
+L4:
+
+1144
+01:05:29.849 --> 01:05:31.129
+Same, fence-aware.
+
+1145
+01:05:32.479 --> 01:05:33.311
+Jobs.
+
+1146
+01:05:33.591 --> 01:05:34.445
+L3:
+
+1147
+01:05:34.725 --> 01:05:36.965
+Token lease lock + idempotency.
+
+1148
+01:05:37.245 --> 01:05:38.119
+L4:
+
+1149
+01:05:38.399 --> 01:05:39.103
+Same.
+
+1150
+01:05:39.383 --> 01:05:40.514
+Capacity growth.
+
+1151
+01:05:40.794 --> 01:05:41.626
+L1:
+
+1152
+01:05:41.906 --> 01:05:42.802
+Predicted.
+
+1153
+01:05:43.082 --> 01:05:43.893
+L2:
+
+1154
+01:05:44.173 --> 01:05:45.111
+More pods.
+
+1155
+01:05:45.391 --> 01:05:46.245
+L3:
+
+1156
+01:05:46.525 --> 01:05:48.530
+More pods (up to the Redis shard).
+
+1157
+01:05:48.810 --> 01:05:49.685
+L4:
+
+1158
+01:05:49.965 --> 01:05:52.098
+More shards; online city moves.
+
+1159
+01:05:52.378 --> 01:05:53.509
+Failure domain.
+
+1160
+01:05:53.789 --> 01:05:54.599
+L2:
+
+1161
+01:05:54.879 --> 01:05:55.775
+One Redis.
+
+1162
+01:05:56.055 --> 01:05:56.909
+L3:
+
+1163
+01:05:57.189 --> 01:05:58.085
+One Redis.
+
+1164
+01:05:58.365 --> 01:05:59.239
+L4:
+
+1165
+01:05:59.519 --> 01:06:00.714
+One city's shard.
+
+1166
+01:06:02.064 --> 01:06:03.003
+Part 6.
+
+1167
+01:06:03.283 --> 01:06:04.563
+Production Concerns.
+
+1168
+01:06:05.813 --> 01:06:06.965
+Failure modes.
+
+1169
+01:06:07.245 --> 01:06:08.589
+Here is a quick table:
+
+1170
+01:06:08.869 --> 01:06:12.751
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+1171
+01:06:13.031 --> 01:06:15.911
+Retrograde scaling (more pods, less throughput).
+
+1172
+01:06:16.191 --> 01:06:17.386
+Detection signal:
+
+1173
+01:06:17.666 --> 01:06:22.274
+Throughput per pod falls as pods rise; lock waits and message rates grow.
+
+1174
+01:06:22.554 --> 01:06:23.770
+Blast radius:
+
+1175
+01:06:24.050 --> 01:06:25.458
+Whole service at peak.
+
+1176
+01:06:25.738 --> 01:06:26.741
+Mitigation:
+
+1177
+01:06:27.021 --> 01:06:33.101
+USL fit per release; remove σ or κ sources; maxReplicas from N/2.
+
+1178
+01:06:33.381 --> 01:06:35.727
+Connection budget overrun on scale-out.
+
+1179
+01:06:36.007 --> 01:06:37.202
+Detection signal:
+
+1180
+01:06:37.482 --> 01:06:41.983
+Pool pending 0; DB too many connections; PgBouncer queueing.
+
+1181
+01:06:42.263 --> 01:06:43.479
+Blast radius:
+
+1182
+01:06:43.759 --> 01:06:45.402
+Every service on that DB.
+
+1183
+01:06:45.682 --> 01:06:46.685
+Mitigation:
+
+1184
+01:06:46.965 --> 01:06:51.594
+Pools from Little's Law; startup + CI budget checks; PgBouncer.
+
+1185
+01:06:51.874 --> 01:06:53.175
+Hidden local state.
+
+1186
+01:06:53.455 --> 01:06:54.650
+Detection signal:
+
+1187
+01:06:54.930 --> 01:06:59.581
+Users logged out or carts lost after deploys; behaviour differs by pod.
+
+1188
+01:06:59.861 --> 01:07:01.077
+Blast radius:
+
+1189
+01:07:01.357 --> 01:07:03.127
+Users on the affected pod.
+
+1190
+01:07:03.407 --> 01:07:04.410
+Mitigation:
+
+1191
+01:07:04.690 --> 01:07:10.962
+Stateless checklist (§2.5) in design review; chaos test: kill pods under load.
+
+1192
+01:07:11.242 --> 01:07:13.610
+Scheduled job runs on every pod.
+
+1193
+01:07:13.890 --> 01:07:15.085
+Detection signal:
+
+1194
+01:07:15.365 --> 01:07:18.906
+Duplicate reminders or double processing after scale-out.
+
+1195
+01:07:19.186 --> 01:07:20.402
+Blast radius:
+
+1196
+01:07:20.682 --> 01:07:22.666
+Customers, downstream systems.
+
+1197
+01:07:22.946 --> 01:07:23.949
+Mitigation:
+
+1198
+01:07:24.229 --> 01:07:27.813
+Job lock + idempotent work (§2.7).
+
+1199
+01:07:29.163 --> 01:07:31.296
+Job lock lease expires mid-run.
+
+1200
+01:07:31.576 --> 01:07:32.771
+Detection signal:
+
+1201
+01:07:33.051 --> 01:07:34.373
+Two holders briefly.
+
+1202
+01:07:34.653 --> 01:07:35.869
+Blast radius:
+
+1203
+01:07:36.149 --> 01:07:37.600
+Duplicate side effects.
+
+1204
+01:07:37.880 --> 01:07:38.883
+Mitigation:
+
+1205
+01:07:39.163 --> 01:07:44.411
+Idempotency markers; lease p99 run time; fencing (Ch 20).
+
+1206
+01:07:44.691 --> 01:07:46.611
+Consumers beyond partition count.
+
+1207
+01:07:46.891 --> 01:07:48.085
+Detection signal:
+
+1208
+01:07:48.365 --> 01:07:52.291
+Idle pods in a consumer group; lag not improving on scale-out.
+
+1209
+01:07:52.571 --> 01:07:53.787
+Blast radius:
+
+1210
+01:07:54.067 --> 01:07:55.539
+Throughput of the consumer.
+
+1211
+01:07:55.819 --> 01:07:56.821
+Mitigation:
+
+1212
+01:07:57.101 --> 01:08:00.536
+Partitions sized for max consumers (Ch 14).
+
+1213
+01:08:00.816 --> 01:08:02.267
+Third-party rate limits.
+
+1214
+01:08:02.547 --> 01:08:03.741
+Detection signal:
+
+1215
+01:08:04.021 --> 01:08:06.923
+429s rise with pod count.
+
+1216
+01:08:07.203 --> 01:08:08.419
+Blast radius:
+
+1217
+01:08:08.699 --> 01:08:09.829
+That integration.
+
+1218
+01:08:10.109 --> 01:08:11.112
+Mitigation:
+
+1219
+01:08:11.392 --> 01:08:13.547
+Central rate-limited queue per provider.
+
+1220
+01:08:13.827 --> 01:08:15.576
+Hot partition (Z-axis).
+
+1221
+01:08:15.856 --> 01:08:17.051
+Detection signal:
+
+1222
+01:08:17.331 --> 01:08:19.635
+One shard's CPU far above others.
+
+1223
+01:08:19.915 --> 01:08:21.131
+Blast radius:
+
+1224
+01:08:21.411 --> 01:08:22.285
+One city.
+
+1225
+01:08:22.565 --> 01:08:23.568
+Mitigation:
+
+1226
+01:08:23.848 --> 01:08:26.643
+Split the city by zone; move it to a bigger shard.
+
+1227
+01:08:27.993 --> 01:08:30.638
+Shard map drift (pods on different versions).
+
+1228
+01:08:30.918 --> 01:08:36.038
+Detection signal: cart.shardmap.version spread across pods; MOVED redirects.
+
+1229
+01:08:36.318 --> 01:08:37.534
+Blast radius:
+
+1230
+01:08:37.814 --> 01:08:39.094
+Moves in progress.
+
+1231
+01:08:39.374 --> 01:08:40.377
+Mitigation:
+
+1232
+01:08:40.657 --> 01:08:44.731
+Fence on the old shard; reload on MOVED; version gauge per pod.
+
+1233
+01:08:45.011 --> 01:08:46.803
+Stale pod writes after a move.
+
+1234
+01:08:47.083 --> 01:08:48.278
+Detection signal:
+
+1235
+01:08:48.558 --> 01:08:50.329
+Orphan keys on the old shard.
+
+1236
+01:08:50.609 --> 01:08:51.825
+Blast radius:
+
+1237
+01:08:52.105 --> 01:08:53.214
+Lost writes.
+
+1238
+01:08:53.494 --> 01:08:54.497
+Mitigation:
+
+1239
+01:08:54.777 --> 01:08:59.129
+Fence every write script; sweeper re-runs until the old shard is empty.
+
+1240
+01:08:59.409 --> 01:09:00.817
+Autoscaler flapping.
+
+1241
+01:09:01.097 --> 01:09:02.291
+Detection signal:
+
+1242
+01:09:02.571 --> 01:09:04.171
+Replica count oscillates.
+
+1243
+01:09:04.451 --> 01:09:05.667
+Blast radius:
+
+1244
+01:09:05.947 --> 01:09:07.974
+Latency spikes, cache coldness.
+
+1245
+01:09:08.254 --> 01:09:09.257
+Mitigation:
+
+1246
+01:09:09.537 --> 01:09:13.803
+Stabilization windows; scale on concurrency, not raw CPU.
+
+1247
+01:09:14.083 --> 01:09:16.003
+Scale-in drops in-flight requests.
+
+1248
+01:09:16.283 --> 01:09:17.478
+Detection signal:
+
+1249
+01:09:17.758 --> 01:09:20.233
+5xx spikes when replicas decrease.
+
+1250
+01:09:20.513 --> 01:09:21.729
+Blast radius:
+
+1251
+01:09:22.009 --> 01:09:23.331
+Users mid-request.
+
+1252
+01:09:23.611 --> 01:09:24.614
+Mitigation:
+
+1253
+01:09:24.894 --> 01:09:29.182
+Graceful shutdown, preStop delay, readiness false before termination.
+
+1254
+01:09:30.532 --> 01:09:31.620
+Observability.
+
+1255
+01:09:31.900 --> 01:09:33.244
+Here is a quick table:
+
+1256
+01:09:33.524 --> 01:09:34.655
+Signal, and Why.
+
+1257
+01:09:34.935 --> 01:09:38.497
+Throughput per pod versus pod count (a live USL view):
+
+1258
+01:09:38.777 --> 01:09:41.273
+The earliest sign of σ or κ growth.
+
+1259
+01:09:41.553 --> 01:09:45.713
+Lock wait time, time in serialized sections: σ sources.
+
+1260
+01:09:45.993 --> 01:09:51.817
+Pod-to-pod message or invalidation rate: κ sources (should be O(N), not O(N²)).
+
+1261
+01:09:52.097 --> 01:09:55.532
+Connections per store versus budget (per service and total):
+
+1262
+01:09:55.812 --> 01:09:56.879
+The hidden ceiling.
+
+1263
+01:09:57.159 --> 01:10:01.745
+In-flight requests per pod (the HPA signal) and HPA decisions:
+
+1264
+01:10:02.025 --> 01:10:03.220
+Elasticity health.
+
+1265
+01:10:03.500 --> 01:10:05.484
+Consumer lag versus replicas:
+
+1266
+01:10:05.764 --> 01:10:07.919
+Whether scaling out helps a consumer.
+
+1267
+01:10:08.199 --> 01:10:11.719
+Per-shard ops per second, memory, CPU; carts per city:
+
+1268
+01:10:11.999 --> 01:10:14.025
+Z-axis balance and hot spots.
+
+1269
+01:10:15.375 --> 01:10:20.047
+cart.mergeoutcome, cart.shard.movedredirects, shard map version per pod:
+
+1270
+01:10:20.327 --> 01:10:22.802
+Correctness of externalized state and moves.
+
+1271
+01:10:23.082 --> 01:10:26.133
+Job lock acquisitions and skipped runs per job:
+
+1272
+01:10:26.413 --> 01:10:27.757
+Scale-safe jobs.
+
+1273
+01:10:29.107 --> 01:10:30.045
+Security.
+
+1274
+01:10:30.325 --> 01:10:32.331
+Signed identifiers for guest state.
+
+1275
+01:10:32.611 --> 01:10:40.333
+Guest cart ids are HMAC-signed and include the city, so clients can't read or modify other carts by guessing ids.
+
+1276
+01:10:40.613 --> 01:10:43.152
+Session cookies (if you use server sessions):
+
+1277
+01:10:43.432 --> 01:10:48.765
+Secure, HttpOnly, SameSite, rotated on login (session fixation).
+
+1278
+01:10:49.045 --> 01:10:51.477
+Spring Session supports id rotation.
+
+1279
+01:10:51.757 --> 01:11:02.467
+Shared stores are shared attack surface: a Redis holding every customer's cart needs ACLs per service, TLS, and no public exposure (Ch 06).
+
+1280
+01:11:02.747 --> 01:11:08.805
+Per-tenant or per-city partitioning limits blast radius for data exposure as well as outages.
+
+1281
+01:11:10.155 --> 01:11:15.297
+Autoscaling can amplify abuse: a bot flood scales you out and raises your bill.
+
+1282
+01:11:15.577 --> 01:11:20.825
+Rate limits at the edge (Ch 08) must act before the autoscaler does.
+
+1283
+01:11:22.175 --> 01:11:23.839
+Performance and tuning knobs.
+
+1284
+01:11:24.119 --> 01:11:25.463
+Here is a quick table:
+
+1285
+01:11:25.743 --> 01:11:29.241
+Knob, and Starting point, and Guidance. maxReplicas.
+
+1286
+01:11:29.521 --> 01:11:34.023
+Starting point: min(connection budget ÷ pool, N/2).
+
+1287
+01:11:34.303 --> 01:11:35.199
+Guidance:
+
+1288
+01:11:35.479 --> 01:11:37.505
+Recompute after each load test.
+
+1289
+01:11:37.785 --> 01:11:39.641
+HPA or KEDA target.
+
+1290
+01:11:39.921 --> 01:11:40.988
+Starting point:
+
+1291
+01:11:41.268 --> 01:11:45.257
+In-flight about Little's Law per pod at 60 % utilization.
+
+1292
+01:11:45.537 --> 01:11:46.433
+Guidance:
+
+1293
+01:11:46.713 --> 01:11:50.383
+Concurrency beats CPU for I or O-bound services.
+
+1294
+01:11:50.663 --> 01:11:53.009
+Scale-up or scale-down stabilization.
+
+1295
+01:11:53.289 --> 01:11:54.356
+Starting point:
+
+1296
+01:11:54.636 --> 01:11:57.132
+0 to 30 s up, 5 min down.
+
+1297
+01:11:57.412 --> 01:11:58.308
+Guidance:
+
+1298
+01:11:58.588 --> 01:12:00.508
+Avoid flapping and cold caches.
+
+1299
+01:12:00.788 --> 01:12:01.876
+Pool sizes.
+
+1300
+01:12:02.156 --> 01:12:03.223
+Starting point:
+
+1301
+01:12:03.503 --> 01:12:04.804
+Little's Law per pod.
+
+1302
+01:12:05.084 --> 01:12:05.980
+Guidance:
+
+1303
+01:12:06.260 --> 01:12:08.628
+Small for secondary stores (snapshots:
+
+1304
+01:12:08.908 --> 01:12:09.633
+2).
+
+1305
+01:12:09.913 --> 01:12:10.959
+Redis client.
+
+1306
+01:12:11.239 --> 01:12:12.305
+Starting point:
+
+1307
+01:12:12.585 --> 01:12:15.785
+One multiplexed Lettuce connection per shard per pod.
+
+1308
+01:12:16.065 --> 01:12:16.961
+Guidance:
+
+1309
+01:12:17.241 --> 01:12:18.777
+Avoids connection storms.
+
+1310
+01:12:19.057 --> 01:12:20.295
+Graceful shutdown.
+
+1311
+01:12:20.575 --> 01:12:21.641
+Starting point:
+
+1312
+01:12:21.921 --> 01:12:25.164
+20 to 30 s + preStop 5 to 10 s.
+
+1313
+01:12:25.444 --> 01:12:26.340
+Guidance:
+
+1314
+01:12:26.620 --> 01:12:29.073
+Longer for streams (Ch 03).
+
+1315
+01:12:30.423 --> 01:12:31.533
+Cart TTL.
+
+1316
+01:12:31.813 --> 01:12:32.879
+Starting point:
+
+1317
+01:12:33.159 --> 01:12:35.442
+7 days (guest), refreshed on write.
+
+1318
+01:12:35.722 --> 01:12:36.618
+Guidance:
+
+1319
+01:12:36.898 --> 01:12:37.943
+Bounds memory.
+
+1320
+01:12:38.223 --> 01:12:39.226
+Job lease.
+
+1321
+01:12:39.506 --> 01:12:43.794
+Starting point: p99 job duration; idempotent work.
+
+1322
+01:12:44.074 --> 01:12:44.970
+Guidance:
+
+1323
+01:12:45.250 --> 01:12:47.447
+Fencing where side effects are external.
+
+1324
+01:12:47.727 --> 01:12:49.093
+Shards per big city.
+
+1325
+01:12:49.373 --> 01:12:50.439
+Starting point:
+
+1326
+01:12:50.719 --> 01:12:55.925
+1 dedicated, split by zone above ~50 % of one shard's capacity.
+
+1327
+01:12:56.205 --> 01:12:57.101
+Guidance:
+
+1328
+01:12:57.381 --> 01:12:59.023
+Keep headroom for sale peaks.
+
+1329
+01:13:00.373 --> 01:13:01.099
+Cost.
+
+1330
+01:13:01.379 --> 01:13:06.115
+Horizontal scaling isn't free: past the USL peak you pay more for less.
+
+1331
+01:13:06.395 --> 01:13:10.064
+The cheapest capacity is removing a σ or κ source.
+
+1332
+01:13:10.344 --> 01:13:16.403
+Vertical scaling of stateful stores is often cheaper than sharding for the next 12 to 18 months.
+
+1333
+01:13:16.683 --> 01:13:17.685
+Price both.
+
+1334
+01:13:17.965 --> 01:13:24.323
+Z-axis partitions add fixed cost (a Redis deployment per big city, with replicas and monitoring).
+
+1335
+01:13:24.603 --> 01:13:26.032
+Pack small cities together.
+
+1336
+01:13:26.312 --> 01:13:34.461
+Autoscaling saves money only if scale-in works: graceful shutdown, no local state, and caches that tolerate cold starts.
+
+1337
+01:13:35.811 --> 01:13:42.318
+Per-pod overheads multiply: sidecars, agents, JVM heap baselines and connection pools.
+
+1338
+01:13:42.598 --> 01:13:47.675
+A few larger pods can be cheaper than many small ones when per-pod overhead dominates.
+
+1339
+01:13:49.025 --> 01:13:49.964
+Part 7.
+
+1340
+01:13:50.244 --> 01:13:51.951
+Anti-Patterns and Pitfalls.
+
+1341
+01:13:53.201 --> 01:13:53.841
+1.
+
+1342
+01:13:54.121 --> 01:13:55.273
+Just add pods.
+
+1343
+01:13:55.553 --> 01:13:56.363
+Symptom:
+
+1344
+01:13:56.643 --> 01:14:00.185
+Throughput falls as replicas rise (§1.1).
+
+1345
+01:14:00.465 --> 01:14:01.190
+Fix:
+
+1346
+01:14:01.470 --> 01:14:08.809
+Load test at several pod counts, fit the USL, remove the σ or κ sources, and cap maxReplicas.
+
+1347
+01:14:09.089 --> 01:14:09.793
+2.
+
+1348
+01:14:10.073 --> 01:14:11.907
+Global locks on the request path.
+
+1349
+01:14:13.257 --> 01:14:29.001
+Here is the Java code. before: every add-to-cart serializes on one Redis key across the fleet (σ). after: immutable, versioned config loaded at startup or refresh (Ch 01 snapshot pattern); no request-time lock.
+
+1350
+01:14:31.851 --> 01:14:32.598
+3.
+
+1351
+01:14:32.878 --> 01:14:34.307
+All-to-all broadcasts.
+
+1352
+01:14:34.587 --> 01:14:35.398
+Symptom:
+
+1353
+01:14:35.678 --> 01:14:40.883
+Message volume grows with N² and pods spend CPU on coordination (κ).
+
+1354
+01:14:41.163 --> 01:14:41.889
+Fix:
+
+1355
+01:14:42.169 --> 01:14:48.185
+Publish once to a log or topic that every pod reads (O(N)), or use an external shared cache.
+
+1356
+01:14:48.465 --> 01:14:49.169
+4.
+
+1357
+01:14:49.449 --> 01:14:52.947
+Sessions in pod memory, and sticky sessions to compensate.
+
+1358
+01:14:53.227 --> 01:14:54.038
+Symptom:
+
+1359
+01:14:54.318 --> 01:14:57.027
+Deploys log users out, and load is uneven.
+
+1360
+01:14:57.307 --> 01:14:58.033
+Fix:
+
+1361
+01:14:58.313 --> 01:14:59.486
+Stateless pods.
+
+1362
+01:14:59.766 --> 01:15:04.801
+Tokens for identity, Redis for session-like state, first-class storage for carts.
+
+1363
+01:15:05.081 --> 01:15:05.849
+5.
+
+1364
+01:15:06.129 --> 01:15:08.902
+Storing growing domain state inside the session.
+
+1365
+01:15:10.252 --> 01:15:20.513
+Here is the Java code. before: whole cart rewritten on every change; two tabs overwrite each other. after: per-line atomic update on a first-class key.
+
+1366
+01:15:23.363 --> 01:15:25.753
+6. @Scheduled jobs without a lock.
+
+1367
+01:15:26.033 --> 01:15:26.843
+Symptom:
+
+1368
+01:15:27.123 --> 01:15:29.897
+40 pods send 40 abandoned-cart reminders.
+
+1369
+01:15:30.177 --> 01:15:30.902
+Fix:
+
+1370
+01:15:31.182 --> 01:15:34.915
+A job lock with a lease and owner token, plus idempotent work.
+
+1371
+01:15:35.195 --> 01:15:35.942
+7.
+
+1372
+01:15:36.222 --> 01:15:39.443
+HPA maxReplicas without a connection budget.
+
+1373
+01:15:40.793 --> 01:15:42.265
+Here is the YAML code.
+
+1374
+01:15:45.115 --> 01:15:45.798
+8.
+
+1375
+01:15:46.078 --> 01:15:48.489
+Scaling consumers past the partition count.
+
+1376
+01:15:48.769 --> 01:15:49.579
+Symptom:
+
+1377
+01:15:49.859 --> 01:15:54.766
+48 consumer pods on a 24-partition topic, and half of them idle.
+
+1378
+01:15:55.046 --> 01:15:55.771
+Fix:
+
+1379
+01:15:56.051 --> 01:16:02.771
+Plan partitions for peak consumers (Ch 14), and scale on lag with a cap at the partition count.
+
+1380
+01:16:03.051 --> 01:16:03.798
+9.
+
+1381
+01:16:04.078 --> 01:16:06.019
+Moving partitions without fencing.
+
+1382
+01:16:06.299 --> 01:16:07.110
+Symptom:
+
+1383
+01:16:07.390 --> 01:16:16.350
+Writes from pods with a stale shard map land on the old shard and are orphaned (the L4 negative control loses 100 or 100).
+
+1384
+01:16:16.630 --> 01:16:17.355
+Fix:
+
+1385
+01:16:17.635 --> 01:16:23.054
+Fence the old location for the moving range, redirect with MOVED, and sweep until empty.
+
+1386
+01:16:24.404 --> 01:16:25.108
+10.
+
+1387
+01:16:25.388 --> 01:16:26.561
+Premature sharding.
+
+1388
+01:16:26.841 --> 01:16:27.652
+Symptom:
+
+1389
+01:16:27.932 --> 01:16:35.100
+A Z-axis design for 50 K users, with cross-shard queries everywhere and a team busy operating shards.
+
+1390
+01:16:35.380 --> 01:16:36.105
+Fix:
+
+1391
+01:16:36.385 --> 01:16:40.673
+Climb the journey (§2.12) only when measurements say so.
+
+1392
+01:16:40.953 --> 01:16:42.681
+Scale up the database first.
+
+1393
+01:16:44.031 --> 01:16:44.906
+Part 8.
+
+1394
+01:16:45.186 --> 01:16:46.530
+Interview Q and A.
+
+1395
+01:16:47.780 --> 01:16:48.612
+Beginner.
+
+1396
+01:16:48.892 --> 01:16:49.916
+Question 1.
+
+1397
+01:16:50.196 --> 01:16:55.273
+Vertical versus horizontal scaling: what's the difference, and when would you choose each?
+
+1398
+01:16:55.553 --> 01:16:56.919
+Thirty-second answer:
+
+1399
+01:16:57.199 --> 01:17:04.964
+Vertical means a bigger machine: no code change, but it has a ceiling, a single failure domain, and superlinear cost at the top.
+
+1400
+01:17:05.244 --> 01:17:15.633
+Horizontal means more machines: near-linear capacity and better fault isolation, but it needs stateless services or partitioned state and brings coordination costs.
+
+1401
+01:17:15.913 --> 01:17:23.060
+Scale stateless tiers horizontally from day one, and scale databases vertically until measurements say you must partition.
+
+1402
+01:17:24.410 --> 01:17:25.413
+Question 2.
+
+1403
+01:17:25.693 --> 01:17:29.063
+What does 'stateless service' mean, and why does it matter for scaling?
+
+1404
+01:17:29.343 --> 01:17:30.709
+Thirty-second answer:
+
+1405
+01:17:30.989 --> 01:17:42.743
+Any instance can serve any request, and losing an instance loses only in-flight work, because state lives in stores designed for it (a database, Redis, object storage, tokens).
+
+1406
+01:17:43.023 --> 01:17:49.146
+That enables load balancing without stickiness, autoscaling, rolling deploys and failure recovery.
+
+1407
+01:17:50.496 --> 01:17:51.541
+Question 3.
+
+1408
+01:17:51.821 --> 01:17:55.427
+Where should user sessions live in a horizontally scaled system?
+
+1409
+01:17:55.707 --> 01:17:57.072
+Thirty-second answer:
+
+1410
+01:17:57.352 --> 01:17:58.696
+Not in pod memory.
+
+1411
+01:17:58.976 --> 01:18:09.109
+Use signed tokens (JWT) for identity in APIs, and an external session store (Redis via Spring Session) when you need server-side session data.
+
+1412
+01:18:09.389 --> 01:18:10.776
+Avoid sticky sessions.
+
+1413
+01:18:12.126 --> 01:18:13.193
+Question 4.
+
+1414
+01:18:13.473 --> 01:18:14.817
+What is the scale cube?
+
+1415
+01:18:15.097 --> 01:18:16.462
+Thirty-second answer:
+
+1416
+01:18:16.742 --> 01:18:17.979
+Three ways to scale:
+
+1417
+01:18:18.259 --> 01:18:31.785
+X-axis (clone stateless instances), Y-axis (split by function into services), and Z-axis (split data by a key such as customer, city or tenant, with each partition served by the same code).
+
+1418
+01:18:32.065 --> 01:18:34.070
+Real platforms combine all three.
+
+1419
+01:18:35.420 --> 01:18:36.423
+Intermediate.
+
+1420
+01:18:36.703 --> 01:18:37.812
+Question 5.
+
+1421
+01:18:38.092 --> 01:18:42.529
+Walk me through scaling a grocery app from 1 K to 1 M daily users.
+
+1422
+01:18:42.809 --> 01:18:44.175
+Thirty-second answer:
+
+1423
+01:18:44.455 --> 01:19:05.980
+One box, then a separate managed database, then stateless app instances behind a load balancer with sessions and uploads externalized, then caching and a CDN, then queues for async work and read replicas, then splitting hot capabilities (search, tracking, payments), then multi-AZ with pre-scaling and city partitioning for hot write paths.
+
+1424
+01:19:06.260 --> 01:19:08.393
+Each step is triggered by a measured limit.
+
+1425
+01:19:09.743 --> 01:19:10.853
+Question 6.
+
+1426
+01:19:11.133 --> 01:19:15.293
+How do you make scheduled jobs safe when a service runs on 40 pods?
+
+1427
+01:19:15.573 --> 01:19:16.938
+Thirty-second answer:
+
+1428
+01:19:17.218 --> 01:19:31.981
+Ensure one execution per interval with a job lock (ShedLock, Redis SET NX PX with an owner token, or a DB lock) or leader election, and make the work idempotent, because leases can expire while a pod is paused.
+
+1429
+01:19:32.261 --> 01:19:39.151
+For large jobs, partition the work so every pod takes a disjoint slice (SKIP LOCKED, Kafka partitions).
+
+1430
+01:19:40.501 --> 01:19:41.589
+Question 7.
+
+1431
+01:19:41.869 --> 01:19:44.429
+What hidden limits appear when you scale out a service?
+
+1432
+01:19:44.709 --> 01:19:46.075
+Thirty-second answer:
+
+1433
+01:19:46.355 --> 01:20:02.440
+Database connections (pods times pool), Redis connections, Kafka consumers per group ( at most partitions), third-party API rate limits, NAT ports, file descriptors, LB connection limits, license limits, and shared locks or hot keys.
+
+1434
+01:20:02.720 --> 01:20:07.221
+Adding pods multiplies every per-pod resource that points at something shared.
+
+1435
+01:20:08.571 --> 01:20:09.595
+Question 8.
+
+1436
+01:20:09.875 --> 01:20:13.907
+Why is storing a cart in the HTTP session a problem at scale?
+
+1437
+01:20:14.187 --> 01:20:15.553
+Thirty-second answer:
+
+1438
+01:20:15.833 --> 01:20:24.025
+The whole session is rewritten on each change, so concurrent updates from two tabs or devices overwrite each other (last write wins).
+
+1439
+01:20:24.305 --> 01:20:34.054
+It can't be merged atomically on login, its lifetime is tied to the session, it can't be queried (abandoned-cart jobs), and it can't be partitioned meaningfully.
+
+1440
+01:20:35.404 --> 01:20:36.471
+Question 9.
+
+1441
+01:20:36.751 --> 01:20:38.649
+What should an autoscaler scale on?
+
+1442
+01:20:38.929 --> 01:20:40.295
+Thirty-second answer:
+
+1443
+01:20:40.575 --> 01:20:54.847
+A signal that tracks saturation for that workload: in-flight requests or concurrency for request or response services, queue depth or lag for consumers, CPU only when CPU-bound, and schedules for known events.
+
+1444
+01:20:55.127 --> 01:20:59.201
+Cap with maxReplicas from budgets, and use stabilization windows.
+
+1445
+01:21:00.551 --> 01:21:01.319
+Senior.
+
+1446
+01:21:01.599 --> 01:21:02.645
+Question 10.
+
+1447
+01:21:02.925 --> 01:21:05.186
+We doubled the pods and throughput went down.
+
+1448
+01:21:05.466 --> 01:21:06.703
+Explain and fix it.
+
+1449
+01:21:06.983 --> 01:21:08.349
+Thirty-second answer:
+
+1450
+01:21:08.629 --> 01:21:12.533
+Retrograde scaling: shared costs grew faster than capacity.
+
+1451
+01:21:12.813 --> 01:21:17.442
+Contention (σ): a global lock, a hot key, one database primary.
+
+1452
+01:21:17.722 --> 01:21:23.418
+Coherency (κ): all-to-all broadcasts, cluster membership chatter, cross-shard coordination.
+
+1453
+01:21:23.698 --> 01:21:25.277
+Plus connection overruns.
+
+1454
+01:21:25.557 --> 01:21:26.986
+The USL models it:
+
+1455
+01:21:27.266 --> 01:21:36.311
+C(N) = N / (1 + σ(Nminus 1) + κN(Nminus 1)) peaks at √((1minus σ)/κ).
+
+1456
+01:21:36.591 --> 01:21:38.895
+Fix the sources, then cap replicas.
+
+1457
+01:21:40.245 --> 01:21:41.376
+Question 11.
+
+1458
+01:21:41.656 --> 01:21:45.496
+Explain Amdahl's law versus the Universal Scalability Law.
+
+1459
+01:21:45.776 --> 01:21:47.141
+Thirty-second answer:
+
+1460
+01:21:47.421 --> 01:21:52.520
+Amdahl: a serial fraction s caps speed-up at 1 per second, and throughput plateaus.
+
+1461
+01:21:52.800 --> 01:22:00.373
+The USL adds a coherency term κ for pairwise coordination, which makes throughput peak and then fall as N grows.
+
+1462
+01:22:00.653 --> 01:22:02.317
+Amdahl explains plateaus.
+
+1463
+01:22:02.597 --> 01:22:06.416
+The USL explains why adding capacity can make things worse.
+
+1464
+01:22:07.766 --> 01:22:08.854
+Question 12.
+
+1465
+01:22:09.134 --> 01:22:13.507
+Design exactly-once guest-to-customer cart merge across many pods.
+
+1466
+01:22:13.787 --> 01:22:15.153
+Thirty-second answer:
+
+1467
+01:22:15.433 --> 01:22:30.323
+Store both carts under the same hash tag (same city slot) in Redis and run one Lua script that checks a merge marker, merges lines with limits (capped quantities, max lines), deletes the guest cart, and sets the marker, all atomically.
+
+1468
+01:22:30.603 --> 01:22:34.102
+Retries on any pod see the marker and return the current cart.
+
+1469
+01:22:35.452 --> 01:22:36.732
+Question 13.
+
+1470
+01:22:37.012 --> 01:22:40.169
+How do you move data between partitions without downtime?
+
+1471
+01:22:40.449 --> 01:22:41.815
+Thirty-second answer:
+
+1472
+01:22:42.095 --> 01:22:43.503
+Version the routing map.
+
+1473
+01:22:43.783 --> 01:22:47.025
+Mark the range as moving (new primary, old fallback).
+
+1474
+01:22:47.305 --> 01:22:50.911
+Fence the old location so stale writers get redirected.
+
+1475
+01:22:51.191 --> 01:22:59.532
+Move lazily on access (atomic export from old, merge-if-absent import on new), sweep the rest, then publish the final map.
+
+1476
+01:23:00.882 --> 01:23:02.077
+Question 14.
+
+1477
+01:23:02.357 --> 01:23:04.725
+How do you prove a service is really stateless?
+
+1478
+01:23:05.005 --> 01:23:06.370
+Thirty-second answer:
+
+1479
+01:23:06.650 --> 01:23:23.674
+Review the hidden-state checklist, then test it: run many replicas behind round-robin, kill random pods during a load test (and during rolling deploys and scale-in), and assert there are no lost sessions, carts or duplicate jobs, and no errors beyond in-flight requests.
+
+1480
+01:23:23.954 --> 01:23:28.946
+Also run two instances in integration tests sharing only external stores.
+
+1481
+01:23:30.296 --> 01:23:31.192
+Architect.
+
+1482
+01:23:31.472 --> 01:23:32.667
+Question 15.
+
+1483
+01:23:32.947 --> 01:23:37.128
+How do you choose a partition (Z-axis) key for a grocery platform?
+
+1484
+01:23:37.408 --> 01:23:38.773
+Thirty-second answer:
+
+1485
+01:23:39.053 --> 01:23:52.664
+Choose the key that keeps most operations inside one partition and spreads load: city (or zone within big cities) for carts, inventory, orders-in-flight, riders and stores, because they rarely cross cities.
+
+1486
+01:23:52.944 --> 01:24:00.069
+Check skew (Bengaluru versus Mysuru), and give big cities dedicated partitions while packing small ones together.
+
+1487
+01:24:00.349 --> 01:24:03.400
+Customer-level views across cities go to read models.
+
+1488
+01:24:04.750 --> 01:24:05.945
+Question 16.
+
+1489
+01:24:06.225 --> 01:24:07.654
+When would you not scale out?
+
+1490
+01:24:07.934 --> 01:24:09.299
+Thirty-second answer:
+
+1491
+01:24:09.579 --> 01:24:28.993
+When a bigger instance solves the next 12 to 18 months more cheaply; when the bottleneck is shared (adding pods adds contention); when the problem is a slow query or missing index; when the load is a known spike better handled by pre-scaling or shedding; and when operational maturity isn't ready for more moving parts.
+
+1492
+01:24:30.343 --> 01:24:31.687
+Question 17.
+
+1493
+01:24:31.967 --> 01:24:35.679
+How do you set maxReplicas for every service across a platform?
+
+1494
+01:24:35.959 --> 01:24:37.324
+Thirty-second answer:
+
+1495
+01:24:37.604 --> 01:24:53.753
+Per service, take the minimum of: the connection budget of each shared store divided by pool size (summed across services sharing it), half the USL-fitted peak from the latest load test, consumer partition counts for consumers, and third-party rate limits.
+
+1496
+01:24:54.033 --> 01:25:00.753
+Record it in the Helm values, check it in CI (including sums across services), and verify it at startup.
+
+1497
+01:25:02.103 --> 01:25:03.277
+Question 18.
+
+1498
+01:25:03.557 --> 01:25:08.122
+Cell-based architecture: what is it and when would the grocery platform need it?
+
+1499
+01:25:08.402 --> 01:25:09.767
+Thirty-second answer:
+
+1500
+01:25:10.047 --> 01:25:20.266
+Split the whole stack (services + data) into independent cells, each serving a subset of users (for example a group of cities), with a thin routing layer in front.
+
+1501
+01:25:20.546 --> 01:25:24.898
+A bad deploy, a noisy tenant or a data corruption affects one cell.
+
+1502
+01:25:25.178 --> 01:25:33.157
+Consider it when blast radius, regional scale or compliance demand it, typically at millions of users across many regions.
+
+1503
+01:25:34.507 --> 01:25:35.744
+Question 19.
+
+1504
+01:25:36.024 --> 01:25:39.437
+How do organizational structure and scalability interact?
+
+1505
+01:25:39.717 --> 01:25:41.083
+Thirty-second answer:
+
+1506
+01:25:41.363 --> 01:25:44.392
+Conway's law: systems mirror team communication.
+
+1507
+01:25:44.672 --> 01:25:51.072
+A single deployable shared by 8 teams limits delivery throughput, which is an organizational scaling limit.
+
+1508
+01:25:51.352 --> 01:25:56.493
+The Y-axis split exists as much for team independence as for runtime scaling.
+
+1509
+01:25:56.773 --> 01:26:01.893
+Conversely, splitting services without team boundaries creates distributed monoliths.
+
+1510
+01:26:03.243 --> 01:26:04.353
+Question 20.
+
+1511
+01:26:04.633 --> 01:26:08.601
+Present a 2-year scalability roadmap for the platform to leadership.
+
+1512
+01:26:08.881 --> 01:26:10.246
+Thirty-second answer:
+
+1513
+01:26:10.526 --> 01:26:14.003
+Start from the forecast (10 times growth) and measured limits:
+
+1514
+01:26:14.283 --> 01:26:24.737
+USL fits per tier-1 service, database runway (months until the primary's limit versus migration lead time, Ch 02), and third-party limits.
+
+1515
+01:26:25.017 --> 01:26:41.998
+Sequence the work by runway minus lead time: remove σ or κ hot spots now, vertical-scale databases, add caches and read models, partition carts and inventory by city next, orders by region later, cells if regional blast radius demands it.
+
+1516
+01:26:42.278 --> 01:26:43.921
+Give cost and risk per step.
+
+1517
+01:26:45.271 --> 01:26:46.167
+Part 9.
+
+1518
+01:26:46.447 --> 01:26:47.855
+Summary and Practice.
+
+1519
+01:26:49.105 --> 01:26:50.193
+Key takeaways.
+
+1520
+01:26:50.473 --> 01:26:52.350
+Scalability is designed in.
+
+1521
+01:26:52.630 --> 01:26:55.766
+A system scales only as far as its shared parts allow.
+
+1522
+01:26:56.046 --> 01:27:00.889
+Vertical first for stateful stores, horizontal from day one for stateless tiers.
+
+1523
+01:27:01.169 --> 01:27:04.262
+Amdahl: serial work caps speed-up at 1 per second.
+
+1524
+01:27:04.542 --> 01:27:07.209
+USL: coherency makes throughput peak and fall.
+
+1525
+01:27:07.489 --> 01:27:11.009
+Fit σ and κ from load tests and set limits from N.
+
+1526
+01:27:11.289 --> 01:27:17.283
+Stateless services: no local sessions, files, unmanaged caches or unguarded jobs.
+
+1527
+01:27:17.563 --> 01:27:20.294
+Test statelessness by killing pods under load.
+
+1528
+01:27:21.644 --> 01:27:29.431
+Identity in tokens, sessions in Redis if needed, domain state (carts) as first-class data with atomic operations.
+
+1529
+01:27:29.711 --> 01:27:34.063
+Scheduled jobs: lease lock with an owner token, plus idempotent work.
+
+1530
+01:27:34.343 --> 01:27:44.049
+Connection budgets are the hidden ceiling. maxReplicas = min(budget ÷ pool, N/2), enforced in CI and at startup.
+
+1531
+01:27:44.329 --> 01:27:45.353
+Scale cube:
+
+1532
+01:27:45.633 --> 01:27:49.281
+X clones, Y splits by function, Z partitions data.
+
+1533
+01:27:49.561 --> 01:27:51.204
+Real platforms combine them.
+
+1534
+01:27:51.484 --> 01:27:58.439
+Partition moves need fencing: version the map, fence the old location, move lazily, sweep, then finalize.
+
+1535
+01:27:59.789 --> 01:28:04.013
+Climb the 1, then 1 M journey on measured triggers, and don't skip ahead.
+
+1536
+01:28:05.363 --> 01:28:06.685
+Decision cheat sheet.
+
+1537
+01:28:06.965 --> 01:28:08.309
+Here is a quick table:
+
+1538
+01:28:08.589 --> 01:28:10.040
+Situation, and Choose.
+
+1539
+01:28:10.320 --> 01:28:12.517
+Stateless tier needs more capacity:
+
+1540
+01:28:12.797 --> 01:28:17.363
+X-axis clones + concurrency-based autoscaling, capped by budgets.
+
+1541
+01:28:17.643 --> 01:28:19.499
+Throughput stops rising with pods:
+
+1542
+01:28:19.779 --> 01:28:24.451
+USL fit, then remove σ (locks, hot keys) / κ (broadcasts).
+
+1543
+01:28:24.731 --> 01:28:26.416
+Stateful store at its limit:
+
+1544
+01:28:26.696 --> 01:28:30.195
+Scale up first; then partition (Z) with a move protocol.
+
+1545
+01:28:30.475 --> 01:28:31.712
+Session-like state:
+
+1546
+01:28:31.992 --> 01:28:36.536
+Tokens for identity; Redis for sessions; first-class storage for carts.
+
+1547
+01:28:36.816 --> 01:28:38.715
+Periodic job on many pods:
+
+1548
+01:28:38.995 --> 01:28:42.771
+Lease lock + idempotency (or a Kubernetes CronJob).
+
+1549
+01:28:43.051 --> 01:28:44.651
+Big city dominates load:
+
+1550
+01:28:44.931 --> 01:28:47.896
+Dedicated partition; split by zone when needed.
+
+1551
+01:28:48.176 --> 01:28:49.520
+Team-level bottleneck:
+
+1552
+01:28:49.800 --> 01:28:52.232
+Y-axis split along bounded contexts.
+
+1553
+01:28:52.512 --> 01:28:54.155
+Regional blast radius:
+
+1554
+01:28:54.435 --> 01:28:56.056
+Cells (Ch 34).
+
+1555
+01:28:57.406 --> 01:28:58.537
+Exercises.
+
+1556
+01:28:58.817 --> 01:29:00.161
+Here is a quick table:
+
+1557
+01:29:00.441 --> 01:29:02.297
+Band, and Exercise, and Hint.
+
+1558
+01:29:02.577 --> 01:29:03.409
+B1.
+
+1559
+01:29:03.689 --> 01:29:04.755
+Exercise:
+
+1560
+01:29:05.035 --> 01:29:09.409
+Run L1 with σ = 0.1 and κ = 0.
+
+1561
+01:29:09.689 --> 01:29:10.798
+Where's the ceiling?
+
+1562
+01:29:11.078 --> 01:29:11.761
+Hint:
+
+1563
+01:29:12.041 --> 01:29:13.107
+1 or σ.
+
+1564
+01:29:13.387 --> 01:29:14.219
+B1.
+
+1565
+01:29:14.499 --> 01:29:15.566
+Exercise:
+
+1566
+01:29:15.846 --> 01:29:18.683
+List every piece of hidden state in a service you know.
+
+1567
+01:29:18.963 --> 01:29:21.289
+Hint: §2.5 checklist.
+
+1568
+01:29:21.569 --> 01:29:22.443
+B2.
+
+1569
+01:29:22.723 --> 01:29:23.790
+Exercise:
+
+1570
+01:29:24.070 --> 01:29:30.619
+Load test a service at 1, 2, 4 and 8 instances and fit the USL with L1's fitUsl.
+
+1571
+01:29:30.899 --> 01:29:31.582
+Hint:
+
+1572
+01:29:31.862 --> 01:29:33.803
+Keep the workload mix identical.
+
+1573
+01:29:34.083 --> 01:29:34.958
+B2.
+
+1574
+01:29:35.238 --> 01:29:36.305
+Exercise:
+
+1575
+01:29:36.585 --> 01:29:41.278
+Add a ShedLock-based variant of the reminder job and compare with the Redis lock.
+
+1576
+01:29:41.558 --> 01:29:42.241
+Hint:
+
+1577
+01:29:42.521 --> 01:29:44.398
+JDBC lock provider.
+
+1578
+01:29:44.678 --> 01:29:45.553
+B3.
+
+1579
+01:29:45.833 --> 01:29:46.899
+Exercise:
+
+1580
+01:29:47.179 --> 01:29:51.147
+Extend the L4 harness: a pod removes a line during a move.
+
+1581
+01:29:51.427 --> 01:29:53.859
+Reproduce the resurrected-line anomaly.
+
+1582
+01:29:54.139 --> 01:29:54.822
+Hint:
+
+1583
+01:29:55.102 --> 01:29:57.747
+Interleave remove between export and import.
+
+1584
+01:29:58.027 --> 01:29:58.902
+B3.
+
+1585
+01:29:59.182 --> 01:30:00.249
+Exercise:
+
+1586
+01:30:00.529 --> 01:30:07.419
+Write a CI check that sums maxReplicas times pool across all Helm charts pointing at one database.
+
+1587
+01:30:07.699 --> 01:30:08.382
+Hint:
+
+1588
+01:30:08.662 --> 01:30:10.070
+Parse values files.
+
+1589
+01:30:11.420 --> 01:30:12.295
+B4.
+
+1590
+01:30:12.575 --> 01:30:13.641
+Exercise:
+
+1591
+01:30:13.921 --> 01:30:20.172
+Design splitting Bengaluru into zones (blr-south, blr-north) with the same move protocol.
+
+1592
+01:30:20.452 --> 01:30:21.135
+Hint:
+
+1593
+01:30:21.415 --> 01:30:24.273
+Zone from pincode; guest ids carry the zone.
+
+1594
+01:30:24.553 --> 01:30:25.428
+B4.
+
+1595
+01:30:25.708 --> 01:30:26.775
+Exercise:
+
+1596
+01:30:27.055 --> 01:30:31.513
+Write the 2-year scalability roadmap for the platform with triggers and runways.
+
+1597
+01:30:31.793 --> 01:30:32.476
+Hint:
+
+1598
+01:30:32.756 --> 01:30:35.615
+Ch 02 runway versus lead time.
+
+1599
+01:30:36.965 --> 01:30:37.967
+Further reading.
+
+1600
+01:30:38.247 --> 01:30:39.186
+Neil J.
+
+1601
+01:30:39.466 --> 01:30:43.519
+Gunther, Guerrilla Capacity Planning (the Universal Scalability Law).
+
+1602
+01:30:43.799 --> 01:30:52.034
+Gene Amdahl, Validity of the single processor approach to achieving large scale computing capabilities (1967).
+
+1603
+01:30:52.314 --> 01:30:53.231
+Martin L.
+
+1604
+01:30:53.511 --> 01:30:54.898
+Abbott and Michael T.
+
+1605
+01:30:55.178 --> 01:30:58.677
+Fisher, The Art of Scalability (the AKF scale cube).
+
+1606
+01:30:58.957 --> 01:31:02.029
+Adam Wiggins, The Twelve-Factor App (12factor.net).
+
+1607
+01:31:02.309 --> 01:31:06.511
+Martin Kleppmann, Designing Data-Intensive Applications: ch.
+
+1608
+01:31:06.791 --> 01:31:08.647
+1 (scalability) and ch.
+
+1609
+01:31:08.927 --> 01:31:10.890
+6 (partitioning, rebalancing).
+
+1610
+01:31:12.240 --> 01:31:18.064
+Spring Session reference documentation; Kubernetes HPA and KEDA documentation.
+
+1611
+01:31:19.414 --> 01:31:20.651
+Related chapters.
+
+1612
+01:31:20.931 --> 01:31:37.785
+02, Estimation, 05, Relational Databases, 07, Caching, 08, Load Balancing, 11, Partitioning and Sharding, 16, Microservices, 20, Idempotency, IDs and Locks, 34, Modern Architecture Styles.
+
+1613
+01:31:39.135 --> 01:31:40.735
+That's the end of this chapter.
+
+1614
+01:31:41.015 --> 01:31:47.052
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1615
+01:31:47.332 --> 01:31:48.783
+See you in the next chapter.
+

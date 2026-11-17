@@ -1,0 +1,6098 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.715
+Networking Essentials.
+
+2
+00:00:01.995 --> 00:00:06.305
+Chapter 03, from the Foundations part of the System Design Playbook.
+
+3
+00:00:08.055 --> 00:00:09.015
+At a glance:
+
+4
+00:00:09.295 --> 00:00:10.468
+Chapter at a glance.
+
+5
+00:00:10.748 --> 00:00:11.751
+Reader bands:
+
+6
+00:00:12.031 --> 00:00:14.335
+B1, then B4, Prerequisites:
+
+7
+00:00:14.615 --> 00:00:18.028
+Ch 01, Ch 02, What you will build:
+
+8
+00:00:18.308 --> 00:00:32.900
+Live order-tracking updates, taken from polling versus a raw SSE stream (L1) to a multi-pod SSE service with heartbeats, resume-after-disconnect, Redis fan-out and graceful drain (L4), Reading time:
+
+9
+00:00:33.180 --> 00:00:34.652
+90 min + code.
+
+10
+00:00:36.002 --> 00:00:36.855
+Part 1.
+
+11
+00:00:37.135 --> 00:00:39.055
+Introduction and Why It Matters.
+
+12
+00:00:40.305 --> 00:00:44.060
+A story: the tracking screen that went quiet after 60 seconds.
+
+13
+00:00:44.340 --> 00:00:46.665
+The grocery app launched live order tracking:
+
+14
+00:00:46.945 --> 00:00:50.551
+Packed, then Rider assigned, then Out for delivery, then Arriving.
+
+15
+00:00:50.831 --> 00:00:52.985
+It worked perfectly on office Wi-Fi.
+
+16
+00:00:53.265 --> 00:00:56.188
+In production, a pattern emerged in support tickets:
+
+17
+00:00:56.468 --> 00:00:57.940
+The app stopped updating.
+
+18
+00:00:58.220 --> 00:01:01.121
+I reopened it and my order was already delivered.
+
+19
+00:01:01.401 --> 00:01:03.833
+The team spent a week on the application code.
+
+20
+00:01:04.113 --> 00:01:05.116
+It was fine.
+
+21
+00:01:05.396 --> 00:01:08.660
+The problem was the network path between the phone and the server:
+
+22
+00:01:08.940 --> 00:01:12.417
+The cloud load balancer had a 60-second idle timeout.
+
+23
+00:01:12.697 --> 00:01:21.423
+Between Rider assigned and Out for delivery there are often 5 to 10 minutes with no data, so the load balancer silently closed the connection.
+
+24
+00:01:22.773 --> 00:01:32.223
+The mobile carrier's NAT (carrier-grade NAT on Indian 4G networks) dropped idle TCP mappings even sooner on some networks.
+
+25
+00:01:32.503 --> 00:01:35.959
+The app's WebSocket client didn't notice the connection was dead.
+
+26
+00:01:36.239 --> 00:01:40.037
+TCP doesn't tell you a peer vanished unless you send something.
+
+27
+00:01:40.317 --> 00:01:48.338
+When a rider's phone switched from Wi-Fi to 4G, the client's IP address changed, and every TCP connection it had was gone.
+
+28
+00:01:48.618 --> 00:01:59.583
+The fix was about 40 lines: a heartbeat every 15 seconds, a reconnect with Last-Event-ID so missed updates are replayed, and aligning timeouts along the whole path.
+
+29
+00:02:00.933 --> 00:02:01.616
+Quote:
+
+30
+00:02:01.896 --> 00:02:03.560
+The thesis of this chapter.
+
+31
+00:02:03.840 --> 00:02:08.384
+Every request crosses a chain of networks, proxies and timeouts you don't own.
+
+32
+00:02:08.664 --> 00:02:18.264
+Good system design treats the network as unreliable, stateful and full of middleboxes, and makes every long-lived interaction survive a dropped connection.
+
+33
+00:02:19.614 --> 00:02:21.918
+Where this lives in the grocery platform.
+
+34
+00:02:22.198 --> 00:02:23.542
+Here is a quick table:
+
+35
+00:02:23.822 --> 00:02:26.019
+Interaction, and Networking concern.
+
+36
+00:02:26.299 --> 00:02:27.942
+App, then api-gateway:
+
+37
+00:02:28.222 --> 00:02:36.265
+TLS 1.3, HTTP or 2 or HTTP or 3, CDN edge, mobile network variability.
+
+38
+00:02:36.545 --> 00:02:37.825
+Live order tracking:
+
+39
+00:02:38.105 --> 00:02:42.841
+Long-lived connections, idle timeouts, NAT, reconnects (this chapter's code).
+
+40
+00:02:43.121 --> 00:02:44.849
+Rider app location pings:
+
+41
+00:02:45.129 --> 00:02:48.883
+Connection migration on network switch (QUIC), battery, batching.
+
+42
+00:02:49.163 --> 00:02:50.571
+Service, then service:
+
+43
+00:02:50.851 --> 00:02:57.891
+Keep-alive, connection pools, mTLS, DNS-based discovery, timeouts. payment-service, then Razorpay:
+
+44
+00:02:58.171 --> 00:03:03.035
+Outbound TLS, egress NAT, IP allow-listing, DNS TTLs.
+
+45
+00:03:03.315 --> 00:03:05.363
+Kafka, PostgreSQL, Redis:
+
+46
+00:03:05.643 --> 00:03:09.142
+Long-lived TCP, private subnets, security groups.
+
+47
+00:03:09.422 --> 00:03:10.830
+Webhooks from Razorpay:
+
+48
+00:03:11.110 --> 00:03:14.523
+Public ingress, signature verification, firewall rules.
+
+49
+00:03:15.873 --> 00:03:17.196
+Learning objectives.
+
+50
+00:03:17.476 --> 00:03:18.820
+Here is a quick table:
+
+51
+00:03:19.100 --> 00:03:21.297
+Band, and After this chapter you can....
+
+52
+00:03:21.577 --> 00:03:22.409
+B1:
+
+53
+00:03:22.689 --> 00:03:31.265
+Explain the layers, TCP versus UDP, what DNS and TLS do, and polling versus SSE versus WebSockets.
+
+54
+00:03:31.545 --> 00:03:32.420
+B2:
+
+55
+00:03:32.700 --> 00:03:41.980
+Reason about handshake costs, keep-alive and pooling, HTTP or 1.1 versus 2 versus 3, and choose a real-time transport.
+
+56
+00:03:42.260 --> 00:03:43.156
+B3:
+
+57
+00:03:43.436 --> 00:03:51.863
+Diagnose idle timeouts, NAT and port exhaustion, DNS caching, TLS failures, and design reconnect-safe streams.
+
+58
+00:03:52.143 --> 00:03:53.039
+B4:
+
+59
+00:03:53.319 --> 00:04:03.708
+Design network topology (VPC, subnets, egress, zero trust), set org-wide timeout and TLS policy, and choose transports across a platform.
+
+60
+00:04:05.058 --> 00:04:05.933
+Part 2.
+
+61
+00:04:06.213 --> 00:04:08.090
+Core Concepts, Beginner to Deep.
+
+62
+00:04:09.340 --> 00:04:12.049
+Intuition: sending a parcel across India.
+
+63
+00:04:12.329 --> 00:04:17.449
+Sending an HTTP request is like sending a parcel from Bengaluru to Delhi:
+
+64
+00:04:17.729 --> 00:04:28.247
+The address (DNS) turns Mehta Sweets, Chandni Chowk into a precise PIN and street, just as DNS turns api.grocery.in into an IP address.
+
+65
+00:04:28.527 --> 00:04:35.524
+The courier's tracking and signatures (TCP) make sure every box arrives, in order, and is re-sent if lost.
+
+66
+00:04:35.804 --> 00:04:41.948
+The sealed, tamper-proof box (TLS) means nobody on the way can read or change the contents.
+
+67
+00:04:42.228 --> 00:04:47.433
+The language of the letter inside (HTTP) is what the recipient actually reads.
+
+68
+00:04:48.783 --> 00:04:58.469
+Checkpoints and warehouses on the way (proxies, load balancers, NAT) each have their own rules, such as we throw away parcels that sit here too long.
+
+69
+00:04:58.749 --> 00:05:02.098
+Most production networking bugs happen at those checkpoints.
+
+70
+00:05:03.448 --> 00:05:04.344
+The layers:
+
+71
+00:05:04.624 --> 00:05:07.099
+OSI versus TCP or IP.
+
+72
+00:05:07.379 --> 00:05:08.723
+Here is a quick table:
+
+73
+00:05:09.003 --> 00:05:15.339
+OSI layer, and TCP or IP layer, and Examples, and What a backend engineer controls.
+
+74
+00:05:15.619 --> 00:05:16.963
+7 Application.
+
+75
+00:05:17.243 --> 00:05:19.120
+TCP or IP layer:
+
+76
+00:05:19.400 --> 00:05:20.445
+Application.
+
+77
+00:05:20.725 --> 00:05:21.685
+Examples:
+
+78
+00:05:21.965 --> 00:05:26.275
+HTTP, gRPC, WebSocket, DNS, Kafka protocol.
+
+79
+00:05:26.555 --> 00:05:28.432
+What a backend engineer controls:
+
+80
+00:05:28.712 --> 00:05:29.885
+Almost everything:
+
+81
+00:05:30.165 --> 00:05:32.149
+APIs, timeouts, retries.
+
+82
+00:05:32.429 --> 00:05:33.752
+6 Presentation.
+
+83
+00:05:34.032 --> 00:05:35.909
+TCP or IP layer:
+
+84
+00:05:36.189 --> 00:05:37.235
+(Application).
+
+85
+00:05:37.515 --> 00:05:38.475
+Examples:
+
+86
+00:05:38.755 --> 00:05:41.869
+TLS, encoding (JSON, Protobuf), compression.
+
+87
+00:05:42.149 --> 00:05:44.027
+What a backend engineer controls:
+
+88
+00:05:44.307 --> 00:05:46.504
+TLS config, serialization.
+
+89
+00:05:46.784 --> 00:05:47.808
+5 Session.
+
+90
+00:05:48.088 --> 00:05:49.965
+TCP or IP layer:
+
+91
+00:05:50.245 --> 00:05:51.291
+(Application).
+
+92
+00:05:51.571 --> 00:05:52.531
+Examples:
+
+93
+00:05:52.811 --> 00:05:54.688
+Connection or session semantics.
+
+94
+00:05:54.968 --> 00:05:56.845
+What a backend engineer controls:
+
+95
+00:05:57.125 --> 00:05:59.259
+Keep-alive, reconnection logic.
+
+96
+00:05:59.539 --> 00:06:00.691
+4 Transport.
+
+97
+00:06:00.971 --> 00:06:02.848
+TCP or IP layer:
+
+98
+00:06:03.128 --> 00:06:04.067
+Transport.
+
+99
+00:06:04.347 --> 00:06:05.307
+Examples:
+
+100
+00:06:05.587 --> 00:06:08.467
+TCP, UDP, QUIC (over UDP).
+
+101
+00:06:08.747 --> 00:06:10.624
+What a backend engineer controls:
+
+102
+00:06:10.904 --> 00:06:12.931
+Socket options, pools, timeouts.
+
+103
+00:06:13.211 --> 00:06:14.149
+3 Network.
+
+104
+00:06:14.429 --> 00:06:16.307
+TCP or IP layer:
+
+105
+00:06:16.587 --> 00:06:17.483
+Internet.
+
+106
+00:06:17.763 --> 00:06:18.723
+Examples:
+
+107
+00:06:19.003 --> 00:06:21.008
+IP, ICMP, routing.
+
+108
+00:06:21.288 --> 00:06:23.165
+What a backend engineer controls:
+
+109
+00:06:23.445 --> 00:06:26.048
+VPC CIDRs, routes (via IaC).
+
+110
+00:06:26.328 --> 00:06:27.373
+2 Data link.
+
+111
+00:06:27.653 --> 00:06:29.531
+TCP or IP layer:
+
+112
+00:06:29.811 --> 00:06:30.579
+Link.
+
+113
+00:06:30.859 --> 00:06:31.819
+Examples:
+
+114
+00:06:32.099 --> 00:06:33.613
+Ethernet, Wi-Fi, ARP.
+
+115
+00:06:33.893 --> 00:06:35.771
+What a backend engineer controls:
+
+116
+00:06:36.051 --> 00:06:36.883
+Rarely.
+
+117
+00:06:38.233 --> 00:06:39.193
+1 Physical.
+
+118
+00:06:39.473 --> 00:06:41.350
+TCP or IP layer:
+
+119
+00:06:41.630 --> 00:06:42.398
+Link.
+
+120
+00:06:42.678 --> 00:06:43.638
+Examples:
+
+121
+00:06:43.918 --> 00:06:45.155
+Fibre, radio.
+
+122
+00:06:45.435 --> 00:06:47.313
+What a backend engineer controls:
+
+123
+00:06:47.593 --> 00:06:50.302
+Never (but it's why cross-region is 60 ms).
+
+124
+00:06:51.652 --> 00:06:52.292
+Tip:
+
+125
+00:06:52.572 --> 00:06:55.687
+Why load balancers are called L4 or L7.
+
+126
+00:06:55.967 --> 00:07:05.183
+An L4 load balancer sees TCP or UDP connections (IP + port) and forwards bytes without understanding HTTP.
+
+127
+00:07:05.463 --> 00:07:12.865
+An L7 load balancer terminates HTTP, so it can route by path or header, retry, and add headers.
+
+128
+00:07:13.145 --> 00:07:19.375
+It also owns HTTP-level timeouts that affect your long-lived streams (Ch 08).
+
+129
+00:07:20.725 --> 00:07:22.538
+TCP versus UDP.
+
+130
+00:07:22.818 --> 00:07:24.162
+Here is a quick table:
+
+131
+00:07:24.442 --> 00:07:26.255
+TCP, and UDP.
+
+132
+00:07:26.535 --> 00:07:27.367
+Connection.
+
+133
+00:07:27.647 --> 00:07:28.629
+TCP:
+
+134
+00:07:28.909 --> 00:07:30.509
+Yes (3-way handshake).
+
+135
+00:07:30.789 --> 00:07:31.727
+UDP:
+
+136
+00:07:32.007 --> 00:07:32.690
+No.
+
+137
+00:07:32.970 --> 00:07:33.845
+Delivery.
+
+138
+00:07:34.125 --> 00:07:35.106
+TCP:
+
+139
+00:07:35.386 --> 00:07:37.711
+Reliable, retransmits lost segments.
+
+140
+00:07:37.991 --> 00:07:38.930
+UDP:
+
+141
+00:07:39.210 --> 00:07:40.149
+Best effort.
+
+142
+00:07:40.429 --> 00:07:41.218
+Ordering.
+
+143
+00:07:41.498 --> 00:07:42.479
+TCP:
+
+144
+00:07:42.759 --> 00:07:44.231
+In order (a byte stream).
+
+145
+00:07:44.511 --> 00:07:45.450
+UDP:
+
+146
+00:07:45.730 --> 00:07:47.309
+No ordering (datagrams).
+
+147
+00:07:47.589 --> 00:07:49.445
+Flow or congestion control.
+
+148
+00:07:49.725 --> 00:07:50.706
+TCP:
+
+149
+00:07:50.986 --> 00:07:51.861
+Built in.
+
+150
+00:07:52.141 --> 00:07:53.079
+UDP:
+
+151
+00:07:53.359 --> 00:07:54.895
+None (the app must do it).
+
+152
+00:07:55.175 --> 00:07:56.519
+Head-of-line blocking.
+
+153
+00:07:56.799 --> 00:07:57.781
+TCP:
+
+154
+00:07:58.061 --> 00:08:00.834
+Yes: one lost segment stalls everything after it.
+
+155
+00:08:01.114 --> 00:08:02.053
+UDP:
+
+156
+00:08:02.333 --> 00:08:03.015
+No.
+
+157
+00:08:03.295 --> 00:08:04.405
+Typical use.
+
+158
+00:08:04.685 --> 00:08:05.666
+TCP:
+
+159
+00:08:05.946 --> 00:08:10.746
+HTTP or 1.1, HTTP or 2, databases, Kafka.
+
+160
+00:08:11.026 --> 00:08:11.965
+UDP:
+
+161
+00:08:12.245 --> 00:08:16.277
+DNS, video or voice, gaming, QUIC (HTTP or 3).
+
+162
+00:08:17.627 --> 00:08:19.248
+The cost of a new connection.
+
+163
+00:08:19.528 --> 00:08:22.323
+The sequence diagram walks through it step by step.
+
+164
+00:08:22.603 --> 00:08:23.541
+C to D:
+
+165
+00:08:23.821 --> 00:08:25.805
+A? api.grocery.in.
+
+166
+00:08:26.085 --> 00:08:27.045
+D to C:
+
+167
+00:08:27.325 --> 00:08:32.787
+203.0.113.10 (TTL 60 s).
+
+168
+00:08:33.067 --> 00:08:34.005
+C to S:
+
+169
+00:08:34.285 --> 00:08:34.989
+SYN.
+
+170
+00:08:35.269 --> 00:08:36.187
+S to C:
+
+171
+00:08:36.467 --> 00:08:37.256
+SYN-ACK.
+
+172
+00:08:37.536 --> 00:08:38.475
+C to S:
+
+173
+00:08:38.755 --> 00:08:39.373
+ACK.
+
+174
+00:08:39.653 --> 00:08:40.592
+C to S:
+
+175
+00:08:40.872 --> 00:08:42.749
+ClientHello (+ key share).
+
+176
+00:08:43.029 --> 00:08:43.947
+S to C:
+
+177
+00:08:44.227 --> 00:08:45.955
+ServerHello, cert, Finished.
+
+178
+00:08:46.235 --> 00:08:47.173
+C to S:
+
+179
+00:08:47.453 --> 00:08:51.421
+Finished + HTTP request (GET or orders or 42).
+
+180
+00:08:51.701 --> 00:08:52.619
+S to C:
+
+181
+00:08:52.899 --> 00:08:54.392
+HTTP response.
+
+182
+00:08:58.242 --> 00:09:06.797
+On a 50 ms mobile RTT, a fresh connection costs ~100 to 150 ms before your server does any work.
+
+183
+00:09:07.077 --> 00:09:16.186
+That's why connection reuse (keep-alive, pooling, HTTP or 2 multiplexing) is one of the highest-leverage performance settings you have.
+
+184
+00:09:16.466 --> 00:09:17.959
+TCP slow start.
+
+185
+00:09:18.239 --> 00:09:26.730
+A new connection begins with a small congestion window (~10 segments about 14 KB) and grows as ACKs arrive.
+
+186
+00:09:27.010 --> 00:09:32.173
+A new connection can't send a 200 KB response at full speed immediately.
+
+187
+00:09:32.453 --> 00:09:33.797
+Warm connections can.
+
+188
+00:09:34.077 --> 00:09:36.295
+That's another reason to reuse connections.
+
+189
+00:09:37.645 --> 00:09:39.416
+Connection teardown and TIMEWAIT.
+
+190
+00:09:39.696 --> 00:09:48.997
+The side that closes first keeps the socket in TIMEWAIT for 2 times MSL (often ~60 s on Linux) so that late packets aren't misread.
+
+191
+00:09:49.277 --> 00:10:02.013
+A service that opens and closes thousands of outbound connections per second (no pooling) exhausts ephemeral ports: ~28 K by default on Linux, per destination IP and port.
+
+192
+00:10:02.293 --> 00:10:07.008
+The symptom is intermittent Cannot assign requested address or connect timeouts.
+
+193
+00:10:07.288 --> 00:10:11.021
+The fix is connection pooling and keep-alive, not kernel tweaks.
+
+194
+00:10:12.371 --> 00:10:15.166
+Nagle, delayed ACK and small messages.
+
+195
+00:10:15.446 --> 00:10:21.014
+Nagle's algorithm batches small writes, and delayed ACK holds acknowledgements briefly.
+
+196
+00:10:21.294 --> 00:10:26.670
+Together they can add tens of milliseconds to request or response patterns with small writes.
+
+197
+00:10:26.950 --> 00:10:37.979
+Most HTTP stacks set TCPNODELAY, but check it for custom protocols and for SSE, where you want each small event sent immediately (flush after each event).
+
+198
+00:10:39.329 --> 00:10:42.316
+Keep-alive, connection pools and head-of-line blocking.
+
+199
+00:10:42.596 --> 00:10:49.935
+Keep-alive keeps a TCP (+TLS) connection open after a response so the next request can reuse it.
+
+200
+00:10:50.215 --> 00:10:54.567
+A connection pool is a set of kept-alive connections a client reuses.
+
+201
+00:10:55.917 --> 00:10:57.261
+Here is a quick table:
+
+202
+00:10:57.541 --> 00:11:00.250
+Setting, and Where, and Typical value, and Why.
+
+203
+00:11:00.530 --> 00:11:01.959
+Client connect timeout.
+
+204
+00:11:02.239 --> 00:11:02.901
+Where:
+
+205
+00:11:03.181 --> 00:11:04.866
+Every HTTP client.
+
+206
+00:11:05.146 --> 00:11:06.234
+Typical value:
+
+207
+00:11:06.514 --> 00:11:10.695
+0.5 to 2 s internal, 3 to 5 s external.
+
+208
+00:11:10.975 --> 00:11:11.658
+Why:
+
+209
+00:11:11.938 --> 00:11:14.818
+Fail fast when the destination is unreachable.
+
+210
+00:11:15.098 --> 00:11:17.167
+Client read or response timeout.
+
+211
+00:11:17.447 --> 00:11:18.109
+Where:
+
+212
+00:11:18.389 --> 00:11:20.074
+Every HTTP client.
+
+213
+00:11:20.354 --> 00:11:21.442
+Typical value:
+
+214
+00:11:21.722 --> 00:11:24.197
+From the latency budget (Ch 01:
+
+215
+00:11:24.477 --> 00:11:25.970
+80 ms fresh check).
+
+216
+00:11:26.250 --> 00:11:26.933
+Why:
+
+217
+00:11:27.213 --> 00:11:28.450
+Never wait forever.
+
+218
+00:11:28.730 --> 00:11:30.522
+Pool max connections per route.
+
+219
+00:11:30.802 --> 00:11:31.463
+Where:
+
+220
+00:11:31.743 --> 00:11:32.533
+Client.
+
+221
+00:11:32.813 --> 00:11:33.901
+Typical value:
+
+222
+00:11:34.181 --> 00:11:37.402
+Little's Law times 1.5 (Ch 02).
+
+223
+00:11:37.682 --> 00:11:38.365
+Why:
+
+224
+00:11:38.645 --> 00:11:41.695
+Enough in-flight capacity, not a DoS on the server.
+
+225
+00:11:41.975 --> 00:11:44.130
+Idle connection TTL in pool.
+
+226
+00:11:44.410 --> 00:11:45.071
+Where:
+
+227
+00:11:45.351 --> 00:11:46.141
+Client.
+
+228
+00:11:46.421 --> 00:11:47.509
+Typical value:
+
+229
+00:11:47.789 --> 00:11:50.370
+Below the server's or LB's idle timeout.
+
+230
+00:11:50.650 --> 00:11:51.333
+Why:
+
+231
+00:11:51.613 --> 00:11:55.069
+Avoid reusing a connection the other side already closed.
+
+232
+00:11:56.419 --> 00:11:58.083
+Server keep-alive timeout.
+
+233
+00:11:58.363 --> 00:11:59.024
+Where:
+
+234
+00:11:59.304 --> 00:12:01.480
+Server (Tomcat or Jetty or Netty).
+
+235
+00:12:01.760 --> 00:12:02.848
+Typical value:
+
+236
+00:12:03.128 --> 00:12:04.813
+60 to 75 s.
+
+237
+00:12:05.093 --> 00:12:05.776
+Why:
+
+238
+00:12:06.056 --> 00:12:08.509
+Free resources held by idle clients.
+
+239
+00:12:08.789 --> 00:12:10.219
+LB idle timeout.
+
+240
+00:12:10.499 --> 00:12:11.160
+Where:
+
+241
+00:12:11.440 --> 00:12:12.507
+Cloud LB.
+
+242
+00:12:12.787 --> 00:12:13.875
+Typical value:
+
+243
+00:12:14.155 --> 00:12:17.333
+60 s default on many LBs; configurable.
+
+244
+00:12:17.613 --> 00:12:18.296
+Why:
+
+245
+00:12:18.576 --> 00:12:21.157
+Silently kills idle long-lived connections.
+
+246
+00:12:22.507 --> 00:12:23.425
+Watch out:
+
+247
+00:12:23.705 --> 00:12:25.518
+The stale pooled connection bug.
+
+248
+00:12:25.798 --> 00:12:36.145
+If a client pool keeps idle connections longer than the server or load balancer does, the client sometimes sends a request on a connection the other side has already closed.
+
+249
+00:12:36.425 --> 00:12:41.737
+The result is an intermittent Connection reset on the first request after a quiet period.
+
+250
+00:12:42.017 --> 00:12:50.102
+The rule: client idle TTL server keep-alive LB idle timeout, and retry idempotent requests once on a reset.
+
+251
+00:12:51.452 --> 00:12:56.593
+Head-of-line (HOL) blocking happens when one slow item blocks everything behind it:
+
+252
+00:12:57.943 --> 00:12:59.287
+Here is a quick table:
+
+253
+00:12:59.567 --> 00:13:02.170
+Protocol, and Where HOL blocking happens.
+
+254
+00:13:02.450 --> 00:13:04.455
+HTTP or 1.1:
+
+255
+00:13:04.735 --> 00:13:11.029
+At the HTTP level: one request at a time per connection, so a slow response blocks the next.
+
+256
+00:13:11.309 --> 00:13:15.063
+Browsers open ~6 connections per host to compensate.
+
+257
+00:13:15.343 --> 00:13:16.773
+HTTP or 2:
+
+258
+00:13:17.053 --> 00:13:25.842
+Solved at HTTP level (multiplexed streams), but still at TCP level: one lost packet stalls all streams on that connection.
+
+259
+00:13:26.122 --> 00:13:27.935
+HTTP or 3 (QUIC):
+
+260
+00:13:28.215 --> 00:13:32.397
+Solved at transport level: streams are independent over UDP.
+
+261
+00:13:32.677 --> 00:13:35.045
+A lost packet stalls only its own stream.
+
+262
+00:13:36.395 --> 00:13:42.389
+HTTP or 1.1 versus HTTP or 2 versus HTTP or 3.
+
+263
+00:13:42.669 --> 00:13:44.013
+Here is a quick table:
+
+264
+00:13:44.293 --> 00:13:50.501
+Feature, and HTTP or 1.1, and HTTP or 2, and HTTP or 3.
+
+265
+00:13:50.781 --> 00:13:51.720
+Transport.
+
+266
+00:13:51.000 --> 00:13:54.005
+HTTP or 1.1:
+
+267
+00:13:54.285 --> 00:13:55.309
+TCP.
+
+268
+00:13:55.589 --> 00:13:57.019
+HTTP or 2:
+
+269
+00:13:57.299 --> 00:13:58.323
+TCP.
+
+270
+00:13:58.603 --> 00:14:00.096
+HTTP or 3:
+
+271
+00:14:00.376 --> 00:14:01.677
+QUIC over UDP.
+
+272
+00:14:01.957 --> 00:14:02.768
+Framing.
+
+273
+00:14:03.048 --> 00:14:05.053
+HTTP or 1.1:
+
+274
+00:14:05.333 --> 00:14:06.080
+Text.
+
+275
+00:14:06.360 --> 00:14:07.789
+HTTP or 2:
+
+276
+00:14:08.069 --> 00:14:09.200
+Binary frames.
+
+277
+00:14:09.480 --> 00:14:10.973
+HTTP or 3:
+
+278
+00:14:11.253 --> 00:14:12.384
+Binary frames.
+
+279
+00:14:12.664 --> 00:14:14.093
+Requests per connection.
+
+280
+00:14:14.373 --> 00:14:16.379
+HTTP or 1.1:
+
+281
+00:14:16.659 --> 00:14:19.603
+1 at a time (pipelining unused in practice).
+
+282
+00:14:19.883 --> 00:14:21.312
+HTTP or 2:
+
+283
+00:14:21.592 --> 00:14:23.021
+Many concurrent streams.
+
+284
+00:14:23.301 --> 00:14:24.795
+HTTP or 3:
+
+285
+00:14:25.075 --> 00:14:26.504
+Many concurrent streams.
+
+286
+00:14:26.784 --> 00:14:27.936
+Header compression.
+
+287
+00:14:28.216 --> 00:14:30.221
+HTTP or 1.1:
+
+288
+00:14:30.501 --> 00:14:31.184
+None.
+
+289
+00:14:31.464 --> 00:14:32.893
+HTTP or 2:
+
+290
+00:14:33.173 --> 00:14:34.069
+HPACK.
+
+291
+00:14:34.349 --> 00:14:35.843
+HTTP or 3:
+
+292
+00:14:36.123 --> 00:14:36.933
+QPACK.
+
+293
+00:14:37.213 --> 00:14:38.088
+TLS.
+
+294
+00:14:38.368 --> 00:14:40.373
+HTTP or 1.1:
+
+295
+00:14:40.653 --> 00:14:41.507
+Optional.
+
+296
+00:14:41.787 --> 00:14:43.216
+HTTP or 2:
+
+297
+00:14:43.496 --> 00:14:45.544
+Effectively required by browsers.
+
+298
+00:14:45.824 --> 00:14:47.317
+HTTP or 3:
+
+299
+00:14:47.597 --> 00:14:50.029
+Built in (TLS 1.3 in QUIC).
+
+300
+00:14:50.309 --> 00:14:51.824
+Handshake to first byte.
+
+301
+00:14:52.104 --> 00:14:54.109
+HTTP or 1.1:
+
+302
+00:14:54.389 --> 00:14:57.120
+TCP + TLS (2 RTT).
+
+303
+00:14:57.400 --> 00:14:58.829
+HTTP or 2:
+
+304
+00:14:59.109 --> 00:15:01.840
+TCP + TLS (2 RTT).
+
+305
+00:15:02.120 --> 00:15:03.613
+HTTP or 3:
+
+306
+00:15:03.893 --> 00:15:07.008
+1 RTT, or 0-RTT on resumption.
+
+307
+00:15:08.358 --> 00:15:10.641
+Connection migration (IP change).
+
+308
+00:15:10.921 --> 00:15:12.926
+HTTP or 1.1:
+
+309
+00:15:13.206 --> 00:15:13.889
+No.
+
+310
+00:15:14.169 --> 00:15:15.598
+HTTP or 2:
+
+311
+00:15:15.878 --> 00:15:16.561
+No.
+
+312
+00:15:16.841 --> 00:15:18.334
+HTTP or 3:
+
+313
+00:15:18.614 --> 00:15:22.817
+Yes: the connection ID survives Wi-Fi ↔ 4G.
+
+314
+00:15:23.097 --> 00:15:24.377
+HOL blocking.
+
+315
+00:15:24.657 --> 00:15:26.662
+HTTP or 1.1:
+
+316
+00:15:26.942 --> 00:15:28.947
+HTTP + TCP.
+
+317
+00:15:29.227 --> 00:15:30.657
+HTTP or 2:
+
+318
+00:15:30.937 --> 00:15:32.174
+TCP only.
+
+319
+00:15:32.454 --> 00:15:33.947
+HTTP or 3:
+
+320
+00:15:34.227 --> 00:15:35.465
+None across streams.
+
+321
+00:15:35.745 --> 00:15:36.747
+Where it shines.
+
+322
+00:15:37.027 --> 00:15:39.033
+HTTP or 1.1:
+
+323
+00:15:39.313 --> 00:15:41.339
+Simple internal calls, legacy.
+
+324
+00:15:41.619 --> 00:15:43.049
+HTTP or 2:
+
+325
+00:15:43.329 --> 00:15:45.825
+Service mesh, gRPC, browsers.
+
+326
+00:15:46.105 --> 00:15:47.598
+HTTP or 3:
+
+327
+00:15:47.878 --> 00:15:49.926
+Mobile clients on lossy networks.
+
+328
+00:15:51.276 --> 00:15:52.919
+Grocery platform choices:
+
+329
+00:15:53.199 --> 00:15:55.567
+Edge (CDN or LB, then apps):
+
+330
+00:15:55.847 --> 00:15:59.409
+HTTP or 2 and HTTP or 3 enabled.
+
+331
+00:15:59.689 --> 00:16:06.665
+Mobile users on flaky 4G benefit most from HTTP or 3's migration and loss handling.
+
+332
+00:16:06.945 --> 00:16:09.441
+Edge, then origin and service-to-service:
+
+333
+00:16:09.721 --> 00:16:16.185
+HTTP or 2 (gRPC) or HTTP or 1.1 with keep-alive pools.
+
+334
+00:16:16.465 --> 00:16:21.308
+Internal networks are low-loss, so HTTP or 3's benefits are smaller.
+
+335
+00:16:21.588 --> 00:16:23.529
+Long-lived streams (SSE):
+
+336
+00:16:23.809 --> 00:16:29.271
+HTTP or 2 lets a browser open many SSE streams over one connection.
+
+337
+00:16:29.551 --> 00:16:36.484
+HTTP or 1.1 browsers limit ~6 connections per host, which SSE can exhaust.
+
+338
+00:16:37.834 --> 00:16:38.581
+Warning:
+
+339
+00:16:38.861 --> 00:16:40.674
+0-RTT has a price.
+
+340
+00:16:40.954 --> 00:16:46.757
+TLS 1.3 or QUIC 0-RTT early data can be replayed by an attacker.
+
+341
+00:16:47.037 --> 00:16:52.925
+Only allow it for idempotent, safe requests (GET the catalog), never for POST or checkout.
+
+342
+00:16:53.205 --> 00:16:57.301
+Most CDNs let you restrict 0-RTT to safe methods.
+
+343
+00:16:58.651 --> 00:17:01.872
+DNS: resolution, TTLs and caching, then.
+
+344
+00:17:02.152 --> 00:17:04.947
+The sequence diagram walks through it step by step.
+
+345
+00:17:05.227 --> 00:17:08.640
+App to OS: resolve api.razorpay.com.
+
+346
+00:17:08.920 --> 00:17:10.669
+OS to R: cache miss.
+
+347
+00:17:10.949 --> 00:17:12.613
+R to Root: where is.com?
+
+348
+00:17:12.893 --> 00:17:13.853
+Root to R:
+
+349
+00:17:14.133 --> 00:17:15.413
+TLD servers.
+
+350
+00:17:15.693 --> 00:17:18.253
+R to TLD: where is razorpay.com?
+
+351
+00:17:18.533 --> 00:17:21.008
+TLD to R: authoritative NS.
+
+352
+00:17:21.288 --> 00:17:22.227
+R to Auth:
+
+353
+00:17:22.507 --> 00:17:24.469
+A api.razorpay.com?
+
+354
+00:17:24.749 --> 00:17:25.731
+Auth to R:
+
+355
+00:17:26.011 --> 00:17:28.059
+A records, TTL 60 s.
+
+356
+00:17:28.339 --> 00:17:31.133
+R to OS: answer (cached for TTL).
+
+357
+00:17:31.413 --> 00:17:34.635
+OS to App: answer (the JVM caches too).
+
+358
+00:17:38.485 --> 00:17:39.829
+Here is a quick table:
+
+359
+00:17:40.109 --> 00:17:42.391
+Concept, and What it means for your design.
+
+360
+00:17:42.671 --> 00:17:43.525
+TTL:
+
+361
+00:17:43.805 --> 00:17:46.109
+How long resolvers may cache an answer.
+
+362
+00:17:46.389 --> 00:17:51.765
+Low TTL (30 to 60 s) enables fast failover but means more lookups.
+
+363
+00:17:52.045 --> 00:17:55.223
+High TTL (hours) is cheap but slow to change.
+
+364
+00:17:55.503 --> 00:18:00.581
+JVM DNS cache: networkaddress.cache.ttl (security property).
+
+365
+00:18:00.861 --> 00:18:05.063
+Default is ~30 s when no security manager is installed.
+
+366
+00:18:05.343 --> 00:18:07.861
+Negative lookups are cached ~10 s.
+
+367
+00:18:08.141 --> 00:18:12.066
+Never set it to forever in cloud environments where IPs change.
+
+368
+00:18:12.346 --> 00:18:14.927
+Connection pools ignore DNS changes:
+
+369
+00:18:15.207 --> 00:18:18.770
+A pooled connection stays on the old IP until it's closed.
+
+370
+00:18:19.050 --> 00:18:25.066
+Cap connection lifetime (for example, 5 to 10 min) so traffic follows DNS failover.
+
+371
+00:18:26.416 --> 00:18:43.739
+Kubernetes DNS: service-name.namespace.svc.cluster.local resolves to a ClusterIP. ndots:5 causes several search-path lookups for external names, so use FQDNs with a trailing dot or tune ndots for hot external calls.
+
+372
+00:18:44.019 --> 00:18:45.768
+DNS as a dependency:
+
+373
+00:18:46.048 --> 00:18:48.821
+DNS outages look like everything is down.
+
+374
+00:18:49.101 --> 00:18:54.264
+Cache sensibly, run node-local DNS caches, and alert on resolver errors.
+
+375
+00:18:54.544 --> 00:18:57.232
+DNS load balancing or GeoDNS:
+
+376
+00:18:57.512 --> 00:19:00.541
+Returns different IPs by location or health.
+
+377
+00:19:00.821 --> 00:19:03.701
+Coarse-grained, and clients cache beyond TTLs.
+
+378
+00:19:03.981 --> 00:19:08.696
+Good for region selection, not for fine load balancing (Ch 08).
+
+379
+00:19:10.046 --> 00:19:20.158
+Here is the PROPERTIES code. $JAVAHOME or conf or security or java.security (or -Dsun.net.inetaddr.ttl for older setups).
+
+380
+00:19:23.008 --> 00:19:25.653
+TLS 1.3 and mTLS.
+
+381
+00:19:25.933 --> 00:19:36.835
+TLS provides confidentiality (encryption), integrity (tamper detection) and server authentication (certificate chain to a trusted CA, and hostname match).
+
+382
+00:19:38.185 --> 00:19:39.529
+Here is a quick table:
+
+383
+00:19:39.809 --> 00:19:41.217
+Topic, and Key point.
+
+384
+00:19:41.497 --> 00:19:43.481
+TLS 1.3 handshake:
+
+385
+00:19:43.761 --> 00:19:51.206
+1 RTT (versus 2 in TLS 1.2); forward secrecy mandatory; fewer, safer cipher suites.
+
+386
+00:19:51.486 --> 00:19:53.939
+Session resumption or 0-RTT:
+
+387
+00:19:54.219 --> 00:20:00.470
+Faster reconnects; 0-RTT early data is replayable (restrict to idempotent requests).
+
+388
+00:20:00.750 --> 00:20:01.475
+SNI:
+
+389
+00:20:01.755 --> 00:20:06.662
+Client sends the hostname in the handshake so one IP can serve many certificates.
+
+390
+00:20:06.942 --> 00:20:08.158
+Certificate chain:
+
+391
+00:20:08.438 --> 00:20:10.550
+Server sends leaf + intermediates.
+
+392
+00:20:10.830 --> 00:20:15.801
+A missing intermediate causes errors on some clients only (a classic Android issue).
+
+393
+00:20:16.081 --> 00:20:17.467
+Certificate expiry:
+
+394
+00:20:17.747 --> 00:20:20.115
+A top cause of self-inflicted outages.
+
+395
+00:20:20.395 --> 00:20:25.942
+Automate renewal (ACME, cert-manager) and alert at 30 or 14 or 7 days.
+
+396
+00:20:27.292 --> 00:20:28.743
+Where TLS terminates:
+
+397
+00:20:29.023 --> 00:20:34.356
+At the CDN or LB (common), then re-encrypted to the origin; or end-to-end.
+
+398
+00:20:34.636 --> 00:20:38.113
+Every hop that decrypts is a trust boundary. mTLS:
+
+399
+00:20:38.393 --> 00:20:42.511
+Both sides present certificates, so the server authenticates the client.
+
+400
+00:20:42.791 --> 00:20:49.020
+Used service-to-service (service mesh, Ch 17, 23) and for some partner APIs.
+
+401
+00:20:49.300 --> 00:20:50.047
+Pinning:
+
+402
+00:20:50.327 --> 00:20:59.287
+Mobile apps pinning certificates must plan rotation (pin the public key or CA, ship backup pins) or a cert rotation bricks the app.
+
+403
+00:21:00.637 --> 00:21:01.511
+Example:
+
+404
+00:21:01.791 --> 00:21:03.242
+In the grocery platform.
+
+405
+00:21:03.522 --> 00:21:10.626
+Customers reach the CDN on TLS 1.3 (HTTP or 2 + HTTP or 3).
+
+406
+00:21:10.906 --> 00:21:14.426
+The CDN talks to the regional LB over TLS.
+
+407
+00:21:14.706 --> 00:21:24.370
+Inside the cluster, services use mTLS via the mesh, so payment-service accepts calls only from workloads with the checkout-service identity.
+
+408
+00:21:24.650 --> 00:21:33.439
+Outbound calls to Razorpay use TLS with the platform's trust store, and go out through a fixed egress IP that Razorpay can allow-list.
+
+409
+00:21:34.789 --> 00:21:39.397
+Real-time delivery: polling, long polling, SSE, WebSockets, then.
+
+410
+00:21:39.677 --> 00:21:41.021
+Here is a quick table:
+
+411
+00:21:41.301 --> 00:21:46.208
+Short polling, and Long polling, and Server-Sent Events (SSE), and WebSocket.
+
+412
+00:21:46.488 --> 00:21:47.363
+Direction.
+
+413
+00:21:47.643 --> 00:21:48.645
+Short polling:
+
+414
+00:21:48.925 --> 00:21:49.971
+Client pulls.
+
+415
+00:21:50.251 --> 00:21:51.253
+Long polling:
+
+416
+00:21:51.533 --> 00:21:53.987
+Client pulls, server holds until data.
+
+417
+00:21:54.267 --> 00:21:56.165
+Server-Sent Events (SSE):
+
+418
+00:21:56.445 --> 00:21:57.811
+Server, then client.
+
+419
+00:21:58.091 --> 00:21:59.093
+WebSocket:
+
+420
+00:21:59.373 --> 00:22:00.397
+Bidirectional.
+
+421
+00:22:00.677 --> 00:22:01.616
+Transport.
+
+422
+00:22:01.896 --> 00:22:02.899
+Short polling:
+
+423
+00:22:03.179 --> 00:22:05.163
+Repeated HTTP requests.
+
+424
+00:22:05.443 --> 00:22:06.445
+Long polling:
+
+425
+00:22:06.725 --> 00:22:09.669
+Repeated HTTP requests (held open).
+
+426
+00:22:09.949 --> 00:22:11.848
+Server-Sent Events (SSE):
+
+427
+00:22:12.128 --> 00:22:15.520
+One long HTTP response (text or event-stream).
+
+428
+00:22:15.800 --> 00:22:16.803
+WebSocket:
+
+429
+00:22:17.083 --> 00:22:19.984
+HTTP upgrade, then WebSocket frames.
+
+430
+00:22:20.264 --> 00:22:21.757
+Latency of an update.
+
+431
+00:22:22.037 --> 00:22:23.040
+Short polling:
+
+432
+00:22:23.320 --> 00:22:24.643
+Up to the poll interval.
+
+433
+00:22:24.923 --> 00:22:26.971
+Long polling: ~Immediate.
+
+434
+00:22:27.251 --> 00:22:30.323
+Server-Sent Events (SSE): ~Immediate.
+
+435
+00:22:30.603 --> 00:22:32.501
+WebSocket: ~Immediate.
+
+436
+00:22:32.781 --> 00:22:34.019
+Wasted requests.
+
+437
+00:22:34.299 --> 00:22:35.301
+Short polling:
+
+438
+00:22:35.581 --> 00:22:36.349
+Most.
+
+439
+00:22:36.629 --> 00:22:37.632
+Long polling:
+
+440
+00:22:37.912 --> 00:22:38.659
+Few.
+
+441
+00:22:38.939 --> 00:22:40.837
+Server-Sent Events (SSE):
+
+442
+00:22:41.117 --> 00:22:41.800
+None.
+
+443
+00:22:42.080 --> 00:22:43.083
+WebSocket:
+
+444
+00:22:43.363 --> 00:22:44.045
+None.
+
+445
+00:22:45.395 --> 00:22:47.102
+Auto-reconnect + resume.
+
+446
+00:22:47.382 --> 00:22:48.385
+Short polling:
+
+447
+00:22:48.665 --> 00:22:49.582
+App-built.
+
+448
+00:22:49.862 --> 00:22:50.865
+Long polling:
+
+449
+00:22:51.145 --> 00:22:52.062
+App-built.
+
+450
+00:22:52.342 --> 00:22:54.241
+Server-Sent Events (SSE):
+
+451
+00:22:54.521 --> 00:22:57.571
+Built into browsers (EventSource, Last-Event-ID).
+
+452
+00:22:57.851 --> 00:22:58.854
+WebSocket:
+
+453
+00:22:59.134 --> 00:23:00.051
+App-built.
+
+454
+00:23:00.331 --> 00:23:02.422
+Works through proxies or CDNs.
+
+455
+00:23:02.702 --> 00:23:03.705
+Short polling:
+
+456
+00:23:03.985 --> 00:23:04.859
+Always.
+
+457
+00:23:05.139 --> 00:23:06.142
+Long polling:
+
+458
+00:23:06.422 --> 00:23:07.254
+Mostly.
+
+459
+00:23:07.534 --> 00:23:09.433
+Server-Sent Events (SSE):
+
+460
+00:23:09.713 --> 00:23:11.633
+Mostly (disable buffering).
+
+461
+00:23:11.913 --> 00:23:12.915
+WebSocket:
+
+462
+00:23:13.195 --> 00:23:16.438
+Needs upgrade support; some corporate proxies block it.
+
+463
+00:23:16.718 --> 00:23:19.001
+HTTP or 2 multiplexing.
+
+464
+00:23:19.281 --> 00:23:20.283
+Short polling:
+
+465
+00:23:20.563 --> 00:23:21.289
+Yes.
+
+466
+00:23:21.569 --> 00:23:22.571
+Long polling:
+
+467
+00:23:22.851 --> 00:23:23.577
+Yes.
+
+468
+00:23:23.857 --> 00:23:25.755
+Server-Sent Events (SSE):
+
+469
+00:23:26.035 --> 00:23:26.761
+Yes.
+
+470
+00:23:27.041 --> 00:23:28.043
+WebSocket:
+
+471
+00:23:28.323 --> 00:23:32.697
+Only with RFC 8441 (limited support).
+
+472
+00:23:32.977 --> 00:23:33.979
+Server cost.
+
+473
+00:23:34.259 --> 00:23:35.262
+Short polling:
+
+474
+00:23:35.542 --> 00:23:36.715
+Request per poll.
+
+475
+00:23:36.995 --> 00:23:37.998
+Long polling:
+
+476
+00:23:38.278 --> 00:23:39.366
+Held request.
+
+477
+00:23:39.646 --> 00:23:41.545
+Server-Sent Events (SSE):
+
+478
+00:23:41.825 --> 00:23:42.934
+Held connection.
+
+479
+00:23:43.214 --> 00:23:44.217
+WebSocket:
+
+480
+00:23:44.497 --> 00:23:46.545
+Held connection + frame handling.
+
+481
+00:23:47.895 --> 00:23:48.919
+Grocery use.
+
+482
+00:23:49.199 --> 00:23:50.201
+Short polling:
+
+483
+00:23:50.481 --> 00:23:52.380
+Fallback, low-frequency checks.
+
+484
+00:23:52.660 --> 00:23:53.663
+Long polling:
+
+485
+00:23:53.943 --> 00:23:55.116
+Legacy clients.
+
+486
+00:23:55.396 --> 00:23:57.295
+Server-Sent Events (SSE):
+
+487
+00:23:57.575 --> 00:24:00.305
+Order tracking, rider location to customer.
+
+488
+00:24:00.585 --> 00:24:01.588
+WebSocket:
+
+489
+00:24:01.868 --> 00:24:07.031
+Customer ↔ rider chat, rider app two-way ops (Ch 41).
+
+490
+00:24:08.381 --> 00:24:14.141
+The L1 program in §5 measures the difference on a compressed 2-second order lifecycle:
+
+491
+00:24:15.491 --> 00:24:16.408
+On screen:
+
+492
+00:24:16.688 --> 00:24:18.331
+Polling (100 ms):
+
+493
+00:24:18.611 --> 00:24:23.112
+18 requests for 6 status changes (67% wasted).
+
+494
+00:24:23.392 --> 00:24:24.352
+SSE:
+
+495
+00:24:24.632 --> 00:24:27.021
+1 request for 6 status changes.
+
+496
+00:24:29.871 --> 00:24:41.989
+Over a real 35-minute delivery with a 10-second poll, that's ~210 requests for ~8 changes (96 % wasted), and each update is up to 10 seconds late.
+
+497
+00:24:43.339 --> 00:24:43.979
+Tip:
+
+498
+00:24:44.259 --> 00:24:46.755
+Choosing between SSE and WebSockets.
+
+499
+00:24:47.035 --> 00:24:57.040
+If the client mostly listens, use SSE: it's plain HTTP, reconnects and resumes automatically, and multiplexes over HTTP or 2.
+
+500
+00:24:57.320 --> 00:25:04.125
+If the client talks back frequently and with low latency (chat, collaborative editing, games), use WebSockets.
+
+501
+00:25:04.405 --> 00:25:12.533
+For mobile apps, both need app-level heartbeats and reconnect logic, because OS network changes kill connections regardless.
+
+502
+00:25:13.883 --> 00:25:16.550
+NAT, firewalls and VPC basics, then.
+
+503
+00:25:16.830 --> 00:25:19.241
+NAT (Network Address Translation).
+
+504
+00:25:19.521 --> 00:25:26.027
+NAT rewrites private addresses to a shared public address, and keeps a mapping table with idle timeouts.
+
+505
+00:25:27.377 --> 00:25:28.721
+Here is a quick table:
+
+506
+00:25:29.001 --> 00:25:30.836
+Where, and Effect on your design.
+
+507
+00:25:31.116 --> 00:25:35.276
+Mobile carrier CGNAT (most Indian 4G or 5G users):
+
+508
+00:25:35.556 --> 00:25:40.591
+Idle mappings can expire in minutes, silently killing idle long-lived connections.
+
+509
+00:25:40.871 --> 00:25:42.897
+Heartbeat every 15 to 30 s.
+
+510
+00:25:43.177 --> 00:25:48.489
+Many users share one public IP, so IP-based rate limits hit innocent users.
+
+511
+00:25:48.769 --> 00:25:52.033
+Cloud NAT gateway (private subnet, then internet):
+
+512
+00:25:52.313 --> 00:25:58.009
+Has its own idle timeout (minutes) and a limit on concurrent connections per destination.
+
+513
+00:25:58.289 --> 00:26:03.089
+Heavy outbound calls to one partner API can exhaust NAT ports.
+
+514
+00:26:03.369 --> 00:26:04.564
+Pool connections.
+
+515
+00:26:04.844 --> 00:26:07.127
+Kubernetes SNAT (pod, then outside):
+
+516
+00:26:07.407 --> 00:26:10.287
+Pod IPs are translated to the node's IP.
+
+517
+00:26:10.567 --> 00:26:12.615
+Conntrack table limits apply per node.
+
+518
+00:26:13.965 --> 00:26:16.909
+Firewalls, security groups and network policies.
+
+519
+00:26:17.189 --> 00:26:18.533
+Here is a quick table:
+
+520
+00:26:18.813 --> 00:26:21.330
+Control, and Scope, and Stateful?, and Use.
+
+521
+00:26:21.610 --> 00:26:23.189
+Security group (cloud).
+
+522
+00:26:23.469 --> 00:26:24.194
+Scope:
+
+523
+00:26:24.474 --> 00:26:25.882
+Instance or ENI.
+
+524
+00:26:26.162 --> 00:26:27.037
+Stateful?:
+
+525
+00:26:27.317 --> 00:26:28.191
+Stateful.
+
+526
+00:26:28.471 --> 00:26:29.175
+Use:
+
+527
+00:26:29.455 --> 00:26:32.847
+Only the LB may reach app nodes on 8080.
+
+528
+00:26:33.127 --> 00:26:34.834
+Network ACL (cloud).
+
+529
+00:26:35.114 --> 00:26:35.839
+Scope:
+
+530
+00:26:36.119 --> 00:26:36.930
+Subnet.
+
+531
+00:26:37.210 --> 00:26:38.085
+Stateful?:
+
+532
+00:26:38.365 --> 00:26:39.282
+Stateless.
+
+533
+00:26:39.562 --> 00:26:40.266
+Use:
+
+534
+00:26:40.546 --> 00:26:43.063
+Coarse deny rules, compliance boundaries.
+
+535
+00:26:43.343 --> 00:26:45.093
+Kubernetes NetworkPolicy.
+
+536
+00:26:45.373 --> 00:26:46.098
+Scope:
+
+537
+00:26:46.378 --> 00:26:47.381
+Pod labels.
+
+538
+00:26:47.661 --> 00:26:48.535
+Stateful?:
+
+539
+00:26:48.815 --> 00:26:50.586
+Stateful (CNI-dependent).
+
+540
+00:26:50.866 --> 00:26:51.570
+Use:
+
+541
+00:26:51.850 --> 00:26:55.370
+Only checkout pods may call payment on 8080.
+
+542
+00:26:55.650 --> 00:26:57.485
+WAF (at CDN or LB).
+
+543
+00:26:57.765 --> 00:26:58.490
+Scope:
+
+544
+00:26:58.770 --> 00:27:00.306
+HTTP requests.
+
+545
+00:27:00.586 --> 00:27:01.461
+Stateful?:
+
+546
+00:27:01.741 --> 00:27:02.658
+L7.
+
+547
+00:27:02.938 --> 00:27:03.642
+Use:
+
+548
+00:27:03.922 --> 00:27:07.826
+OWASP rules, bot mitigation, rate limits (Ch 23).
+
+549
+00:27:08.106 --> 00:27:09.770
+Service mesh authorization.
+
+550
+00:27:10.050 --> 00:27:10.775
+Scope:
+
+551
+00:27:11.055 --> 00:27:13.317
+Workload identity (mTLS).
+
+552
+00:27:13.597 --> 00:27:14.471
+Stateful?:
+
+553
+00:27:14.751 --> 00:27:15.669
+L7.
+
+554
+00:27:15.949 --> 00:27:16.653
+Use:
+
+555
+00:27:16.933 --> 00:27:20.090
+Identity-based rules that survive IP changes.
+
+556
+00:27:21.440 --> 00:27:23.360
+VPC layout for the platform.
+
+557
+00:27:23.640 --> 00:27:24.984
+Here is the diagram.
+
+558
+00:27:28.834 --> 00:27:30.178
+Here is a quick table:
+
+559
+00:27:30.458 --> 00:27:31.738
+Principle, and Why.
+
+560
+00:27:32.018 --> 00:27:35.303
+Data stores in private subnets with no internet route:
+
+561
+00:27:35.583 --> 00:27:38.698
+They can't be reached from outside, even if misconfigured.
+
+562
+00:27:38.978 --> 00:27:41.282
+Egress through NAT with fixed IPs:
+
+563
+00:27:41.562 --> 00:27:44.783
+Partners can allow-list; you can audit outbound traffic.
+
+564
+00:27:45.063 --> 00:27:49.181
+Private endpoints for cloud services (object storage, KMS):
+
+565
+00:27:49.461 --> 00:27:52.575
+Traffic doesn't cross the internet; no NAT cost.
+
+566
+00:27:52.855 --> 00:27:54.605
+Three AZs for every tier:
+
+567
+00:27:54.885 --> 00:27:57.871
+Zone-failure tolerance (Ch 02 headroom).
+
+568
+00:27:58.151 --> 00:28:01.522
+Non-overlapping CIDRs across VPCs or regions:
+
+569
+00:28:01.802 --> 00:28:06.751
+Future peering and multi-region (Ch 27) won't need renumbering.
+
+570
+00:28:07.031 --> 00:28:10.935
+Identity-based rules (mTLS) on top of IP rules:
+
+571
+00:28:11.215 --> 00:28:14.927
+IPs change constantly in Kubernetes; identities don't.
+
+572
+00:28:16.277 --> 00:28:18.880
+Timeouts across a path: the timeout ladder.
+
+573
+00:28:19.160 --> 00:28:20.888
+Every hop has its own timeouts.
+
+574
+00:28:21.168 --> 00:28:27.973
+They must be ordered, or the wrong layer gives up first, which causes retries, duplicate work and confusing errors.
+
+575
+00:28:29.323 --> 00:28:30.667
+Here is the diagram.
+
+576
+00:28:34.517 --> 00:28:35.435
+The rules:
+
+577
+00:28:35.715 --> 00:28:40.259
+Request or response calls: each inner timeout is shorter than the outer one.
+
+578
+00:28:40.539 --> 00:28:47.131
+A downstream call times out before the service does, the service before the gateway, and the gateway before the client.
+
+579
+00:28:47.411 --> 00:28:51.635
+Otherwise the outer layer gives up and retries while the inner one is still working.
+
+580
+00:28:51.915 --> 00:28:58.677
+Long-lived streams: heartbeat interval the smallest idle timeout on the path (NAT, LB, CDN).
+
+581
+00:28:58.957 --> 00:29:07.981
+Server stream lifetime LB idle timeout, so the server closes cleanly and the client reconnects, rather than a middlebox silently killing it.
+
+582
+00:29:09.331 --> 00:29:15.369
+Pools: client idle TTL server keep-alive LB idle timeout (§2.4).
+
+583
+00:29:15.649 --> 00:29:17.505
+Write the ladder in the design doc.
+
+584
+00:29:17.785 --> 00:29:20.089
+It's an NFR, not a config detail.
+
+585
+00:29:21.439 --> 00:29:22.335
+Part 3.
+
+586
+00:29:22.615 --> 00:29:24.343
+Architecture and Diagrams.
+
+587
+00:29:25.593 --> 00:29:27.854
+Component view: live order tracking.
+
+588
+00:29:28.134 --> 00:29:29.478
+Here is the diagram.
+
+589
+00:29:33.328 --> 00:29:36.571
+Sequence: happy path, subscribe and receive updates.
+
+590
+00:29:36.851 --> 00:29:39.645
+The sequence diagram walks through it step by step.
+
+591
+00:29:39.925 --> 00:29:41.291
+App to GW:
+
+592
+00:29:41.571 --> 00:29:49.101
+GET or api or v1 or orders or 42 or events (Accept: text or event-stream, JWT).
+
+593
+00:29:49.381 --> 00:29:53.157
+GW to S: forward (stream route, no response timeout).
+
+594
+00:29:53.437 --> 00:29:56.915
+S to S: verify order 42 belongs to user.
+
+595
+00:29:57.195 --> 00:29:58.133
+S to R:
+
+596
+00:29:58.413 --> 00:30:03.853
+SUBSCRIBE trk:live:42 (first local subscriber for order 42).
+
+597
+00:30:04.133 --> 00:30:05.072
+S to R:
+
+598
+00:30:05.352 --> 00:30:09.853
+XREVRANGE trk:order:42 + - COUNT 1 (current state).
+
+599
+00:30:10.133 --> 00:30:11.051
+S to App:
+
+600
+00:30:11.331 --> 00:30:13.613
+200 text or event-stream, id:
+
+601
+00:30:13.893 --> 00:30:18.608
+1727..-0, event: status, data:
+
+602
+00:30:18.888 --> 00:30:19.592
+PACKED.
+
+603
+00:30:19.872 --> 00:30:24.971
+K to RT: order.order.status-changed.v1 42, RIDERASSIGNED.
+
+604
+00:30:25.251 --> 00:30:26.317
+RT to R:
+
+605
+00:30:26.597 --> 00:30:30.032
+XADD trk:order:42 status RIDERASSIGNED.
+
+606
+00:30:30.312 --> 00:30:31.379
+RT to R:
+
+607
+00:30:31.659 --> 00:30:35.157
+PUBLISH trk:live:42 id, RIDERASSIGNED.
+
+608
+00:30:35.437 --> 00:30:38.744
+R to S: message on trk:live:42.
+
+609
+00:30:39.024 --> 00:30:40.453
+S to App: id:
+
+610
+00:30:40.733 --> 00:30:45.299
+1727..-1, event: status, data:
+
+611
+00:30:45.579 --> 00:30:46.667
+RIDERASSIGNED.
+
+612
+00:30:46.947 --> 00:30:49.720
+S to App: : heartbeat (SSE comment line).
+
+613
+00:30:53.570 --> 00:30:57.367
+Sequence: failure path, network switch mid-delivery and resume.
+
+614
+00:30:57.647 --> 00:31:00.442
+The sequence diagram walks through it step by step.
+
+615
+00:31:00.722 --> 00:31:04.178
+App to App: phone moves Wi-Fi, then 4G (new IP).
+
+616
+00:31:04.458 --> 00:31:05.610
+R to S2:
+
+617
+00:31:05.890 --> 00:31:11.010
+PUBLISH OUTFORDELIVERY (id 1727..-2).
+
+618
+00:31:11.290 --> 00:31:17.029
+S2 to App: write fails on next event or heartbeat, then emitter completed, unsubscribe.
+
+619
+00:31:17.309 --> 00:31:20.551
+App to App: no event or heartbeat for 45 s?
+
+620
+00:31:20.831 --> 00:31:21.514
+No:
+
+621
+00:31:21.794 --> 00:31:24.866
+OS reports network change, then reconnect now.
+
+622
+00:31:25.146 --> 00:31:27.023
+App to NAT: new connection.
+
+623
+00:31:27.303 --> 00:31:28.477
+NAT to S3:
+
+624
+00:31:28.757 --> 00:31:32.255
+GET or orders or 42 or events, Last-Event-ID:
+
+625
+00:31:32.535 --> 00:31:37.186
+1727..-1 (LB picks pod 3).
+
+626
+00:31:37.466 --> 00:31:38.575
+S3 to R:
+
+627
+00:31:38.855 --> 00:31:47.709
+XRANGE trk:order:42 (1727..-1 +, then events after the last seen id.
+
+628
+00:31:47.989 --> 00:31:49.162
+R to S3:
+
+629
+00:31:49.442 --> 00:31:53.559
+1727..-2 OUTFORDELIVERY.
+
+630
+00:31:53.839 --> 00:32:00.239
+S3 to App: replay: id 1727..-2 OUTFORDELIVERY.
+
+631
+00:32:00.519 --> 00:32:01.629
+S3 to R:
+
+632
+00:32:01.909 --> 00:32:04.405
+SUBSCRIBE trk:live:42.
+
+633
+00:32:08.255 --> 00:32:09.001
+Note:
+
+634
+00:32:09.281 --> 00:32:12.055
+What the system guarantees after this failure path.
+
+635
+00:32:12.335 --> 00:32:19.225
+Every status change is delivered at least once to a client that reconnects within the replay window (3 hours).
+
+636
+00:32:19.505 --> 00:32:22.535
+Duplicates are removed on the client by event id.
+
+637
+00:32:22.815 --> 00:32:30.452
+A missed heartbeat is detected within 45 s at most, and an OS-reported network change triggers an immediate reconnect.
+
+638
+00:32:30.732 --> 00:32:34.273
+No pod stickiness is needed: any pod can serve any order.
+
+639
+00:32:35.623 --> 00:32:37.586
+State: client stream lifecycle.
+
+640
+00:32:37.866 --> 00:32:39.210
+Here is the diagram.
+
+641
+00:32:43.060 --> 00:32:43.977
+Part 4.
+
+642
+00:32:44.257 --> 00:32:45.879
+Design Document Excerpt:
+
+643
+00:32:46.159 --> 00:32:47.759
+Live Order Tracking Stream.
+
+644
+00:32:49.009 --> 00:32:50.353
+Here is a quick table:
+
+645
+00:32:50.633 --> 00:32:51.934
+Field, and Value.
+
+646
+00:32:52.214 --> 00:32:53.558
+Author or Reviewers:
+
+647
+00:32:53.838 --> 00:32:57.145
+Fulfilment platform or Mobile, SRE, Security.
+
+648
+00:32:57.425 --> 00:32:58.321
+Status:
+
+649
+00:32:58.601 --> 00:32:59.475
+Approved.
+
+650
+00:32:59.755 --> 00:33:01.078
+Related ADRs:
+
+651
+00:33:01.358 --> 00:33:07.289
+ADR-017 SSE for customer tracking; WebSockets reserved for chat.
+
+652
+00:33:08.639 --> 00:33:09.279
+1.
+
+653
+00:33:09.559 --> 00:33:10.967
+Context and Problem.
+
+654
+00:33:11.247 --> 00:33:15.769
+Tracking updates were delivered over a WebSocket without heartbeats or resume.
+
+655
+00:33:16.049 --> 00:33:22.321
+Middleboxes silently closed idle connections, and users saw frozen screens (§1.1).
+
+656
+00:33:22.601 --> 00:33:23.305
+2.
+
+657
+00:33:23.585 --> 00:33:24.929
+Goals or Non-Goals.
+
+658
+00:33:25.209 --> 00:33:37.967
+Goals: push status and rider-location updates within 2 s p95; survive disconnects without losing updates; work through CDN, LB and carrier NAT; no sticky sessions.
+
+659
+00:33:38.247 --> 00:33:47.420
+Non-goals: customer ↔ rider chat (WebSocket, Ch 41); rider app telemetry ingestion (Ch 47).
+
+660
+00:33:48.770 --> 00:33:49.517
+3.
+
+661
+00:33:49.797 --> 00:33:50.757
+Requirements.
+
+662
+00:33:52.107 --> 00:33:53.451
+Here is a quick table:
+
+663
+00:33:53.731 --> 00:33:55.203
+ID, and Requirement.
+
+664
+00:33:55.483 --> 00:33:56.421
+FR-1:
+
+665
+00:33:56.701 --> 00:34:03.763
+Stream order status changes and rider location (every ~4 s while out for delivery) to the order's owner.
+
+666
+00:34:04.043 --> 00:34:04.981
+FR-2:
+
+667
+00:34:05.261 --> 00:34:09.613
+A reconnecting client receives all events missed within the last 3 hours.
+
+668
+00:34:09.893 --> 00:34:10.939
+NFR-1:
+
+669
+00:34:11.219 --> 00:34:16.701
+Event delivery latency (Kafka publish, then client) p95 at most 2 s.
+
+670
+00:34:16.981 --> 00:34:18.027
+NFR-2:
+
+671
+00:34:18.307 --> 00:34:21.165
+Detect a dead connection within 45 s.
+
+672
+00:34:21.445 --> 00:34:22.512
+NFR-3:
+
+673
+00:34:22.792 --> 00:34:26.760
+Support 150 K concurrent streams at festival peak.
+
+674
+00:34:27.040 --> 00:34:28.128
+NFR-4:
+
+675
+00:34:28.408 --> 00:34:32.291
+Only the order's owner (or support staff with a role) can subscribe.
+
+676
+00:34:32.571 --> 00:34:33.616
+NFR-5:
+
+677
+00:34:33.896 --> 00:34:36.051
+Pod deploys must not drop updates.
+
+678
+00:34:37.401 --> 00:34:38.105
+4.
+
+679
+00:34:38.385 --> 00:34:39.665
+Capacity estimates.
+
+680
+00:34:41.015 --> 00:34:42.359
+Here is a quick table:
+
+681
+00:34:42.639 --> 00:34:44.943
+Item, and Calculation, and Result.
+
+682
+00:34:45.223 --> 00:34:47.569
+Orders in flight, normal evening peak.
+
+683
+00:34:47.849 --> 00:34:53.289
+Calculation: ~48 K orders per hour times 35 min lifecycle.
+
+684
+00:34:53.569 --> 00:34:55.361
+Result: ~28 K.
+
+685
+00:34:55.641 --> 00:34:57.711
+Orders in flight, festival peak.
+
+686
+00:34:57.991 --> 00:34:59.057
+Calculation:
+
+687
+00:34:59.337 --> 00:35:07.700
+Ch 02: first hour about 300 K orders about 83 orders per second sustained times 35 min.
+
+688
+00:35:07.980 --> 00:35:10.561
+Result: ~175 K.
+
+689
+00:35:10.841 --> 00:35:12.057
+Concurrent streams.
+
+690
+00:35:12.337 --> 00:35:19.121
+Calculation: ~85 % of in-flight orders have the tracking screen open at the busiest moment.
+
+691
+00:35:19.401 --> 00:35:22.729
+Result: ~150 K (sizing target).
+
+692
+00:35:23.009 --> 00:35:24.417
+Messages to clients.
+
+693
+00:35:24.697 --> 00:35:25.764
+Calculation:
+
+694
+00:35:26.044 --> 00:35:33.575
+150 K times (location every 4 s during ~40 % of lifecycle) + status changes.
+
+695
+00:35:33.855 --> 00:35:39.337
+Result: ~15 K msgs per second + heartbeats 10 K per second.
+
+696
+00:35:39.617 --> 00:35:43.137
+Memory per stream (servlet async + buffers + emitter).
+
+697
+00:35:43.417 --> 00:35:46.233
+Calculation: ~30 to 60 KB.
+
+698
+00:35:46.513 --> 00:35:47.324
+Result:
+
+699
+00:35:47.604 --> 00:35:52.596
+150 K times 60 KB about 9 GB across the fleet.
+
+700
+00:35:53.946 --> 00:35:59.919
+Pods ( about 15 K streams per 2 vCPU or 2 GB pod, to be load-tested).
+
+701
+00:36:00.199 --> 00:36:01.266
+Calculation:
+
+702
+00:36:01.546 --> 00:36:07.007
+150 K ÷ 15 K times AZ headroom 1.5.
+
+703
+00:36:07.287 --> 00:36:08.098
+Result:
+
+704
+00:36:08.378 --> 00:36:09.466
+15 pods.
+
+705
+00:36:09.746 --> 00:36:11.410
+Redis Pub or Sub channels.
+
+706
+00:36:11.690 --> 00:36:12.757
+Calculation:
+
+707
+00:36:13.037 --> 00:36:14.381
+One per watched order.
+
+708
+00:36:14.661 --> 00:36:22.170
+Result: ~150 K channels, well within Redis capacity; ~25 K publishes per second.
+
+709
+00:36:22.450 --> 00:36:23.538
+Replay buffer.
+
+710
+00:36:23.818 --> 00:36:24.885
+Calculation:
+
+711
+00:36:25.165 --> 00:36:30.946
+150 K streams times ~60 entries times ~150 B.
+
+712
+00:36:31.226 --> 00:36:35.642
+Result: ~1.4 GB in Redis, TTL 3 h.
+
+713
+00:36:36.992 --> 00:36:37.909
+Success:
+
+714
+00:36:38.189 --> 00:36:39.661
+What the estimate tells us.
+
+715
+00:36:39.941 --> 00:36:52.357
+Connections, not CPU, are the resource to plan: memory per stream, LB and NAT connection limits, and file descriptors (ulimit -n ≥ 65 K per pod).
+
+716
+00:36:52.637 --> 00:36:55.304
+Location updates dominate message volume.
+
+717
+00:36:55.584 --> 00:37:00.896
+Throttling them to 1 per 4 s, and only while out for delivery, is the biggest lever.
+
+718
+00:37:02.246 --> 00:37:03.014
+5.
+
+719
+00:37:03.294 --> 00:37:04.489
+Proposed design.
+
+720
+00:37:04.769 --> 00:37:21.174
+SSE over HTTP or 2 (HTTP or 3 at the edge). tracking-router consumes Kafka, appends to a per-order Redis Stream (replay buffer), and publishes to a per-order Pub or Sub channel. tracking-stream pods hold SSE connections,
+
+721
+00:37:21.454 --> 00:37:38.606
+subscribe to per-order channels only while they have at least one local subscriber, send heartbeats every 15 s, close streams after 100 s with a retry hint (below the 120 s LB idle timeout), and replay from the Redis Stream on Last-Event-ID.
+
+722
+00:37:38.886 --> 00:37:40.507
+5.2 API.
+
+723
+00:37:41.857 --> 00:37:43.628
+Here is the HTTP code.
+
+724
+00:37:43.908 --> 00:37:47.535
+It runs to 21 lines; the full listing is in the chapter.
+
+725
+00:37:50.385 --> 00:37:52.987
+5.5 Timeout ladder (NFR).
+
+726
+00:37:54.337 --> 00:37:55.681
+Here is a quick table:
+
+727
+00:37:55.961 --> 00:37:57.604
+Hop, and Setting, and Value.
+
+728
+00:37:57.884 --> 00:37:59.057
+Carrier NAT.
+
+729
+00:37:59.337 --> 00:38:00.105
+Setting:
+
+730
+00:38:00.385 --> 00:38:02.561
+Idle mapping timeout (not ours).
+
+731
+00:38:02.841 --> 00:38:03.609
+Value:
+
+732
+00:38:03.889 --> 00:38:06.151
+Assume ≥ 60 s.
+
+733
+00:38:06.431 --> 00:38:07.583
+Server heartbeat.
+
+734
+00:38:07.863 --> 00:38:08.631
+Setting:
+
+735
+00:38:08.911 --> 00:38:10.447
+SSE comment interval.
+
+736
+00:38:10.727 --> 00:38:11.495
+Value:
+
+737
+00:38:11.775 --> 00:38:12.841
+15 s.
+
+738
+00:38:13.121 --> 00:38:14.337
+Client watchdog.
+
+739
+00:38:14.617 --> 00:38:15.385
+Setting:
+
+740
+00:38:15.665 --> 00:38:17.884
+No bytes received, then reconnect.
+
+741
+00:38:18.164 --> 00:38:18.932
+Value:
+
+742
+00:38:19.212 --> 00:38:20.407
+45 s.
+
+743
+00:38:20.687 --> 00:38:22.159
+Server stream lifetime.
+
+744
+00:38:22.439 --> 00:38:23.207
+Setting:
+
+745
+00:38:23.487 --> 00:38:24.852
+Close with retry hint.
+
+746
+00:38:25.132 --> 00:38:25.900
+Value:
+
+747
+00:38:26.180 --> 00:38:28.804
+100 s ± 10 s jitter.
+
+748
+00:38:29.084 --> 00:38:30.428
+Gateway stream route.
+
+749
+00:38:30.708 --> 00:38:31.476
+Setting:
+
+750
+00:38:31.756 --> 00:38:34.508
+Response timeout disabled, idle timeout.
+
+751
+00:38:34.788 --> 00:38:35.556
+Value:
+
+752
+00:38:35.836 --> 00:38:37.159
+110 s.
+
+753
+00:38:37.439 --> 00:38:39.593
+LB or CDN idle timeout.
+
+754
+00:38:39.873 --> 00:38:40.641
+Value:
+
+755
+00:38:40.921 --> 00:38:42.329
+120 s.
+
+756
+00:38:42.609 --> 00:38:44.124
+Client reconnect backoff.
+
+757
+00:38:44.404 --> 00:38:45.172
+Setting:
+
+758
+00:38:45.452 --> 00:38:46.732
+Jittered exponential.
+
+759
+00:38:47.012 --> 00:38:47.780
+Value:
+
+760
+00:38:48.060 --> 00:38:49.959
+1 s, then 30 s max.
+
+761
+00:38:51.309 --> 00:38:52.055
+7.
+
+762
+00:38:52.335 --> 00:38:53.850
+Alternatives considered.
+
+763
+00:38:55.200 --> 00:38:56.544
+Here is a quick table:
+
+764
+00:38:56.824 --> 00:38:59.363
+Option, and Pros, and Cons, and Verdict.
+
+765
+00:38:59.643 --> 00:39:01.307
+Short polling every 10 s.
+
+766
+00:39:01.587 --> 00:39:02.440
+Pros:
+
+767
+00:39:02.720 --> 00:39:04.107
+Trivial, cache-friendly.
+
+768
+00:39:04.387 --> 00:39:05.197
+Cons:
+
+769
+00:39:05.477 --> 00:39:09.083
+96 % wasted requests; up to 10 s late.
+
+770
+00:39:09.363 --> 00:39:10.173
+Verdict:
+
+771
+00:39:10.453 --> 00:39:11.584
+Fallback only.
+
+772
+00:39:11.864 --> 00:39:12.888
+WebSocket.
+
+773
+00:39:13.168 --> 00:39:14.021
+Pros:
+
+774
+00:39:14.301 --> 00:39:15.325
+Bidirectional.
+
+775
+00:39:15.605 --> 00:39:16.416
+Cons:
+
+776
+00:39:16.696 --> 00:39:20.728
+We don't need client, then server; no built-in resume; proxy issues.
+
+777
+00:39:21.008 --> 00:39:21.819
+Verdict:
+
+778
+00:39:22.099 --> 00:39:22.995
+Chat only.
+
+779
+00:39:23.275 --> 00:39:26.048
+SSE + Redis replay + Pub or Sub.
+
+780
+00:39:26.328 --> 00:39:27.181
+Pros:
+
+781
+00:39:27.461 --> 00:39:33.947
+HTTP-native, resume built in, HTTP or 2 multiplexing, any pod serves any order.
+
+782
+00:39:34.227 --> 00:39:35.037
+Cons:
+
+783
+00:39:35.317 --> 00:39:38.240
+Server, then client only; per-connection memory.
+
+784
+00:39:38.520 --> 00:39:39.331
+Verdict:
+
+785
+00:39:39.611 --> 00:39:40.443
+Chosen.
+
+786
+00:39:40.723 --> 00:39:42.749
+Mobile push notifications only.
+
+787
+00:39:43.029 --> 00:39:43.883
+Pros:
+
+788
+00:39:44.163 --> 00:39:45.485
+No connection held.
+
+789
+00:39:45.765 --> 00:39:46.576
+Cons:
+
+790
+00:39:46.856 --> 00:39:49.949
+Not real-time for map; delivery not guaranteed.
+
+791
+00:39:50.229 --> 00:39:51.040
+Verdict:
+
+792
+00:39:51.320 --> 00:39:54.499
+Complementary (status changes when app backgrounded).
+
+793
+00:39:55.849 --> 00:39:56.531
+8.
+
+794
+00:39:56.811 --> 00:39:57.963
+Failure modes.
+
+795
+00:39:58.243 --> 00:40:09.102
+Redis down, then streams stay open with heartbeats; new events aren't delivered until recovery, the client screen shows updates delayed, and push notifications still arrive.
+
+796
+00:40:09.382 --> 00:40:15.803
+Kafka lag, then the router's lag alert fires, and the UI shows the last known ETA with its timestamp.
+
+797
+00:40:16.083 --> 00:40:19.838
+A pod killed, then clients reconnect to other pods and replay.
+
+798
+00:40:20.118 --> 00:40:20.865
+9.
+
+799
+00:40:21.145 --> 00:40:22.083
+Security.
+
+800
+00:40:22.363 --> 00:40:34.886
+JWT validated at the gateway, order ownership checked at the pod, no PII in event payloads beyond coarse rider location near the destination, and location updates stop at delivery.
+
+801
+00:40:36.236 --> 00:40:36.940
+10.
+
+802
+00:40:37.220 --> 00:40:38.308
+Observability.
+
+803
+00:40:38.588 --> 00:40:52.177
+Gauges tracking.streams.active, tracking.subscriptions.channels; counters tracking.events.senttype, tracking.replays, tracking.stream.closedreason; timer tracking.delivery.lag (event time, then sent).
+
+804
+00:40:52.457 --> 00:40:53.289
+11.
+
+805
+00:40:53.569 --> 00:40:54.401
+Rollout.
+
+806
+00:40:54.681 --> 00:40:59.951
+Behind the flag tracking.transport=SSEPOLL, rolled out by app version and city.
+
+807
+00:41:00.231 --> 00:41:02.769
+Polling stays as a fallback for 2 releases.
+
+808
+00:41:04.119 --> 00:41:04.973
+14.
+
+809
+00:41:05.253 --> 00:41:08.069
+Decision (ADR-017 summary).
+
+810
+00:41:08.349 --> 00:41:10.354
+Customer tracking uses SSE.
+
+811
+00:41:10.634 --> 00:41:21.151
+Every long-lived connection on the platform must have a heartbeat below the smallest idle timeout on its path, a bounded server-side lifetime, and resume by event id.
+
+812
+00:41:21.431 --> 00:41:24.674
+WebSockets are reserved for bidirectional use cases.
+
+813
+00:41:26.024 --> 00:41:26.984
+Part 5.
+
+814
+00:41:27.264 --> 00:41:29.248
+Hands-On Code, Level Ladder.
+
+815
+00:41:30.498 --> 00:41:33.079
+We build live order-tracking updates four times:
+
+816
+00:41:34.429 --> 00:41:35.773
+Here is a quick table:
+
+817
+00:41:36.053 --> 00:41:38.741
+Level, and New requirement that forces the step.
+
+818
+00:41:39.021 --> 00:41:39.853
+L1:
+
+819
+00:41:40.133 --> 00:41:41.819
+Show that pushing beats polling.
+
+820
+00:41:42.099 --> 00:41:44.744
+(plain JDK server + client, measured).
+
+821
+00:41:45.024 --> 00:41:45.835
+L2:
+
+822
+00:41:46.115 --> 00:41:49.869
+Push real order events to the right customer from a Spring service.
+
+823
+00:41:50.149 --> 00:41:51.003
+L3:
+
+824
+00:41:51.283 --> 00:41:57.491
+Survive idle timeouts, disconnects and deploys on one pod: heartbeats, resume, limits, metrics.
+
+825
+00:41:57.771 --> 00:41:58.645
+L4:
+
+826
+00:41:58.925 --> 00:42:04.835
+Run many pods with no stickiness, deliver events from Kafka, replay from Redis, drain safely.
+
+827
+00:42:06.185 --> 00:42:08.467
+L1, Concept (plain JDK).
+
+828
+00:42:08.747 --> 00:42:20.395
+One JDK HttpServer offers a polling endpoint and an SSE stream for a simulated order moving through six statuses (compressed to 400 ms per step).
+
+829
+00:42:20.675 --> 00:42:25.369
+A JDK HttpClient consumes both and counts the requests.
+
+830
+00:42:26.719 --> 00:42:28.233
+Here is the Java code.
+
+831
+00:42:28.513 --> 00:42:32.716
+It runs to 116 lines; the full listing is in the chapter.
+
+832
+00:42:32.996 --> 00:42:38.180
+OrderUpdatesL1.java, run with: java OrderUpdatesL1.java.
+
+833
+00:42:38.460 --> 00:42:51.729
+Plain JDK only: a tiny HTTP server offering (1) a polling endpoint and (2) an SSE stream. and a client that measures how many requests or connections each approach costs.
+
+834
+00:42:54.579 --> 00:42:56.371
+Actual output from running it:
+
+835
+00:42:57.721 --> 00:42:58.639
+On screen:
+
+836
+00:42:58.919 --> 00:43:00.561
+Polling (100 ms):
+
+837
+00:43:00.841 --> 00:43:05.343
+18 requests for 6 status changes (67% wasted).
+
+838
+00:43:05.623 --> 00:43:07.628
+SSE + 10 ms PLACED.
+
+839
+00:43:07.908 --> 00:43:10.681
+SSE + 410 ms CONFIRMED.
+
+840
+00:43:10.961 --> 00:43:13.628
+SSE + 816 ms PACKED.
+
+841
+00:43:13.908 --> 00:43:17.919
+SSE +1203 ms RIDERASSIGNED.
+
+842
+00:43:18.199 --> 00:43:22.380
+SSE +1608 ms OUTFORDELIVERY.
+
+843
+00:43:22.660 --> 00:43:25.561
+SSE +2013 ms DELIVERED.
+
+844
+00:43:25.841 --> 00:43:26.801
+SSE:
+
+845
+00:43:27.081 --> 00:43:29.471
+1 request for 6 status changes.
+
+846
+00:43:32.321 --> 00:43:48.107
+What L1 shows: the SSE wire format (id:, event:, data:, blank line), why you flush() per event, chunked responses (sendResponseHeaders(200, 0)), and virtual threads making one thread per held connection affordable.
+
+847
+00:43:48.387 --> 00:43:49.710
+What L1 can't do:
+
+848
+00:43:51.060 --> 00:43:52.404
+Here is a quick table:
+
+849
+00:43:52.684 --> 00:43:54.561
+Gap, and Networking consequence.
+
+850
+00:43:54.841 --> 00:43:57.508
+Loops with sleep instead of reacting to events:
+
+851
+00:43:57.788 --> 00:44:00.732
+Wastes CPU; latency depends on the sleep.
+
+852
+00:44:01.012 --> 00:44:02.100
+No heartbeat:
+
+853
+00:44:02.380 --> 00:44:05.751
+Idle LBs and NATs silently kill the stream.
+
+854
+00:44:06.031 --> 00:44:07.033
+No resume:
+
+855
+00:44:07.313 --> 00:44:10.940
+A disconnect loses every event sent while the client was away.
+
+856
+00:44:11.220 --> 00:44:12.500
+No authorization:
+
+857
+00:44:12.780 --> 00:44:14.700
+Anyone can watch anyone's order.
+
+858
+00:44:14.980 --> 00:44:15.961
+One process:
+
+859
+00:44:16.241 --> 00:44:18.929
+Can't scale or deploy without dropping everyone.
+
+860
+00:44:20.279 --> 00:44:30.157
+L2, Spring Implementation (four layers). tracking-stream exposes GET or api or v1 or orders/orderId/events.
+
+861
+00:44:30.437 --> 00:44:39.695
+The gateway has already validated the JWT and forwards the user id in X-User-Id (Ch 23 covers doing this safely).
+
+862
+00:44:39.975 --> 00:44:43.325
+Events arrive in-process as Spring application events.
+
+863
+00:44:43.605 --> 00:44:46.058
+In L4 they come from Kafka via Redis.
+
+864
+00:44:47.408 --> 00:44:52.293
+Here is the Kotlin code. build.gradle.kts (module l2-spring).
+
+865
+00:44:55.143 --> 00:44:56.701
+Domain, Repository.
+
+866
+00:44:56.981 --> 00:44:58.495
+Here is the Java code.
+
+867
+00:45:01.345 --> 00:45:02.860
+Here is the Java code.
+
+868
+00:45:05.710 --> 00:45:07.225
+Here is the Java code.
+
+869
+00:45:07.505 --> 00:45:11.046
+It runs to 19 lines; the full listing is in the chapter.
+
+870
+00:45:11.326 --> 00:45:17.705
+Read model of orders (a projection owned by tracking; populated from order events, Ch 15).
+
+871
+00:45:20.555 --> 00:45:22.304
+Service (emitter registry).
+
+872
+00:45:22.584 --> 00:45:24.099
+Here is the Java code.
+
+873
+00:45:24.379 --> 00:45:31.568
+It runs to 42 lines; the full listing is in the chapter. orderId - emitters currently watching it on THIS instance.
+
+874
+00:45:34.418 --> 00:45:35.805
+Delegate, Controller.
+
+875
+00:45:36.085 --> 00:45:37.599
+Here is the Java code.
+
+876
+00:45:37.879 --> 00:45:41.613
+It runs to 23 lines; the full listing is in the chapter.
+
+877
+00:45:44.463 --> 00:45:45.977
+Here is the Java code.
+
+878
+00:45:46.257 --> 00:45:49.756
+It runs to 16 lines; the full listing is in the chapter.
+
+879
+00:45:52.606 --> 00:45:53.331
+Test.
+
+880
+00:45:53.611 --> 00:45:55.126
+Here is the Java code.
+
+881
+00:45:55.406 --> 00:45:59.139
+It runs to 23 lines; the full listing is in the chapter.
+
+882
+00:45:59.419 --> 00:46:05.329
+Before the servlet container attaches a handler, SseEmitter buffers sends, safe to call here.
+
+883
+00:46:08.179 --> 00:46:13.469
+What L2 fixed: real events, authorization by order ownership, and cleanup callbacks.
+
+884
+00:46:13.749 --> 00:46:24.203
+What L2 exposes: new SseEmitter(0L) means never time out, so connections live until a middlebox kills them silently (§1.1).
+
+885
+00:46:24.483 --> 00:46:32.269
+There's no heartbeat, no resume, no connection limit, no metrics, and a deploy drops everyone without telling them to reconnect.
+
+886
+00:46:33.619 --> 00:46:35.966
+L3, Production-Grade (one pod).
+
+887
+00:46:36.246 --> 00:46:39.382
+This level applies the §4 timeout ladder in code:
+
+888
+00:46:39.662 --> 00:46:48.473
+Heartbeat every 15 s (an SSE comment line: invisible to EventSource, but it keeps NATs and LBs from closing the connection).
+
+889
+00:46:48.753 --> 00:46:52.742
+Bounded lifetime of 100 s ± 10 s jitter.
+
+890
+00:46:53.022 --> 00:47:02.323
+The server closes the stream with a retry hint before the LB's 120 s idle timeout, and the jitter prevents synchronized reconnect waves.
+
+891
+00:47:02.603 --> 00:47:07.361
+Resume from an in-memory replay buffer by Last-Event-ID (a per-order sequence).
+
+892
+00:47:07.641 --> 00:47:09.262
+This is correct on one pod.
+
+893
+00:47:09.542 --> 00:47:11.057
+L4 moves it to Redis.
+
+894
+00:47:12.407 --> 00:47:17.185
+Limits: at most 5 streams per user; the pod-wide cap comes from load testing.
+
+895
+00:47:17.465 --> 00:47:19.940
+Headers that stop proxy buffering and caching.
+
+896
+00:47:20.220 --> 00:47:24.593
+Graceful drain on shutdown: tell every client to reconnect, then close.
+
+897
+00:47:24.873 --> 00:47:28.905
+Metrics: active streams, events sent, replays, close reasons.
+
+898
+00:47:30.255 --> 00:47:34.714
+Here is the Kotlin code. additional dependencies for l3-production.
+
+899
+00:47:37.564 --> 00:47:38.652
+Replay buffer.
+
+900
+00:47:38.932 --> 00:47:40.447
+Here is the Java code.
+
+901
+00:47:40.727 --> 00:47:44.439
+It runs to 45 lines; the full listing is in the chapter.
+
+902
+00:47:44.719 --> 00:47:49.327
+Per-order ring buffer of recent events with monotonically increasing ids.
+
+903
+00:47:49.607 --> 00:47:51.420
+Single-pod only (L3).
+
+904
+00:47:54.270 --> 00:47:55.571
+Stream hub (service).
+
+905
+00:47:55.851 --> 00:47:57.366
+Here is the Java code.
+
+906
+00:47:57.646 --> 00:48:01.913
+It runs to 152 lines; the full listing is in the chapter.
+
+907
+00:48:02.193 --> 00:48:10.683
+Owns every open stream on this pod: registration, fan-out, heartbeats. bounded lifetime, per-user limits, and graceful drain.
+
+908
+00:48:13.533 --> 00:48:15.048
+Here is the Java code.
+
+909
+00:48:17.898 --> 00:48:19.327
+Controller and Config.
+
+910
+00:48:19.607 --> 00:48:21.122
+Here is the Java code.
+
+911
+00:48:21.402 --> 00:48:25.071
+It runs to 42 lines; the full listing is in the chapter.
+
+912
+00:48:27.921 --> 00:48:36.540
+Here is the Java code. excerpt, OrderStreamDelegate.open now passes lastEventId to StreamHub after the ownership check.
+
+913
+00:48:39.390 --> 00:48:40.905
+Here is the Java code.
+
+914
+00:48:41.185 --> 00:48:44.918
+It runs to 35 lines; the full listing is in the chapter.
+
+915
+00:48:47.768 --> 00:48:49.240
+Here is the YAML code.
+
+916
+00:48:49.520 --> 00:48:53.253
+It runs to 26 lines; the full listing is in the chapter.
+
+917
+00:48:56.103 --> 00:48:58.642
+Integration test (real HTTP).
+
+918
+00:48:58.922 --> 00:49:00.437
+Here is the Java code.
+
+919
+00:49:00.717 --> 00:49:04.471
+It runs to 68 lines; the full listing is in the chapter.
+
+920
+00:49:07.321 --> 00:49:08.303
+Load note.
+
+921
+00:49:08.583 --> 00:49:13.425
+With virtual threads and servlet async, idle streams cost memory, not threads.
+
+922
+00:49:13.705 --> 00:49:20.745
+Budget ~30 to 60 KB per stream and load test to find your per-pod ceiling (Ch 25).
+
+923
+00:49:21.025 --> 00:49:25.015
+Also raise file-descriptor limits: one stream is one socket.
+
+924
+00:49:25.295 --> 00:49:29.924
+What L3 still lacks: the replay buffer and emitters live in one JVM.
+
+925
+00:49:30.204 --> 00:49:39.313
+With 15 pods, an event must reach whichever pod holds the customer's stream, and a reconnect that lands on a different pod must still replay correctly.
+
+926
+00:49:40.663 --> 00:49:42.135
+L4, Enterprise:
+
+927
+00:49:42.415 --> 00:49:45.551
+Many Pods, Kafka, then Redis Fan-out, No Stickiness.
+
+928
+00:49:45.831 --> 00:49:47.175
+Here is the diagram.
+
+929
+00:49:51.025 --> 00:49:52.092
+Key decisions:
+
+930
+00:49:52.372 --> 00:49:55.380
+The Redis Stream id is the SSE event id.
+
+931
+00:49:55.660 --> 00:49:59.201
+Ids are monotonic per order and survive pod changes.
+
+932
+00:49:59.481 --> 00:50:09.679
+Per-order channels with reference-counted subscriptions, so a pod receives only events for orders it's serving (not all ~25 K msgs per second).
+
+933
+00:50:09.959 --> 00:50:15.505
+Subscribe first, then replay, then flush buffered live events, deduplicated by id.
+
+934
+00:50:15.785 --> 00:50:20.649
+This closes the race where an event arrives between the replay read and the subscription.
+
+935
+00:50:21.999 --> 00:50:23.706
+Router (Kafka, then Redis).
+
+936
+00:50:23.986 --> 00:50:25.501
+Here is the Java code.
+
+937
+00:50:25.781 --> 00:50:29.258
+It runs to 40 lines; the full listing is in the chapter.
+
+938
+00:50:29.538 --> 00:50:35.127
+Key = orderId, so all events of one order are processed in order by one consumer.
+
+939
+00:50:37.977 --> 00:50:38.724
+Note:
+
+940
+00:50:39.004 --> 00:50:40.903
+Why write the stream before publishing?.
+
+941
+00:50:41.183 --> 00:50:48.180
+If a pod receives a live event and the client disconnects a moment later, the reconnect must be able to replay that event.
+
+942
+00:50:48.460 --> 00:50:54.007
+Writing to the durable replay buffer first guarantees every published id is replayable.
+
+943
+00:50:54.287 --> 00:50:55.951
+The two writes aren't atomic.
+
+944
+00:50:56.231 --> 00:51:06.492
+A router crash in between means the event was stored but not pushed live, and the next Kafka redelivery (at-least-once) or the client's reconnect replay covers it.
+
+945
+00:51:07.842 --> 00:51:09.954
+Pod subscriptions (ref-counted).
+
+946
+00:51:10.234 --> 00:51:11.749
+Here is the Java code.
+
+947
+00:51:12.029 --> 00:51:15.655
+It runs to 41 lines; the full listing is in the chapter.
+
+948
+00:51:15.935 --> 00:51:22.335
+Subscribes this pod to trk:live:orderId while at least one local stream watches the order.
+
+949
+00:51:25.185 --> 00:51:26.977
+Replay + race-free session.
+
+950
+00:51:27.257 --> 00:51:28.772
+Here is the Java code.
+
+951
+00:51:29.052 --> 00:51:32.764
+It runs to 33 lines; the full listing is in the chapter.
+
+952
+00:51:35.614 --> 00:51:37.129
+Here is the Java code.
+
+953
+00:51:37.409 --> 00:51:41.718
+Redis stream ids are millis-seq; compare numerically, not as strings.
+
+954
+00:51:44.568 --> 00:51:46.083
+Here is the Java code.
+
+955
+00:51:46.363 --> 00:51:49.840
+It runs to 40 lines; the full listing is in the chapter.
+
+956
+00:51:50.120 --> 00:51:51.485
+One client connection.
+
+957
+00:51:51.765 --> 00:51:59.083
+Live events that arrive while we are still replaying are buffered. then flushed in id order, skipping anything already sent.
+
+958
+00:51:59.363 --> 00:52:04.696
+Guarantees: no gaps, no duplicates. monotonically increasing ids on the wire.
+
+959
+00:52:07.546 --> 00:52:09.061
+Here is the Java code.
+
+960
+00:52:09.341 --> 00:52:30.781
+It runs to 18 lines; the full listing is in the chapter. excerpt, StreamHub.open in L4 (heartbeat, lifetime, limits, drain unchanged from L3). lastEventId is now the Redis stream id (String), for example, 1727340004000 to 0, or null.
+
+961
+00:52:31.061 --> 00:52:31.701
+1.
+
+962
+00:52:31.981 --> 00:52:36.717
+Subscribe FIRST so nothing published from now on is missed (buffered while replaying).
+
+963
+00:52:39.567 --> 00:52:41.103
+Edge and deploy config.
+
+964
+00:52:41.383 --> 00:52:42.855
+Here is the YAML code.
+
+965
+00:52:43.135 --> 00:52:46.676
+It runs to 18 lines; the full listing is in the chapter.
+
+966
+00:52:46.956 --> 00:52:50.391
+Kubernetes ingress (ingress-nginx) for the stream route.
+
+967
+00:52:53.241 --> 00:52:54.713
+Here is the YAML code.
+
+968
+00:52:54.993 --> 00:52:58.662
+It runs to 17 lines; the full listing is in the chapter.
+
+969
+00:52:58.942 --> 00:53:02.761
+Deployment excerpt: drain streams before the pod is removed.
+
+970
+00:53:05.611 --> 00:53:07.509
+Tests (Testcontainers Redis).
+
+971
+00:53:07.789 --> 00:53:09.304
+Here is the Java code.
+
+972
+00:53:09.584 --> 00:53:13.232
+It runs to 28 lines; the full listing is in the chapter.
+
+973
+00:53:16.082 --> 00:53:17.597
+Here is the Java code.
+
+974
+00:53:17.877 --> 00:53:21.354
+It runs to 20 lines; the full listing is in the chapter.
+
+975
+00:53:21.634 --> 00:53:28.802
+The race: live event 3 arrives while replay (2) is in progress; a duplicate of 2 also arrives live.
+
+976
+00:53:31.652 --> 00:53:32.399
+Note:
+
+977
+00:53:32.679 --> 00:53:34.129
+ADR-017:
+
+978
+00:53:34.409 --> 00:53:38.633
+SSE for customer tracking; WebSockets for bidirectional use.
+
+979
+00:53:38.913 --> 00:53:39.831
+Context.
+
+980
+00:53:40.111 --> 00:53:41.988
+Tracking is server, then client.
+
+981
+00:53:42.268 --> 00:53:49.799
+The old WebSocket had no heartbeat or resume and failed behind LBs and carrier NAT (§1.1).
+
+982
+00:53:50.079 --> 00:53:54.303
+We need 150 K concurrent streams with no sticky sessions.
+
+983
+00:53:54.583 --> 00:53:55.457
+Decision.
+
+984
+00:53:55.737 --> 00:54:00.452
+(1) Use SSE over HTTP or 2 or HTTP or 3.
+
+985
+00:54:00.732 --> 00:54:13.980
+(2) Every long-lived connection sends a heartbeat below the smallest idle timeout on its path (15 s) and has a bounded lifetime below the LB idle timeout (100 s ± 10 s).
+
+986
+00:54:14.260 --> 00:54:22.900
+(3) Events carry monotonically increasing ids, and clients resume with Last-Event-ID from a Redis Stream replay buffer (3 h).
+
+987
+00:54:23.180 --> 00:54:29.623
+(4) Kafka, then router, then Redis Pub or Sub with per-order channels, so any pod can serve any order.
+
+988
+00:54:29.903 --> 00:54:33.359
+(5) Pods drain on shutdown with jittered reconnect hints.
+
+989
+00:54:34.709 --> 00:54:35.733
+Consequences.
+
+990
+00:54:36.013 --> 00:54:42.711
+(+) Works through standard HTTP infrastructure, and the browser EventSource reconnects automatically.
+
+991
+00:54:42.991 --> 00:54:46.021
+(+) No stickiness; deploys don't lose updates.
+
+992
+00:54:46.301 --> 00:54:55.645
+(minus ) Redis becomes a runtime dependency (mitigated: open streams keep heartbeating; push notifications cover status changes).
+
+993
+00:54:55.925 --> 00:55:11.199
+(minus ) Planned reconnects every ~100 s add ~1.5 K reconnects per second at 150 K streams, which is cheap on warm HTTP or 2 connections but has to be in the capacity plan.
+
+994
+00:55:12.549 --> 00:55:30.043
+Revisit when: clients need to send frequent messages on the same channel (then WebSocket with the same heartbeat, lifetime and resume rules), or stream counts exceed what Redis Pub or Sub handles comfortably (then shard channels across Redis instances by order id).
+
+995
+00:55:31.393 --> 00:55:33.526
+What changed from L1 to L4.
+
+996
+00:55:33.806 --> 00:55:35.150
+Here is a quick table:
+
+997
+00:55:35.430 --> 00:55:38.886
+Concern, and L1, and L2, and L3, and L4.
+
+998
+00:55:39.166 --> 00:55:40.190
+Event source.
+
+999
+00:55:40.470 --> 00:55:41.302
+L1:
+
+1000
+00:55:41.582 --> 00:55:42.478
+Timer loop.
+
+1001
+00:55:42.758 --> 00:55:43.569
+L2:
+
+1002
+00:55:43.849 --> 00:55:45.342
+In-process Spring events.
+
+1003
+00:55:45.622 --> 00:55:46.475
+L3:
+
+1004
+00:55:46.755 --> 00:55:47.673
+In-process.
+
+1005
+00:55:47.953 --> 00:55:48.827
+L4:
+
+1006
+00:55:49.107 --> 00:55:51.753
+Kafka, then Redis Streams + Pub or Sub.
+
+1007
+00:55:52.033 --> 00:55:53.142
+Authorization.
+
+1008
+00:55:53.422 --> 00:55:54.233
+L2:
+
+1009
+00:55:54.513 --> 00:55:56.902
+Owner check (404 for others).
+
+1010
+00:55:57.182 --> 00:55:58.974
+Heartbeat or idle timeouts.
+
+1011
+00:55:59.254 --> 00:56:00.107
+L3:
+
+1012
+00:56:00.387 --> 00:56:03.950
+15 s heartbeat, 100 s lifetime + jitter.
+
+1013
+00:56:04.230 --> 00:56:07.217
+L4: same, aligned with ingress config.
+
+1014
+00:56:07.497 --> 00:56:08.947
+Resume after disconnect.
+
+1015
+00:56:09.227 --> 00:56:10.081
+L3:
+
+1016
+00:56:10.361 --> 00:56:12.238
+In-memory replay (one pod).
+
+1017
+00:56:12.518 --> 00:56:13.393
+L4:
+
+1018
+00:56:13.673 --> 00:56:15.870
+Redis replay, any pod, race-free.
+
+1019
+00:56:16.150 --> 00:56:17.409
+Limits and metrics.
+
+1020
+00:56:17.689 --> 00:56:18.542
+L3:
+
+1021
+00:56:18.822 --> 00:56:20.934
+Per-user cap, gauges, counters.
+
+1022
+00:56:21.214 --> 00:56:23.518
+L4: + per-pod subscriptions.
+
+1023
+00:56:24.868 --> 00:56:26.084
+Deploy behaviour.
+
+1024
+00:56:26.364 --> 00:56:27.196
+L1:
+
+1025
+00:56:27.476 --> 00:56:28.372
+Drops all.
+
+1026
+00:56:28.652 --> 00:56:29.463
+L2:
+
+1027
+00:56:29.743 --> 00:56:30.639
+Drops all.
+
+1028
+00:56:30.919 --> 00:56:31.772
+L3:
+
+1029
+00:56:32.052 --> 00:56:33.588
+Drain with jittered retry.
+
+1030
+00:56:33.868 --> 00:56:36.044
+L4: + preStop, readiness.
+
+1031
+00:56:36.324 --> 00:56:37.476
+Stickiness needed.
+
+1032
+00:56:37.756 --> 00:56:39.185
+L1: n or a.
+
+1033
+00:56:39.465 --> 00:56:40.852
+L2: n or a.
+
+1034
+00:56:41.132 --> 00:56:43.052
+L3: n or a (one pod).
+
+1035
+00:56:43.332 --> 00:56:44.207
+L4:
+
+1036
+00:56:44.487 --> 00:56:45.169
+None.
+
+1037
+00:56:46.519 --> 00:56:47.394
+Question.
+
+1038
+00:56:47.674 --> 00:56:49.210
+Would you stop at L3?
+
+1039
+00:56:49.490 --> 00:56:50.855
+Thirty-second answer:
+
+1040
+00:56:51.135 --> 00:56:53.589
+For a single-instance internal tool, yes.
+
+1041
+00:56:53.869 --> 00:56:56.877
+For a customer-facing, multi-pod service, no.
+
+1042
+00:56:57.157 --> 00:57:04.218
+The first deploy with L3 on several pods would send reconnecting clients to pods that have never seen their events.
+
+1043
+00:57:04.498 --> 00:57:08.765
+The deciding question is simply: can the reconnect land on a different pod?
+
+1044
+00:57:09.045 --> 00:57:10.922
+In Kubernetes it always can.
+
+1045
+00:57:12.272 --> 00:57:13.211
+Part 6.
+
+1046
+00:57:13.491 --> 00:57:14.771
+Production Concerns.
+
+1047
+00:57:16.021 --> 00:57:17.173
+Failure modes.
+
+1048
+00:57:17.453 --> 00:57:18.797
+Here is a quick table:
+
+1049
+00:57:19.077 --> 00:57:22.959
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+1050
+00:57:23.239 --> 00:57:25.437
+Idle timeout kills streams silently.
+
+1051
+00:57:25.717 --> 00:57:35.253
+Detection signal: tracking.stream.closedreason=error spikes at ~60 or 120 s marks; client watchdog reconnects.
+
+1052
+00:57:35.533 --> 00:57:36.749
+Blast radius:
+
+1053
+00:57:37.029 --> 00:57:38.181
+Frozen screens.
+
+1054
+00:57:38.461 --> 00:57:39.463
+Mitigation:
+
+1055
+00:57:39.743 --> 00:57:43.775
+Heartbeat smallest idle timeout; server lifetime LB idle.
+
+1056
+00:57:44.055 --> 00:57:45.207
+Proxy buffering.
+
+1057
+00:57:45.487 --> 00:57:46.682
+Detection signal:
+
+1058
+00:57:46.962 --> 00:57:50.269
+Events arrive in bursts, or only when the stream closes.
+
+1059
+00:57:50.549 --> 00:57:51.765
+Blast radius:
+
+1060
+00:57:52.045 --> 00:57:53.346
+Tracking looks laggy.
+
+1061
+00:57:53.626 --> 00:58:00.730
+Mitigation: proxy-buffering: off, X-Accel-Buffering: no, Cache-Control: no-transform, flush per event.
+
+1062
+00:58:01.010 --> 00:58:04.082
+Reconnect storm after deploy or LB restart.
+
+1063
+00:58:04.362 --> 00:58:05.557
+Detection signal:
+
+1064
+00:58:05.837 --> 00:58:08.994
+Connection rate spike; 5xx on new streams.
+
+1065
+00:58:09.274 --> 00:58:10.490
+Blast radius:
+
+1066
+00:58:10.770 --> 00:58:12.199
+Other pods overloaded.
+
+1067
+00:58:12.479 --> 00:58:13.482
+Mitigation:
+
+1068
+00:58:13.762 --> 00:58:19.842
+Jittered retry, drain spread over 1 to 5 s, rolling deploys with maxUnavailable limits.
+
+1069
+00:58:21.192 --> 00:58:23.347
+Stale pooled connection (outbound).
+
+1070
+00:58:23.627 --> 00:58:24.821
+Detection signal:
+
+1071
+00:58:25.101 --> 00:58:28.173
+Intermittent Connection reset after quiet periods.
+
+1072
+00:58:28.453 --> 00:58:29.669
+Blast radius:
+
+1073
+00:58:29.949 --> 00:58:31.293
+Random failed calls.
+
+1074
+00:58:31.573 --> 00:58:32.576
+Mitigation:
+
+1075
+00:58:32.856 --> 00:58:37.464
+Pool idle TTL server keep-alive; retry idempotent calls once.
+
+1076
+00:58:37.744 --> 00:58:40.496
+Ephemeral port or NAT port exhaustion.
+
+1077
+00:58:40.776 --> 00:58:41.971
+Detection signal:
+
+1078
+00:58:42.251 --> 00:58:47.819
+Cannot assign requested address, NAT gateway errors, connect timeouts to one partner.
+
+1079
+00:58:48.099 --> 00:58:49.315
+Blast radius:
+
+1080
+00:58:49.595 --> 00:58:51.835
+All outbound calls to that destination.
+
+1081
+00:58:52.115 --> 00:58:53.117
+Mitigation:
+
+1082
+00:58:53.397 --> 00:58:58.048
+Connection pooling, keep-alive, more NAT IPs, fewer new connections.
+
+1083
+00:58:58.328 --> 00:59:01.208
+DNS resolution failure or slow DNS.
+
+1084
+00:59:01.488 --> 00:59:02.683
+Detection signal:
+
+1085
+00:59:02.963 --> 00:59:06.120
+UnknownHostException, latency on first calls.
+
+1086
+00:59:06.400 --> 00:59:07.616
+Blast radius:
+
+1087
+00:59:07.896 --> 00:59:09.411
+Anything resolving names.
+
+1088
+00:59:09.691 --> 00:59:10.693
+Mitigation:
+
+1089
+00:59:10.973 --> 00:59:17.224
+Node-local DNS cache, sane JVM DNS TTL, FQDNs, resolver alerts.
+
+1090
+00:59:18.574 --> 00:59:21.411
+DNS change ignored by pooled connections.
+
+1091
+00:59:21.691 --> 00:59:22.886
+Detection signal:
+
+1092
+00:59:23.166 --> 00:59:26.281
+Traffic keeps going to the old IP after failover.
+
+1093
+00:59:26.561 --> 00:59:27.777
+Blast radius:
+
+1094
+00:59:28.057 --> 00:59:29.529
+Failover doesn't happen.
+
+1095
+00:59:29.809 --> 00:59:30.811
+Mitigation:
+
+1096
+00:59:31.091 --> 00:59:34.483
+Max connection lifetime (5 to 10 min) in pools.
+
+1097
+00:59:34.763 --> 00:59:37.131
+Certificate expiry or broken chain.
+
+1098
+00:59:37.411 --> 00:59:38.606
+Detection signal:
+
+1099
+00:59:38.886 --> 00:59:42.001
+TLS handshake errors spike on one client type.
+
+1100
+00:59:42.281 --> 00:59:43.497
+Blast radius:
+
+1101
+00:59:43.777 --> 00:59:45.910
+Total outage for affected clients.
+
+1102
+00:59:46.190 --> 00:59:47.193
+Mitigation:
+
+1103
+00:59:47.473 --> 00:59:54.918
+Automated renewal, expiry alerts, chain validation in CI. mTLS identity misconfiguration.
+
+1104
+00:59:55.198 --> 00:59:56.393
+Detection signal:
+
+1105
+00:59:56.673 --> 01:00:01.707
+403 or CERTIFICATEVERIFYFAILED between services after a mesh change.
+
+1106
+01:00:01.987 --> 01:00:03.203
+Blast radius:
+
+1107
+01:00:03.483 --> 01:00:05.233
+Service-to-service calls fail.
+
+1108
+01:00:05.513 --> 01:00:06.515
+Mitigation:
+
+1109
+01:00:06.795 --> 01:00:10.763
+Staged policy rollout (permissive, then strict), mesh dashboards.
+
+1110
+01:00:11.043 --> 01:00:12.494
+Too many streams per pod.
+
+1111
+01:00:12.774 --> 01:00:13.969
+Detection signal:
+
+1112
+01:00:14.249 --> 01:00:17.193
+Memory or FD exhaustion, GC pressure.
+
+1113
+01:00:17.473 --> 01:00:18.689
+Blast radius:
+
+1114
+01:00:18.969 --> 01:00:21.017
+Pod restarts drop all its streams.
+
+1115
+01:00:21.297 --> 01:00:22.299
+Mitigation:
+
+1116
+01:00:22.579 --> 01:00:28.553
+Per-pod cap from load test, readiness false when full, HPA on tracking.streams.active.
+
+1117
+01:00:29.903 --> 01:00:31.823
+Redis Pub or Sub unavailable.
+
+1118
+01:00:32.103 --> 01:00:33.297
+Detection signal:
+
+1119
+01:00:33.577 --> 01:00:36.159
+Router publish errors; delivery lag alert.
+
+1120
+01:00:36.439 --> 01:00:37.655
+Blast radius:
+
+1121
+01:00:37.935 --> 01:00:40.303
+No live updates (streams stay open).
+
+1122
+01:00:40.583 --> 01:00:41.585
+Mitigation:
+
+1123
+01:00:41.865 --> 01:00:46.623
+Push notifications for status; UI updates delayed banner; Redis HA.
+
+1124
+01:00:47.973 --> 01:00:49.061
+Observability.
+
+1125
+01:00:49.341 --> 01:00:50.685
+Here is a quick table:
+
+1126
+01:00:50.965 --> 01:00:55.018
+Signal, and Type, and Alert or use. tracking.streams.active.
+
+1127
+01:00:55.298 --> 01:00:55.959
+Type:
+
+1128
+01:00:56.239 --> 01:00:57.349
+Gauge per pod.
+
+1129
+01:00:57.629 --> 01:00:58.717
+Alert or use:
+
+1130
+01:00:58.997 --> 01:01:04.373
+Autoscale on it; alert 80 % of per-pod cap. tracking.stream.closedreason.
+
+1131
+01:01:04.653 --> 01:01:05.314
+Type:
+
+1132
+01:01:05.594 --> 01:01:06.426
+Counter.
+
+1133
+01:01:06.706 --> 01:01:07.794
+Alert or use:
+
+1134
+01:01:08.074 --> 01:01:15.242
+Rising error share means middlebox kills or network issues. tracking.replays, tracking.replayed.events.
+
+1135
+01:01:15.522 --> 01:01:16.183
+Type:
+
+1136
+01:01:16.463 --> 01:01:17.359
+Counters.
+
+1137
+01:01:17.639 --> 01:01:18.727
+Alert or use:
+
+1138
+01:01:19.007 --> 01:01:25.535
+High replay volume means frequent disconnects on some network or app version. tracking.delivery.lag.
+
+1139
+01:01:25.815 --> 01:01:26.477
+Type:
+
+1140
+01:01:26.757 --> 01:01:28.506
+Timer (event time, then sent).
+
+1141
+01:01:28.786 --> 01:01:32.861
+Alert or use: p95 2 s pages (NFR-1).
+
+1142
+01:01:33.141 --> 01:01:35.466
+Connection rate (new streams per second).
+
+1143
+01:01:35.746 --> 01:01:36.407
+Type:
+
+1144
+01:01:36.687 --> 01:01:37.797
+LB metric.
+
+1145
+01:01:38.077 --> 01:01:39.165
+Alert or use:
+
+1146
+01:01:39.445 --> 01:01:41.002
+Reconnect-storm detection.
+
+1147
+01:01:41.282 --> 01:01:44.695
+TLS handshake errors by client (UA or app version).
+
+1148
+01:01:44.975 --> 01:01:45.637
+Type:
+
+1149
+01:01:45.917 --> 01:01:47.581
+LB or CDN logs.
+
+1150
+01:01:47.861 --> 01:01:48.949
+Alert or use:
+
+1151
+01:01:49.229 --> 01:01:50.786
+Chain or pinning problems.
+
+1152
+01:01:52.136 --> 01:01:54.248
+DNS lookup latency or errors.
+
+1153
+01:01:54.528 --> 01:01:55.189
+Type:
+
+1154
+01:01:55.469 --> 01:01:56.856
+CoreDNS metrics.
+
+1155
+01:01:57.136 --> 01:01:58.224
+Alert or use:
+
+1156
+01:01:58.504 --> 01:01:59.528
+Resolver health.
+
+1157
+01:01:59.808 --> 01:02:02.155
+NAT gateway port allocation errors.
+
+1158
+01:02:02.435 --> 01:02:03.096
+Type:
+
+1159
+01:02:03.376 --> 01:02:04.443
+Cloud metric.
+
+1160
+01:02:04.723 --> 01:02:05.811
+Alert or use:
+
+1161
+01:02:06.091 --> 01:02:10.741
+Outbound exhaustion. http.client.requests + pool stats.
+
+1162
+01:02:11.021 --> 01:02:11.683
+Type:
+
+1163
+01:02:11.963 --> 01:02:12.965
+Micrometer.
+
+1164
+01:02:13.245 --> 01:02:14.333
+Alert or use:
+
+1165
+01:02:14.613 --> 01:02:17.088
+Outbound latency, pool saturation.
+
+1166
+01:02:18.438 --> 01:02:19.377
+Security.
+
+1167
+01:02:19.657 --> 01:02:25.865
+Authenticate every stream (JWT at the gateway) and authorize by order ownership at the pod.
+
+1168
+01:02:26.145 --> 01:02:30.582
+Return 404 for other users' orders to avoid enumeration.
+
+1169
+01:02:30.862 --> 01:02:33.550
+Limit streams per user and per IP range.
+
+1170
+01:02:33.830 --> 01:02:42.491
+Remember that CGNAT puts many real users behind one IP, so per-IP limits must be generous or combined with user identity.
+
+1171
+01:02:42.771 --> 01:02:50.473
+Location privacy: stream rider location only while out for delivery, only to the order owner, and stop at delivery.
+
+1172
+01:02:50.753 --> 01:02:54.635
+Never include rider phone numbers in events; use masked calling.
+
+1173
+01:02:55.985 --> 01:02:57.223
+TLS everywhere:
+
+1174
+01:02:57.503 --> 01:03:05.417
+TLS 1.2 minimum (prefer 1.3), HSTS on public domains, mTLS inside the mesh.
+
+1175
+01:03:05.697 --> 01:03:09.367
+0-RTT only for idempotent requests at the edge.
+
+1176
+01:03:09.647 --> 01:03:20.207
+Egress control: services reach the internet only through NAT with fixed IPs, and outbound destinations are allow-listed (Razorpay, SMS providers).
+
+1177
+01:03:20.487 --> 01:03:30.343
+Webhooks inbound: verify signatures (Razorpay HMAC), accept only via CDN or WAF, and don't rely on source IP alone.
+
+1178
+01:03:31.693 --> 01:03:33.357
+Performance and tuning knobs.
+
+1179
+01:03:33.637 --> 01:03:34.981
+Here is a quick table:
+
+1180
+01:03:35.261 --> 01:03:37.095
+Knob, and Value, and Guidance.
+
+1181
+01:03:37.375 --> 01:03:38.634
+SSE heartbeat.
+
+1182
+01:03:38.914 --> 01:03:39.682
+Value:
+
+1183
+01:03:39.962 --> 01:03:41.029
+15 s.
+
+1184
+01:03:41.309 --> 01:03:48.882
+Guidance: min idle timeout on the path; costs ~10 K tiny writes per second at 150 K streams.
+
+1185
+01:03:49.162 --> 01:03:50.335
+Stream lifetime.
+
+1186
+01:03:50.615 --> 01:03:51.383
+Value:
+
+1187
+01:03:51.663 --> 01:03:53.967
+100 s ± 10 s.
+
+1188
+01:03:54.247 --> 01:03:55.143
+Guidance:
+
+1189
+01:03:55.423 --> 01:03:58.282
+LB idle timeout; jitter spreads reconnects.
+
+1190
+01:03:58.562 --> 01:03:59.778
+Client watchdog.
+
+1191
+01:04:00.058 --> 01:04:00.826
+Value:
+
+1192
+01:04:01.106 --> 01:04:03.410
+3 times heartbeat (45 s).
+
+1193
+01:04:03.690 --> 01:04:04.586
+Guidance:
+
+1194
+01:04:04.866 --> 01:04:06.167
+Detects silent death.
+
+1195
+01:04:06.447 --> 01:04:07.706
+Reconnect backoff.
+
+1196
+01:04:07.986 --> 01:04:08.754
+Value:
+
+1197
+01:04:09.034 --> 01:04:11.146
+1 s, then 30 s, full jitter.
+
+1198
+01:04:11.426 --> 01:04:12.322
+Guidance:
+
+1199
+01:04:12.602 --> 01:04:14.437
+Protects servers during incidents.
+
+1200
+01:04:14.717 --> 01:04:16.253
+Tomcat max-connections.
+
+1201
+01:04:16.533 --> 01:04:17.301
+Value:
+
+1202
+01:04:17.581 --> 01:04:20.055
+From load test (for example, 20 K).
+
+1203
+01:04:20.335 --> 01:04:21.231
+Guidance:
+
+1204
+01:04:21.511 --> 01:04:25.223
+Default 8,192 caps streams per pod.
+
+1205
+01:04:25.503 --> 01:04:26.762
+File descriptors.
+
+1206
+01:04:27.042 --> 01:04:31.501
+Value: ≥ 65,536.
+
+1207
+01:04:31.781 --> 01:04:32.677
+Guidance:
+
+1208
+01:04:32.957 --> 01:04:34.727
+One per socket, plus files.
+
+1209
+01:04:36.077 --> 01:04:38.019
+Outbound pool idle TTL.
+
+1210
+01:04:38.299 --> 01:04:39.067
+Value:
+
+1211
+01:04:39.347 --> 01:04:40.669
+30 to 50 s.
+
+1212
+01:04:40.949 --> 01:04:44.427
+Guidance: server keep-alive (60 to 75 s).
+
+1213
+01:04:44.707 --> 01:04:46.733
+Outbound max connection lifetime.
+
+1214
+01:04:47.013 --> 01:04:47.781
+Value:
+
+1215
+01:04:48.061 --> 01:04:49.277
+5 to 10 min.
+
+1216
+01:04:49.557 --> 01:04:50.453
+Guidance:
+
+1217
+01:04:50.733 --> 01:04:52.333
+Follow DNS changes.
+
+1218
+01:04:52.613 --> 01:04:54.384
+JVM DNS TTL.
+
+1219
+01:04:54.664 --> 01:04:55.432
+Value:
+
+1220
+01:04:55.712 --> 01:04:56.629
+30 s.
+
+1221
+01:04:56.909 --> 01:04:57.805
+Guidance:
+
+1222
+01:04:58.085 --> 01:05:00.453
+Never cache forever in cloud environments.
+
+1223
+01:05:00.733 --> 01:05:03.464
+HTTP or 2 max concurrent streams.
+
+1224
+01:05:03.744 --> 01:05:04.512
+Value:
+
+1225
+01:05:04.792 --> 01:05:08.056
+Server default (~100 to 250).
+
+1226
+01:05:08.336 --> 01:05:09.232
+Guidance:
+
+1227
+01:05:09.512 --> 01:05:13.160
+Raise at the edge if clients multiplex many SSE streams.
+
+1228
+01:05:14.510 --> 01:05:15.235
+Cost.
+
+1229
+01:05:15.515 --> 01:05:16.859
+Here is a quick table:
+
+1230
+01:05:17.139 --> 01:05:18.377
+Driver, and Note.
+
+1231
+01:05:18.657 --> 01:05:19.830
+Held connections:
+
+1232
+01:05:20.110 --> 01:05:27.107
+Memory-bound: ~9 GB of stream state across the fleet at 150 K streams (§4).
+
+1233
+01:05:27.387 --> 01:05:29.222
+LB or CDN pricing:
+
+1234
+01:05:29.502 --> 01:05:33.811
+Many LBs charge by new connections, active connections and bytes.
+
+1235
+01:05:34.091 --> 01:05:40.619
+Planned reconnects every 100 s cost ~1.5 K new connections per second at peak.
+
+1236
+01:05:40.899 --> 01:05:42.926
+NAT gateway data processing:
+
+1237
+01:05:43.206 --> 01:05:47.942
+Outbound partner calls and image fetches through NAT are billed per GB.
+
+1238
+01:05:48.222 --> 01:05:50.611
+Use private endpoints for cloud services.
+
+1239
+01:05:50.891 --> 01:05:52.193
+Cross-AZ traffic:
+
+1240
+01:05:52.473 --> 01:05:58.617
+Pod ↔ Redis ↔ pod fan-out across AZs is billed per GB.
+
+1241
+01:05:58.897 --> 01:06:02.886
+Keep payloads small (location events ~150 B).
+
+1242
+01:06:03.166 --> 01:06:04.958
+Location update frequency:
+
+1243
+01:06:05.238 --> 01:06:06.347
+The biggest lever:
+
+1244
+01:06:06.627 --> 01:06:10.595
+4 s versus 2 s halves message volume and battery drain.
+
+1245
+01:06:11.945 --> 01:06:12.884
+Part 7.
+
+1246
+01:06:13.164 --> 01:06:14.871
+Anti-Patterns and Pitfalls.
+
+1247
+01:06:16.121 --> 01:06:16.761
+1.
+
+1248
+01:06:17.041 --> 01:06:19.409
+Long-lived connections with no heartbeat.
+
+1249
+01:06:19.689 --> 01:06:20.499
+Symptom:
+
+1250
+01:06:20.779 --> 01:06:24.427
+Streams die silently after 60 s, 5 min of quiet.
+
+1251
+01:06:24.707 --> 01:06:25.433
+Fix:
+
+1252
+01:06:25.713 --> 01:06:30.321
+Heartbeat below the smallest idle timeout on the path, plus a client watchdog.
+
+1253
+01:06:30.601 --> 01:06:31.305
+2.
+
+1254
+01:06:31.585 --> 01:06:33.654
+Infinite server-side stream lifetime.
+
+1255
+01:06:35.004 --> 01:06:47.591
+Here is the Java code. before: lives until some middlebox kills it without telling anyone. after: bounded, jittered lifetime; server closes cleanly with a retry hint; client resumes.
+
+1256
+01:06:50.441 --> 01:06:51.187
+3.
+
+1257
+01:06:51.467 --> 01:06:53.643
+Events without ids (no resume).
+
+1258
+01:06:53.923 --> 01:06:54.734
+Symptom:
+
+1259
+01:06:55.014 --> 01:06:59.110
+Every disconnect loses updates, and users reopen the app to refresh.
+
+1260
+01:06:59.390 --> 01:07:00.115
+Fix:
+
+1261
+01:07:00.395 --> 01:07:05.323
+Monotonic event ids and Last-Event-ID replay from a durable buffer.
+
+1262
+01:07:05.603 --> 01:07:06.307
+4.
+
+1263
+01:07:06.587 --> 01:07:09.574
+Sticky sessions as the scaling strategy for streams.
+
+1264
+01:07:09.854 --> 01:07:10.665
+Symptom:
+
+1265
+01:07:10.945 --> 01:07:16.854
+Uneven load, and deploys or scale-downs drop a whole pod's users with no way to recover.
+
+1266
+01:07:17.134 --> 01:07:17.859
+Fix:
+
+1267
+01:07:18.139 --> 01:07:23.793
+Any pod can serve any stream (shared replay + Pub or Sub), so no stickiness is needed.
+
+1268
+01:07:24.073 --> 01:07:24.841
+5.
+
+1269
+01:07:25.121 --> 01:07:27.745
+Creating an HTTP client per request.
+
+1270
+01:07:29.095 --> 01:07:30.609
+Here is the Java code.
+
+1271
+01:07:30.889 --> 01:07:46.015
+It runs to 17 lines; the full listing is in the chapter. before: new client (and new TCP + TLS handshake, new pool) on every call. after: one client bean with a pooled, kept-alive connector and explicit timeouts.
+
+1272
+01:07:48.865 --> 01:07:49.611
+6.
+
+1273
+01:07:49.891 --> 01:07:51.065
+Misordered timeouts.
+
+1274
+01:07:51.345 --> 01:07:52.155
+Symptom:
+
+1275
+01:07:52.435 --> 01:07:56.851
+The gateway times out at 5 s while the service keeps working for 30 s.
+
+1276
+01:07:57.131 --> 01:07:59.734
+The client retries, and the work runs twice.
+
+1277
+01:08:00.014 --> 01:08:00.739
+Fix:
+
+1278
+01:08:01.019 --> 01:08:08.913
+The timeout ladder (§2.10): inner timeouts are shorter than outer ones, and it's documented in the design doc.
+
+1279
+01:08:09.193 --> 01:08:09.939
+7.
+
+1280
+01:08:10.219 --> 01:08:13.185
+Caching DNS forever or ignoring it in pools.
+
+1281
+01:08:13.465 --> 01:08:14.275
+Symptom:
+
+1282
+01:08:14.555 --> 01:08:19.633
+A partner fails over to new IPs, and your service keeps calling the dead ones for hours.
+
+1283
+01:08:19.913 --> 01:08:20.638
+Fix:
+
+1284
+01:08:20.918 --> 01:08:26.742
+JVM DNS TTL of ~30 s and a max connection lifetime in pools.
+
+1285
+01:08:28.092 --> 01:08:28.775
+8.
+
+1286
+01:08:29.055 --> 01:08:31.743
+IP-based rate limiting for mobile users.
+
+1287
+01:08:32.023 --> 01:08:32.833
+Symptom:
+
+1288
+01:08:33.113 --> 01:08:39.087
+A whole city's users behind one carrier NAT IP get 429s together.
+
+1289
+01:08:39.367 --> 01:08:40.092
+Fix:
+
+1290
+01:08:40.372 --> 01:08:48.329
+Limit by authenticated identity or device, with IP limits only as a coarse backstop (Ch 18, 39).
+
+1291
+01:08:48.609 --> 01:08:49.356
+9.
+
+1292
+01:08:49.636 --> 01:08:51.193
+WebSockets by default.
+
+1293
+01:08:51.473 --> 01:08:52.284
+Symptom:
+
+1294
+01:08:52.564 --> 01:09:00.372
+Custom reconnect, resume and auth code, and problems with corporate proxies, for a feature that only pushes server, then client.
+
+1295
+01:09:00.652 --> 01:09:01.377
+Fix:
+
+1296
+01:09:01.657 --> 01:09:06.607
+Use SSE for one-way push and keep WebSockets for true bidirectional needs.
+
+1297
+01:09:07.957 --> 01:09:08.831
+Part 8.
+
+1298
+01:09:09.111 --> 01:09:10.455
+Interview Q and A.
+
+1299
+01:09:11.705 --> 01:09:12.537
+Beginner.
+
+1300
+01:09:12.817 --> 01:09:13.841
+Question 1.
+
+1301
+01:09:14.121 --> 01:09:19.647
+What happens when you type api.grocery.in or orders or 42 into a browser?
+
+1302
+01:09:19.927 --> 01:09:21.292
+Thirty-second answer:
+
+1303
+01:09:21.572 --> 01:09:25.604
+DNS resolves the name to an IP (cached at several levels).
+
+1304
+01:09:25.884 --> 01:09:42.247
+The browser opens a TCP connection (3-way handshake), negotiates TLS 1.3 (1 RTT, certificate check), sends an HTTP GET over it, and the CDN or LB routes it to a server that builds the response.
+
+1305
+01:09:42.527 --> 01:09:45.193
+The browser receives, decrypts and renders it.
+
+1306
+01:09:45.473 --> 01:09:47.649
+The connection is kept alive for reuse.
+
+1307
+01:09:48.999 --> 01:09:50.002
+Question 2.
+
+1308
+01:09:50.282 --> 01:09:53.375
+TCP versus UDP: when would you use each?
+
+1309
+01:09:53.655 --> 01:09:55.021
+Thirty-second answer:
+
+1310
+01:09:55.301 --> 01:09:59.738
+TCP gives reliable, ordered byte streams with congestion control.
+
+1311
+01:10:00.018 --> 01:10:04.626
+It's used for HTTP or 1.1 to 2, databases and Kafka.
+
+1312
+01:10:04.906 --> 01:10:09.343
+UDP gives unordered, unreliable datagrams with no connection.
+
+1313
+01:10:09.623 --> 01:10:19.202
+It's used for DNS, real-time voice or video, games, and as the base for QUIC (HTTP or 3), which adds reliability per stream on top.
+
+1314
+01:10:20.552 --> 01:10:21.597
+Question 3.
+
+1315
+01:10:21.877 --> 01:10:26.443
+What's the difference between polling, long polling, SSE and WebSockets?
+
+1316
+01:10:26.723 --> 01:10:28.088
+Thirty-second answer:
+
+1317
+01:10:28.368 --> 01:10:32.101
+Polling asks repeatedly, which is simple but wasteful and late.
+
+1318
+01:10:32.381 --> 01:10:35.453
+Long polling holds each request until there's data.
+
+1319
+01:10:35.733 --> 01:10:42.859
+SSE keeps one HTTP response open and the server pushes events, with built-in reconnect and resume.
+
+1320
+01:10:43.139 --> 01:10:47.213
+WebSockets upgrade to a full-duplex channel for two-way messaging.
+
+1321
+01:10:48.563 --> 01:10:49.630
+Question 4.
+
+1322
+01:10:49.910 --> 01:10:52.875
+What does TLS protect, and what doesn't it protect?
+
+1323
+01:10:53.155 --> 01:10:54.521
+Thirty-second answer:
+
+1324
+01:10:54.801 --> 01:11:03.803
+TLS provides confidentiality (encryption), integrity (tamper detection) and server authentication (certificate chain and hostname).
+
+1325
+01:11:04.083 --> 01:11:11.870
+It doesn't protect data at the endpoints: after termination at the CDN or LB, the next hop must be secured separately.
+
+1326
+01:11:12.150 --> 01:11:21.985
+It doesn't authenticate the client unless you use mTLS, and it doesn't hide the destination hostname completely (SNI is visible without ECH).
+
+1327
+01:11:23.335 --> 01:11:24.337
+Intermediate.
+
+1328
+01:11:24.617 --> 01:11:25.727
+Question 5.
+
+1329
+01:11:26.007 --> 01:11:31.724
+Compare HTTP or 1.1, HTTP or 2 and HTTP or 3.
+
+1330
+01:11:32.004 --> 01:11:33.241
+Which would you use where?
+
+1331
+01:11:33.521 --> 01:11:34.887
+Thirty-second answer:
+
+1332
+01:11:35.167 --> 01:11:40.159
+HTTP or 1.1 handles one request at a time per connection.
+
+1333
+01:11:40.439 --> 01:11:50.188
+HTTP or 2 multiplexes many streams over one TCP connection with header compression, but TCP-level HOL blocking remains.
+
+1334
+01:11:50.468 --> 01:11:57.956
+HTTP or 3 runs over QUIC (UDP) with independent streams, faster handshakes and connection migration.
+
+1335
+01:11:58.236 --> 01:12:11.356
+Use HTTP or 2 and 3 at the edge (mobile benefits from HTTP or 3), and HTTP or 2 (gRPC) or keep-alive HTTP or 1.1 internally.
+
+1336
+01:12:12.706 --> 01:12:13.815
+Question 6.
+
+1337
+01:12:14.095 --> 01:12:18.042
+Why does connection reuse matter so much, and how do you configure it?
+
+1338
+01:12:18.322 --> 01:12:19.687
+Thirty-second answer:
+
+1339
+01:12:19.967 --> 01:12:34.559
+A new connection costs DNS + TCP (1 RTT) + TLS (1 RTT) plus slow start, which is 100 plus ms on mobile and meaningful even inside a data centre at high QPS.
+
+1340
+01:12:34.839 --> 01:12:45.314
+Reuse via keep-alive and pools, set pool size from Little's Law, and order idle timeouts: client idle TTL server keep-alive LB idle timeout.
+
+1341
+01:12:46.664 --> 01:12:47.752
+Question 7.
+
+1342
+01:12:48.032 --> 01:12:52.171
+How does DNS work, and what DNS problems have you seen in production?
+
+1343
+01:12:52.451 --> 01:12:53.816
+Thirty-second answer:
+
+1344
+01:12:54.096 --> 01:13:00.859
+Recursive resolvers walk root, then TLD, then authoritative servers and cache answers for their TTL.
+
+1345
+01:13:01.139 --> 01:13:02.547
+Common production issues:
+
+1346
+01:13:02.827 --> 01:13:17.504
+JVMs or pools holding stale IPs after failover, ndots in Kubernetes multiplying lookups, resolver overload or outages making everything look down, and negative caching hiding a record that was just created.
+
+1347
+01:13:18.854 --> 01:13:19.878
+Question 8.
+
+1348
+01:13:20.158 --> 01:13:22.846
+When would you choose SSE over WebSockets?
+
+1349
+01:13:23.126 --> 01:13:24.726
+Design live order tracking.
+
+1350
+01:13:25.006 --> 01:13:26.371
+Thirty-second answer:
+
+1351
+01:13:26.651 --> 01:13:36.422
+Tracking is server, then client, so use SSE: plain HTTP, HTTP or 2 multiplexing, built-in reconnect with Last-Event-ID.
+
+1352
+01:13:36.702 --> 01:13:37.662
+The design:
+
+1353
+01:13:37.942 --> 01:13:45.238
+Kafka events go to a router that writes a per-order Redis Stream (replay) and publishes to a per-order Pub or Sub channel.
+
+1354
+01:13:45.518 --> 01:13:55.651
+Stream pods subscribe only for orders they serve, send heartbeats every 15 s, close every ~100 s with a retry hint, and replay on reconnect.
+
+1355
+01:13:57.001 --> 01:13:58.068
+Question 9.
+
+1356
+01:13:58.348 --> 01:14:04.001
+What are L4 and L7 load balancers, and why does it matter for long-lived connections?
+
+1357
+01:14:04.281 --> 01:14:05.647
+Thirty-second answer:
+
+1358
+01:14:05.927 --> 01:14:11.836
+L4 balances TCP or UDP connections without understanding HTTP.
+
+1359
+01:14:12.116 --> 01:14:18.047
+L7 terminates HTTP, routes by path or headers, and can retry and inspect.
+
+1360
+01:14:18.327 --> 01:14:26.177
+For long-lived connections, L7 LBs impose HTTP idle and response timeouts and may buffer responses.
+
+1361
+01:14:26.457 --> 01:14:33.625
+L4 LBs balance connections, not requests, so long-lived streams can leave load uneven after scaling.
+
+1362
+01:14:34.975 --> 01:14:35.743
+Senior.
+
+1363
+01:14:36.023 --> 01:14:37.069
+Question 10.
+
+1364
+01:14:37.349 --> 01:14:40.485
+Users say live tracking 'freezes' after a minute or two.
+
+1365
+01:14:40.765 --> 01:14:42.045
+How do you debug it?
+
+1366
+01:14:42.325 --> 01:14:43.690
+Thirty-second answer:
+
+1367
+01:14:43.970 --> 01:14:46.039
+Suspect idle timeouts on the path:
+
+1368
+01:14:46.319 --> 01:14:50.522
+LB (often 60 s), carrier NAT, proxies, and buffering.
+
+1369
+01:14:50.802 --> 01:15:03.986
+Check close-reason metrics and timing (do disconnects cluster at 60 s?), LB and ingress timeouts, whether heartbeats exist and are flushed, whether buffering is on, and whether clients have a watchdog and resume.
+
+1370
+01:15:05.336 --> 01:15:06.467
+Question 11.
+
+1371
+01:15:06.747 --> 01:15:13.595
+Outbound calls to a payment partner intermittently fail with connection resets or 'cannot assign requested address'.
+
+1372
+01:15:13.875 --> 01:15:14.877
+What's happening?
+
+1373
+01:15:15.157 --> 01:15:16.523
+Thirty-second answer:
+
+1374
+01:15:16.803 --> 01:15:22.456
+Resets usually mean stale pooled connections (the partner or LB closed idle ones first).
+
+1375
+01:15:22.736 --> 01:15:29.776
+Cannot assign requested address means ephemeral or NAT port exhaustion from opening too many new connections.
+
+1376
+01:15:30.056 --> 01:15:40.872
+The fixes are proper pooling and keep-alive, idle TTL below the partner's timeout, a retry on reset for idempotent calls, and more NAT IPs if needed.
+
+1377
+01:15:42.222 --> 01:15:43.310
+Question 12.
+
+1378
+01:15:43.590 --> 01:15:47.878
+How do you handle a reconnect storm after a deploy or an LB failover?
+
+1379
+01:15:48.158 --> 01:15:49.523
+Thirty-second answer:
+
+1380
+01:15:49.803 --> 01:16:11.457
+Prevent synchronization (jittered lifetimes, jittered retry hints on drain, rolling deploys with limited unavailability), protect the servers (connection admission limits, readiness false when full, gateway rate limiting of new streams), and make reconnects cheap (HTTP or 2, TLS resumption, replay from Redis rather than recomputing state).
+
+1381
+01:16:12.807 --> 01:16:14.087
+Question 13.
+
+1382
+01:16:14.367 --> 01:16:16.692
+Explain timeouts across a request path.
+
+1383
+01:16:16.972 --> 01:16:18.145
+How do you set them?
+
+1384
+01:16:18.425 --> 01:16:19.791
+Thirty-second answer:
+
+1385
+01:16:20.071 --> 01:16:25.831
+Every hop has timeouts: client, CDN, LB, gateway, service, downstream, DB.
+
+1386
+01:16:26.111 --> 01:16:32.617
+For request or response, inner timeouts must be shorter than outer ones, and derived from a latency budget.
+
+1387
+01:16:32.897 --> 01:16:38.145
+For streams, heartbeat min idle timeout, and server lifetime LB idle timeout.
+
+1388
+01:16:38.425 --> 01:16:41.561
+Pools: client idle server keep-alive LB idle.
+
+1389
+01:16:42.911 --> 01:16:44.106
+Question 14.
+
+1390
+01:16:44.386 --> 01:16:49.186
+A partner rotated their TLS certificate and some of your services started failing.
+
+1391
+01:16:49.466 --> 01:16:50.511
+Why only some?
+
+1392
+01:16:50.791 --> 01:16:52.157
+Thirty-second answer:
+
+1393
+01:16:52.437 --> 01:17:10.399
+Likely causes: different trust stores (an old base image missing the new CA or intermediate), certificate pinning in some clients, a partner chain missing an intermediate that only some clients can fetch or cache, or different TLS versions and ciphers across JVM versions.
+
+1394
+01:17:11.749 --> 01:17:12.645
+Architect.
+
+1395
+01:17:12.925 --> 01:17:14.120
+Question 15.
+
+1396
+01:17:14.400 --> 01:17:18.731
+Design the network topology for the grocery platform in one region.
+
+1397
+01:17:19.011 --> 01:17:20.376
+Thirty-second answer:
+
+1398
+01:17:20.656 --> 01:17:26.629
+CDN + WAF at the edge (TLS 1.3, HTTP or 2 and 3).
+
+1399
+01:17:26.909 --> 01:17:39.069
+A VPC with public subnets only for LBs and NAT, private app subnets across 3 AZs for Kubernetes, and private data subnets for PostgreSQL, Redis and Kafka.
+
+1400
+01:17:39.349 --> 01:17:54.432
+Egress via NAT with fixed IPs for partners, private endpoints for cloud services, mTLS in the mesh with identity-based policies, NetworkPolicies as defense in depth, and non-overlapping CIDRs for future regions.
+
+1401
+01:17:55.782 --> 01:17:56.977
+Question 16.
+
+1402
+01:17:57.257 --> 01:18:03.699
+How would you set platform-wide standards for timeouts, retries and connections across 26 services?
+
+1403
+01:18:03.979 --> 01:18:05.345
+Thirty-second answer:
+
+1404
+01:18:05.625 --> 01:18:28.110
+Publish a standard: every client has explicit connect or read timeouts derived from per-route latency budgets, pools sized by Little's Law with idle TTL and max lifetime rules, retries only for idempotent operations with budgets and jitter, deadline propagation, and heartbeat or lifetime or resume rules for long-lived connections.
+
+1405
+01:18:28.390 --> 01:18:33.382
+Enforce it through shared client libraries or a mesh, config linting, and dashboards.
+
+1406
+01:18:34.732 --> 01:18:36.076
+Question 17.
+
+1407
+01:18:36.356 --> 01:18:38.980
+Should the grocery platform adopt a service mesh?
+
+1408
+01:18:39.260 --> 01:18:40.625
+What does it give and cost?
+
+1409
+01:18:40.905 --> 01:18:42.271
+Thirty-second answer:
+
+1410
+01:18:42.551 --> 01:18:54.753
+A mesh gives mTLS with workload identity, identity-based authorization, uniform retries, timeouts and telemetry, and traffic shifting for canaries, without changing app code.
+
+1411
+01:18:55.033 --> 01:19:06.063
+It costs resources (sidecar CPU and memory, or ambient-mode components), latency (sub-millisecond per hop), and operational complexity (upgrades, debugging).
+
+1412
+01:19:06.343 --> 01:19:15.708
+Adopt it when the service count and security requirements justify it, as they do at 26 services with PCI and DPDP obligations.
+
+1413
+01:19:17.058 --> 01:19:18.231
+Question 18.
+
+1414
+01:19:18.511 --> 01:19:22.181
+Your platform must serve customers across India from one region.
+
+1415
+01:19:22.461 --> 01:19:25.639
+How do you minimize latency for users far from Mumbai?
+
+1416
+01:19:25.919 --> 01:19:27.285
+Thirty-second answer:
+
+1417
+01:19:27.565 --> 01:19:48.557
+Terminate TLS at a CDN with Indian edge locations (saves handshake RTTs), cache catalog and images at the edge, enable HTTP or 3 for mobile, keep connections warm from edge to origin, reduce round trips (fewer sequential calls, aggregated BFF responses), and compress payloads.
+
+1418
+01:19:48.837 --> 01:19:55.301
+Multi-region only when latency or availability requirements justify it (Ch 27).
+
+1419
+01:19:56.651 --> 01:19:57.888
+Question 19.
+
+1420
+01:19:58.168 --> 01:20:01.261
+How do you design for zero trust inside the platform?
+
+1421
+01:20:01.541 --> 01:20:02.907
+Thirty-second answer:
+
+1422
+01:20:03.187 --> 01:20:04.915
+Don't trust network location.
+
+1423
+01:20:05.195 --> 01:20:17.909
+Every call is authenticated (mTLS workload identity, plus end-user tokens where relevant), authorized by policy (service A may call B's specific routes), encrypted, and logged.
+
+1424
+01:20:18.189 --> 01:20:25.187
+Least privilege is enforced for services, humans (just-in-time access) and data (per-service credentials).
+
+1425
+01:20:25.467 --> 01:20:28.709
+Network segmentation remains as defense in depth.
+
+1426
+01:20:30.059 --> 01:20:31.169
+Question 20.
+
+1427
+01:20:31.449 --> 01:20:36.462
+What would make you choose HTTP or 3 for the rider app, and how would you roll it out?
+
+1428
+01:20:36.742 --> 01:20:38.107
+Thirty-second answer:
+
+1429
+01:20:38.387 --> 01:20:46.259
+Riders move constantly between networks (Wi-Fi ↔ 4G, cell handovers), and their connections are lossy.
+
+1430
+01:20:46.539 --> 01:20:53.537
+QUIC's connection migration, 0 or 1-RTT setup and independent streams reduce stalls and reconnects.
+
+1431
+01:20:53.817 --> 01:21:08.665
+Roll it out via the CDN or LB with HTTP or 3 enabled, clients that fall back to HTTP or 2 when UDP is blocked, and metrics by transport comparing reconnect rate, latency and battery use.
+
+1432
+01:21:10.015 --> 01:21:10.911
+Part 9.
+
+1433
+01:21:11.191 --> 01:21:12.599
+Summary and Practice.
+
+1434
+01:21:13.849 --> 01:21:14.937
+Key takeaways.
+
+1435
+01:21:15.217 --> 01:21:23.515
+A request crosses DNS, TCP, TLS, HTTP and many middleboxes, each with its own caching and timeouts.
+
+1436
+01:21:23.795 --> 01:21:28.382
+New connections are expensive (DNS + 2 RTT + slow start).
+
+1437
+01:21:28.662 --> 01:21:32.161
+Reuse them with keep-alive and pools sized by Little's Law.
+
+1438
+01:21:32.441 --> 01:21:36.878
+Order idle timeouts: client pool idle server keep-alive LB idle.
+
+1439
+01:21:37.158 --> 01:21:40.806
+Cap connection lifetime so DNS changes take effect.
+
+1440
+01:21:41.086 --> 01:21:46.611
+HTTP or 2 multiplexes over TCP (TCP HOL remains).
+
+1441
+01:21:46.891 --> 01:21:54.977
+HTTP or 3 or QUIC removes cross-stream HOL and survives network changes, which matters most on mobile.
+
+1442
+01:21:56.327 --> 01:22:03.260
+DNS is a dependency: sane JVM TTLs, node-local caches, FQDNs, and monitoring.
+
+1443
+01:22:03.540 --> 01:22:06.356
+TLS 1.3 is 1 RTT.
+
+1444
+01:22:06.636 --> 01:22:11.223
+0-RTT is replayable, so use it for idempotent requests only.
+
+1445
+01:22:11.503 --> 01:22:15.364
+Automate certificates, and use mTLS for service identity.
+
+1446
+01:22:15.644 --> 01:22:20.956
+Use SSE for server, then client push, and WebSockets for bidirectional messaging.
+
+1447
+01:22:21.236 --> 01:22:27.017
+Every long-lived connection needs a heartbeat, a bounded lifetime, and resume by event id.
+
+1448
+01:22:27.297 --> 01:22:31.863
+Carrier NAT and cloud NAT have idle timeouts and port limits.
+
+1449
+01:22:32.143 --> 01:22:35.812
+Heartbeat, pool, and don't rate-limit mobile users by IP.
+
+1450
+01:22:37.162 --> 01:22:46.207
+Topology: public subnets only for LBs and NAT, private app and data tiers, fixed egress IPs, identity-based rules.
+
+1451
+01:22:46.487 --> 01:22:50.050
+Write the timeout ladder into the design doc as an NFR.
+
+1452
+01:22:51.400 --> 01:22:52.723
+Decision cheat sheet.
+
+1453
+01:22:53.003 --> 01:22:54.347
+Here is a quick table:
+
+1454
+01:22:54.627 --> 01:22:56.077
+Situation, and Choose.
+
+1455
+01:22:56.357 --> 01:22:59.984
+Server, then client updates (tracking, notifications feed):
+
+1456
+01:23:00.264 --> 01:23:02.952
+SSE + heartbeat + Last-Event-ID.
+
+1457
+01:23:03.232 --> 01:23:05.195
+Bidirectional real-time (chat):
+
+1458
+01:23:05.475 --> 01:23:07.715
+WebSocket + heartbeat + resume.
+
+1459
+01:23:07.995 --> 01:23:09.701
+Very low-frequency updates:
+
+1460
+01:23:09.981 --> 01:23:12.008
+Polling (or push notifications).
+
+1461
+01:23:12.288 --> 01:23:14.315
+Mobile clients on lossy networks:
+
+1462
+01:23:14.595 --> 01:23:16.643
+HTTP or 3 at the edge.
+
+1463
+01:23:16.923 --> 01:23:18.587
+Service-to-service RPC:
+
+1464
+01:23:18.867 --> 01:23:25.352
+HTTP or 2 (gRPC) or keep-alive HTTP or 1.1 + pools.
+
+1465
+01:23:25.632 --> 01:23:27.189
+Streams across many pods:
+
+1466
+01:23:27.469 --> 01:23:30.648
+Shared replay buffer + Pub or Sub, no stickiness.
+
+1467
+01:23:30.928 --> 01:23:33.360
+Partner API with IP allow-listing:
+
+1468
+01:23:33.640 --> 01:23:35.667
+NAT with fixed egress IPs.
+
+1469
+01:23:35.947 --> 01:23:37.717
+Fast failover via DNS:
+
+1470
+01:23:37.997 --> 01:23:43.587
+Low TTL + JVM DNS TTL 30 s + pool max lifetime.
+
+1471
+01:23:44.937 --> 01:23:46.067
+Exercises.
+
+1472
+01:23:46.347 --> 01:23:47.691
+Here is a quick table:
+
+1473
+01:23:47.971 --> 01:23:49.827
+Band, and Exercise, and Hint.
+
+1474
+01:23:50.107 --> 01:23:50.939
+B1.
+
+1475
+01:23:51.219 --> 01:23:52.286
+Exercise:
+
+1476
+01:23:52.566 --> 01:24:00.395
+Run L1, then change the poll interval to 50 ms and 1 s and record wasted requests and worst-case delay.
+
+1477
+01:24:00.675 --> 01:24:01.358
+Hint:
+
+1478
+01:24:01.638 --> 01:24:03.473
+The two trade off against each other.
+
+1479
+01:24:03.753 --> 01:24:04.585
+B1.
+
+1480
+01:24:04.865 --> 01:24:05.931
+Exercise:
+
+1481
+01:24:06.211 --> 01:24:11.395
+Use curl -N against the L3 service and read the raw SSE frames and heartbeats.
+
+1482
+01:24:11.675 --> 01:24:13.851
+Hint: -N disables curl's buffering.
+
+1483
+01:24:14.131 --> 01:24:15.006
+B2.
+
+1484
+01:24:15.286 --> 01:24:16.353
+Exercise:
+
+1485
+01:24:16.633 --> 01:24:26.745
+Measure a cold versus warm HTTPS request with curl -w %timeconnect %timeappconnect %timestarttransfer\n.
+
+1486
+01:24:27.025 --> 01:24:27.707
+Hint:
+
+1487
+01:24:27.987 --> 01:24:29.737
+Run the same URL twice.
+
+1488
+01:24:30.017 --> 01:24:30.891
+B2.
+
+1489
+01:24:31.171 --> 01:24:32.238
+Exercise:
+
+1490
+01:24:32.518 --> 01:24:40.710
+Add a client-side watchdog to a Java SSE client that reconnects with Last-Event-ID after 45 s of silence.
+
+1491
+01:24:40.990 --> 01:24:41.673
+Hint:
+
+1492
+01:24:41.953 --> 01:24:43.574
+Track the last id seen.
+
+1493
+01:24:43.854 --> 01:24:44.729
+B3.
+
+1494
+01:24:45.009 --> 01:24:46.075
+Exercise:
+
+1495
+01:24:46.355 --> 01:24:51.475
+Put NGINX in front of L3 with buffering on, observe the batching, then fix it.
+
+1496
+01:24:51.755 --> 01:24:53.334
+Hint: proxybuffering off;.
+
+1497
+01:24:54.684 --> 01:24:55.559
+B3.
+
+1498
+01:24:55.839 --> 01:24:56.905
+Exercise:
+
+1499
+01:24:57.185 --> 01:25:02.689
+Load test 20 K concurrent SSE streams on one pod and chart memory per stream.
+
+1500
+01:25:02.969 --> 01:25:05.743
+Hint: k6 or Gatling SSE support.
+
+1501
+01:25:06.023 --> 01:25:06.897
+B4.
+
+1502
+01:25:07.177 --> 01:25:08.244
+Exercise:
+
+1503
+01:25:08.524 --> 01:25:13.900
+Write the platform Connection and Timeout Standard (one page) for all 26 services.
+
+1504
+01:25:14.180 --> 01:25:14.863
+Hint:
+
+1505
+01:25:15.143 --> 01:25:17.276
+Ladders, pools, retries, streams.
+
+1506
+01:25:17.556 --> 01:25:18.431
+B4.
+
+1507
+01:25:18.711 --> 01:25:19.777
+Exercise:
+
+1508
+01:25:20.057 --> 01:25:26.436
+Design the rider-app transport migration to HTTP or 3 with success metrics and fallback.
+
+1509
+01:25:26.716 --> 01:25:27.399
+Hint:
+
+1510
+01:25:27.679 --> 01:25:29.193
+A or B by app version.
+
+1511
+01:25:30.543 --> 01:25:31.546
+Further reading.
+
+1512
+01:25:31.826 --> 01:25:35.858
+Ilya Grigorik, High Performance Browser Networking (free online):
+
+1513
+01:25:36.138 --> 01:25:41.429
+TCP, TLS, HTTP or 2, WebSocket and SSE chapters.
+
+1514
+01:25:41.709 --> 01:25:52.951
+RFC 9000 (QUIC), RFC 9114 (HTTP or 3), RFC 8446 (TLS 1.3).
+
+1515
+01:25:53.231 --> 01:25:55.322
+WHATWG HTML Living Standard:
+
+1516
+01:25:55.602 --> 01:25:58.567
+Server-sent events (EventSource, Last-Event-ID).
+
+1517
+01:25:58.847 --> 01:26:05.354
+Cloudflare and Fastly engineering blogs on HTTP or 3 and 0-RTT in production.
+
+1518
+01:26:05.634 --> 01:26:07.149
+Spring Framework reference:
+
+1519
+01:26:07.429 --> 01:26:11.354
+SseEmitter, RestClient, HTTP interface clients.
+
+1520
+01:26:12.704 --> 01:26:13.941
+Related chapters.
+
+1521
+01:26:14.221 --> 01:26:29.880
+02, Estimation, 04, API Design, 08, Load Balancing, 17, Inter-Service Communication, 18, Resilience Patterns, 23, Security Architecture, 41, Chat or Customer, Rider Messaging.
+
+1522
+01:26:31.230 --> 01:26:32.830
+That's the end of this chapter.
+
+1523
+01:26:33.110 --> 01:26:39.147
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1524
+01:26:39.427 --> 01:26:40.878
+See you in the next chapter.
+

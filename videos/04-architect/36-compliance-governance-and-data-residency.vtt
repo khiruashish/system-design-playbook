@@ -1,0 +1,3062 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.995
+Compliance, Governance and Data Residency.
+
+2
+00:00:03.275 --> 00:00:07.393
+Chapter 36, from the Architect part of the System Design Playbook.
+
+3
+00:00:09.143 --> 00:00:10.103
+At a glance:
+
+4
+00:00:10.383 --> 00:00:11.556
+Chapter at a glance.
+
+5
+00:00:11.836 --> 00:00:12.839
+Reader bands:
+
+6
+00:00:13.119 --> 00:00:15.401
+B2, then B4, Prerequisites:
+
+7
+00:00:15.681 --> 00:00:21.164
+Ch 21, Ch 23, Ch 27, Ch 30, What you will build:
+
+8
+00:00:21.444 --> 00:00:40.260
+How regulation shapes architecture, privacy by design under India's DPDP Act (and GDPR for comparison), payment-data localisation and card tokenisation, statutory retention, audit evidence, and data governance, turned into engineering mechanisms you can test.
+
+9
+00:00:40.540 --> 00:00:43.889
+Four runnable labs with real cryptography and hashing.
+
+10
+00:00:45.239 --> 00:00:47.095
+L1: the right to erasure.
+
+11
+00:00:47.375 --> 00:00:52.751
+A customer's data lived in 6 stores plus a legally retained GST invoice.
+
+12
+00:00:53.031 --> 00:01:15.517
+Deleting from the primary left 5 copies readable (including the backup, with a sensitive shopping-basket inference); deleting everywhere we remembered left 2 (backup, warehouse); crypto-shredding (per-customer AES-256-GCM key destroyed) left 0, kept the invoice under a separate legal-retention key, and left the other customer intact.
+
+13
+00:01:16.867 --> 00:01:19.107
+L2: finding PII in logs.
+
+14
+00:01:19.387 --> 00:01:49.460
+On 20,000 log lines with planted synthetic identifiers, format-only regexes had 1.9% precision for Aadhaar-format numbers and 0.9% for card numbers; checksums (Verhoeff, Luhn + issuer prefix) raised that to 16.4% and 97.8%; key-aware scanning reached 100% with no loss of recall, and redaction left 0 planted values and destroyed 0 order ids.
+
+15
+00:01:49.740 --> 00:01:52.215
+L3: residency as policy-as-code.
+
+16
+00:01:52.495 --> 00:01:54.948
+10 data flows checked against 5 rules:
+
+17
+00:01:55.228 --> 00:02:05.639
+5 blocked, including a Singapore DR replica holding payment data, card numbers in logs shipped to a vendor, and clickstream reused for ad targeting without consent.
+
+18
+00:02:05.919 --> 00:02:10.399
+A full orders-DB replica may only go to Mumbai or Hyderabad.
+
+19
+00:02:11.749 --> 00:02:13.903
+L4: tamper-evident audit log.
+
+20
+00:02:14.183 --> 00:02:19.645
+103,500 hash-chained events (~25k per second).
+
+21
+00:02:19.925 --> 00:02:33.109
+The chain alone caught edits, deletes and reorders but not a delete-and-recompute; external write-once anchors caught that, neither caught deletion of the 3,500 entries written since the last anchor.
+
+22
+00:02:33.389 --> 00:02:34.370
+Reading time:
+
+23
+00:02:34.650 --> 00:02:36.570
+120 min + code.
+
+24
+00:02:37.920 --> 00:02:38.667
+Warning:
+
+25
+00:02:38.947 --> 00:02:40.227
+Not legal advice.
+
+26
+00:02:40.507 --> 00:02:45.840
+This chapter explains how engineers turn regulatory obligations into architecture.
+
+27
+00:02:46.120 --> 00:02:50.877
+Laws and regulators' directions change, and their application depends on facts.
+
+28
+00:02:51.157 --> 00:03:05.024
+Statements about specific laws reflect the author's understanding as of mid-2026 and are marked where status may have changed, confirm every obligation with your legal and compliance teams before relying on it.
+
+29
+00:03:06.374 --> 00:03:07.227
+Part 1.
+
+30
+00:03:07.507 --> 00:03:09.427
+Introduction and Why It Matters.
+
+31
+00:03:10.677 --> 00:03:14.837
+A story: the audit that found what the architecture diagram didn't show.
+
+32
+00:03:15.117 --> 00:03:28.664
+In its fourth year, the grocery platform prepared for three things at once: a payment-partner audit, its first formal privacy review under India's Digital Personal Data Protection Act, and due diligence from an investor.
+
+33
+00:03:28.944 --> 00:03:31.077
+The architecture diagrams looked clean.
+
+34
+00:03:31.357 --> 00:03:34.536
+The auditors didn't look at diagrams; they looked at data.
+
+35
+00:03:34.816 --> 00:03:35.819
+What they found:
+
+36
+00:03:37.169 --> 00:03:39.366
+The DR region was in Singapore.
+
+37
+00:03:39.646 --> 00:03:56.030
+Chosen years earlier for latency and price, it held a full replica of the orders database, including payment transaction data that the platform's payment-data policy (and RBI's 2018 direction) required to be stored only in India (L3).
+
+38
+00:03:56.310 --> 00:03:57.867
+Card numbers were in the logs.
+
+39
+00:03:58.147 --> 00:04:09.881
+A payment-adapter debug statement had logged request payloads for two weeks during an incident, and those logs had been shipped to a third-party observability vendor abroad (L2, L3).
+
+40
+00:04:11.231 --> 00:04:12.681
+Delete my account didn't.
+
+41
+00:04:12.961 --> 00:04:15.649
+The erasure feature deleted the customer row.
+
+42
+00:04:15.929 --> 00:04:26.148
+Their name, phone, address and order history remained in the read model, the support search index, caches, nightly backups and the analytics warehouse, for years (L1).
+
+43
+00:04:26.428 --> 00:04:28.561
+Nobody could prove who issued refunds.
+
+44
+00:04:28.841 --> 00:04:38.484
+The refund audit table sat in the same database the operations team administered; several entries had been edited, and there was no way to show which (L4).
+
+45
+00:04:39.834 --> 00:04:41.818
+Nobody knew where personal data was.
+
+46
+00:04:42.098 --> 00:04:50.034
+There was no inventory of which stores held which categories of personal data, for what purpose, for how long, or who could access it.
+
+47
+00:04:50.314 --> 00:04:57.098
+None of this was malice; each was an ordinary engineering choice made without the compliance constraint in view.
+
+48
+00:04:57.378 --> 00:05:12.354
+The remediation took two quarters, moving the DR region, purging and re-shipping logs, retrofitting encryption for erasure, rebuilding the audit trail, and it would have cost a fraction of that if the constraints had been architecture requirements from the start.
+
+49
+00:05:13.704 --> 00:05:14.387
+Quote:
+
+50
+00:05:14.667 --> 00:05:16.331
+The thesis of this chapter.
+
+51
+00:05:16.611 --> 00:05:21.731
+Compliance obligations are non-functional requirements with legal consequences.
+
+52
+00:05:22.011 --> 00:05:43.472
+Treat them like latency or availability: identify them early, turn each into a concrete engineering mechanism (a key hierarchy, a residency policy, a retention rule, a tamper-evident log, a scanner), make those mechanisms testable and automated, and keep the evidence continuously rather than assembling it for an audit.
+
+53
+00:05:43.752 --> 00:05:58.152
+The recurring architectural moves are few: know your data (inventory and classification), minimise it, encrypt it with keys you can destroy, control where it goes, retain it exactly as long as required, and prove what happened.
+
+54
+00:05:59.502 --> 00:06:01.806
+Where this lives in the grocery platform.
+
+55
+00:06:02.086 --> 00:06:03.430
+Here is a quick table:
+
+56
+00:06:03.710 --> 00:06:07.230
+Obligation (source), and Engineering mechanism, and Lab.
+
+57
+00:06:07.510 --> 00:06:12.694
+Erasure when the purpose is served or on request (DPDP; GDPR Art.
+
+58
+00:06:12.974 --> 00:06:13.955
+17).
+
+59
+00:06:14.235 --> 00:06:15.686
+Engineering mechanism:
+
+60
+00:06:15.966 --> 00:06:18.931
+Per-customer keys, crypto-shredding, erasure log.
+
+61
+00:06:19.211 --> 00:06:19.894
+Lab:
+
+62
+00:06:20.174 --> 00:06:21.006
+L1.
+
+63
+00:06:21.286 --> 00:06:26.406
+Security safeguards; data minimisation (DPDP; PCI DSS).
+
+64
+00:06:26.686 --> 00:06:28.137
+Engineering mechanism:
+
+65
+00:06:28.417 --> 00:06:33.089
+PII discovery + redaction in logs; structured logging allow-lists.
+
+66
+00:06:33.369 --> 00:06:34.051
+Lab:
+
+67
+00:06:34.331 --> 00:06:35.163
+L2.
+
+68
+00:06:35.443 --> 00:06:40.137
+Payment data stored only in India (RBI 2018 direction).
+
+69
+00:06:40.417 --> 00:06:41.867
+Engineering mechanism:
+
+70
+00:06:42.147 --> 00:06:45.091
+Residency policy-as-code; in-country DR.
+
+71
+00:06:45.371 --> 00:06:46.054
+Lab:
+
+72
+00:06:46.334 --> 00:06:47.187
+L3.
+
+73
+00:06:47.467 --> 00:06:52.502
+No storage of card numbers by merchants (RBI card-on-file tokenisation).
+
+74
+00:06:52.782 --> 00:06:54.233
+Engineering mechanism:
+
+75
+00:06:54.513 --> 00:06:57.201
+Network tokens; PCI vault boundary.
+
+76
+00:06:57.481 --> 00:06:58.163
+Lab:
+
+77
+00:06:58.443 --> 00:07:00.470
+L3, §2.5.
+
+78
+00:07:00.750 --> 00:07:03.587
+Purpose limitation and consent (DPDP).
+
+79
+00:07:03.867 --> 00:07:05.318
+Engineering mechanism:
+
+80
+00:07:05.598 --> 00:07:08.371
+Purpose tags on data flows; consent records.
+
+81
+00:07:08.651 --> 00:07:09.334
+Lab:
+
+82
+00:07:09.614 --> 00:07:11.577
+L3, §2.3.
+
+83
+00:07:12.927 --> 00:07:15.572
+Statutory retention (GST records).
+
+84
+00:07:15.852 --> 00:07:17.303
+Engineering mechanism:
+
+85
+00:07:17.583 --> 00:07:21.209
+Retention schedule + legal-retention keys + WORM.
+
+86
+00:07:21.489 --> 00:07:22.172
+Lab:
+
+87
+00:07:22.452 --> 00:07:23.775
+L1, L3.
+
+88
+00:07:24.055 --> 00:07:28.705
+Accountability, forensics (DPDP; CERT-In log retention; audits).
+
+89
+00:07:28.985 --> 00:07:30.436
+Engineering mechanism:
+
+90
+00:07:30.716 --> 00:07:33.276
+Hash-chained, externally anchored audit log.
+
+91
+00:07:33.556 --> 00:07:34.239
+Lab:
+
+92
+00:07:34.519 --> 00:07:35.393
+L4.
+
+93
+00:07:36.743 --> 00:07:38.066
+Learning objectives.
+
+94
+00:07:38.346 --> 00:07:40.245
+By the end you will be able to:
+
+95
+00:07:40.525 --> 00:07:45.858
+Translate regulatory obligations into architecture requirements and mechanisms.
+
+96
+00:07:46.138 --> 00:07:53.519
+Design erasure that actually erases, including backups and derived stores, while honouring legal retention (L1).
+
+97
+00:07:53.799 --> 00:07:57.682
+Discover and prevent personal data in the wrong places (L2).
+
+98
+00:07:57.962 --> 00:08:03.935
+Enforce data residency and transfer rules as policy-as-code over the architecture (L3).
+
+99
+00:08:05.285 --> 00:08:08.912
+Build tamper-evident audit trails and know their limits (L4).
+
+100
+00:08:09.192 --> 00:08:15.379
+Set up data governance, classification, ownership, retention, access reviews, evidence, that scales.
+
+101
+00:08:16.729 --> 00:08:17.603
+Part 2.
+
+102
+00:08:17.883 --> 00:08:19.761
+Core Concepts, Beginner to Deep.
+
+103
+00:08:21.011 --> 00:08:24.445
+Intuition: compliance as non-functional requirements.
+
+104
+00:08:24.725 --> 00:08:30.528
+Laws rarely say use AES-256 or put the DR region in Hyderabad.
+
+105
+00:08:30.808 --> 00:08:46.424
+They state outcomes: protect personal data with reasonable safeguards; process it only for the purpose it was collected; erase it when that purpose is served; keep tax records for a period; store payment data in the country; report breaches promptly.
+
+106
+00:08:46.704 --> 00:08:49.136
+The architect's job is the translation:
+
+107
+00:08:50.486 --> 00:08:51.830
+Here is a quick table:
+
+108
+00:08:52.110 --> 00:08:55.523
+Legal outcome, and Engineering requirement, and Mechanism.
+
+109
+00:08:55.803 --> 00:08:57.510
+Erase when no longer needed.
+
+110
+00:08:57.790 --> 00:08:59.262
+Engineering requirement:
+
+111
+00:08:59.542 --> 00:09:04.086
+Every copy of a customer's data can be made unrecoverable within N days.
+
+112
+00:09:04.366 --> 00:09:05.305
+Mechanism:
+
+113
+00:09:05.585 --> 00:09:07.163
+Crypto-shredding (L1).
+
+114
+00:09:07.443 --> 00:09:09.342
+Reasonable security safeguards.
+
+115
+00:09:09.622 --> 00:09:11.094
+Engineering requirement:
+
+116
+00:09:11.374 --> 00:09:14.766
+No plaintext personal data outside approved stores.
+
+117
+00:09:15.046 --> 00:09:15.985
+Mechanism:
+
+118
+00:09:16.265 --> 00:09:19.678
+Encryption, access control, PII scanning (L2).
+
+119
+00:09:19.958 --> 00:09:21.323
+Store only in India.
+
+120
+00:09:21.603 --> 00:09:23.075
+Engineering requirement:
+
+121
+00:09:23.355 --> 00:09:27.729
+No replica, backup or export of class X outside Indian regions.
+
+122
+00:09:28.009 --> 00:09:28.947
+Mechanism:
+
+123
+00:09:29.227 --> 00:09:31.681
+Residency policy in CI (L3).
+
+124
+00:09:31.961 --> 00:09:33.497
+Be able to show what happened.
+
+125
+00:09:33.777 --> 00:09:35.249
+Engineering requirement:
+
+126
+00:09:35.529 --> 00:09:38.153
+Tamper-evident record of privileged actions.
+
+127
+00:09:38.433 --> 00:09:39.371
+Mechanism:
+
+128
+00:09:39.651 --> 00:09:42.297
+Hash chain + external anchors (L4).
+
+129
+00:09:43.647 --> 00:09:45.631
+Two principles run through everything:
+
+130
+00:09:45.911 --> 00:09:56.641
+Privacy by design and by default, build the protection in (minimise, encrypt, restrict) rather than bolting it on; the default configuration should be the compliant one.
+
+131
+00:09:56.921 --> 00:10:04.516
+Evidence, continuously, an obligation you can't demonstrate is, for an auditor or regulator, an obligation you didn't meet.
+
+132
+00:10:04.796 --> 00:10:11.687
+Automate the evidence (scanner reports, policy results, verification runs) as part of normal operations.
+
+133
+00:10:13.037 --> 00:10:16.066
+The regulatory landscape for an Indian platform.
+
+134
+00:10:16.346 --> 00:10:19.717
+A summary for engineers, confirm specifics with counsel:
+
+135
+00:10:21.067 --> 00:10:26.101
+Digital Personal Data Protection Act, 2023 (DPDP Act).
+
+136
+00:10:26.381 --> 00:10:28.557
+India's general personal-data law.
+
+137
+00:10:28.837 --> 00:10:29.883
+Key concepts:
+
+138
+00:10:30.163 --> 00:10:39.955
+Data Principal (the individual), Data Fiduciary (who decides purpose and means, the platform), Data Processor (acts on the fiduciary's behalf, vendors).
+
+139
+00:10:40.235 --> 00:10:52.395
+Processing on consent (free, specific, informed, unconditional, unambiguous, by clear affirmative action, withdrawable as easily as given) or for specified legitimate uses.
+
+140
+00:10:52.675 --> 00:11:09.955
+Obligations include notice, purpose limitation, accuracy, reasonable security safeguards, breach notification to the Data Protection Board and affected individuals, erasure once the purpose is served (unless retention is required by law), grievance redressal,
+
+141
+00:11:10.235 --> 00:11:17.488
+and additional duties for Significant Data Fiduciaries (for example, a Data Protection Officer, DPIAs, audits).
+
+142
+00:11:18.838 --> 00:11:28.033
+Children's data needs verifiable parental consent and bars tracking or behavioural monitoring and targeted advertising directed at children.
+
+143
+00:11:28.313 --> 00:11:34.179
+Cross-border transfer is permitted except to countries the government restricts by notification.
+
+144
+00:11:34.459 --> 00:11:42.929
+Penalties are substantial (up to 250 crore rupees for a failure to take reasonable security safeguards, per the Act's schedule).
+
+145
+00:11:43.209 --> 00:11:59.614
+The DPDP Rules, 2025 were notified in November 2025 with obligations phasing in over roughly 18 months, verify current commencement dates and the Rules' specifics, for example, breach-reporting timelines, with counsel.
+
+146
+00:12:00.964 --> 00:12:09.689
+RBI payment-data localisation (2018 direction on storage of payment system data, with 2019 FAQs).
+
+147
+00:12:09.969 --> 00:12:25.372
+Payment system operators must store the entire payment data in systems only in India; processing abroad is permitted if the data is deleted abroad and brought back within a short window (one business day or 24 hours per the FAQs).
+
+148
+00:12:25.652 --> 00:12:33.545
+It applies to payment system operators and flows through to their partners via contracts, so merchants' architectures are shaped by it.
+
+149
+00:12:34.895 --> 00:12:39.930
+RBI card-on-file tokenisation (effective October 2022).
+
+150
+00:12:40.210 --> 00:12:54.311
+Merchants and payment aggregators (other than card networks and issuers) may not store customers' actual card data; they use network or issuer tokens (retaining only limited data such as the last four digits for reference).
+
+151
+00:12:54.591 --> 00:12:57.066
+PCI DSS (v4.x).
+
+152
+00:12:57.346 --> 00:13:03.682
+The card industry's security standard for any system that stores, processes or transmits card data.
+
+153
+00:13:03.962 --> 00:13:13.391
+The main architectural lever is scope reduction: hosted payment pages, tokenisation, and keeping card data inside a small, isolated vault.
+
+154
+00:13:14.741 --> 00:13:16.491
+GST record retention.
+
+155
+00:13:16.771 --> 00:13:30.467
+Under the CGST Act (s.36), books and records, including invoices, must be kept for 72 months from the due date of the annual return for the year (longer if under appeal or investigation).
+
+156
+00:13:30.747 --> 00:13:33.691
+CERT-In directions (April 2022).
+
+157
+00:13:33.971 --> 00:13:48.584
+Report specified cyber incidents to CERT-In within 6 hours of noticing them; maintain ICT system logs for a rolling 180 days within Indian jurisdiction; synchronise clocks to specified NTP sources.
+
+158
+00:13:48.864 --> 00:13:51.595
+Verify the current directions and applicability.
+
+159
+00:13:52.945 --> 00:14:14.150
+GDPR (for EU residents' data, for example, an EU-based seller or customer), similar principles with notable differences: six lawful bases, 72-hour breach notification to the supervisory authority, transfer mechanisms (adequacy, standard contractual clauses), fines up to 4% of global turnover.
+
+160
+00:14:14.430 --> 00:14:26.355
+Assurance frameworks, ISO or IEC 27001, SOC 2, aren't laws, but partners and enterprise customers require them; they're the governance scaffolding that evidence hangs on.
+
+161
+00:14:27.705 --> 00:14:47.097
+The architectural consequences cluster into five themes: where data is stored and flows (residency), how long it's kept and how it's erased (retention or erasure), what is collected and for what (minimisation or purpose), how it's protected (security safeguards), and what can be proven (audit or evidence).
+
+162
+00:14:48.447 --> 00:14:51.285
+Data inventory, classification and purpose.
+
+163
+00:14:51.565 --> 00:15:02.039
+Every compliance mechanism depends on knowing what data you have, where it lives, why you have it, and how long you need it, the §1.1 platform knew none of these.
+
+164
+00:15:02.319 --> 00:15:06.287
+Classify data into a small number of classes with handling rules.
+
+165
+00:15:06.567 --> 00:15:28.413
+For the grocery platform: public (catalog), internal (operational metrics), personal (name, phone, address, order history), sensitive or special (inferences from baskets, health, pregnancy, religion; children's data), payment (transaction data subject to localisation), card (PAN, never outside the vault), legal-record (GST invoices).
+
+166
+00:15:29.763 --> 00:15:42.584
+Inventory (a data catalog or record of processing): for each store, which classes it holds, owner, purpose(s), legal basis, retention, location, who can access it, which processors receive it.
+
+167
+00:15:42.864 --> 00:15:55.152
+Tag at the source: schema annotations (@Personal, @Sensitive), column tags in the catalog, and purpose tags on data flows (L3) so tooling can enforce rules automatically.
+
+168
+00:15:55.432 --> 00:16:03.261
+Discover what escaped: scan logs, exports, object storage and warehouses for identifiers that shouldn't be there (L2).
+
+169
+00:16:03.541 --> 00:16:07.616
+Discovery is how you find the gaps between the inventory and reality.
+
+170
+00:16:08.966 --> 00:16:16.305
+Purpose limitation and consent: record why each piece of personal data is processed, and check new uses against it.
+
+171
+00:16:16.585 --> 00:16:29.086
+L3's clickstream flow (F4) reused personal data for ad targeting, a purpose the customer never agreed to, and was blocked; the aggregated, anonymised version (F5) passed.
+
+172
+00:16:29.366 --> 00:16:38.241
+Consent should be recorded as data (who, what purpose, when, which notice version, withdrawn when) and checked at use, not just collected at sign-up.
+
+173
+00:16:39.591 --> 00:16:42.449
+Minimisation, pseudonymisation and encryption.
+
+174
+00:16:42.729 --> 00:16:45.844
+The cheapest data to protect is data you don't have.
+
+175
+00:16:46.124 --> 00:16:50.199
+Minimise collection: don't ask for a date of birth to deliver groceries.
+
+176
+00:16:50.479 --> 00:17:00.783
+Minimise propagation: pass IDs, not personal data, in events and to downstream systems; give each context only the fields it needs (Ch 33:
+
+177
+00:17:01.063 --> 00:17:05.009
+Fulfilment gets a DeliveryLocation, not the customer profile).
+
+178
+00:17:06.359 --> 00:17:16.087
+Pseudonymise for analytics: replace direct identifiers with keyed tokens (HMAC with a secret key), so analysts work without names and phone numbers.
+
+179
+00:17:16.367 --> 00:17:31.535
+Pseudonymised data is still personal data under most laws (re-identification is possible with the key); anonymised aggregate data generally is not, but true anonymisation is harder than it looks (small groups, rare combinations).
+
+180
+00:17:31.815 --> 00:17:47.026
+Encrypt at rest and in transit as a baseline (Ch 23); field-level encryption with per-subject or per-tenant keys for personal fields enables crypto-shredding (L1) and limits who can read them even with database access.
+
+181
+00:17:48.376 --> 00:17:55.672
+Structured logging with allow-lists: log known-safe fields by name; never log whole request or response bodies.
+
+182
+00:17:55.952 --> 00:17:58.597
+This is the upstream fix for L2's findings.
+
+183
+00:17:59.947 --> 00:18:03.382
+Payment data: tokenisation and the PCI boundary.
+
+184
+00:18:03.662 --> 00:18:09.870
+Card data is the most regulated data most platforms touch, and the best strategy is to not touch it:
+
+185
+00:18:10.150 --> 00:18:18.619
+Hosted payment pages or SDKs from the payment aggregator collect card details directly, so card numbers never reach your servers.
+
+186
+00:18:18.899 --> 00:18:27.411
+Network or issuer tokens replace stored card numbers for repeat payments (as RBI's card-on-file rules require of merchants).
+
+187
+00:18:28.761 --> 00:18:39.769
+If any component must handle card data, isolate it in a small vault (its own network segment, accounts, keys and admins) and keep everything else out of PCI scope.
+
+188
+00:18:40.049 --> 00:18:46.236
+L3's rule R2 blocks any flow carrying raw card numbers; L2 finds them where they leaked.
+
+189
+00:18:46.516 --> 00:19:00.745
+Payment transaction data (amounts, parties, timestamps, references, not just card numbers) is what localisation rules address: store it in India, and design DR, analytics and vendor flows accordingly (L3).
+
+190
+00:19:01.025 --> 00:19:06.423
+Foreign legs of processing (a card network abroad) are acceptable only when transient.
+
+191
+00:19:07.773 --> 00:19:10.354
+Data residency and cross-border transfer.
+
+192
+00:19:10.634 --> 00:19:13.983
+Residency constraints turn into concrete architecture:
+
+193
+00:19:14.263 --> 00:19:29.709
+DR and replication: a full replica of a store containing localised data must stay in-country, for the grocery platform, a Mumbai primary with a Hyderabad DR region rather than Singapore (L3: the only allowed regions).
+
+194
+00:19:29.989 --> 00:19:36.410
+This also matters for cells (Ch 34) and multi-region designs (Ch 27).
+
+195
+00:19:36.690 --> 00:19:41.810
+Backups and snapshots are copies, they follow the same residency rules as the primary.
+
+196
+00:19:43.160 --> 00:19:49.496
+Vendors (processors): observability, support desks, email or SMS, analytics, fraud tools.
+
+197
+00:19:49.776 --> 00:19:53.936
+Each is a data flow with a destination, data classes and purpose.
+
+198
+00:19:54.216 --> 00:20:00.744
+Send them the minimum (pseudonymised IDs, no card data), under a data-processing agreement, encrypted.
+
+199
+00:20:01.024 --> 00:20:09.621
+Regional isolation for tenants or markets: per-region clusters or cells for data that must stay in a jurisdiction (Ch 30).
+
+200
+00:20:09.901 --> 00:20:16.771
+Policy-as-code: encode the rules and evaluate every flow in the architecture manifest in CI (L3).
+
+201
+00:20:17.051 --> 00:20:23.557
+Architects and reviewers then argue about the rules once, and every design is checked against them automatically.
+
+202
+00:20:24.907 --> 00:20:26.998
+Retention and the right to erasure.
+
+203
+00:20:27.278 --> 00:20:35.299
+Retention cuts both ways: keep data no longer than the purpose requires, and keep some records at least as long as the law requires.
+
+204
+00:20:35.579 --> 00:20:59.835
+Retention schedule: per data class, debug logs 14 days; application logs 30 to 90 days hot then deleted (or longer only where required, for example, security logs per CERT-In's 180-day direction); order history for the customer relationship plus a defined period; GST invoices 72 plus months; marketing data until consent is withdrawn.
+
+205
+00:21:00.115 --> 00:21:06.046
+Enforce with TTLs, lifecycle rules (Ch 35) and scheduled deletion jobs.
+
+206
+00:21:07.396 --> 00:21:20.687
+Erasure is hard because data spreads (L1): the primary, CQRS read models, search indexes, caches, message logs (Kafka retention, compacted topics), backups, warehouses, vendor copies.
+
+207
+00:21:20.967 --> 00:21:28.071
+Deleting from the primary left 5 readable copies; chasing copies still missed the immutable backup and the warehouse.
+
+208
+00:21:29.421 --> 00:21:40.877
+Crypto-shredding makes erasure a single, provable action: encrypt personal fields with a per-customer key everywhere they're written (including backups and exports), and destroy the key.
+
+209
+00:21:41.157 --> 00:21:41.989
+L1:
+
+210
+00:21:42.269 --> 00:21:46.087
+0 readable copies afterwards, other customers untouched.
+
+211
+00:21:46.367 --> 00:22:02.773
+Pre-conditions: personal data is never written in plaintext anywhere (logs, exports, caches), keys live in a KMS with deletion controls, and derived stores (search, warehouse) index encrypted fields or pseudonymous IDs rather than plaintext.
+
+212
+00:22:04.123 --> 00:22:21.147
+Legal retention alongside erasure: data the law requires you to keep (GST invoices) is encrypted under a separate legal-retention key with only the fields the law needs; it's retained, access-restricted, and deleted when the retention period ends.
+
+213
+00:22:21.427 --> 00:22:31.624
+Erasure log: record that an erasure happened (request, subject ID, keys destroyed, what was retained and why, when), without the personal data, as evidence.
+
+214
+00:22:31.904 --> 00:22:40.523
+Backups: rotate within a bounded period, so even without crypto-shredding the data ages out; with crypto-shredding it's unreadable immediately.
+
+215
+00:22:41.873 --> 00:22:52.390
+Legal holds (litigation, investigations) override deletion for specific subjects; the retention system must support suspending deletion with an audit trail.
+
+216
+00:22:53.740 --> 00:22:55.361
+Audit trails and evidence.
+
+217
+00:22:55.641 --> 00:23:11.769
+Accountability obligations and forensics need a reliable record of who did what to which object, when, especially privileged actions: viewing personal data in support tools, issuing refunds, changing roles, exporting data, changing configuration.
+
+218
+00:23:12.049 --> 00:23:14.695
+What makes an audit trail trustworthy (L4):
+
+219
+00:23:14.975 --> 00:23:27.604
+Completeness: emitted from the application for every sensitive action, including by service accounts; include actor, action, target, time (synchronised clocks), source, and a correlation ID.
+
+220
+00:23:28.954 --> 00:23:40.901
+Tamper evidence: a hash chain detects edits, deletions and reorders, but an insider who controls the whole store can delete an entry and recompute every later hash (L4 case 4).
+
+221
+00:23:41.181 --> 00:23:54.066
+External anchoring: periodically write the chain head to a write-once store outside the insider's control (object storage with Object Lock or WORM in a separate account, or a public timestamping service).
+
+222
+00:23:54.346 --> 00:24:05.119
+That defeats rewrites; the remaining gap is entries since the last anchor (L4 case 5), shrink it by anchoring frequently or streaming each entry to the external store.
+
+223
+00:24:06.469 --> 00:24:12.400
+Separation of duties: the people who administer the application can't administer the audit store.
+
+224
+00:24:12.680 --> 00:24:18.739
+Retention and access: keep audit logs as long as required; restrict and audit access to them.
+
+225
+00:24:19.019 --> 00:24:27.360
+Verification as a job: verify the chain and anchors continuously and alert on failure, evidence you never check isn't evidence.
+
+226
+00:24:28.710 --> 00:24:42.193
+Beyond audit logs, compliance evidence includes access-review records, policy-check results (L3), scanner reports (L2), key-destruction records (L1), change approvals and DR test results.
+
+227
+00:24:42.473 --> 00:24:46.121
+Automate collection so an audit is a report, not a project.
+
+228
+00:24:47.471 --> 00:24:48.559
+Breach readiness.
+
+229
+00:24:48.839 --> 00:24:52.465
+Breach notification obligations have short clocks (CERT-In:
+
+230
+00:24:52.745 --> 00:25:03.583
+6 hours for reportable incidents; DPDP: prompt notification to the Board and affected individuals, with details specified in the Rules; GDPR:
+
+231
+00:25:03.863 --> 00:25:05.121
+72 hours).
+
+232
+00:25:05.401 --> 00:25:07.385
+You can't meet them without preparation:
+
+233
+00:25:07.665 --> 00:25:12.529
+Know which data is where (inventory) so you can scope impact in hours, not weeks.
+
+234
+00:25:12.809 --> 00:25:18.975
+Keep logs and audit trails sufficient to reconstruct access (and retained per CERT-In where applicable).
+
+235
+00:25:20.325 --> 00:25:26.341
+A runbook with legal, security, communications and engineering roles, and pre-drafted notices.
+
+236
+00:25:26.621 --> 00:25:34.834
+Encryption and minimisation reduce impact: a stolen backup of crypto-shredded or field-encrypted data exposes far less.
+
+237
+00:25:35.114 --> 00:25:40.063
+Practise it (tabletop exercises), like DR drills (Ch 27).
+
+238
+00:25:41.413 --> 00:25:42.971
+Data governance at scale.
+
+239
+00:25:43.251 --> 00:25:49.480
+Governance is how an organisation keeps these mechanisms working as teams and systems multiply:
+
+240
+00:25:49.760 --> 00:25:55.776
+Ownership: every data store has an owning team and a data steward; every class has handling rules.
+
+241
+00:25:56.056 --> 00:26:07.235
+Catalog + lineage: where data came from and where it flows (lineage from pipelines or CDC), so an erasure or a residency rule can be traced through derived datasets.
+
+242
+00:26:08.585 --> 00:26:21.342
+Policy-as-code everywhere it can be: residency and transfer rules (L3), required encryption and tags at provisioning, retention defaults, allowed log fields, checked in CI and at deploy.
+
+243
+00:26:21.622 --> 00:26:30.475
+Access governance: least privilege, just-in-time elevated access for production data with approval and audit, periodic access reviews.
+
+244
+00:26:30.755 --> 00:26:39.417
+Privacy reviews or DPIAs for new features that process personal data in new ways, part of the design-doc process (Ch 32).
+
+245
+00:26:39.697 --> 00:26:51.515
+Metrics: % of stores classified, % of flows passing policy, PII findings in logs per week (L2), erasure SLA, audit-verification status (L4).
+
+246
+00:26:52.865 --> 00:27:04.876
+Proportionality: as with cost (Ch 35), concentrate effort where the risk is, payment data, children's data, sensitive inferences, rather than equal ceremony for every table.
+
+247
+00:27:06.226 --> 00:27:07.122
+Part 3.
+
+248
+00:27:07.402 --> 00:27:09.130
+Architecture and Diagrams.
+
+249
+00:27:10.380 --> 00:27:13.772
+Component view: compliance mechanisms in the platform.
+
+250
+00:27:14.052 --> 00:27:15.396
+Here is the diagram.
+
+251
+00:27:19.246 --> 00:27:21.827
+Sequence: happy path, an erasure request.
+
+252
+00:27:22.107 --> 00:27:24.902
+The sequence diagram walks through it step by step.
+
+253
+00:27:25.182 --> 00:27:27.721
+Cust to App: delete my account and data.
+
+254
+00:27:28.001 --> 00:27:32.950
+App to Ers: erasure request for C-1001 (verified identity).
+
+255
+00:27:33.230 --> 00:27:39.161
+Ers to Ers: check legal holds and retention (GST invoices kept under legal key).
+
+256
+00:27:39.441 --> 00:27:44.155
+Ers to KMS: schedule destruction of key pii-C-1001.
+
+257
+00:27:44.435 --> 00:27:49.299
+KMS to Ers: key destroyed - every copy incl. backups now unreadable.
+
+258
+00:27:49.579 --> 00:27:53.334
+Ers to Live: delete rows, index docs, cache entries (tidy-up).
+
+259
+00:27:53.614 --> 00:27:59.033
+Ers to Log: record request, subject id, key destroyed, retained records, time.
+
+260
+00:27:59.313 --> 00:28:02.577
+Ers to Cust: confirmation within the promised period.
+
+261
+00:28:06.427 --> 00:28:10.523
+Sequence: failure path, a non-compliant design caught in CI.
+
+262
+00:28:10.803 --> 00:28:13.597
+The sequence diagram walks through it step by step.
+
+263
+00:28:13.877 --> 00:28:18.165
+Eng to PR: add DR replica of orders DB in Singapore.
+
+264
+00:28:18.445 --> 00:28:21.432
+PR to Pol: evaluate flows against rules.
+
+265
+00:28:21.712 --> 00:28:22.864
+Pol to PR:
+
+266
+00:28:23.144 --> 00:28:25.939
+BLOCK - payment data would be stored outside India.
+
+267
+00:28:26.219 --> 00:28:30.805
+PR to Eng: failed check with rule R1 and the offending data class.
+
+268
+00:28:31.085 --> 00:28:34.285
+Eng to PR: move DR replica to Hyderabad.
+
+269
+00:28:34.565 --> 00:28:35.717
+Pol to PR:
+
+270
+00:28:35.997 --> 00:28:36.744
+PASS.
+
+271
+00:28:37.024 --> 00:28:39.861
+PR to Rev: approve with evidence attached.
+
+272
+00:28:43.711 --> 00:28:46.378
+State: a personal record through its lifecycle.
+
+273
+00:28:46.658 --> 00:28:48.002
+Here is the diagram.
+
+274
+00:28:51.852 --> 00:28:52.769
+Part 4.
+
+275
+00:28:53.049 --> 00:28:54.671
+Design Document Excerpt:
+
+276
+00:28:54.951 --> 00:28:56.977
+Grocery Compliance Architecture.
+
+277
+00:28:58.227 --> 00:28:58.974
+Note:
+
+278
+00:28:59.254 --> 00:29:05.121
+Design Document (excerpt), Privacy, Residency and Audit Architecture v1.0.
+
+279
+00:29:05.401 --> 00:29:06.297
+Status:
+
+280
+00:29:06.577 --> 00:29:07.857
+Accepted, Authors:
+
+281
+00:29:08.137 --> 00:29:11.401
+Security architecture + Data platform, Reviewers:
+
+282
+00:29:11.681 --> 00:29:15.414
+Legal, Compliance, DPO, SRE, all tech leads.
+
+283
+00:29:15.694 --> 00:29:35.043
+Context, Payment-partner audit, DPDP readiness review and investor due diligence found: payment data replicated to a Singapore DR region; card numbers in logs shipped abroad; erasure that deleted only the primary row; an editable refund audit table; no data inventory.
+
+284
+00:29:36.393 --> 00:29:56.084
+Decision, Treat compliance obligations as NFRs with automated mechanisms and continuous evidence: data classification and catalog; field-level encryption with per-customer keys and crypto-shredding; in-country DR; residency and transfer policy-as-code; PII scanning and structured-logging
+
+285
+00:29:56.364 --> 00:30:02.871
+allow-lists; card data only in a tokenised vault; hash-chained audit log with external WORM anchors.
+
+286
+00:30:04.221 --> 00:30:27.815
+Related ADRs, ADR-220 Data classes + catalog + owners; ADR-221 Per-customer and legal-retention keys, crypto-shredding for erasure (L1); ADR-222 Structured logging allow-lists + PII scanner on logs and exports (L2); ADR-223 Residency and transfer rules as code,
+
+287
+00:30:28.095 --> 00:30:58.851
+evaluated on every manifest change (L3); ADR-224 DR moved to Hyderabad; no localised data abroad; ADR-225 Card data only via aggregator hosted pages and network tokens; ADR-226 Audit log: hash chain + 1-minute external anchors in a separate account (L4); ADR-227 Retention schedule per data class, enforced by TTL or lifecycle.
+
+288
+00:30:59.131 --> 00:31:00.091
+Requirements.
+
+289
+00:31:01.441 --> 00:31:02.764
+R1, Erasure.
+
+290
+00:31:03.044 --> 00:31:16.975
+A verified erasure request makes the customer's personal data unrecoverable in every store, including backups and the warehouse, within 30 days; legally retained records are kept under a separate key with minimum fields.
+
+291
+00:31:17.255 --> 00:31:19.004
+R2, No stray PII.
+
+292
+00:31:19.284 --> 00:31:28.159
+Zero card numbers and zero unapproved personal identifiers in logs and exports; findings alert the owning team within 1 hour.
+
+293
+00:31:28.439 --> 00:31:29.889
+R3, Residency.
+
+294
+00:31:30.169 --> 00:31:39.791
+Payment data and full replicas of localised stores exist only in Indian regions; every data flow passes the policy check before deploy.
+
+295
+00:31:40.071 --> 00:31:41.308
+R4, Purpose.
+
+296
+00:31:41.588 --> 00:31:47.753
+Every flow of personal data carries a purpose that matches consent or a documented legitimate use.
+
+297
+00:31:49.103 --> 00:31:50.938
+R5, Audit integrity.
+
+298
+00:31:51.218 --> 00:31:59.175
+Privileged actions are recorded in a tamper-evident log; verification runs hourly; the unanchored window is at most 1 minute.
+
+299
+00:31:59.455 --> 00:32:00.863
+R6, Evidence.
+
+300
+00:32:01.143 --> 00:32:08.333
+Policy results, scanner reports, key destructions and audit verifications are retained and reportable on demand.
+
+301
+00:32:08.613 --> 00:32:10.021
+Decisions in detail.
+
+302
+00:32:10.301 --> 00:32:13.031
+Classification (ADR-220).
+
+303
+00:32:13.311 --> 00:32:21.503
+Seven classes (§2.3); schema annotations generate catalog entries; every store has an owner and retention.
+
+304
+00:32:22.853 --> 00:32:24.837
+Keys (ADR-221).
+
+305
+00:32:25.117 --> 00:32:36.445
+Envelope encryption: per-customer data keys wrapped by a KMS key; personal fields encrypted in the service before any write; search indexes store pseudonymous tokens.
+
+306
+00:32:36.725 --> 00:32:38.795
+Logs (ADR-222).
+
+307
+00:32:39.075 --> 00:32:46.712
+Logging library only emits allow-listed fields; scanner runs on the log pipeline and on exports, key-aware (L2).
+
+308
+00:32:46.992 --> 00:32:51.323
+Residency (ADR-223 or 224).
+
+309
+00:32:51.603 --> 00:32:57.491
+Manifest of data flows in the repo; rules in code; CI blocks violations (L3).
+
+310
+00:32:57.771 --> 00:32:59.499
+DR region Hyderabad.
+
+311
+00:32:59.779 --> 00:33:02.232
+Payments (ADR-225).
+
+312
+00:33:02.512 --> 00:33:07.867
+Aggregator hosted checkout and network tokens; the platform never receives card numbers.
+
+313
+00:33:09.217 --> 00:33:11.649
+Audit (ADR-226).
+
+314
+00:33:11.929 --> 00:33:19.054
+Chain head anchored every minute to an Object-Lock bucket in a security-owned account; hourly verification (L4).
+
+315
+00:33:19.334 --> 00:33:22.086
+Retention (ADR-227).
+
+316
+00:33:22.366 --> 00:33:34.547
+Debug logs 14 d; app logs 90 d; security logs 180 d in India; GST invoices 72 months+; marketing data until consent withdrawn.
+
+317
+00:33:34.827 --> 00:33:35.851
+Consequences.
+
+318
+00:33:36.131 --> 00:33:49.785
+Encryption adds latency and complexity (key management, re-encryption on rotation, search over pseudonymous tokens); a second Indian region costs more than Singapore; engineers lose free-form logging.
+
+319
+00:33:50.065 --> 00:33:58.662
+In return: erasure is provable, residency is enforced by construction, audit evidence is trustworthy, and audits become reports.
+
+320
+00:34:00.012 --> 00:34:00.972
+Part 5.
+
+321
+00:34:01.252 --> 00:34:03.236
+Hands-On Code, Level Ladder.
+
+322
+00:34:04.486 --> 00:34:05.254
+Info:
+
+323
+00:34:05.534 --> 00:34:06.622
+What's real here.
+
+324
+00:34:06.902 --> 00:34:24.609
+All four labs are JDK 21 programs using the JDK's real cryptography (javax.crypto AES-256-GCM in L1, SHA-256 in L4) and real checksum algorithms (Verhoeff, Luhn) in L2.
+
+325
+00:34:24.889 --> 00:34:26.745
+All identifiers are synthetic:
+
+326
+00:34:27.025 --> 00:34:37.457
+Aadhaar-format numbers are randomly generated with a valid checksum, card numbers are the card networks' public test numbers, and names, phones and emails are invented.
+
+327
+00:34:37.737 --> 00:34:43.603
+L3's rules are an illustrative engineering encoding of obligations, not legal advice.
+
+328
+00:34:43.883 --> 00:34:47.275
+Output is deterministic except timings in L4.
+
+329
+00:34:48.625 --> 00:34:51.676
+L1, The right to erasure, across every copy.
+
+330
+00:34:51.956 --> 00:34:52.895
+Requirement:
+
+331
+00:34:53.175 --> 00:34:55.500
+A customer asked us to delete their data.
+
+332
+00:34:55.780 --> 00:35:00.516
+Prove it's gone, from everywhere, while keeping the GST invoice the law requires.
+
+333
+00:35:00.796 --> 00:35:11.079
+Two customers' data is written to six stores (orders DB, read model, support search, cache, nightly backup, warehouse) plus a GST invoice archive.
+
+334
+00:35:11.359 --> 00:35:17.567
+Three erasure strategies are applied to one customer, and every store is scanned for anything still readable.
+
+335
+00:35:17.847 --> 00:35:25.783
+Encryption uses the JDK's real AES-256-GCM; the KMS is an in-memory key map.
+
+336
+00:35:27.133 --> 00:35:30.162
+Here is the Java code, ErasureL1.java.
+
+337
+00:35:30.442 --> 00:35:34.794
+It runs to 159 lines; the full listing is in the chapter.
+
+338
+00:35:35.074 --> 00:35:42.391
+ErasureL1.java, run with: java ErasureL1.java (JDK 21, no dependencies).
+
+339
+00:35:42.671 --> 00:35:46.021
+THE RIGHT TO ERASURE versus WHERE DATA ACTUALLY LIVES.
+
+340
+00:35:46.301 --> 00:35:50.994
+A customer asks the platform to delete their personal data (DPDP Act.
+
+341
+00:35:51.274 --> 00:35:54.261
+2023 or GDPR Art.
+
+342
+00:35:54.541 --> 00:35:55.522
+17).
+
+343
+00:35:55.802 --> 00:36:02.949
+Their data is not in one table: it's in the orders DB, a CQRS read model, the support search index.
+
+344
+00:36:05.799 --> 00:36:06.716
+On screen:
+
+345
+00:36:06.996 --> 00:36:11.305
+Customer C-1001 asks us to erase their personal data.
+
+346
+00:36:11.585 --> 00:36:15.767
+It lives in 6 stores (+ a GST. invoice we must retain).
+
+347
+00:36:16.047 --> 00:36:19.716
+A) delete from the orders DB only NOT erased (still readable):
+
+348
+00:36:19.996 --> 00:36:27.121
+5 read model (incl. basket), support search (incl. basket), cache (incl. basket), nightly backup.
+
+349
+00:36:27.401 --> 00:36:32.628
+(incl. basket), warehouse (incl. basket). retained under legal obligation:
+
+350
+00:36:32.908 --> 00:36:40.908
+GST invoice (name + address. only). other customer C-2002 still. intact: yes (7 or 7).
+
+351
+00:36:41.188 --> 00:36:45.113
+B) delete from every store we remembered NOT erased (still readable):
+
+352
+00:36:45.393 --> 00:36:46.311
+2 nightly.
+
+353
+00:36:46.591 --> 00:36:48.105
+The rest is in the chapter.
+
+354
+00:36:50.955 --> 00:36:51.809
+Reading it:
+
+355
+00:36:52.089 --> 00:37:04.078
+A) Primary-only delete leaves the customer readable in 5 stores, and every copy includes the shopping basket, a sensitive inference (pregnancy) that no one thought of as a field to erase.
+
+356
+00:37:04.358 --> 00:37:11.825
+B) Deleting everywhere we remembered still leaves 2: the nightly backup (immutable) and the warehouse (another team's system).
+
+357
+00:37:13.175 --> 00:37:23.521
+C) Crypto-shredding leaves 0: every copy, backups included, was ciphertext under pii-C-1001, so destroying that one key erased them all.
+
+358
+00:37:23.801 --> 00:37:26.681
+The other customer is untouched (7 or 7).
+
+359
+00:37:26.961 --> 00:37:35.367
+The GST invoice is retained under a separate legal-C-1001 key with only name and address, the minimum the law needs.
+
+360
+00:37:35.647 --> 00:37:46.100
+The erasure log records that it happened (request, subject id, key destroyed, what was retained and why) without any personal data, the evidence an auditor asks for.
+
+361
+00:37:47.450 --> 00:37:56.815
+Here is the Java code, VERIFY: envelope encryption with a cloud KMS (AWS SDK v2 shown; other clouds are similar).
+
+362
+00:37:57.095 --> 00:38:04.370
+Per-customer data key: generated once, stored WRAPPED next to the customer; the KMS key never leaves the KMS.
+
+363
+00:38:04.650 --> 00:38:12.821
+Erasure: delete the wrapped key (and, for per-customer KMS keys, schedule key deletion), every ciphertext becomes useless.
+
+364
+00:38:15.671 --> 00:38:18.060
+L2, Finding personal data in logs.
+
+365
+00:38:18.340 --> 00:38:19.279
+Requirement:
+
+366
+00:38:19.559 --> 00:38:22.247
+Card numbers ended up in logs shipped to a vendor.
+
+367
+00:38:22.527 --> 00:38:27.839
+Build a scanner the team won't switch off, and a redactor that doesn't destroy debugging data.
+
+368
+00:38:28.119 --> 00:38:40.620
+20,000 synthetic log lines with realistic look-alikes (13-digit epoch timestamps, 12-digit order ids, hex trace ids, SKUs) and planted synthetic PII.
+
+369
+00:38:40.900 --> 00:38:57.177
+Three scanner tiers: format-only regexes, plus identifier checksums (Verhoeff for Aadhaar-format numbers, Luhn + issuer prefix for cards, PAN entity letter), plus key-awareness (values of known non-PII keys are never candidates).
+
+370
+00:38:58.527 --> 00:39:01.557
+Here is the Java code, PiiScanL2.java.
+
+371
+00:39:01.837 --> 00:39:06.189
+It runs to 191 lines; the full listing is in the chapter.
+
+372
+00:39:06.469 --> 00:39:13.999
+PiiScanL2.java, run with: java PiiScanL2.java (JDK 21, no dependencies).
+
+373
+00:39:14.279 --> 00:39:18.375
+FINDING PERSONAL DATA WHERE IT SHOULDN'T BE, in application logs.
+
+374
+00:39:18.655 --> 00:39:29.237
+You can't protect, minimise or erase personal data you. don't know you have, and logs are where it leaks (a request body logged at DEBUG, an exception message with a phone.
+
+375
+00:39:32.087 --> 00:39:33.004
+On screen:
+
+376
+00:39:33.284 --> 00:39:40.495
+20,000 synthetic log lines with planted (synthetic) PII among order ids, epoch. timestamps,
+
+377
+00:39:40.775 --> 00:40:37.872
+trace ids and SKUs. detector planted naive: hits or precision validated validated + key-aware. aadhaar 394 20466 or 1.9% r100% 2404 or 16.4% r100% 394 or 100.0% r100%. card 182 20279 or 0.9% r100% 186 or 97.8% r100% 182 or 100.0% r100%. pan 181 181 or 100.0% r100% 181 or 100.0% r100% 181 or 100.0%
+
+378
+00:40:38.152 --> 00:41:12.855
+r100%. phone 620 716 or 86.6% r100% 716 or 86.6% r100% 620 or 100.0% r100%. email 412 412 or 100.0% r100% 412 or 100.0% r100% 412 or 100.0% r100%.
+
+379
+00:41:13.135 --> 00:41:15.610
+(hits or precision, r = recall).
+
+380
+00:41:15.890 --> 00:41:18.151
+Redaction (validated + key-aware):
+
+381
+00:41:18.431 --> 00:41:23.509
+1,728 lines changed; planted PII still present:
+
+382
+00:41:23.789 --> 00:41:26.690
+0; order ids or timestamps destroyed:
+
+383
+00:41:26.970 --> 00:41:27.717
+0.
+
+384
+00:41:27.997 --> 00:41:29.511
+The rest is in the chapter.
+
+385
+00:41:32.361 --> 00:41:33.215
+Reading it:
+
+386
+00:41:33.495 --> 00:41:36.588
+Format-only is useless for numeric identifiers:
+
+387
+00:41:36.868 --> 00:41:45.444
+1.9% precision for Aadhaar-format numbers and 0.9% for cards, timestamps and order ids dominate.
+
+388
+00:41:45.724 --> 00:41:47.367
+Alerts like that get ignored.
+
+389
+00:41:47.647 --> 00:41:50.015
+Checksums help a lot but not completely:
+
+390
+00:41:50.295 --> 00:42:04.631
+Luhn + issuer prefix makes the card detector 97.8% precise; Verhoeff only reaches 16.4%, because ~10% of random 12-digit order ids pass a checksum by chance.
+
+391
+00:42:04.911 --> 00:42:08.324
+Redacting those would destroy the order ids engineers need.
+
+392
+00:42:09.674 --> 00:42:30.069
+Structure closes the gap: excluding values of known non-PII keys (order=, ts=, trace=) reaches 100% precision with 100% recall on every detector, and the redaction pass removes every planted value while destroying 0 order ids or timestamps.
+
+393
+00:42:30.349 --> 00:42:42.231
+That 100% is partly by construction, the synthetic logs use known keys, which is exactly the argument for structured logging: when logs have structure, scanning becomes precise.
+
+394
+00:42:42.511 --> 00:42:50.277
+The upstream fix is still the one that matters: log allow-listed fields only, so personal data isn't written in the first place.
+
+395
+00:42:51.627 --> 00:42:55.147
+L3, Residency and transfer rules as policy-as-code.
+
+396
+00:42:55.427 --> 00:42:56.365
+Requirement:
+
+397
+00:42:56.645 --> 00:43:05.669
+Before any design ships, check every data flow, replicas, exports, vendors, against our residency, card-data, purpose and retention rules.
+
+398
+00:43:05.949 --> 00:43:15.421
+Ten flows from the architecture manifest, each with data classes, destination region, purpose and safeguards, are evaluated against five rules.
+
+399
+00:43:15.701 --> 00:43:22.741
+The rules are an illustrative engineering encoding of obligations the platform has identified, not legal advice.
+
+400
+00:43:24.091 --> 00:43:27.291
+Here is the Java code, ResidencyL3.java.
+
+401
+00:43:27.571 --> 00:43:31.625
+It runs to 150 lines; the full listing is in the chapter.
+
+402
+00:43:31.905 --> 00:43:39.542
+ResidencyL3.java, run with: java ResidencyL3.java (JDK 21, no dependencies).
+
+403
+00:43:39.822 --> 00:43:43.257
+DATA RESIDENCY AND TRANSFER RULES AS POLICY-AS-CODE.
+
+404
+00:43:43.537 --> 00:43:54.758
+Architects draw data flows, DR replicas, analytics exports, log. shipping, vendor integrations, and each one moves some CLASSES of data to some PLACE for some PURPOSE.
+
+405
+00:43:55.038 --> 00:43:55.998
+Whether that's.
+
+406
+00:43:58.848 --> 00:43:59.765
+On screen:
+
+407
+00:44:00.045 --> 00:44:06.979
+Evaluating 10 data flows from the architecture manifest against 5 residency or transfer. rules.
+
+408
+00:44:07.259 --> 00:44:12.549
+F1 orders DB, then DR replica (Hyderabad), then INHYDERABAD PASS.
+
+409
+00:44:12.829 --> 00:44:17.437
+F2 orders DB, then DR replica (Singapore), then SG BLOCK.
+
+410
+00:44:17.717 --> 00:44:22.347
+R1 payment-data localisation payment data would be STORED in SG.
+
+411
+00:44:22.627 --> 00:44:26.957
+F3 payment auth, then card network (abroad leg), then US PASS.
+
+412
+00:44:27.237 --> 00:44:31.291
+F4 clickstream, then US marketing SaaS, then US BLOCK.
+
+413
+00:44:31.571 --> 00:44:38.675
+R3 purpose limitation 'behavioural' data used for 'ad-targeting' without a. matching purpose or consent.
+
+414
+00:44:38.955 --> 00:44:45.888
+R3 purpose limitation 'personal' data used for 'ad-targeting' without a. matching purpose or consent.
+
+415
+00:44:46.168 --> 00:44:51.096
+F5 clickstream, then US marketing SaaS (aggregated), then US PASS.
+
+416
+00:44:51.376 --> 00:44:52.891
+The rest is in the chapter.
+
+417
+00:44:55.741 --> 00:44:56.594
+Reading it:
+
+418
+00:44:56.874 --> 00:45:02.677
+F2, a DR replica in Singapore, is blocked: it would store payment data outside India.
+
+419
+00:45:02.957 --> 00:45:12.343
+F1, the Hyderabad replica with the same data, passes; the engine computes that a full orders replica may only go to Mumbai or Hyderabad.
+
+420
+00:45:12.623 --> 00:45:19.429
+F3, the card network's foreign leg, passes only because it is processing-only with deletion abroad within a day.
+
+421
+00:45:19.709 --> 00:45:28.391
+F8, a fraud vendor that would store payment data in the US, is blocked; sending it tokenised or pseudonymised signals would change that.
+
+422
+00:45:29.741 --> 00:45:36.632
+F6, logs to an EU observability vendor, is blocked because they carry card numbers (what L2 finds).
+
+423
+00:45:36.912 --> 00:45:48.432
+F4 reuses personal and behavioural data for ad targeting without a matching purpose, blocked; F5, the aggregated or anonymised version of the same export, passes.
+
+424
+00:45:48.712 --> 00:45:55.347
+F9 would archive invoices with a 36-month retention, shorter than the statutory period, blocked.
+
+425
+00:45:55.627 --> 00:46:06.016
+In production this runs as OPA or Rego (or similar) over the service manifests and Terraform plans in CI, with data classes drawn from the catalog.
+
+426
+00:46:07.366 --> 00:46:09.627
+L4, A tamper-evident audit log.
+
+427
+00:46:09.907 --> 00:46:10.846
+Requirement:
+
+428
+00:46:11.126 --> 00:46:14.070
+Refund records were edited and we can't tell which.
+
+429
+00:46:14.350 --> 00:46:19.001
+Build an audit trail an insider with database access can't silently rewrite.
+
+430
+00:46:19.281 --> 00:46:30.929
+103,500 audit events are appended to a SHA-256 hash chain; every 10,000th chain head is anchored to an external write-once store.
+
+431
+00:46:31.209 --> 00:46:37.886
+Then an insider tries to hide a specific refund five ways, and verification runs with and without the anchors.
+
+432
+00:46:39.236 --> 00:46:42.393
+Here is the Java code, AuditLogL4.java.
+
+433
+00:46:42.673 --> 00:46:47.047
+It runs to 164 lines; the full listing is in the chapter.
+
+434
+00:46:47.327 --> 00:46:54.921
+AuditLogL4.java, run with: java AuditLogL4.java (JDK 21, no dependencies).
+
+435
+00:46:55.201 --> 00:46:56.972
+A TAMPER-EVIDENT AUDIT LOG.
+
+436
+00:46:57.252 --> 00:47:06.511
+Regulators, auditors and incident responders need to trust who did what to which record. when, refunds issued, PII viewed, roles granted.
+
+437
+00:47:06.791 --> 00:47:10.993
+An audit table in the same database the admins control proves nothing:
+
+438
+00:47:13.843 --> 00:47:14.761
+On screen:
+
+439
+00:47:15.041 --> 00:47:28.545
+Appended 103,500 audit events in 4091 ms (25,297 per second); full verification in 2166 ms.
+
+440
+00:47:28.825 --> 00:47:32.387
+10. external anchors (last at seq 100,000).
+
+441
+00:47:32.667 --> 00:47:33.627
+Clean log:
+
+442
+00:47:33.907 --> 00:47:34.846
+VERIFIED.
+
+443
+00:47:35.126 --> 00:47:48.417
+Insider cover-up of entry 42,008 (ISSUEREFUND by ops.kiran, amountPaise=40476): manipulation hash chain alone chain + external anchors.
+
+444
+00:47:48.697 --> 00:47:56.334
+1. change the actor on the entry DETECTED DETECTED, entry 42008 content does not. match its hash.
+
+445
+00:47:56.614 --> 00:48:03.035
+2. delete the entry DETECTED DETECTED, sequence gap or reorder at position 42008.
+
+446
+00:48:03.315 --> 00:48:05.363
+(found seq 42009).
+
+447
+00:48:05.643 --> 00:48:16.161
+3. swap it with the next entry (reorder) DETECTED DETECTED, sequence gap or reorder. at position 42008 (found seq 42009).
+
+448
+00:48:16.441 --> 00:48:17.955
+The rest is in the chapter.
+
+449
+00:48:20.805 --> 00:48:21.659
+Reading it:
+
+450
+00:48:21.939 --> 00:48:27.443
+Edits, deletions and reorders (1 to 3) break the chain and are caught by the chain alone.
+
+451
+00:48:27.723 --> 00:48:34.037
+Delete-and-recompute (4) produces an internally consistent chain, invisible to the chain alone.
+
+452
+00:48:34.317 --> 00:48:43.277
+The external anchor at sequence 50,000 exposes it: the recomputed chain no longer matches what was written outside the insider's reach.
+
+453
+00:48:44.627 --> 00:48:51.817
+Deleting entries written since the last anchor (5) is caught by neither, the unanchored window is the residual risk.
+
+454
+00:48:52.097 --> 00:49:01.590
+Anchor frequently (for example, every minute) or stream every entry to the external store, and keep that store in a separate account with separate administrators.
+
+455
+00:49:01.870 --> 00:49:13.326
+Throughput here is ~25k entries per second single-threaded (with simple hex formatting); shard chains per service or partition and anchor a combined root for higher volumes.
+
+456
+00:49:14.676 --> 00:49:15.615
+Part 6.
+
+457
+00:49:15.895 --> 00:49:17.175
+Production Concerns.
+
+458
+00:49:18.425 --> 00:49:19.577
+Failure modes.
+
+459
+00:49:19.857 --> 00:49:21.201
+Here is a quick table:
+
+460
+00:49:21.481 --> 00:49:23.763
+Failure, and Symptom, and Mitigation.
+
+461
+00:49:24.043 --> 00:49:25.579
+Erasure misses copies.
+
+462
+00:49:25.859 --> 00:49:26.670
+Symptom:
+
+463
+00:49:26.950 --> 00:49:30.641
+Data survives in read models, backups, warehouse (L1).
+
+464
+00:49:30.921 --> 00:49:31.923
+Mitigation:
+
+465
+00:49:32.203 --> 00:49:35.190
+Crypto-shredding; no plaintext PII anywhere.
+
+466
+00:49:35.470 --> 00:49:38.009
+Plaintext PII leaks around encryption.
+
+467
+00:49:38.289 --> 00:49:39.099
+Symptom:
+
+468
+00:49:39.379 --> 00:49:41.918
+Logs, exports, caches written in clear.
+
+469
+00:49:42.198 --> 00:49:43.201
+Mitigation:
+
+470
+00:49:43.481 --> 00:49:47.171
+Structured logging allow-lists; scanners on every sink (L2).
+
+471
+00:49:47.451 --> 00:49:49.478
+Key loss or premature destruction.
+
+472
+00:49:49.758 --> 00:49:50.569
+Symptom:
+
+473
+00:49:50.849 --> 00:49:53.430
+Unrecoverable data for active customers.
+
+474
+00:49:53.710 --> 00:49:54.713
+Mitigation:
+
+475
+00:49:54.993 --> 00:50:01.009
+KMS with deletion windows, two-person approval for bulk destruction, backups of wrapped keys.
+
+476
+00:50:01.289 --> 00:50:04.062
+Residency violation via infrastructure.
+
+477
+00:50:04.342 --> 00:50:05.153
+Symptom:
+
+478
+00:50:05.433 --> 00:50:08.035
+DR, backups, vendors abroad (L3).
+
+479
+00:50:08.315 --> 00:50:09.318
+Mitigation:
+
+480
+00:50:09.598 --> 00:50:12.691
+Flows in a manifest; policy-as-code in CI.
+
+481
+00:50:12.971 --> 00:50:13.910
+Purpose creep.
+
+482
+00:50:14.190 --> 00:50:15.001
+Symptom:
+
+483
+00:50:15.281 --> 00:50:18.011
+Data reused for new purposes without consent.
+
+484
+00:50:18.291 --> 00:50:19.294
+Mitigation:
+
+485
+00:50:19.574 --> 00:50:23.051
+Purpose tags on flows; privacy review in design docs.
+
+486
+00:50:24.401 --> 00:50:25.767
+Editable audit trail.
+
+487
+00:50:26.047 --> 00:50:26.857
+Symptom:
+
+488
+00:50:27.137 --> 00:50:29.356
+Evidence can't be trusted (L4).
+
+489
+00:50:29.636 --> 00:50:30.639
+Mitigation:
+
+490
+00:50:30.919 --> 00:50:34.417
+Hash chain + external anchors + separation of duties.
+
+491
+00:50:34.697 --> 00:50:35.764
+Over-retention.
+
+492
+00:50:36.044 --> 00:50:36.855
+Symptom:
+
+493
+00:50:37.135 --> 00:50:38.927
+Old data kept just in case.
+
+494
+00:50:39.207 --> 00:50:40.209
+Mitigation:
+
+495
+00:50:40.489 --> 00:50:44.265
+Retention schedule enforced by TTL or lifecycle.
+
+496
+00:50:44.545 --> 00:50:45.612
+Under-retention.
+
+497
+00:50:45.892 --> 00:50:46.703
+Symptom:
+
+498
+00:50:46.983 --> 00:50:48.817
+Statutory records deleted.
+
+499
+00:50:49.097 --> 00:50:50.100
+Mitigation:
+
+500
+00:50:50.380 --> 00:50:53.601
+Legal-retention class, WORM storage, legal holds.
+
+501
+00:50:53.881 --> 00:50:55.268
+Slow breach response.
+
+502
+00:50:55.548 --> 00:50:56.359
+Symptom:
+
+503
+00:50:56.639 --> 00:50:58.495
+Can't scope impact within hours.
+
+504
+00:50:58.775 --> 00:50:59.777
+Mitigation:
+
+505
+00:51:00.057 --> 00:51:02.361
+Inventory, logs, runbook, drills.
+
+506
+00:51:03.711 --> 00:51:04.799
+Observability.
+
+507
+00:51:05.079 --> 00:51:06.978
+Dashboards for compliance signals:
+
+508
+00:51:07.258 --> 00:51:19.610
+PII findings per day by source (L2), policy-check failures (L3), erasure requests and SLA, audit-verification status and unanchored window (L4), key destructions.
+
+509
+00:51:19.890 --> 00:51:29.959
+Access logs for personal data (support tool views, exports) feed the audit log and anomaly detection (an agent viewing hundreds of customer profiles).
+
+510
+00:51:30.239 --> 00:51:39.285
+Be careful that observability itself doesn't become a PII store, the logs, traces and dashboards are data sinks too (Ch 24).
+
+511
+00:51:40.635 --> 00:51:41.573
+Security.
+
+512
+00:51:41.853 --> 00:51:50.195
+Compliance and security overlap but aren't the same: you can be compliant and breached, or secure and non-compliant (keeping data too long).
+
+513
+00:51:50.475 --> 00:51:52.757
+Design for both (Ch 23).
+
+514
+00:51:53.037 --> 00:52:01.891
+KMS as crown jewels: key-destruction and key-use permissions are the most sensitive in the system; separate duties and audit every use.
+
+515
+00:52:02.171 --> 00:52:08.507
+Separate accounts for audit anchors, backups and the payment vault limit what one compromised admin can alter.
+
+516
+00:52:08.787 --> 00:52:17.192
+Treat vendors as part of the attack surface: minimise what they receive, contract for security and breach notification, review regularly.
+
+517
+00:52:18.542 --> 00:52:19.865
+Performance trade-offs.
+
+518
+00:52:20.145 --> 00:52:33.926
+Field-level encryption adds CPU and latency per field and prevents database-side search on encrypted columns, use blind indexes (HMAC tokens) for equality lookups and pseudonymous IDs in search.
+
+519
+00:52:34.206 --> 00:52:48.606
+Hash-chaining serialises audit writes per chain; shard chains by partition (per service or per time window) and anchor each (L4: ~25k entries per second single-threaded with naive hex formatting).
+
+520
+00:52:48.886 --> 00:52:59.595
+Scanning every log line costs CPU; scan at the pipeline with sampling for high-volume, low-risk streams and fully for high-risk sinks (exports, vendor-bound logs).
+
+521
+00:53:00.945 --> 00:53:01.671
+Cost.
+
+522
+00:53:01.951 --> 00:53:10.036
+An in-country DR region may cost more than a cheaper foreign one; residency is a constraint, not an option to optimise away.
+
+523
+00:53:10.316 --> 00:53:18.743
+Encryption and KMS calls add cost at scale, cache data keys (envelope encryption) rather than calling the KMS per field.
+
+524
+00:53:19.023 --> 00:53:31.716
+The cost of non-compliance, penalties, remediation projects (§1.1's two quarters), lost partners, dwarfs the mechanisms, but apply them proportionately to risk (Ch 35).
+
+525
+00:53:33.066 --> 00:53:34.005
+Part 7.
+
+526
+00:53:34.285 --> 00:53:35.991
+Anti-Patterns and Pitfalls.
+
+527
+00:53:37.241 --> 00:53:38.159
+Watch out:
+
+528
+00:53:38.439 --> 00:53:39.079
+1.
+
+529
+00:53:39.359 --> 00:53:41.471
+Compliance as a pre-audit project.
+
+530
+00:53:41.751 --> 00:53:44.844
+Evidence assembled once a year is stale and incomplete.
+
+531
+00:53:45.124 --> 00:53:48.324
+Build mechanisms and collect evidence continuously.
+
+532
+00:53:49.674 --> 00:53:50.591
+Watch out:
+
+533
+00:53:50.871 --> 00:53:51.575
+2.
+
+534
+00:53:51.855 --> 00:53:54.223
+Erasure = DELETE FROM customers.
+
+535
+00:53:54.503 --> 00:53:59.623
+Leaves read models, indexes, caches, backups and warehouses readable (L1).
+
+536
+00:53:59.903 --> 00:54:02.122
+Design erasure across every copy.
+
+537
+00:54:03.472 --> 00:54:04.389
+Watch out:
+
+538
+00:54:04.669 --> 00:54:05.416
+3.
+
+539
+00:54:05.696 --> 00:54:08.021
+Crypto-shredding with plaintext side-channels.
+
+540
+00:54:08.301 --> 00:54:14.872
+Encrypting the database while logs, exports and caches hold plaintext makes the key destruction meaningless.
+
+541
+00:54:15.152 --> 00:54:17.072
+No plaintext PII anywhere.
+
+542
+00:54:18.422 --> 00:54:19.339
+Watch out:
+
+543
+00:54:19.619 --> 00:54:20.323
+4.
+
+544
+00:54:20.603 --> 00:54:22.075
+Logging request bodies.
+
+545
+00:54:22.355 --> 00:54:27.582
+The most common way card numbers and personal data leak (§1.1, L2).
+
+546
+00:54:27.862 --> 00:54:29.761
+Log allow-listed fields only.
+
+547
+00:54:31.111 --> 00:54:32.028
+Watch out:
+
+548
+00:54:32.308 --> 00:54:33.076
+5.
+
+549
+00:54:33.356 --> 00:54:35.255
+Format-only PII scanning.
+
+550
+00:54:35.535 --> 00:54:37.711
+Alerts drown in look-alikes (L2:
+
+551
+00:54:37.991 --> 00:54:40.849
+1.9% precision) and get ignored.
+
+552
+00:54:41.129 --> 00:54:43.327
+Validate candidates and use structure.
+
+553
+00:54:44.677 --> 00:54:45.594
+Watch out:
+
+554
+00:54:45.874 --> 00:54:46.621
+6.
+
+555
+00:54:46.901 --> 00:54:50.165
+DR region chosen for price and latency alone.
+
+556
+00:54:50.445 --> 00:54:54.733
+Replicas and backups are copies subject to residency rules (L3).
+
+557
+00:54:55.013 --> 00:54:56.805
+Check the rules before the region.
+
+558
+00:54:58.155 --> 00:54:59.072
+Watch out:
+
+559
+00:54:59.352 --> 00:55:00.099
+7.
+
+560
+00:55:00.379 --> 00:55:02.000
+Vendors as an afterthought.
+
+561
+00:55:02.280 --> 00:55:07.635
+Every observability, support and analytics tool is a cross-border data flow with a purpose.
+
+562
+00:55:07.915 --> 00:55:09.813
+Minimise, contract, record.
+
+563
+00:55:11.163 --> 00:55:12.081
+Watch out:
+
+564
+00:55:12.361 --> 00:55:13.043
+8.
+
+565
+00:55:13.323 --> 00:55:15.286
+Consent collected but never checked.
+
+566
+00:55:15.566 --> 00:55:19.022
+A checkbox at sign-up that no data flow ever consults.
+
+567
+00:55:19.302 --> 00:55:23.633
+Record consent as data and check purpose at use (L3 R3).
+
+568
+00:55:24.983 --> 00:55:25.900
+Watch out:
+
+569
+00:55:26.180 --> 00:55:26.927
+9.
+
+570
+00:55:27.207 --> 00:55:29.745
+Audit table in the application database.
+
+571
+00:55:30.025 --> 00:55:33.524
+Anyone who administers it can edit it (§1.1).
+
+572
+00:55:33.804 --> 00:55:36.449
+Hash-chain it and anchor externally (L4).
+
+573
+00:55:37.799 --> 00:55:38.717
+Watch out:
+
+574
+00:55:38.997 --> 00:55:39.701
+10.
+
+575
+00:55:39.981 --> 00:55:41.901
+Hash chain without external anchors.
+
+576
+00:55:42.181 --> 00:55:45.573
+An insider can delete and recompute (L4 case 4).
+
+577
+00:55:45.853 --> 00:55:47.559
+Anchor to a store they can't write.
+
+578
+00:55:48.909 --> 00:55:49.827
+Watch out:
+
+579
+00:55:50.107 --> 00:55:50.939
+11.
+
+580
+00:55:51.219 --> 00:55:52.755
+Keeping everything forever.
+
+581
+00:55:53.035 --> 00:55:57.301
+Over-retention is itself a violation and increases breach impact.
+
+582
+00:55:57.581 --> 00:55:59.309
+Retention schedule per class.
+
+583
+00:56:00.659 --> 00:56:01.577
+Watch out:
+
+584
+00:56:01.857 --> 00:56:02.646
+12.
+
+585
+00:56:02.926 --> 00:56:05.230
+Storing card numbers 'just for refunds'.
+
+586
+00:56:05.510 --> 00:56:12.593
+Tokens do that job; storing card data brings PCI scope and violates card-on-file rules for merchants.
+
+587
+00:56:13.943 --> 00:56:14.817
+Part 8.
+
+588
+00:56:15.097 --> 00:56:16.441
+Interview Q and A.
+
+589
+00:56:17.691 --> 00:56:18.523
+Beginner.
+
+590
+00:56:18.803 --> 00:56:19.827
+Question 1.
+
+591
+00:56:20.107 --> 00:56:23.115
+How do regulations become architecture requirements?
+
+592
+00:56:23.395 --> 00:56:24.761
+Thirty-second answer:
+
+593
+00:56:25.041 --> 00:56:37.115
+Laws state outcomes, protect personal data, use it only for its purpose, erase it when no longer needed, keep tax records for a period, store payment data in-country, report breaches quickly.
+
+594
+00:56:37.395 --> 00:56:50.963
+The architect translates each into a testable engineering requirement and a mechanism: crypto-shredding for erasure, policy-as-code for residency, a tamper-evident log for accountability, scanners for data leakage.
+
+595
+00:56:51.243 --> 00:56:52.843
+Then automate the evidence.
+
+596
+00:56:54.193 --> 00:56:55.196
+Question 2.
+
+597
+00:56:55.476 --> 00:56:58.015
+What is data residency or localisation?
+
+598
+00:56:58.295 --> 00:56:59.660
+Thirty-second answer:
+
+599
+00:56:59.940 --> 00:57:06.084
+A requirement that certain data be stored (and sometimes processed) only within a country or region.
+
+600
+00:57:06.364 --> 00:57:20.273
+For an Indian payments-related platform, RBI's 2018 direction requires payment system data to be stored only in India; transient processing abroad is allowed if the data is deleted there quickly.
+
+601
+00:57:20.553 --> 00:57:26.825
+Architecturally it constrains where replicas, backups, DR regions, analytics and vendors can be.
+
+602
+00:57:28.175 --> 00:57:29.221
+Question 3.
+
+603
+00:57:29.501 --> 00:57:30.866
+What is crypto-shredding?
+
+604
+00:57:31.146 --> 00:57:32.511
+Thirty-second answer:
+
+605
+00:57:32.791 --> 00:57:40.749
+Encrypting a subject's personal data with a key specific to them, in every place it's written, and erasing the data by destroying the key.
+
+606
+00:57:41.029 --> 00:57:49.093
+Every copy, primary, replicas, backups, exports, becomes unreadable at once, without having to find and delete each copy.
+
+607
+00:57:49.373 --> 00:57:52.509
+Other subjects' data, under other keys, is unaffected.
+
+608
+00:57:53.859 --> 00:57:54.925
+Question 4.
+
+609
+00:57:55.205 --> 00:57:56.827
+Why tokenise card data?
+
+610
+00:57:57.107 --> 00:57:58.472
+Thirty-second answer:
+
+611
+00:57:58.752 --> 00:58:03.232
+So your systems never store, and ideally never see, actual card numbers.
+
+612
+00:58:03.512 --> 00:58:09.677
+Hosted payment pages collect them and network or issuer tokens stand in for them on repeat payments.
+
+613
+00:58:09.957 --> 00:58:21.499
+That keeps most of the platform out of PCI DSS scope, removes the highest-value data from breach impact, and meets RBI's rule that merchants don't store card-on-file data.
+
+614
+00:58:22.849 --> 00:58:23.851
+Intermediate.
+
+615
+00:58:24.131 --> 00:58:25.241
+Question 5.
+
+616
+00:58:25.521 --> 00:58:31.878
+Design the right-to-erasure feature for a platform with CQRS, search, Kafka, backups and a warehouse.
+
+617
+00:58:32.158 --> 00:58:33.523
+Thirty-second answer:
+
+618
+00:58:33.803 --> 00:58:43.979
+Encrypt personal fields at write time with a per-customer key from a KMS, in every store and message, and keep only pseudonymous IDs in search and the warehouse.
+
+619
+00:58:44.259 --> 00:58:57.529
+On a verified request: check legal holds and retention; destroy the customer key (all copies become unreadable, including backups); tidy up live stores (delete rows, index documents, cache entries,
+
+620
+00:58:57.809 --> 00:59:08.454
+compact topics); keep legally required records under a separate retention key with minimal fields; write an erasure log without personal data; confirm to the customer.
+
+621
+00:59:09.804 --> 00:59:10.913
+Question 6.
+
+622
+00:59:11.193 --> 00:59:13.732
+How do you find personal data where it shouldn't be?
+
+623
+00:59:14.012 --> 00:59:15.377
+Thirty-second answer:
+
+624
+00:59:15.657 --> 00:59:38.356
+Scan the sinks, logs, exports, object storage, warehouses, vendor feeds, with detectors for the identifiers you care about (phones, emails, Aadhaar-format numbers, PAN, card numbers), validate candidates with each identifier's rules (Verhoeff, Luhn + issuer prefix, PAN structure) and use structure (field names or keys) to exclude known non-PII fields.
+
+625
+00:59:38.636 --> 00:59:42.391
+Redact at the pipeline, alert the owning team, and fix the source.
+
+626
+00:59:43.741 --> 00:59:44.829
+Question 7.
+
+627
+00:59:45.109 --> 00:59:48.159
+What does purpose limitation mean for system design?
+
+628
+00:59:48.439 --> 00:59:49.805
+Thirty-second answer:
+
+629
+00:59:50.085 --> 00:59:56.015
+Personal data may be used only for the purposes it was collected for (consent or legitimate use).
+
+630
+00:59:56.295 --> 01:00:09.842
+In design terms: record the purpose(s) for each data class, tag data flows with their purpose, check new uses against recorded purposes and consent, and require a privacy review when a new purpose appears.
+
+631
+01:00:10.122 --> 01:00:14.133
+Aggregated or anonymised data can often be used more freely.
+
+632
+01:00:15.483 --> 01:00:16.507
+Question 8.
+
+633
+01:00:16.787 --> 01:00:18.387
+How long should you keep data?
+
+634
+01:00:18.667 --> 01:00:20.032
+Thirty-second answer:
+
+635
+01:00:20.312 --> 01:00:25.880
+Exactly as long as its purpose or a legal obligation requires, no longer, no shorter.
+
+636
+01:00:26.160 --> 01:00:45.147
+Set a retention schedule per data class (debug logs days, app logs weeks to months, security logs per regulator direction, order history per relationship, GST invoices 72 plus months), enforce it with TTLs and lifecycle rules, support legal holds, and record deletions.
+
+637
+01:00:46.497 --> 01:00:47.563
+Question 9.
+
+638
+01:00:47.843 --> 01:00:49.721
+What makes an audit log trustworthy?
+
+639
+01:00:50.001 --> 01:00:51.366
+Thirty-second answer:
+
+640
+01:00:51.646 --> 01:01:10.334
+Completeness (every privileged action, with actor, action, target, time and source), tamper evidence (hash chain), external anchoring (chain heads written to a write-once store outside the operators' control), separation of duties, appropriate retention, and continuous verification with alerts.
+
+641
+01:01:11.684 --> 01:01:12.452
+Senior.
+
+642
+01:01:12.732 --> 01:01:13.777
+Question 10.
+
+643
+01:01:14.057 --> 01:01:18.089
+Design DR for a platform whose payment data must stay in India.
+
+644
+01:01:18.369 --> 01:01:19.735
+Thirty-second answer:
+
+645
+01:01:20.015 --> 01:01:36.527
+Primary in one Indian region, DR in another Indian region, with replication, backups and snapshots staying in-country; anything leaving the country is transient processing (deleted promptly), anonymised or aggregated, or stripped of payment data.
+
+646
+01:01:36.807 --> 01:01:42.780
+Encode this as policy-as-code over the architecture's data flows so a foreign replica fails CI.
+
+647
+01:01:44.130 --> 01:01:45.261
+Question 11.
+
+648
+01:01:45.541 --> 01:01:49.103
+How do you make search and analytics work with encrypted personal data?
+
+649
+01:01:49.383 --> 01:01:50.749
+Thirty-second answer:
+
+650
+01:01:51.029 --> 01:01:52.586
+Don't index plaintext.
+
+651
+01:01:52.866 --> 01:02:09.293
+Use pseudonymous tokens (keyed HMAC of identifiers) as join keys and for equality search (blind indexes); keep analytics on pseudonymised or aggregated data; decrypt only in the service that needs the value, for the user who's allowed to see it.
+
+652
+01:02:09.573 --> 01:02:20.879
+For free-text search over personal data (support tools), use a separate, access-controlled, audited index whose entries are encrypted under the subject key so crypto-shredding covers it.
+
+653
+01:02:22.229 --> 01:02:23.317
+Question 12.
+
+654
+01:02:23.597 --> 01:02:28.333
+How do you encode compliance rules as code without turning engineers into lawyers?
+
+655
+01:02:28.613 --> 01:02:29.979
+Thirty-second answer:
+
+656
+01:02:30.259 --> 01:02:48.669
+Legal and compliance define the rules in plain language; a small platform team encodes them as policies over data classes, regions, purposes and safeguards; engineers declare their data flows in a manifest (or it's derived from infrastructure code) and CI evaluates them.
+
+657
+01:02:48.949 --> 01:02:54.731
+Engineers see concrete failures (payment data would be stored in SG), not legal text.
+
+658
+01:02:56.081 --> 01:02:57.361
+Question 13.
+
+659
+01:02:57.641 --> 01:03:01.395
+What are the architectural implications of processing children's data?
+
+660
+01:03:01.675 --> 01:03:03.041
+Thirty-second answer:
+
+661
+01:03:03.321 --> 01:03:19.257
+Under the DPDP Act, processing a child's personal data needs verifiable parental consent, and tracking, behavioural monitoring and targeted advertising directed at children are not allowed (subject to exemptions the Rules may define).
+
+662
+01:03:19.537 --> 01:03:34.406
+Architecturally: know whether a user is a child (age assurance at onboarding), flag their data as a special class, exclude it from personalisation, ad and profiling pipelines by policy, and apply stricter retention and access.
+
+663
+01:03:35.756 --> 01:03:36.951
+Question 14.
+
+664
+01:03:37.231 --> 01:03:40.025
+How would you prepare to notify a breach within hours?
+
+665
+01:03:40.305 --> 01:03:41.671
+Thirty-second answer:
+
+666
+01:03:41.951 --> 01:04:01.023
+Know what data is where (inventory), keep sufficient access logs and audit trails (retained and in the required jurisdiction), have a runbook with legal or security or comms or engineering roles and pre-drafted notices, practise it, and reduce impact in advance with minimisation and encryption.
+
+667
+01:04:01.303 --> 01:04:04.033
+Detection and scoping speed are the bottlenecks.
+
+668
+01:04:05.383 --> 01:04:06.279
+Architect.
+
+669
+01:04:06.559 --> 01:04:07.754
+Question 15.
+
+670
+01:04:08.034 --> 01:04:12.450
+Design a compliance architecture for a new Indian quick-commerce platform.
+
+671
+01:04:12.730 --> 01:04:14.095
+Thirty-second answer:
+
+672
+01:04:14.375 --> 01:04:33.917
+Data classes and a catalog from day one; field-level encryption with per-customer and legal-retention keys (crypto-shredding for erasure); payments via hosted pages and tokens (no card data); structured logging allow-lists plus PII scanning of sinks; residency and purpose rules as code over a
+
+673
+01:04:34.197 --> 01:04:47.914
+data-flow manifest; in-country DR; retention schedule enforced by lifecycle; hash-chained audit log anchored externally; consent recorded as data; breach runbook; evidence collected automatically.
+
+674
+01:04:49.264 --> 01:04:50.459
+Question 16.
+
+675
+01:04:50.739 --> 01:04:54.024
+How do multi-tenancy and data residency interact?
+
+676
+01:04:54.304 --> 01:04:55.669
+Thirty-second answer:
+
+677
+01:04:55.949 --> 01:05:00.472
+Tenants (or markets) may have different residency and contractual requirements.
+
+678
+01:05:00.752 --> 01:05:17.989
+Use regional cells or silos for tenants whose data must stay in a jurisdiction, pool the rest, route by tenant to the right region, keep per-tenant keys for crypto-shredding and contract termination, and make residency a property in the tenant registry that policy checks consult.
+
+679
+01:05:19.339 --> 01:05:20.683
+Question 17.
+
+680
+01:05:20.963 --> 01:05:25.230
+How do you keep compliance mechanisms from eroding as the system evolves?
+
+681
+01:05:25.510 --> 01:05:26.875
+Thirty-second answer:
+
+682
+01:05:27.155 --> 01:05:30.675
+The same way you keep architecture from eroding: automation.
+
+683
+01:05:30.955 --> 01:05:50.454
+Policy checks in CI on every manifest and infrastructure change, PII scanners on every sink, audit-log verification jobs, catalog coverage metrics, drift detection between documented and actual data flows, periodic access reviews, and privacy review built into the design-doc template.
+
+684
+01:05:51.804 --> 01:05:52.977
+Question 18.
+
+685
+01:05:53.257 --> 01:05:57.951
+Hash chain versus append-only database versus blockchain for audit logs?
+
+686
+01:05:58.231 --> 01:05:59.596
+Thirty-second answer:
+
+687
+01:05:59.876 --> 01:06:06.489
+An append-only table (permissions preventing UPDATE or DELETE) stops casual edits but not a DBA.
+
+688
+01:06:06.769 --> 01:06:12.209
+A hash chain makes any edit detectable but can be rewritten by whoever controls the whole store.
+
+689
+01:06:12.489 --> 01:06:18.719
+Periodic external anchoring to a write-once store controlled by someone else fixes that at low cost.
+
+690
+01:06:18.999 --> 01:06:30.903
+A blockchain (distributed consensus among mutually distrusting parties) is rarely needed inside one organisation, anchoring gives the same tamper evidence with far less complexity.
+
+691
+01:06:31.183 --> 01:06:35.193
+Managed immutable ledgers and WORM storage are practical options.
+
+692
+01:06:36.543 --> 01:06:37.781
+Question 19.
+
+693
+01:06:38.061 --> 01:06:40.749
+How do you balance compliance with product velocity?
+
+694
+01:06:41.029 --> 01:06:42.394
+Thirty-second answer:
+
+695
+01:06:42.674 --> 01:07:01.021
+Make the compliant path the easy path: a logging library that only emits allow-listed fields, an encryption library that handles keys, templates for new services with classification and retention defaults, policy checks with clear messages, and a lightweight privacy review for new data uses.
+
+696
+01:07:01.301 --> 01:07:08.127
+Concentrate heavy process on high-risk data (payments, children's data, sensitive inferences) and new purposes.
+
+697
+01:07:09.477 --> 01:07:10.587
+Question 20.
+
+698
+01:07:10.867 --> 01:07:14.429
+What distinguishes a principal engineer's approach to compliance?
+
+699
+01:07:14.709 --> 01:07:16.075
+Thirty-second answer:
+
+700
+01:07:16.355 --> 01:07:33.251
+They treat regulations as design inputs from day one, translate them into a small set of mechanisms that make violations structurally hard (encryption with destroyable keys, residency by policy, allow-listed logging, tamper-evident audit), automate the evidence,
+
+701
+01:07:33.531 --> 01:07:45.691
+know the limits of each mechanism (L2's residual false positives, L4's unanchored window), and work with legal as partners, asking precise questions rather than guessing at the law.
+
+702
+01:07:47.041 --> 01:07:47.937
+Part 9.
+
+703
+01:07:48.217 --> 01:07:49.625
+Summary and Practice.
+
+704
+01:07:50.875 --> 01:07:51.963
+Key takeaways.
+
+705
+01:07:52.243 --> 01:08:02.291
+Compliance obligations are NFRs with legal consequences; translate each into a testable mechanism and automate the evidence (§2.1).
+
+706
+01:08:02.571 --> 01:08:10.123
+Know your data: classes, inventory, owners, purposes, retention, everything else depends on it (§2.3).
+
+707
+01:08:10.403 --> 01:08:20.024
+Minimise and encrypt: pass IDs not PII, pseudonymise analytics, encrypt personal fields with keys you can destroy (§2.4).
+
+708
+01:08:20.304 --> 01:08:28.731
+Erasure must cover every copy; crypto-shredding makes it one provable action while legal retention uses a separate key (L1).
+
+709
+01:08:30.081 --> 01:08:37.057
+Find stray PII with validated, structure-aware scanning, and fix it upstream with logging allow-lists (L2).
+
+710
+01:08:37.337 --> 01:08:46.126
+Encode residency, transfer and purpose rules as code over the architecture's data flows; DR and vendors are data flows (L3).
+
+711
+01:08:46.406 --> 01:08:52.955
+Keep card data out with hosted pages and tokens; keep payment data in-country (§2.5).
+
+712
+01:08:53.235 --> 01:08:59.763
+Make audit trails tamper-evident with hash chains and external anchors, and know the unanchored window (L4).
+
+713
+01:09:01.113 --> 01:09:12.079
+Be breach-ready and proportionate: inventory, logs, runbooks, drills, and effort concentrated on the riskiest data (§2.9, §2.10).
+
+714
+01:09:13.429 --> 01:09:14.751
+Decision cheat sheet.
+
+715
+01:09:15.031 --> 01:09:16.375
+Here is a quick table:
+
+716
+01:09:16.655 --> 01:09:18.149
+Need, and Mechanism.
+
+717
+01:09:18.429 --> 01:09:20.733
+Erasure across all stores and backups:
+
+718
+01:09:21.013 --> 01:09:24.405
+Per-subject keys + crypto-shredding + erasure log.
+
+719
+01:09:24.685 --> 01:09:26.455
+Keep records the law requires:
+
+720
+01:09:26.735 --> 01:09:30.703
+Legal-retention class, separate key, WORM, retention schedule.
+
+721
+01:09:30.983 --> 01:09:32.391
+No PII in logs:
+
+722
+01:09:32.671 --> 01:09:36.447
+Structured logging allow-lists + key-aware scanner + redaction.
+
+723
+01:09:36.727 --> 01:09:38.242
+Payment data in-country:
+
+724
+01:09:38.522 --> 01:09:42.085
+Residency policy-as-code; in-country DR and backups.
+
+725
+01:09:42.365 --> 01:09:43.517
+No card data:
+
+726
+01:09:43.797 --> 01:09:48.618
+Hosted payment pages, network tokens, isolated vault if unavoidable.
+
+727
+01:09:48.898 --> 01:09:50.477
+New use of personal data:
+
+728
+01:09:50.757 --> 01:09:54.725
+Purpose check against consent or legitimate use; privacy review.
+
+729
+01:09:55.005 --> 01:09:56.669
+Analytics on personal data:
+
+730
+01:09:56.949 --> 01:09:59.402
+Pseudonymised or aggregated datasets.
+
+731
+01:10:00.752 --> 01:10:02.160
+Trustworthy audit trail:
+
+732
+01:10:02.440 --> 01:10:06.707
+Hash chain + frequent external WORM anchors + separation of duties.
+
+733
+01:10:06.987 --> 01:10:08.821
+Breach notification in hours:
+
+734
+01:10:09.101 --> 01:10:11.405
+Inventory, logs, runbook, drills.
+
+735
+01:10:12.755 --> 01:10:13.886
+Exercises.
+
+736
+01:10:14.166 --> 01:10:20.907
+(B2) Extend L1 with a Kafka topic store holding OrderPlaced events with encrypted customer fields.
+
+737
+01:10:21.187 --> 01:10:24.707
+Show that crypto-shredding covers the topic's retained history.
+
+738
+01:10:24.987 --> 01:10:31.601
+(B2) Add detectors to L2 for UPI IDs and GSTINs (GSTIN has a checksum character).
+
+739
+01:10:31.881 --> 01:10:34.227
+Measure precision with and without the checksum.
+
+740
+01:10:34.507 --> 01:10:42.145
+(B3) Extend L3's policy with a children's data class that may not flow to recommendations or marketing systems.
+
+741
+01:10:42.425 --> 01:10:44.046
+Add a flow that violates it.
+
+742
+01:10:45.396 --> 01:10:53.353
+(B3) In L4, shard the audit log into 8 chains (per service) and anchor a Merkle root of the 8 chain heads each minute.
+
+743
+01:10:53.633 --> 01:10:55.404
+How does verification change?
+
+744
+01:10:55.684 --> 01:11:03.172
+(B4) Write the data inventory for your own system: classes, stores, purposes, retention, locations, processors.
+
+745
+01:11:03.452 --> 01:11:05.799
+Which flows would L3-style rules block?
+
+746
+01:11:07.149 --> 01:11:08.151
+Further reading.
+
+747
+01:11:08.431 --> 01:11:19.823
+The Digital Personal Data Protection Act, 2023 and the DPDP Rules, 2025 (MeitY), primary texts; check current commencement status.
+
+748
+01:11:20.103 --> 01:11:29.127
+RBI, Storage of Payment System Data (2018) and its FAQs; RBI directions on card-on-file tokenisation.
+
+749
+01:11:29.407 --> 01:11:34.399
+PCI Security Standards Council, PCI DSS v4.x.
+
+750
+01:11:34.679 --> 01:11:41.122
+CERT-In, Directions under section 70B(6) of the IT Act (April 2022).
+
+751
+01:11:41.402 --> 01:11:50.490
+GDPR (Regulation (EU) 2016 or 679) and EDPB guidance on pseudonymisation and transfers.
+
+752
+01:11:51.840 --> 01:11:54.144
+Ann Cavoukian, Privacy by Design:
+
+753
+01:11:54.424 --> 01:11:56.344
+The 7 Foundational Principles.
+
+754
+01:11:56.624 --> 01:12:03.429
+NIST Privacy Framework; ISO or IEC 27001 and 27701.
+
+755
+01:12:04.779 --> 01:12:06.017
+Related chapters.
+
+756
+01:12:06.297 --> 01:12:10.329
+Ch 21, Data at Scale: lakehouse, retention tiers.
+
+757
+01:12:10.609 --> 01:12:15.921
+Ch 23, Security Architecture: encryption, KMS, access control.
+
+758
+01:12:16.201 --> 01:12:19.913
+Ch 27, Reliability and Disaster Recovery:
+
+759
+01:12:20.193 --> 01:12:22.795
+DR design under residency constraints.
+
+760
+01:12:23.075 --> 01:12:29.283
+Ch 30, Multi-Tenancy and SaaS Architecture: per-tenant keys and regional isolation.
+
+761
+01:12:29.563 --> 01:12:36.305
+Ch 32, Design Documents and Architecture Communication: privacy sections and drift detection.
+
+762
+01:12:37.655 --> 01:12:43.607
+Ch 35, Cost Engineering and FinOps: retention and lifecycle as cost levers.
+
+763
+01:12:44.957 --> 01:12:46.557
+That's the end of this chapter.
+
+764
+01:12:46.837 --> 01:12:52.874
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+765
+01:12:53.154 --> 01:12:54.605
+See you in the next chapter.
+

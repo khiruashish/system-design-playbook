@@ -1,0 +1,498 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.417
+Autocomplete:
+
+2
+00:00:01.697 --> 00:00:03.147
+Trie with Cached Top-K.
+
+3
+00:00:03.427 --> 00:00:07.331
+Chapter 9, from the Coding Interview part of the System Design Playbook.
+
+4
+00:00:09.081 --> 00:00:09.935
+Part 1.
+
+5
+00:00:10.215 --> 00:00:11.111
+Problem.
+
+6
+00:00:12.361 --> 00:00:20.297
+For a search box, return the 3 most popular past queries that start with what the user has typed, on every keystroke, fast.
+
+7
+00:00:20.577 --> 00:00:24.737
+Popularity changes as users search, and trending queries should rise.
+
+8
+00:00:26.087 --> 00:00:26.961
+Part 2.
+
+9
+00:00:27.241 --> 00:00:28.159
+Key idea.
+
+10
+00:00:29.409 --> 00:00:31.414
+A trie maps each prefix to a node.
+
+11
+00:00:31.694 --> 00:00:39.481
+A DFS of the whole subtree on every keystroke is too slow for short prefixes like j, so cache the top-K at every node.
+
+12
+00:00:39.761 --> 00:00:41.787
+A read is then O(prefix length).
+
+13
+00:00:42.067 --> 00:00:46.099
+A write updates the top-K along its path (O(L, K log K)).
+
+14
+00:00:46.379 --> 00:00:49.878
+Reads outnumber writes enormously, so this trade-off is right.
+
+15
+00:00:51.228 --> 00:00:52.572
+Here is the diagram.
+
+16
+00:00:56.422 --> 00:00:57.318
+Part 3.
+
+17
+00:00:57.598 --> 00:00:58.451
+Solution.
+
+18
+00:00:59.701 --> 00:01:02.795
+Here is the Java code, AutocompleteTrie.java.
+
+19
+00:01:03.075 --> 00:01:06.659
+It runs to 91 lines; the full listing is in the chapter.
+
+20
+00:01:06.939 --> 00:01:15.045
+Problem: search-box autocomplete: top-3 most popular queries for a prefix, fast; popularity updates as users search.
+
+21
+00:01:17.895 --> 00:01:18.813
+Part 4.
+
+22
+00:01:19.093 --> 00:01:19.925
+Walkthrough.
+
+23
+00:01:21.175 --> 00:01:22.519
+Here is a quick table:
+
+24
+00:01:22.799 --> 00:01:23.865
+Code, and Why.
+
+25
+00:01:24.145 --> 00:01:28.412
+ListString topK = new ArrayList() // cached per node:
+
+26
+00:01:28.692 --> 00:01:36.671
+This is the key design choice: pay on writes so each read is a single lookup. for (Node p: path) updateTopK(p, q):
+
+27
+00:01:36.951 --> 00:01:46.081
+A search updates every prefix node from the root to its last character. list.sort(by count desc, then text); if (size K) remove last:
+
+28
+00:01:46.361 --> 00:01:48.132
+Re-rank this node's candidates.
+
+29
+00:01:48.412 --> 00:01:55.964
+K is tiny (3 to 10), so sorting is cheap. check(t.suggest(p).equals(t.suggestByDfs(p))):
+
+30
+00:01:56.244 --> 00:02:01.172
+The cached answer is verified against a brute-force DFS for several prefixes.
+
+31
+00:02:02.522 --> 00:02:03.482
+Part 5.
+
+32
+00:02:03.762 --> 00:02:04.701
+Complexity.
+
+33
+00:02:05.951 --> 00:02:07.295
+Here is a quick table:
+
+34
+00:02:07.575 --> 00:02:10.177
+Approach, and Time, and Space. suggest.
+
+35
+00:02:10.457 --> 00:02:11.204
+Time:
+
+36
+00:02:11.484 --> 00:02:12.764
+O(prefix length).
+
+37
+00:02:13.044 --> 00:02:14.409
+Space: -. record.
+
+38
+00:02:14.689 --> 00:02:15.436
+Time:
+
+39
+00:02:15.716 --> 00:02:17.188
+O(L, K log K).
+
+40
+00:02:17.468 --> 00:02:18.321
+Space:
+
+41
+00:02:18.601 --> 00:02:20.799
+O(total chars + nodes, K).
+
+42
+00:02:21.079 --> 00:02:22.572
+DFS alternative.
+
+43
+00:02:22.852 --> 00:02:23.599
+Time:
+
+44
+00:02:23.879 --> 00:02:25.607
+O(subtree) per keystroke.
+
+45
+00:02:25.887 --> 00:02:26.740
+Space: -.
+
+46
+00:02:28.090 --> 00:02:29.029
+Part 6.
+
+47
+00:02:29.309 --> 00:02:30.034
+Run it.
+
+48
+00:02:31.284 --> 00:02:32.607
+Here is the shell code.
+
+49
+00:02:35.457 --> 00:03:01.761
+On screen: suggest(j ) = javascript array, java tutorial, java streams. suggest(jav ) = javascript array, java tutorial, java streams. suggest(java ) = java tutorial, java streams, java virtual threads. suggest(k ) = kafka. suggest(x ) =. after 'java virtual threads' trends: suggest(jav) = java virtual threads. javascript array, java tutorial.
+
+50
+00:03:02.041 --> 00:03:02.787
+PASS.
+
+51
+00:03:05.637 --> 00:03:06.576
+Part 7.
+
+52
+00:03:06.856 --> 00:03:08.541
+Solve it with Spring Boot 4.
+
+53
+00:03:09.791 --> 00:03:19.114
+Each trie node becomes a small sorted set per prefix that holds only that prefix's top K terms (the cached top-K per node from the solution).
+
+54
+00:03:19.394 --> 00:03:21.442
+A lookup is a single ZREVRANGE.
+
+55
+00:03:21.722 --> 00:03:29.423
+All the work happens on write, in one Lua script, and responses carry Cache-Control so a CDN can absorb the read traffic.
+
+56
+00:03:30.773 --> 00:03:33.568
+The sequence diagram walks through it step by step.
+
+57
+00:03:33.848 --> 00:03:37.005
+Log to S: recordSearch(iphone 15 pro).
+
+58
+00:03:37.285 --> 00:03:39.632
+S to R: autocomplete-record.lua:
+
+59
+00:03:39.912 --> 00:03:43.901
+ZINCRBY ac:counts, then for each prefix i, ip, iph...
+
+60
+00:03:44.181 --> 00:03:45.952
+ZADD + trim to top 5.
+
+61
+00:03:46.232 --> 00:03:47.171
+C to S:
+
+62
+00:03:47.451 --> 00:03:51.440
+GET or api or v1 or autocomplete?q=iph.
+
+63
+00:03:51.720 --> 00:03:52.659
+S to R:
+
+64
+00:03:52.939 --> 00:03:55.840
+ZREVRANGE ac:prefix:iph 0 4.
+
+65
+00:03:56.120 --> 00:03:57.037
+S to C:
+
+66
+00:03:57.317 --> 00:04:02.480
+200 Cache-Control: max-age=60, public iphone 15 pro,...
+
+67
+00:04:06.330 --> 00:04:07.397
+Record (Lua).
+
+68
+00:04:07.677 --> 00:04:10.898
+Here is the LUA code, autocomplete-record.lua.
+
+69
+00:04:11.178 --> 00:04:14.698
+It runs to 15 lines; the full listing is in the chapter.
+
+70
+00:04:14.978 --> 00:04:20.333
+KEYS1 = global counts zset; ARGV: term, k, prefix1, prefix2,...
+
+71
+00:04:20.613 --> 00:04:30.298
+(prefix keys are passed in ARGV and. built from the term, so this script is for single-node Redis; in a cluster, hash-tag them or shard by prefix).
+
+72
+00:04:33.148 --> 00:04:33.980
+Service.
+
+73
+00:04:34.260 --> 00:04:37.759
+Here is the Java code, AutocompleteService.java.
+
+74
+00:04:38.039 --> 00:04:41.729
+It runs to 44 lines; the full listing is in the chapter.
+
+75
+00:04:42.009 --> 00:04:45.572
+The interview trie stores top-K completions on every node.
+
+76
+00:04:45.852 --> 00:05:00.700
+In Redis each trie node becomes a small. sorted set per prefix holding only its top K terms, so a lookup is one ZREVRANGE: read-optimised. with the work done on write (exactly the trade-off the interview answer argues for).
+
+77
+00:05:03.550 --> 00:05:04.425
+Controller.
+
+78
+00:05:04.705 --> 00:05:08.225
+Here is the Java code, AutocompleteController.java.
+
+79
+00:05:08.505 --> 00:05:12.174
+It runs to 24 lines; the full listing is in the chapter.
+
+80
+00:05:12.454 --> 00:05:17.873
+Suggestions are the same for everyone, so let the CDN or browser cache them briefly.
+
+81
+00:05:20.723 --> 00:05:22.067
+Run it as a service.
+
+82
+00:05:22.347 --> 00:05:28.213
+The integration test AutocompleteIT.java drives the API against a real Redis.
+
+83
+00:05:28.493 --> 00:05:31.181
+This is its transcript ( request, response):
+
+84
+00:05:32.531 --> 00:05:47.721
+On screen: search log: iphone 15 pro=8, india versus australia=7, ice cream=6, iphone 15=5, idli=4. ipad air=3, iphone charger=2.
+
+85
+00:05:48.001 --> 00:05:51.862
+GET or api or v1 or autocomplete?q=i.
+
+86
+00:05:52.142 --> 00:06:01.614
+200 Cache-Control: max-age=60, public iphone 15 pro,india versus australia,ice. cream,iphone 15,idli.
+
+87
+00:06:01.894 --> 00:06:05.883
+GET or api or v1 or autocomplete?q=IPH.
+
+88
+00:06:06.163 --> 00:06:13.694
+200 Cache-Control: max-age=60, public iphone 15 pro,iphone 15,iphone charger.
+
+89
+00:06:13.974 --> 00:06:21.334
+GET or api or v1 or autocomplete?q=iphone%2015%20p.
+
+90
+00:06:21.614 --> 00:06:26.777
+200 Cache-Control: max-age=60, public iphone 15 pro.
+
+91
+00:06:27.057 --> 00:06:33.798
+POST or api or v1 or autocomplete or searches?term=Ipad%20Air.
+
+92
+00:06:34.078 --> 00:06:35.166
+202.
+
+93
+00:06:35.446 --> 00:06:40.310
+'ipad air' searched 6 more times (9 total) - it enters the top 5 for 'i'.
+
+94
+00:06:40.590 --> 00:06:44.451
+GET or api or v1 or autocomplete?q=i.
+
+95
+00:06:44.731 --> 00:06:46.246
+The rest is in the chapter.
+
+96
+00:06:49.096 --> 00:06:51.187
+What changes from the interview version.
+
+97
+00:06:51.467 --> 00:06:52.811
+Here is a quick table:
+
+98
+00:06:53.091 --> 00:07:15.981
+Interview, and Production (Spring Boot 4). trie nodes with a top-K list: one Redis sorted set per prefix ( at most 10 characters), holding at most K terms. update on every keystroke: update from the search log (submitted queries), ideally batched. no normalisation: lower-case, trim, collapse spaces; filter for prefixes longer than 10 characters. no caching:
+
+99
+00:07:16.261 --> 00:07:19.291
+Cache-Control: public, max-age=60.
+
+100
+00:07:19.571 --> 00:07:22.387
+Most prefixes are shared by millions of users.
+
+101
+00:07:23.737 --> 00:07:26.851
+Memory is bounded: prefixes times K entries.
+
+102
+00:07:27.131 --> 00:07:35.963
+Add per-user personalisation as a second, small set merged at read time, and remove offensive terms through a deny-list filter on write.
+
+103
+00:07:37.313 --> 00:07:38.188
+Part 8.
+
+104
+00:07:38.468 --> 00:07:39.577
+Common mistakes.
+
+105
+00:07:40.827 --> 00:07:46.139
+A DFS on every keystroke for one-letter prefixes, which can mean millions of nodes.
+
+106
+00:07:46.419 --> 00:07:49.961
+Updating the trie synchronously on every search at Google scale.
+
+107
+00:07:50.241 --> 00:07:58.305
+Aggregate counts offline (hourly or daily) and rebuild or swap the tries, with a small real-time layer for trending queries.
+
+108
+00:07:58.585 --> 00:08:03.939
+Ignoring normalisation (case, whitespace, accents) and offensive-content filtering.
+
+109
+00:08:05.289 --> 00:08:06.185
+Part 9.
+
+110
+00:08:06.465 --> 00:08:07.809
+Follow-up questions.
+
+111
+00:08:09.059 --> 00:08:09.934
+Question.
+
+112
+00:08:10.214 --> 00:08:12.945
+How would you serve this to 100k QPS?
+
+113
+00:08:13.225 --> 00:08:14.590
+Thirty-second answer:
+
+114
+00:08:14.870 --> 00:08:19.841
+Shard the trie by the first one or two characters, replicate it, and keep it in memory.
+
+115
+00:08:20.121 --> 00:08:24.067
+Put a CDN or edge cache in front for very common prefixes.
+
+116
+00:08:24.347 --> 00:08:30.129
+The client debounces keystrokes (about 100 ms) and caches responses per prefix.
+
+117
+00:08:31.479 --> 00:08:32.353
+Question.
+
+118
+00:08:32.633 --> 00:08:34.617
+How do you personalise suggestions?
+
+119
+00:08:34.897 --> 00:08:36.263
+Thirty-second answer:
+
+120
+00:08:36.543 --> 00:08:44.137
+Blend global top-K candidates with the user's own history and context (location, language) in a re-ranking step.
+
+121
+00:08:44.417 --> 00:08:49.025
+The trie supplies candidates; a small model or scoring function orders them.
+
+122
+00:08:50.375 --> 00:08:51.975
+That's the end of this chapter.
+
+123
+00:08:52.255 --> 00:08:58.293
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+124
+00:08:58.573 --> 00:09:00.023
+See you in the next chapter.
+

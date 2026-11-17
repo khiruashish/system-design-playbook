@@ -1,0 +1,3074 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:03.553
+Delivery Dispatch and Live Tracking.
+
+3
+00:00:03.833 --> 00:00:08.163
+Chapter 47, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:09.913 --> 00:00:10.873
+At a glance:
+
+5
+00:00:11.153 --> 00:00:12.327
+Chapter at a glance.
+
+6
+00:00:12.607 --> 00:00:13.609
+Reader bands:
+
+7
+00:00:13.889 --> 00:00:16.172
+B2, then B4, Prerequisites:
+
+8
+00:00:16.452 --> 00:00:28.655
+Ch 03 (SSE tracking), Ch 06 (Redis GEO), Ch 14 (rider location topic), Ch 41 (presence from location), What you will build:
+
+9
+00:00:28.935 --> 00:00:42.417
+Everything between order packed and delivered: geofenced serviceability, rider GPS ingestion, the live rider index, dispatch (which rider takes which order), ETAs and live tracking on the customer's screen.
+
+10
+00:00:42.697 --> 00:00:48.116
+This is the design Uber or Swiggy dispatch interview question for a quick-commerce platform.
+
+11
+00:00:48.396 --> 00:01:03.692
+Earlier chapters deferred all of it here: polygon serviceability (Ch 01), telemetry ingestion (Ch 03, Ch 14), H3 or geohash indexing and dispatch algorithms (Ch 06).
+
+12
+00:01:05.042 --> 00:01:08.263
+L1: geo indexes (real Redis for riders).
+
+13
+00:01:08.543 --> 00:01:14.367
+Serviceability over 400 store polygons and 200,000 customer locations:
+
+14
+00:01:14.647 --> 00:01:22.733
+Testing every polygon took 1,457 ms (136.7 polygon tests per lookup).
+
+15
+00:01:23.013 --> 00:01:29.391
+A 500 m grid index took 78 ms (1.9 tests per lookup), with the same answers.
+
+16
+00:01:29.671 --> 00:01:43.858
+For the nearest 5 of 20,000 riders, brute force took 780 µs p50, a 1 km grid 11 µs, and Redis GEOSEARCH 468 µs including the network round trip.
+
+17
+00:01:44.138 --> 00:01:44.949
+L2:
+
+18
+00:01:45.229 --> 00:01:47.533
+GPS ingestion (real Redis).
+
+19
+00:01:47.813 --> 00:01:53.039
+250,000 pings from 50,000 riders, 3% delivered late:
+
+20
+00:01:54.389 --> 00:02:02.539
+Two commands per ping reached ~12,800 pings per second and left 480 riders at an older position.
+
+21
+00:02:02.819 --> 00:02:06.680
+An ordering-safe Lua script per ping gave 0 stale riders.
+
+22
+00:02:06.960 --> 00:02:11.312
+Pipelining reached ~94,500 pings per second.
+
+23
+00:02:11.592 --> 00:02:19.571
+A movement filter for the live index cut Redis writes from 250,000 to 145,061.
+
+24
+00:02:19.851 --> 00:02:21.259
+L3: dispatch.
+
+25
+00:02:21.539 --> 00:02:24.483
+6 dark stores times 10 riders at evening peak:
+
+26
+00:02:24.763 --> 00:02:30.224
+FIFO to riders standing at the store delivered 40% within the 20-minute promise.
+
+27
+00:02:31.574 --> 00:02:35.841
+Also assigning riders on their way back raised that to 53%.
+
+28
+00:02:36.121 --> 00:02:40.387
+Batching two orders to nearby customers raised it to 61%.
+
+29
+00:02:40.667 --> 00:02:47.793
+Both together reached 69%, with the average falling from 24.8 to 18.0 minutes.
+
+30
+00:02:48.073 --> 00:02:48.947
+L4:
+
+31
+00:02:49.227 --> 00:02:49.953
+ETAs.
+
+32
+00:02:50.233 --> 00:02:54.307
+Across 6,677 evaluated deliveries:
+
+33
+00:02:54.587 --> 00:03:01.179
+A city-wide speed was off by 4.6 min on average, and 49% arrived after the promise.
+
+34
+00:03:02.529 --> 00:03:09.335
+Zone times hour speeds and learned door times per building brought that to 2.4 min and 28%.
+
+35
+00:03:09.615 --> 00:03:16.548
+Re-estimating halfway from the rider's actual pace brought it to 1.2 min and 11.5%.
+
+36
+00:03:16.828 --> 00:03:17.809
+Reading time:
+
+37
+00:03:18.089 --> 00:03:19.881
+110 min + code.
+
+38
+00:03:21.231 --> 00:03:22.085
+Part 1.
+
+39
+00:03:22.365 --> 00:03:24.285
+Introduction and Why It Matters.
+
+40
+00:03:25.535 --> 00:03:28.969
+A story: the rider who was 2 minutes away for 20 minutes.
+
+41
+00:03:29.249 --> 00:03:44.993
+The first delivery system was simple: customers served by pincode, the nearest idle rider at the store assigned when an order was packed, rider positions written to a table every 4 seconds, and an ETA of distance ÷ 18 km per hour.
+
+42
+00:03:45.273 --> 00:03:46.148
+At scale:
+
+43
+00:03:46.428 --> 00:03:48.647
+Serviceability was wrong at the edges.
+
+44
+00:03:48.927 --> 00:03:51.721
+Pincodes don't match 3 km delivery radii.
+
+45
+00:03:52.001 --> 00:04:01.665
+Customers across a lake or a highway were accepted and then waited 40 minutes; customers just inside the radius but in the wrong pincode were turned away.
+
+46
+00:04:03.015 --> 00:04:04.679
+The position table melted.
+
+47
+00:04:04.959 --> 00:04:11.253
+50,000 riders times 1 ping every 4 s is 12,500 writes per second.
+
+48
+00:04:11.533 --> 00:04:17.143
+Updates queued; live positions were a minute old, and dispatch sent riders who had already left.
+
+49
+00:04:17.423 --> 00:04:19.045
+Positions jumped backwards.
+
+50
+00:04:19.325 --> 00:04:27.730
+Phones buffer pings in tunnels and send them later; a late ping overwrote a newer position, and the customer's map showed the rider reversing.
+
+51
+00:04:28.010 --> 00:04:30.229
+Riders waited while orders waited.
+
+52
+00:04:30.509 --> 00:04:36.589
+At 8 pm, orders queued for riders at the store while riders were two minutes away on their way back.
+
+53
+00:04:36.869 --> 00:04:39.877
+Dispatch only considered riders standing at the store.
+
+54
+00:04:41.227 --> 00:04:43.296
+The ETA lied most at the worst time.
+
+55
+00:04:43.576 --> 00:04:49.891
+Arriving in 2 minutes in the evening jam, and in the gated complex whose security desk takes five minutes.
+
+56
+00:04:50.171 --> 00:04:53.755
+Support calls peaked exactly when the ETA was least honest.
+
+57
+00:04:54.035 --> 00:04:58.493
+Delivery is where the product's promise (in 20 minutes) is kept or broken.
+
+58
+00:04:58.773 --> 00:05:04.576
+This chapter designs the geo, streaming, optimisation and estimation systems behind it.
+
+59
+00:05:05.926 --> 00:05:06.609
+Quote:
+
+60
+00:05:06.889 --> 00:05:08.553
+The thesis of this chapter.
+
+61
+00:05:08.833 --> 00:05:21.078
+Delivery is a real-time, geo-indexed control loop: positions stream in, an index answers who is near, an optimiser decides who goes where, and an estimator tells the customer when.
+
+62
+00:05:21.358 --> 00:05:25.945
+Geo questions are answered by a coarse index plus an exact check (L1).
+
+63
+00:05:26.225 --> 00:05:32.902
+Telemetry is a high-volume stream that must be order-safe and thinned before it hits the live index (L2).
+
+64
+00:05:33.182 --> 00:05:40.670
+Dispatch is an optimisation over the next few minutes, predicted availability and batching beat nearest-idle-rider (L3).
+
+65
+00:05:40.950 --> 00:05:49.953
+ETAs come from learned speeds, learned last-100-metre times and live progress, and promises are sized from the error distribution (L4).
+
+66
+00:05:51.303 --> 00:05:53.607
+Where this lives in the grocery platform.
+
+67
+00:05:53.887 --> 00:05:55.231
+Here is a quick table:
+
+68
+00:05:55.511 --> 00:05:58.135
+Concern, and Data, and Freshness, and Store.
+
+69
+00:05:58.415 --> 00:05:59.524
+Serviceability.
+
+70
+00:05:59.804 --> 00:06:00.615
+Data:
+
+71
+00:06:00.895 --> 00:06:02.473
+Store delivery polygons.
+
+72
+00:06:02.753 --> 00:06:03.628
+Freshness:
+
+73
+00:06:03.908 --> 00:06:04.740
+Hours.
+
+74
+00:06:05.020 --> 00:06:05.809
+Store:
+
+75
+00:06:06.089 --> 00:06:08.713
+In-memory grid or H3 index per city.
+
+76
+00:06:08.993 --> 00:06:10.167
+Rider positions.
+
+77
+00:06:10.447 --> 00:06:11.257
+Data:
+
+78
+00:06:11.537 --> 00:06:12.945
+Raw GPS pings.
+
+79
+00:06:13.225 --> 00:06:14.100
+Freshness:
+
+80
+00:06:14.380 --> 00:06:15.191
+Seconds.
+
+81
+00:06:15.471 --> 00:06:16.260
+Store:
+
+82
+00:06:16.540 --> 00:06:22.769
+Kafka delivery.rider.location.v1, then Redis GEO (live), time-series store (history).
+
+83
+00:06:23.049 --> 00:06:24.073
+Rider state.
+
+84
+00:06:24.353 --> 00:06:25.164
+Data:
+
+85
+00:06:25.444 --> 00:06:28.132
+Idle, to-store, at-store, delivering, offline.
+
+86
+00:06:28.412 --> 00:06:29.287
+Freshness:
+
+87
+00:06:29.567 --> 00:06:30.377
+Seconds.
+
+88
+00:06:30.657 --> 00:06:31.447
+Store:
+
+89
+00:06:31.727 --> 00:06:34.031
+Redis hash + dispatch service memory.
+
+90
+00:06:34.311 --> 00:06:35.228
+Dispatch.
+
+91
+00:06:35.508 --> 00:06:36.319
+Data:
+
+92
+00:06:36.599 --> 00:06:39.479
+Packed and soon-packed orders, rider predictions.
+
+93
+00:06:39.759 --> 00:06:40.633
+Freshness:
+
+94
+00:06:40.913 --> 00:06:42.705
+Every ~10 to 30 s.
+
+95
+00:06:42.985 --> 00:06:43.775
+Store:
+
+96
+00:06:44.055 --> 00:06:45.996
+Dispatch service per store cluster.
+
+97
+00:06:47.346 --> 00:06:48.071
+ETA.
+
+98
+00:06:48.351 --> 00:06:49.162
+Data:
+
+99
+00:06:49.442 --> 00:06:53.581
+Speeds per zone times hour, door times per building, live progress.
+
+100
+00:06:53.861 --> 00:06:54.735
+Freshness:
+
+101
+00:06:55.015 --> 00:06:57.170
+Model daily, estimate per update.
+
+102
+00:06:57.450 --> 00:06:58.239
+Store:
+
+103
+00:06:58.519 --> 00:07:01.314
+Model store + request-time computation.
+
+104
+00:07:01.594 --> 00:07:02.469
+Tracking.
+
+105
+00:07:02.749 --> 00:07:03.559
+Data:
+
+106
+00:07:03.839 --> 00:07:06.207
+Rider position and ETA for the customer.
+
+107
+00:07:06.487 --> 00:07:08.557
+Freshness: ~2 to 5 s.
+
+108
+00:07:08.837 --> 00:07:09.626
+Store:
+
+109
+00:07:09.906 --> 00:07:12.231
+SSE stream (Ch 03).
+
+110
+00:07:13.581 --> 00:07:14.904
+Learning objectives.
+
+111
+00:07:15.184 --> 00:07:17.083
+By the end you will be able to:
+
+112
+00:07:17.363 --> 00:07:22.739
+Index geo data for serviceability polygons and nearest-rider queries (L1).
+
+113
+00:07:23.019 --> 00:07:28.416
+Ingest rider telemetry at scale, order-safely, and keep the live index lean (L2).
+
+114
+00:07:28.696 --> 00:07:34.627
+Design dispatch: assignment, predicted availability, batching, and fairness to riders (L3).
+
+115
+00:07:34.907 --> 00:07:37.936
+Estimate and communicate ETAs honestly (L4).
+
+116
+00:07:38.216 --> 00:07:41.608
+Serve live tracking, handle privacy and operate the loop.
+
+117
+00:07:42.958 --> 00:07:43.833
+Part 2.
+
+118
+00:07:44.113 --> 00:07:45.990
+Core Concepts, Beginner to Deep.
+
+119
+00:07:47.240 --> 00:07:50.184
+Intuition: an air-traffic controller for scooters.
+
+120
+00:07:50.464 --> 00:07:58.677
+A controller has a radar (positions), a map of airspace (zones), a queue of planes wanting to land (orders), and runways (riders).
+
+121
+00:07:58.957 --> 00:08:11.139
+They don't assign the nearest runway to each plane the moment it appears; they plan a few minutes ahead, pair things efficiently, and tell each plane an honest arrival time, updated as conditions change.
+
+122
+00:08:11.419 --> 00:08:15.621
+Dispatch works the same way, with the radar fed by 50,000 phones.
+
+123
+00:08:16.971 --> 00:08:17.931
+Requirements.
+
+124
+00:08:18.211 --> 00:08:19.065
+Functional.
+
+125
+00:08:19.345 --> 00:08:26.555
+Decide if an address is serviceable and by which store (polygon zones, with overrides for rain, events and store load).
+
+126
+00:08:26.835 --> 00:08:31.657
+Track rider positions and states; show the customer the rider on a map with an ETA.
+
+127
+00:08:31.937 --> 00:08:36.118
+Assign packed orders to riders, with batching; reassign on problems.
+
+128
+00:08:36.398 --> 00:08:39.982
+Rider app: offers, navigation, proof of delivery, earnings.
+
+129
+00:08:40.262 --> 00:08:41.371
+Non-functional.
+
+130
+00:08:42.721 --> 00:08:46.583
+Serviceability lookup 5 ms; nearest riders 10 ms.
+
+131
+00:08:46.863 --> 00:08:54.159
+Ingest ~12,500 pings per second (peaks ~20k), live positions 5 s old.
+
+132
+00:08:54.439 --> 00:08:59.217
+Dispatch decisions within seconds of an order being packed (or predicted to be packed).
+
+133
+00:08:59.497 --> 00:09:04.788
+ETA error small enough that promises hold ≥ 90% of the time.
+
+134
+00:09:06.138 --> 00:09:07.183
+Estimation.
+
+135
+00:09:07.463 --> 00:09:08.807
+Here is a quick table:
+
+136
+00:09:09.087 --> 00:09:10.517
+Quantity, and Estimate.
+
+137
+00:09:10.797 --> 00:09:13.762
+Riders online at peak: ~50,000.
+
+138
+00:09:14.042 --> 00:09:14.938
+Ping rate:
+
+139
+00:09:15.218 --> 00:09:28.466
+1 per 4 s, then 12,500 per second; ~200 bytes each, then ~2.5 MB per second raw, times RF3 in Kafka (Ch 14 exercise).
+
+140
+00:09:28.746 --> 00:09:29.813
+Live index:
+
+141
+00:09:30.093 --> 00:09:37.858
+50k riders times ~100 B = ~5 MB in Redis GEO, trivial size, high write rate.
+
+142
+00:09:38.138 --> 00:09:43.983
+History: ~1 billion pings per day; days in the hot time-series store, months in the lake.
+
+143
+00:09:44.263 --> 00:09:54.887
+Dispatch: ~1.5M orders per day; peak ~50 per second nationally, ~0.5 per minute per store at the busiest (L3's setting).
+
+144
+00:09:55.167 --> 00:09:59.647
+Tracking streams: ~150k concurrent customers watching.
+
+145
+00:10:00.997 --> 00:10:04.283
+The data is small; the rates and freshness are the challenge.
+
+146
+00:10:05.633 --> 00:10:06.849
+Geo indexing.
+
+147
+00:10:07.129 --> 00:10:15.577
+Every geo question is answered in two steps: a coarse index to find a few candidates near the point, then an exact check on those candidates.
+
+148
+00:10:16.927 --> 00:10:18.271
+Here is a quick table:
+
+149
+00:10:18.551 --> 00:10:21.089
+Question, and Coarse index, and Exact check.
+
+150
+00:10:21.369 --> 00:10:23.716
+Which store's polygon contains this address?
+
+151
+00:10:23.996 --> 00:10:24.977
+Coarse index:
+
+152
+00:10:25.257 --> 00:10:29.972
+Grid or geohash or H3 cells, then polygons overlapping each cell.
+
+153
+00:10:30.252 --> 00:10:31.255
+Exact check:
+
+154
+00:10:31.535 --> 00:10:33.476
+Point-in-polygon (ray casting).
+
+155
+00:10:33.756 --> 00:10:35.335
+Nearest available riders.
+
+156
+00:10:35.615 --> 00:10:36.596
+Coarse index:
+
+157
+00:10:36.876 --> 00:10:40.332
+Grid cells or Redis GEO (geohash in a sorted set).
+
+158
+00:10:40.612 --> 00:10:41.615
+Exact check:
+
+159
+00:10:41.895 --> 00:10:44.988
+Distance, then road distance or ETA for the top few.
+
+160
+00:10:45.268 --> 00:10:46.697
+Riders inside a zone.
+
+161
+00:10:46.977 --> 00:10:47.959
+Coarse index:
+
+162
+00:10:48.239 --> 00:10:49.583
+Cells covering the zone.
+
+163
+00:10:49.863 --> 00:10:50.865
+Exact check:
+
+164
+00:10:51.145 --> 00:10:52.383
+Point-in-polygon.
+
+165
+00:10:53.733 --> 00:10:55.098
+L1 measured both:
+
+166
+00:10:56.448 --> 00:10:57.792
+Here is a quick table:
+
+167
+00:10:58.072 --> 00:11:00.461
+Query, and Method, and Cost, and Correct.
+
+168
+00:11:00.741 --> 00:11:04.688
+Serviceability (400 polygons, 200k lookups).
+
+169
+00:11:04.968 --> 00:11:05.715
+Method:
+
+170
+00:11:05.995 --> 00:11:06.997
+Brute force.
+
+171
+00:11:07.277 --> 00:11:08.003
+Cost:
+
+172
+00:11:08.283 --> 00:11:14.640
+1,457 ms, 136.7 polygon tests or lookup.
+
+173
+00:11:14.920 --> 00:11:15.667
+Method:
+
+174
+00:11:15.947 --> 00:11:17.739
+500 m grid index.
+
+175
+00:11:18.019 --> 00:11:18.744
+Cost:
+
+176
+00:11:19.024 --> 00:11:22.181
+78 ms, 1.9 tests or lookup.
+
+177
+00:11:22.461 --> 00:11:23.827
+Correct: identical.
+
+178
+00:11:24.107 --> 00:11:26.069
+Nearest 5 of 20k riders.
+
+179
+00:11:26.349 --> 00:11:27.096
+Method:
+
+180
+00:11:27.376 --> 00:11:28.379
+Brute force.
+
+181
+00:11:28.659 --> 00:11:29.384
+Cost:
+
+182
+00:11:29.664 --> 00:11:32.139
+780 µs p50.
+
+183
+00:11:32.419 --> 00:11:33.165
+Method:
+
+184
+00:11:33.445 --> 00:11:35.728
+1 km grid, expanding rings.
+
+185
+00:11:36.008 --> 00:11:36.733
+Cost:
+
+186
+00:11:37.013 --> 00:11:38.805
+11 µs p50.
+
+187
+00:11:39.085 --> 00:11:40.451
+Correct: identical.
+
+188
+00:11:40.731 --> 00:11:41.477
+Method:
+
+189
+00:11:41.757 --> 00:11:43.016
+Redis GEOSEARCH.
+
+190
+00:11:43.296 --> 00:11:44.021
+Cost:
+
+191
+00:11:44.301 --> 00:11:48.120
+468 µs p50, incl. network.
+
+192
+00:11:48.400 --> 00:11:49.189
+Correct:
+
+193
+00:11:49.469 --> 00:11:52.776
+(near-ties can swap: haversine versus flat distance).
+
+194
+00:11:54.126 --> 00:12:02.830
+Geohash encodes lat or lon into a string prefix: nearby points usually share prefixes, but neighbours across cell boundaries don't.
+
+195
+00:12:03.110 --> 00:12:04.966
+Always search neighbouring cells too.
+
+196
+00:12:05.246 --> 00:12:11.966
+H3 (Uber's hexagonal grid) and S2 (Google's) give uniform cells and hierarchical resolutions.
+
+197
+00:12:12.246 --> 00:12:20.097
+H3 hexagons have equidistant neighbours, which is useful for zone-level aggregates such as demand, supply and surge.
+
+198
+00:12:21.447 --> 00:12:32.775
+Serviceability as data: store polygons are edited by ops, versioned, and compiled into a per-city index (cell, then candidate stores) that every service loads in memory.
+
+199
+00:12:33.055 --> 00:12:39.369
+Dynamic overrides (rain, store overload) shrink polygons or change priorities in real time.
+
+200
+00:12:39.649 --> 00:12:41.484
+Straight line is only a filter.
+
+201
+00:12:41.764 --> 00:12:49.017
+Final ranking needs road distance or ETA (L4), especially across rivers, railway lines and one-way systems.
+
+202
+00:12:50.367 --> 00:12:51.797
+Telemetry ingestion.
+
+203
+00:12:52.077 --> 00:13:03.170
+Rider apps send positions over HTTP or 2 or MQTT to a gateway, which writes them to Kafka keyed by rider id (per-rider order within a partition).
+
+204
+00:13:03.450 --> 00:13:19.194
+Consumers then feed: the live index (Redis GEO + last-seen hash) for dispatch and presence (Ch 41). the tracking fan-out for customers watching their order. the history store (time-series or lake) for ETAs, disputes and payouts.
+
+205
+00:13:19.474 --> 00:13:25.725
+L2 replayed 250,000 pings with 3% delivered late into a real Redis:
+
+206
+00:13:27.075 --> 00:13:28.419
+Here is a quick table:
+
+207
+00:13:28.699 --> 00:13:33.691
+Ingester, and Throughput, and Redis commands, and Riders left at an older position.
+
+208
+00:13:33.971 --> 00:13:36.957
+GEOADD + HSET per ping, no ordering check.
+
+209
+00:13:37.237 --> 00:13:38.069
+Throughput:
+
+210
+00:13:38.349 --> 00:13:41.613
+12,781 pings per second.
+
+211
+00:13:41.893 --> 00:13:42.981
+Redis commands:
+
+212
+00:13:43.261 --> 00:13:44.691
+500,000.
+
+213
+00:13:44.971 --> 00:13:47.019
+Riders left at an older position:
+
+214
+00:13:47.299 --> 00:13:48.515
+480.
+
+215
+00:13:48.795 --> 00:13:50.843
+Lua per ping, drops older pings.
+
+216
+00:13:51.123 --> 00:13:51.955
+Throughput:
+
+217
+00:13:52.235 --> 00:13:54.603
+20,865.
+
+218
+00:13:54.883 --> 00:13:55.971
+Redis commands:
+
+219
+00:13:56.251 --> 00:13:57.765
+250,000.
+
+220
+00:13:58.045 --> 00:14:00.093
+Riders left at an older position:
+
+221
+00:14:00.373 --> 00:14:01.120
+0.
+
+222
+00:14:01.400 --> 00:14:03.917
+Lua, pipelined in batches of 200.
+
+223
+00:14:04.197 --> 00:14:05.029
+Throughput:
+
+224
+00:14:05.309 --> 00:14:07.955
+94,526.
+
+225
+00:14:08.235 --> 00:14:09.323
+Redis commands:
+
+226
+00:14:09.603 --> 00:14:11.117
+250,000.
+
+227
+00:14:11.397 --> 00:14:13.445
+Riders left at an older position:
+
+228
+00:14:13.725 --> 00:14:17.800
+0. + write only if moved 20 m or 15 s passed.
+
+229
+00:14:18.080 --> 00:14:18.912
+Throughput:
+
+230
+00:14:19.192 --> 00:14:22.285
+162,832.
+
+231
+00:14:22.565 --> 00:14:23.653
+Redis commands:
+
+232
+00:14:23.933 --> 00:14:26.365
+145,061.
+
+233
+00:14:26.645 --> 00:14:28.693
+Riders left at an older position:
+
+234
+00:14:28.973 --> 00:14:29.720
+0.
+
+235
+00:14:31.070 --> 00:14:33.609
+Order safety: phones buffer and resend.
+
+236
+00:14:33.889 --> 00:14:40.289
+Compare timestamps atomically (Lua, or a conditional update), or late pings move riders backwards.
+
+237
+00:14:40.569 --> 00:14:44.686
+Batching: one round trip per ping caps throughput; batch per consumer poll.
+
+238
+00:14:44.966 --> 00:14:48.187
+Thinning: the live index needs news, not every ping.
+
+239
+00:14:48.467 --> 00:14:51.155
+Stationary riders at the store send nothing new.
+
+240
+00:14:51.435 --> 00:14:53.185
+Raw pings still go to history.
+
+241
+00:14:53.465 --> 00:15:01.401
+GPS noise: snap to roads, drop impossible jumps (speed 80 km per hour), and smooth positions for display.
+
+242
+00:15:02.751 --> 00:15:09.364
+Battery and data: adaptive ping rates (faster while delivering, slower while idle) are the biggest lever of all.
+
+243
+00:15:10.714 --> 00:15:11.631
+Dispatch.
+
+244
+00:15:11.911 --> 00:15:18.567
+Dispatch assigns orders to riders to minimise delivery time (and keep promises) at a given fleet size.
+
+245
+00:15:18.847 --> 00:15:20.981
+L3 simulated the evening peak:
+
+246
+00:15:22.331 --> 00:15:23.675
+Here is a quick table:
+
+247
+00:15:23.955 --> 00:15:29.203
+Policy, and Avg, and p90, and Within 20 min, and Riding min per order.
+
+248
+00:15:29.483 --> 00:15:31.808
+FIFO to riders standing at the store.
+
+249
+00:15:32.088 --> 00:15:33.069
+Avg:
+
+250
+00:15:33.349 --> 00:15:35.781
+24.8 min. p90:
+
+251
+00:15:36.061 --> 00:15:37.576
+39.3 min.
+
+252
+00:15:37.856 --> 00:15:39.051
+Within 20 min:
+
+253
+00:15:39.331 --> 00:15:40.931
+40.0%.
+
+254
+00:15:41.211 --> 00:15:42.597
+Riding min per order:
+
+255
+00:15:42.877 --> 00:15:46.248
+20.0. + assign riders on their way back.
+
+256
+00:15:46.528 --> 00:15:47.509
+Avg:
+
+257
+00:15:47.789 --> 00:15:50.179
+21.6 min. p90:
+
+258
+00:15:50.459 --> 00:15:51.931
+33.3 min.
+
+259
+00:15:52.211 --> 00:15:53.405
+Within 20 min:
+
+260
+00:15:53.685 --> 00:15:55.328
+53.2%.
+
+261
+00:15:55.608 --> 00:15:56.995
+Riding min per order:
+
+262
+00:15:57.275 --> 00:16:01.136
+20.0. + batch 2 orders to nearby customers.
+
+263
+00:16:01.416 --> 00:16:02.397
+Avg:
+
+264
+00:16:02.677 --> 00:16:05.152
+19.0 min. p90:
+
+265
+00:16:05.432 --> 00:16:06.925
+26.3 min.
+
+266
+00:16:07.205 --> 00:16:08.400
+Within 20 min:
+
+267
+00:16:08.680 --> 00:16:10.387
+61.3%.
+
+268
+00:16:10.667 --> 00:16:12.053
+Riding min per order:
+
+269
+00:16:12.333 --> 00:16:13.635
+17.5.
+
+270
+00:16:13.915 --> 00:16:14.619
+Both.
+
+271
+00:16:14.899 --> 00:16:15.880
+Avg:
+
+272
+00:16:16.160 --> 00:16:18.656
+18.0 min. p90:
+
+273
+00:16:18.936 --> 00:16:20.429
+24.6 min.
+
+274
+00:16:20.709 --> 00:16:21.904
+Within 20 min:
+
+275
+00:16:22.184 --> 00:16:23.912
+69.1%.
+
+276
+00:16:24.192 --> 00:16:25.579
+Riding min per order:
+
+277
+00:16:25.859 --> 00:16:27.139
+17.8.
+
+278
+00:16:28.489 --> 00:16:33.715
+Predicted availability: include riders who will reach the store before the order is packed.
+
+279
+00:16:33.995 --> 00:16:39.926
+Dispatch plans on when things will be ready, from packing ETAs and rider ETAs, not on current state.
+
+280
+00:16:40.206 --> 00:16:44.942
+Batching: two orders to neighbouring doors turn one return trip into two deliveries.
+
+281
+00:16:45.222 --> 00:16:48.251
+Cap the detour and the second customer's extra wait.
+
+282
+00:16:48.531 --> 00:17:07.945
+Assignment algorithms: greedy (fast, myopic), then batched optimisation every N seconds (bipartite matching or Hungarian algorithm or min-cost flow over orders times riders, with costs from ETAs and penalties for promise risk), then rolling-horizon optimisation with predicted orders.
+
+283
+00:17:09.295 --> 00:17:21.391
+Constraints: rider shift ends, vehicle capacity, cold-chain items, rider acceptance (offers can be declined; handle timeouts and re-offers), fairness of earnings across riders.
+
+284
+00:17:21.671 --> 00:17:29.031
+Rebalancing: move idle riders between nearby stores when demand is uneven (H3 cell demand forecasts).
+
+285
+00:17:30.381 --> 00:17:31.106
+ETAs.
+
+286
+00:17:31.386 --> 00:17:40.282
+L4 evaluated four estimators on 6,677 held-out deliveries (promise = estimate + 2 min):
+
+287
+00:17:41.632 --> 00:17:42.976
+Here is a quick table:
+
+288
+00:17:43.256 --> 00:17:47.907
+ETA method, and Mean error, and p90 error, and Arrived after the promise.
+
+289
+00:17:48.187 --> 00:17:52.368
+Straight line times 1.4 at 18 km per hour + 2 min.
+
+290
+00:17:52.648 --> 00:17:53.544
+Mean error:
+
+291
+00:17:53.824 --> 00:17:56.171
+4.6 min. p90 error:
+
+292
+00:17:56.451 --> 00:17:57.752
+10.5 min.
+
+293
+00:17:58.032 --> 00:17:59.525
+Arrived after the promise:
+
+294
+00:17:59.805 --> 00:18:01.683
+49.0%.
+
+295
+00:18:01.963 --> 00:18:04.096
+Speed per (zone, hour) + 2 min.
+
+296
+00:18:04.376 --> 00:18:05.272
+Mean error:
+
+297
+00:18:05.552 --> 00:18:07.835
+3.2 min. p90 error:
+
+298
+00:18:08.115 --> 00:18:09.437
+7.4 min.
+
+299
+00:18:09.717 --> 00:18:11.211
+Arrived after the promise:
+
+300
+00:18:11.491 --> 00:18:14.776
+40.0%. + door time per building.
+
+301
+00:18:15.056 --> 00:18:15.952
+Mean error:
+
+302
+00:18:16.232 --> 00:18:18.472
+2.4 min. p90 error:
+
+303
+00:18:18.752 --> 00:18:20.032
+5.2 min.
+
+304
+00:18:20.312 --> 00:18:21.805
+Arrived after the promise:
+
+305
+00:18:22.085 --> 00:18:26.843
+27.7%. + re-estimate halfway from actual pace.
+
+306
+00:18:27.123 --> 00:18:28.019
+Mean error:
+
+307
+00:18:28.299 --> 00:18:30.517
+1.2 min. p90 error:
+
+308
+00:18:30.797 --> 00:18:32.077
+2.7 min.
+
+309
+00:18:32.357 --> 00:18:33.851
+Arrived after the promise:
+
+310
+00:18:34.131 --> 00:18:35.773
+11.5%.
+
+311
+00:18:37.123 --> 00:18:49.817
+Ride time from learned speeds by zone and hour (or a routing engine with live traffic such as OSRM or GraphHopper, or a maps API), corrected by models trained on your riders' actual trips.
+
+312
+00:18:50.097 --> 00:18:59.867
+The last 100 metres, gated complexes, lifts, security desks, often dominate the error, and only your own delivery history per building knows them.
+
+313
+00:19:00.147 --> 00:19:04.670
+Live updates: once the rider is moving, their actual pace beats any prior.
+
+314
+00:19:04.950 --> 00:19:10.155
+Update the ETA every few pings, and never let it count up suspiciously without explanation.
+
+315
+00:19:11.505 --> 00:19:16.689
+Promises use the error distribution: promise the p80, p90, not the mean.
+
+316
+00:19:16.969 --> 00:19:24.649
+The checkout promise (20 min) also depends on packing time and rider availability, so it must come from the same models.
+
+317
+00:19:25.999 --> 00:19:27.066
+Live tracking.
+
+318
+00:19:27.346 --> 00:19:31.826
+Customers watching an order subscribe via SSE (Ch 03).
+
+319
+00:19:32.106 --> 00:19:42.069
+The tracking service consumes the rider location topic filtered by active deliveries and pushes a smoothed position + ETA every ~3 to 5 s.
+
+320
+00:19:42.349 --> 00:19:53.677
+Privacy: show the rider's position only during an active delivery, approximate the rider's position before pickup, and never show the customer's address to anyone but the assigned rider.
+
+321
+00:19:53.957 --> 00:19:57.349
+Retain raw tracks for a limited time (Ch 36).
+
+322
+00:19:57.629 --> 00:20:06.994
+Degradation: if updates stop (tunnel, dead battery), show last updated 1 min ago and extrapolate along the route, rather than freezing silently.
+
+323
+00:20:08.344 --> 00:20:09.944
+Rider state and presence.
+
+324
+00:20:10.224 --> 00:20:11.056
+States:
+
+325
+00:20:11.336 --> 00:20:17.672
+OFFLINE, then IDLEATSTORE, then ASSIGNED, then PICKEDUP, then DELIVERING, then RETURNING, then IDLEATSTORE.
+
+326
+00:20:17.952 --> 00:20:23.627
+Transitions come from app actions and geofences (entered store radius, reached customer).
+
+327
+00:20:23.907 --> 00:20:29.539
+Presence is derived from the location stream with grace periods (Ch 41 L3).
+
+328
+00:20:29.819 --> 00:20:34.277
+Stuck-state detection: delivering for 60 minutes triggers support outreach.
+
+329
+00:20:35.627 --> 00:20:36.758
+Interview framing.
+
+330
+00:20:37.038 --> 00:20:49.753
+Draw the loop: rider app, then gateway, then Kafka, then live index or tracking or history; order events, then dispatch, then offers, then rider app; ETA service used by checkout, dispatch and tracking.
+
+331
+00:20:50.033 --> 00:20:58.438
+Then go deep on geo indexing (two-step), telemetry (order, batching, thinning), and dispatch (predicted availability, batching, matching).
+
+332
+00:20:58.718 --> 00:21:00.083
+Staff-level signals:
+
+333
+00:21:00.363 --> 00:21:08.555
+ETAs from learned door times and live progress, promises from error distributions, privacy of positions, and planning on predictions.
+
+334
+00:21:09.905 --> 00:21:10.801
+Part 3.
+
+335
+00:21:11.081 --> 00:21:12.809
+Architecture and Diagrams.
+
+336
+00:21:14.059 --> 00:21:15.105
+Component view.
+
+337
+00:21:15.385 --> 00:21:16.729
+Here is the diagram.
+
+338
+00:21:20.579 --> 00:21:23.096
+Sequence: happy path, packed order to door.
+
+339
+00:21:23.376 --> 00:21:26.171
+The sequence diagram walks through it step by step.
+
+340
+00:21:26.451 --> 00:21:31.400
+S to D: order 88213 will be packed in 2 min.
+
+341
+00:21:31.680 --> 00:21:35.307
+D to G: riders at or returning to store 17.
+
+342
+00:21:35.587 --> 00:21:40.216
+G to D: rider R-9 returning, arrives in 1.5 min.
+
+343
+00:21:40.496 --> 00:21:41.456
+D to E:
+
+344
+00:21:41.736 --> 00:21:45.171
+ETA store to customer, building B-442.
+
+345
+00:21:45.451 --> 00:21:46.347
+E to D:
+
+346
+00:21:46.627 --> 00:21:48.952
+11 min ride plus 5 min door.
+
+347
+00:21:49.232 --> 00:21:56.208
+D to R: offer 88213 plus 88219 same lane.
+
+348
+00:21:56.488 --> 00:21:58.045
+R to D: accept.
+
+349
+00:21:58.325 --> 00:22:01.184
+R to T: pings every 4 s while delivering.
+
+350
+00:22:01.464 --> 00:22:04.941
+T to C: position and ETA, updated every 4 s.
+
+351
+00:22:05.221 --> 00:22:07.483
+R to D: delivered, photo proof.
+
+352
+00:22:11.333 --> 00:22:14.746
+Sequence: failure path, late pings and a frozen phone.
+
+353
+00:22:15.026 --> 00:22:17.821
+The sequence diagram walks through it step by step.
+
+354
+00:22:18.101 --> 00:22:24.479
+R to K: ping t 100 then tunnel, pings t 104 to t 120 buffered.
+
+355
+00:22:24.759 --> 00:22:27.981
+R to K: ping t 124 after tunnel.
+
+356
+00:22:28.261 --> 00:22:33.295
+R to K: buffered pings t 104 to t 120 arrive late.
+
+357
+00:22:33.575 --> 00:22:39.037
+K to L: t 124 applied, late pings older than stored ts dropped.
+
+358
+00:22:39.317 --> 00:22:42.303
+L to T: position at t 124.
+
+359
+00:22:42.583 --> 00:22:45.677
+T to C: rider position, ETA re-estimated.
+
+360
+00:22:45.957 --> 00:22:50.671
+T to C: last updated 90 s ago, ETA extrapolated along route.
+
+361
+00:22:54.521 --> 00:22:57.039
+State: a rider's lifecycle during a shift.
+
+362
+00:22:57.319 --> 00:22:58.663
+Here is the diagram.
+
+363
+00:23:02.513 --> 00:23:03.430
+Part 4.
+
+364
+00:23:03.710 --> 00:23:05.331
+Design Document Excerpt:
+
+365
+00:23:05.611 --> 00:23:07.233
+Delivery Platform v2.
+
+366
+00:23:08.483 --> 00:23:09.229
+Note:
+
+367
+00:23:09.509 --> 00:23:12.923
+Design Document (excerpt), Delivery Platform v2.
+
+368
+00:23:13.203 --> 00:23:14.099
+Status:
+
+369
+00:23:14.379 --> 00:23:15.659
+Accepted, Authors:
+
+370
+00:23:15.939 --> 00:23:17.923
+Delivery platform team, Reviewers:
+
+371
+00:23:18.203 --> 00:23:21.915
+Dark-store ops, Rider experience, Checkout, SRE, Legal.
+
+372
+00:23:22.195 --> 00:23:38.877
+Context, Pincode serviceability mismatched delivery radii; a position table couldn't take 12.5k writes per second; late pings moved riders backwards; dispatch ignored returning riders; ETAs were wrong in jams and at gated complexes.
+
+373
+00:23:39.157 --> 00:24:00.939
+Decision, Polygon serviceability compiled into grid or H3 indexes; telemetry through Kafka into an order-safe, batched, thinned Redis live index; dispatch with predicted availability, batching and periodic matching; ETAs from zone times hour speeds, building door times and live pace; SSE tracking with privacy rules.
+
+374
+00:24:02.289 --> 00:24:16.283
+Related ADRs, ADR-330 Serviceability polygons, versioned, compiled to 500 m grid or H3 res 8 per city (L1); ADR-331 Telemetry:
+
+375
+00:24:16.563 --> 00:24:35.187
+Kafka keyed by rider, Lua timestamp-guarded updates, batches of 200, movement thinning for the live index (L2); ADR-332 Dispatch every 15 s per store cluster: min-cost matching over packed + soon-packed orders and present + returning riders,
+
+376
+00:24:35.467 --> 00:24:56.033
+max 2-order batches within 1 km (L3); ADR-333 ETA = learned ride + learned door time, live re-estimation; promise at p85 (L4); ADR-334 Tracking via SSE only during active deliveries; raw tracks retained 30 days.
+
+377
+00:24:56.313 --> 00:24:57.273
+Requirements.
+
+378
+00:24:58.623 --> 00:25:03.871
+R1 Serviceability decision 5 ms; zone edits live within 5 minutes.
+
+379
+00:25:04.151 --> 00:25:11.852
+R2 Live positions 5 s old for 99% of active riders; 0 backwards moves from late pings.
+
+380
+00:25:12.132 --> 00:25:17.764
+R3 ≥ 85% of orders delivered within the promise at peak.
+
+381
+00:25:18.044 --> 00:25:22.759
+R4 ETA shown to customers late by 3 min for 10% of deliveries.
+
+382
+00:25:23.039 --> 00:25:28.180
+R5 Rider positions visible to customers only during their active delivery.
+
+383
+00:25:28.460 --> 00:25:29.868
+Decisions in detail.
+
+384
+00:25:31.218 --> 00:25:33.138
+Geo (ADR-330).
+
+385
+00:25:33.418 --> 00:25:39.370
+Cells, then candidate stores in memory in every checkout pod; overrides applied at request time.
+
+386
+00:25:39.650 --> 00:25:42.402
+Telemetry (ADR-331).
+
+387
+00:25:42.682 --> 00:25:51.578
+48 partitions; consumers batch 200 or 50 ms; idle riders ping every 15 s, delivering riders every 4 s.
+
+388
+00:25:51.858 --> 00:25:54.354
+Dispatch (ADR-332).
+
+389
+00:25:54.634 --> 00:26:04.127
+Costs = predicted delivery time + promise-breach penalty + batch detour; Hungarian algorithm per cluster; offers expire in 20 s.
+
+390
+00:26:04.407 --> 00:26:06.498
+ETA (ADR-333).
+
+391
+00:26:06.778 --> 00:26:13.199
+Daily training on the last 8 weeks; door time per building with shrinkage to the neighbourhood mean for sparse buildings.
+
+392
+00:26:14.549 --> 00:26:17.045
+Tracking (ADR-334).
+
+393
+00:26:17.325 --> 00:26:20.013
+Smoothed positions; last updated when stale.
+
+394
+00:26:20.293 --> 00:26:21.317
+Consequences.
+
+395
+00:26:21.597 --> 00:26:26.867
+More models to train and monitor; dispatch complexity; building-level data to maintain.
+
+396
+00:26:27.147 --> 00:26:34.251
+In return: honest promises, faster deliveries at the same fleet size, and a live index that stays fresh at peak.
+
+397
+00:26:35.601 --> 00:26:36.561
+Part 5.
+
+398
+00:26:36.841 --> 00:26:38.825
+Hands-On Code, Level Ladder.
+
+399
+00:26:40.075 --> 00:26:40.843
+Info:
+
+400
+00:26:41.123 --> 00:26:42.211
+What's real here.
+
+401
+00:26:42.491 --> 00:26:44.987
+All four labs are JDK 21.
+
+402
+00:26:45.267 --> 00:26:52.499
+L1 (nearest riders) and L2 run against a real Redis 7, with real GEOADD or GEOSEARCH and Lua.
+
+403
+00:26:52.779 --> 00:27:00.608
+L1's serviceability part, L3 and L4 are deterministic simulations with fixed seeds over a synthetic city.
+
+404
+00:27:00.888 --> 00:27:05.539
+Traffic, door times, packing times and rider speeds are stated assumptions.
+
+405
+00:27:05.819 --> 00:27:07.397
+Timings vary by machine.
+
+406
+00:27:08.747 --> 00:27:13.633
+L1 and L2 need Redis 7 on port 6390.
+
+407
+00:27:13.913 --> 00:27:18.030
+Run every lab with -Dstdout.encoding=UTF-8.
+
+408
+00:27:19.380 --> 00:27:21.001
+L1, Geo indexes.
+
+409
+00:27:21.281 --> 00:27:22.220
+Requirement:
+
+410
+00:27:22.500 --> 00:27:31.119
+Decide serviceability from polygons and find nearby riders in microseconds, with exactly the same answers as checking everything.
+
+411
+00:27:31.399 --> 00:27:37.457
+A synthetic Bengaluru-sized city with 400 store polygons and 20,000 riders.
+
+412
+00:27:37.737 --> 00:27:41.087
+The riders are also loaded into a real Redis GEO set.
+
+413
+00:27:42.437 --> 00:27:45.210
+Here is the Java code, GeoL1.java.
+
+414
+00:27:45.490 --> 00:27:49.629
+It runs to 220 lines; the full listing is in the chapter.
+
+415
+00:27:49.909 --> 00:27:59.999
+GeoL1.java, run with (Redis 7 on:6390): java GeoL1.java (JDK 21, no dependencies).
+
+416
+00:28:00.279 --> 00:28:02.711
+THE TWO GEO QUESTIONS EVERY ORDER ASKS.
+
+417
+00:28:02.991 --> 00:28:05.786
+Bengaluru-sized synthetic city (fixed seed):
+
+418
+00:28:06.066 --> 00:28:10.631
+1) SERVICEABILITY, which dark store's delivery zone contains this customer?
+
+419
+00:28:10.911 --> 00:28:13.365
+400 stores, each with an irregular.
+
+420
+00:28:16.215 --> 00:28:17.132
+On screen:
+
+421
+00:28:17.412 --> 00:28:18.799
+1) Serviceability:
+
+422
+00:28:19.079 --> 00:28:43.548
+400 store polygons, 200,000 customer locations (85% inside some. zone). method total time polygon tests or lookup wrong. brute force: test every polygon 1457 ms 136.7 0. grid index (500 m cells, then candidate polygons) 78 ms 1.9 0.
+
+423
+00:28:43.828 --> 00:29:08.468
+2) Nearest 5 riders to a point, 20,000 riders, 5,000 queries. method p50 p99 different from exact top-5. brute force over every rider 780.1 µs 2538.9 µs 0. grid index (1 km cells, expanding rings) 11.1 µs 73.2 µs 0.
+
+424
+00:29:08.748 --> 00:29:18.839
+Redis GEOSEARCH (network round trip incl.) 467.6 µs 1536.7 µs 7.
+
+425
+00:29:19.119 --> 00:29:20.633
+The rest is in the chapter.
+
+426
+00:29:23.483 --> 00:29:24.337
+Reading it:
+
+427
+00:29:24.617 --> 00:29:34.835
+Serviceability: the grid index checks ~2 polygons instead of ~137, is ~19x faster, and gives identical answers.
+
+428
+00:29:35.115 --> 00:29:43.883
+Nearest riders: an in-memory grid with expanding rings is ~70x faster than brute force, again with identical results.
+
+429
+00:29:44.163 --> 00:29:48.643
+The stopping rule guarantees no closer rider sits in an unvisited ring.
+
+430
+00:29:48.923 --> 00:29:53.617
+Redis GEOSEARCH includes a network round trip and is shared by every dispatcher.
+
+431
+00:29:53.897 --> 00:29:59.785
+Its 7 differences out of 5,000 queries are near-ties swapped by a different distance formula.
+
+432
+00:30:01.135 --> 00:30:03.119
+L2, GPS ingestion.
+
+433
+00:30:03.399 --> 00:30:04.337
+Requirement:
+
+434
+00:30:04.617 --> 00:30:13.919
+Keep the live rider index fresh at 12,500 pings per second, never let a late ping move a rider backwards, and don't write what doesn't matter.
+
+435
+00:30:14.199 --> 00:30:22.007
+250,000 synthetic pings, 3% delivered out of order, replayed into a real Redis with four ingesters.
+
+436
+00:30:23.357 --> 00:30:26.322
+Here is the Java code, TelemetryL2.java.
+
+437
+00:30:26.602 --> 00:30:30.975
+It runs to 164 lines; the full listing is in the chapter.
+
+438
+00:30:31.255 --> 00:30:41.858
+TelemetryL2.java, run with (Redis 7 on:6390): java TelemetryL2.java (JDK 21, no dependencies).
+
+439
+00:30:42.138 --> 00:30:43.951
+RIDER GPS INGESTION.
+
+440
+00:30:44.231 --> 00:30:52.103
+50,000 riders send a position every 4 s (12,500 pings per second, the Ch 14 estimate).
+
+441
+00:30:52.383 --> 00:30:59.807
+Positions must land. in the live geo index (Redis GEO + last-seen hash) that dispatch queries (L1).
+
+442
+00:31:00.087 --> 00:31:03.394
+We replay 20 s of pings (250,000.
+
+443
+00:31:06.244 --> 00:31:07.161
+On screen:
+
+444
+00:31:07.441 --> 00:31:24.764
+250,000 pings from 50,000 riders (20 s at 1 ping or 4 s); ~7,489 delivered out of. order; 40% of riders stationary. ingester pings per second Redis commands riders left with an.
+
+445
+00:31:25.044 --> 00:31:26.687
+(real) older. position.
+
+446
+00:31:26.967 --> 00:31:35.756
+T1) GEOADD + HSET per ping, no ordering check 12,781 500,000 480.
+
+447
+00:31:36.036 --> 00:31:43.588
+T2) one Lua script per ping, drops older pings 20,865 250,000 0.
+
+448
+00:31:43.868 --> 00:31:52.529
+T3) T2 pipelined in batches of 200 94,526 250,000 0.
+
+449
+00:31:52.809 --> 00:32:04.201
+T4) T3 + write only if moved 20 m or 15 s passed 162,832 145,061 0.
+
+450
+00:32:04.481 --> 00:32:11.905
+(T4 deliberately skips pings that didn't move a rider; its check counts only. positions older than its own last write.).
+
+451
+00:32:12.185 --> 00:32:13.700
+The rest is in the chapter.
+
+452
+00:32:16.550 --> 00:32:17.403
+Reading it:
+
+453
+00:32:17.683 --> 00:32:26.067
+T1: two round trips per ping reach ~12,800 pings per second, barely the steady-state requirement with no headroom.
+
+454
+00:32:26.347 --> 00:32:29.569
+480 riders end up at an older position.
+
+455
+00:32:29.849 --> 00:32:36.419
+T2: the Lua script makes each update atomic and ordering-safe (0 stale), and halves the commands.
+
+456
+00:32:36.699 --> 00:32:43.739
+T3: batching 200 per round trip: ~94,500 pings per second on one Redis.
+
+457
+00:32:44.019 --> 00:32:49.630
+T4: skipping pings that carry no movement cuts live-index writes to 58%.
+
+458
+00:32:49.910 --> 00:32:51.851
+The raw stream still has every ping.
+
+459
+00:32:53.201 --> 00:32:54.503
+L3, Dispatch.
+
+460
+00:32:54.783 --> 00:32:55.721
+Requirement:
+
+461
+00:32:56.001 --> 00:33:00.247
+Deliver more orders within the 20-minute promise at the same fleet size.
+
+462
+00:33:00.527 --> 00:33:08.889
+An evening peak at 6 dark stores with 10 riders each, demand just above one-order-per-trip capacity, and four dispatch policies.
+
+463
+00:33:10.239 --> 00:33:13.269
+Here is the Java code, DispatchL3.java.
+
+464
+00:33:13.549 --> 00:33:17.666
+It runs to 107 lines; the full listing is in the chapter.
+
+465
+00:33:17.946 --> 00:33:25.327
+DispatchL3.java, run with: java DispatchL3.java (JDK 21, no dependencies).
+
+466
+00:33:25.607 --> 00:33:27.314
+WHICH RIDER TAKES WHICH ORDER?
+
+467
+00:33:27.594 --> 00:33:30.005
+A quick-commerce evening peak (fixed seed):
+
+468
+00:33:30.285 --> 00:33:41.741
+6 dark stores, 10 riders each, orders. arriving at ~0.55 per minute per store for 2 hours (just above what 10 riders can carry one order at a time).
+
+469
+00:33:44.591 --> 00:33:45.508
+On screen:
+
+470
+00:33:45.788 --> 00:34:00.209
+6 dark stores times 10 riders; ~0.55 orders per minute or store for 2 h (evening peak); promise 20. min. dispatch policy avg p90 within 20 min riding min or order.
+
+471
+00:34:00.489 --> 00:34:09.577
+D1) FIFO to riders standing at the store 24.8 min 39.3 min 40.0% 20.0.
+
+472
+00:34:09.857 --> 00:34:19.884
+D2) D1 + assign riders who are on their way back 21.6 min 33.3 min 53.2% 20.0.
+
+473
+00:34:20.164 --> 00:34:30.767
+D3) D1 + batch 2 orders with nearby customers 19.0 min 26.3 min 61.3% 17.5.
+
+474
+00:34:31.047 --> 00:34:48.348
+D4) D2 + D3 18.0 min 24.6 min 69.1% 17.8. then at peak the constraint is riders, not distance: every minute a rider spends. riding back empty is a minute an. order waits.
+
+475
+00:34:48.628 --> 00:34:54.879
+Planning on predicted availability (riders about to arrive) removes. idle gaps between trips, and.
+
+476
+00:34:55.159 --> 00:34:56.673
+The rest is in the chapter.
+
+477
+00:34:59.523 --> 00:35:00.377
+Reading it:
+
+478
+00:35:00.657 --> 00:35:03.579
+FIFO to idle riders is overwhelmed at peak:
+
+479
+00:35:03.859 --> 00:35:06.910
+40% on time, p90 39 minutes.
+
+480
+00:35:07.190 --> 00:35:11.862
+Predicted availability alone lifts on-time delivery to 53%.
+
+481
+00:35:12.142 --> 00:35:15.619
+It removes the gap between a rider arriving and being noticed.
+
+482
+00:35:15.899 --> 00:35:23.110
+Batching makes the most difference, because it cuts riding time per order (20.0, then 17.5 minutes).
+
+483
+00:35:23.390 --> 00:35:24.179
+Together:
+
+484
+00:35:24.459 --> 00:35:27.894
+69% on time with an 18-minute average.
+
+485
+00:35:28.174 --> 00:35:32.078
+The rest of the gap is fleet size, which dispatch alone can't fix.
+
+486
+00:35:33.428 --> 00:35:34.537
+L4, ETAs.
+
+487
+00:35:34.817 --> 00:35:35.756
+Requirement:
+
+488
+00:35:36.036 --> 00:35:39.407
+Tell customers when the rider will arrive, and keep the promise.
+
+489
+00:35:39.687 --> 00:35:45.575
+40,000 synthetic deliveries with zone-by-hour traffic and building-specific door times.
+
+490
+00:35:45.855 --> 00:35:51.572
+The estimators learn from days 1 to 25 and are evaluated on days 26 to 30.
+
+491
+00:35:52.922 --> 00:35:55.802
+Here is the Java code, EtaL4.java.
+
+492
+00:35:56.082 --> 00:36:00.114
+It runs to 105 lines; the full listing is in the chapter.
+
+493
+00:36:00.394 --> 00:36:07.221
+EtaL4.java, run with: java EtaL4.java (JDK 21, no dependencies).
+
+494
+00:36:07.501 --> 00:36:09.357
+HOW LONG UNTIL THE RIDER ARRIVES?
+
+495
+00:36:09.637 --> 00:36:23.887
+40,000 synthetic deliveries (fixed seed) over 30 days in a city with 25 zones, each. with its own traffic by hour (evening peaks are slow, some zones much worse), and 2,000 destination buildings whose.
+
+496
+00:36:26.737 --> 00:36:27.655
+On screen:
+
+497
+00:36:27.935 --> 00:36:36.639
+40,000 deliveries; learn from days 1 to 25, evaluate 6,677 on days 26 to 30.
+
+498
+00:36:36.919 --> 00:36:39.265
+Promise =. estimate + 2 min.
+
+499
+00:36:39.545 --> 00:36:44.239
+ETA method mean error p90 error arrived after the. promised. time.
+
+500
+00:36:44.519 --> 00:36:54.524
+E1) straight line times 1.4 at 18 km per hour + 2 min 4.6 min 10.5 min 49.0%.
+
+501
+00:36:54.804 --> 00:37:01.972
+E2) learned speed per (zone, hour) + 2 min 3.2 min 7.4 min 40.0%.
+
+502
+00:37:02.252 --> 00:37:09.761
+E3) E2 + learned door time per building 2.4 min 5.2 min 27.7%.
+
+503
+00:37:10.041 --> 00:37:26.617
+E4) E3 + re-estimate halfway from actual progress 1.2 min 2.7 min 11.5%. then a single city-wide speed is wrong in both directions: too pessimistic off-peak. badly optimistic in the evening.
+
+504
+00:37:26.897 --> 00:37:28.412
+The rest is in the chapter.
+
+505
+00:37:31.262 --> 00:37:32.115
+Reading it:
+
+506
+00:37:32.395 --> 00:37:38.390
+One city-wide speed breaks half the promises (49%), mostly in the evening jams.
+
+507
+00:37:38.670 --> 00:37:43.769
+Zone times hour speeds fix much of the ride error, but a big error remains at the door.
+
+508
+00:37:44.049 --> 00:37:50.406
+Door time per building brings the mean error to 2.4 minutes and late arrivals to 28%.
+
+509
+00:37:51.756 --> 00:37:58.113
+Re-estimating halfway from the rider's actual pace cuts late arrivals to 11.5%.
+
+510
+00:37:58.393 --> 00:38:03.748
+This helps only customers still waiting, and the second half of the ride still has its own noise.
+
+511
+00:38:04.028 --> 00:38:10.001
+An earlier version of this lab made the second half identical to the first, which made E4 look perfect.
+
+512
+00:38:10.281 --> 00:38:11.881
+The noise is there on purpose.
+
+513
+00:38:13.231 --> 00:38:14.170
+Part 6.
+
+514
+00:38:14.450 --> 00:38:15.730
+Production Concerns.
+
+515
+00:38:16.980 --> 00:38:18.132
+Failure modes.
+
+516
+00:38:18.412 --> 00:38:19.756
+Here is a quick table:
+
+517
+00:38:20.036 --> 00:38:22.319
+Failure, and Symptom, and Mitigation.
+
+518
+00:38:22.599 --> 00:38:24.156
+Brute-force geo queries.
+
+519
+00:38:24.436 --> 00:38:25.247
+Symptom:
+
+520
+00:38:25.527 --> 00:38:28.087
+Slow serviceability and dispatch (L1).
+
+521
+00:38:28.367 --> 00:38:29.369
+Mitigation:
+
+522
+00:38:29.649 --> 00:38:33.041
+Grid or H3 or geohash index + exact check.
+
+523
+00:38:33.321 --> 00:38:34.601
+Per-ping round trips.
+
+524
+00:38:34.881 --> 00:38:35.692
+Symptom:
+
+525
+00:38:35.972 --> 00:38:38.191
+Stale live index at peak (L2).
+
+526
+00:38:38.471 --> 00:38:39.473
+Mitigation:
+
+527
+00:38:39.753 --> 00:38:41.204
+Batching, pipelining.
+
+528
+00:38:41.484 --> 00:38:42.508
+Late pings.
+
+529
+00:38:42.788 --> 00:38:43.599
+Symptom:
+
+530
+00:38:43.879 --> 00:38:45.863
+Riders move backwards (L2).
+
+531
+00:38:46.143 --> 00:38:47.145
+Mitigation:
+
+532
+00:38:47.425 --> 00:38:49.409
+Timestamp-guarded atomic updates.
+
+533
+00:38:49.689 --> 00:38:51.119
+Every ping written live.
+
+534
+00:38:51.399 --> 00:38:52.209
+Symptom:
+
+535
+00:38:52.489 --> 00:38:54.388
+Write amplification (L2).
+
+536
+00:38:54.668 --> 00:38:55.671
+Mitigation:
+
+537
+00:38:55.951 --> 00:38:58.191
+Movement thinning; adaptive ping rates.
+
+538
+00:38:58.471 --> 00:39:00.263
+Nearest-idle-rider dispatch.
+
+539
+00:39:00.543 --> 00:39:01.353
+Symptom:
+
+540
+00:39:01.633 --> 00:39:04.385
+Orders wait while riders return (L3).
+
+541
+00:39:04.665 --> 00:39:05.668
+Mitigation:
+
+542
+00:39:05.948 --> 00:39:08.401
+Predicted availability, batching, matching.
+
+543
+00:39:08.681 --> 00:39:09.684
+Naive ETAs.
+
+544
+00:39:09.964 --> 00:39:10.775
+Symptom:
+
+545
+00:39:11.055 --> 00:39:13.273
+Broken promises at peak (L4).
+
+546
+00:39:13.553 --> 00:39:14.556
+Mitigation:
+
+547
+00:39:14.836 --> 00:39:17.993
+Zone times hour speeds, door times, live pace.
+
+548
+00:39:19.343 --> 00:39:20.581
+Frozen tracking.
+
+549
+00:39:20.861 --> 00:39:21.671
+Symptom:
+
+550
+00:39:21.951 --> 00:39:23.914
+Anxious customers, support calls.
+
+551
+00:39:24.194 --> 00:39:25.197
+Mitigation:
+
+552
+00:39:25.477 --> 00:39:27.525
+Last updated, extrapolation.
+
+553
+00:39:27.805 --> 00:39:29.810
+Serviceability edits break zones.
+
+554
+00:39:30.090 --> 00:39:30.901
+Symptom:
+
+555
+00:39:31.181 --> 00:39:32.567
+Unserviceable areas.
+
+556
+00:39:32.847 --> 00:39:33.850
+Mitigation:
+
+557
+00:39:34.130 --> 00:39:37.330
+Versioned polygons, validation, instant rollback.
+
+558
+00:39:38.680 --> 00:39:39.768
+Observability.
+
+559
+00:39:40.048 --> 00:39:47.173
+Live index freshness (p99 age of positions), ingestion lag per partition, dropped late pings.
+
+560
+00:39:47.453 --> 00:39:53.213
+Dispatch: time from packed to assigned, offer decline rate, batch rate, promise-hit rate per store.
+
+561
+00:39:53.493 --> 00:39:58.507
+ETA error distributions by zone, hour and building type; promise calibration.
+
+562
+00:39:58.787 --> 00:40:00.771
+Tracking stream counts and staleness.
+
+563
+00:40:02.121 --> 00:40:03.678
+Security and privacy.
+
+564
+00:40:03.958 --> 00:40:13.387
+Location is sensitive personal data for riders and customers: purpose limitation, retention limits, access controls (Ch 36).
+
+565
+00:40:13.667 --> 00:40:19.811
+Show rider locations only during active deliveries; mask customer addresses until assignment.
+
+566
+00:40:20.091 --> 00:40:27.643
+Detect GPS spoofing (fake-location apps) with consistency checks: speed, accelerometer, network location.
+
+567
+00:40:28.993 --> 00:40:29.889
+Performance.
+
+568
+00:40:30.169 --> 00:40:36.953
+In-memory geo indexes in every service that needs them; Redis GEO for shared, frequently updated data.
+
+569
+00:40:37.233 --> 00:40:43.057
+Dispatch per store cluster (partitioned by geography) so optimisation problems stay small.
+
+570
+00:40:43.337 --> 00:40:49.076
+ETA computation cached per (zone, hour) with request-time door and progress adjustments.
+
+571
+00:40:50.426 --> 00:40:51.151
+Cost.
+
+572
+00:40:51.431 --> 00:40:59.367
+Rider time is the dominant cost: batching and predicted availability are worth more than any infrastructure saving (L3).
+
+573
+00:40:59.647 --> 00:41:04.831
+Ping rates cost riders' battery and data as well as our ingestion; adapt them to state.
+
+574
+00:41:05.111 --> 00:41:13.005
+Maps and routing API calls: cache, and use them only for final ranking of a few candidates (Ch 35).
+
+575
+00:41:14.355 --> 00:41:15.293
+Part 7.
+
+576
+00:41:15.573 --> 00:41:17.280
+Anti-Patterns and Pitfalls.
+
+577
+00:41:18.530 --> 00:41:19.447
+Watch out:
+
+578
+00:41:19.727 --> 00:41:20.367
+1.
+
+579
+00:41:20.647 --> 00:41:22.397
+Pincodes as delivery zones.
+
+580
+00:41:22.677 --> 00:41:24.405
+They don't match delivery radii.
+
+581
+00:41:25.755 --> 00:41:26.672
+Watch out:
+
+582
+00:41:26.952 --> 00:41:27.656
+2.
+
+583
+00:41:27.936 --> 00:41:29.515
+Testing every polygon.
+
+584
+00:41:29.795 --> 00:41:34.552
+136 polygon tests per lookup instead of ~2 (L1).
+
+585
+00:41:35.902 --> 00:41:36.819
+Watch out:
+
+586
+00:41:37.099 --> 00:41:37.846
+3.
+
+587
+00:41:38.126 --> 00:41:39.641
+Geohash without neighbours.
+
+588
+00:41:39.921 --> 00:41:42.779
+Points near cell edges miss their nearest riders.
+
+589
+00:41:44.129 --> 00:41:45.047
+Watch out:
+
+590
+00:41:45.327 --> 00:41:46.031
+4.
+
+591
+00:41:46.311 --> 00:41:49.489
+One database row per rider updated every ping.
+
+592
+00:41:49.769 --> 00:41:53.204
+Write storms at peak; use a stream + batched live index.
+
+593
+00:41:54.554 --> 00:41:55.471
+Watch out:
+
+594
+00:41:55.751 --> 00:41:56.519
+5.
+
+595
+00:41:56.799 --> 00:41:58.357
+Last-write-wins positions.
+
+596
+00:41:58.637 --> 00:42:01.261
+Late pings move riders backwards (L2:
+
+597
+00:42:01.541 --> 00:42:03.098
+480 riders).
+
+598
+00:42:04.448 --> 00:42:05.365
+Watch out:
+
+599
+00:42:05.645 --> 00:42:06.392
+6.
+
+600
+00:42:06.672 --> 00:42:08.891
+Writing every ping to the live index.
+
+601
+00:42:09.171 --> 00:42:11.261
+Most pings carry no news (L2).
+
+602
+00:42:12.611 --> 00:42:13.529
+Watch out:
+
+603
+00:42:13.809 --> 00:42:14.555
+7.
+
+604
+00:42:14.835 --> 00:42:17.374
+Only idle riders at the store are available.
+
+605
+00:42:17.654 --> 00:42:20.875
+Orders wait for riders who are two minutes away (L3).
+
+606
+00:42:22.225 --> 00:42:23.143
+Watch out:
+
+607
+00:42:23.423 --> 00:42:24.105
+8.
+
+608
+00:42:24.385 --> 00:42:25.388
+No batching.
+
+609
+00:42:25.668 --> 00:42:27.823
+Every order costs a full return trip.
+
+610
+00:42:29.173 --> 00:42:30.090
+Watch out:
+
+611
+00:42:30.370 --> 00:42:31.117
+9.
+
+612
+00:42:31.397 --> 00:42:32.570
+Straight-line ETAs.
+
+613
+00:42:32.850 --> 00:42:35.773
+49% of promises broken (L4).
+
+614
+00:42:37.123 --> 00:42:38.040
+Watch out:
+
+615
+00:42:38.320 --> 00:42:39.024
+10.
+
+616
+00:42:39.304 --> 00:42:41.395
+Ignoring the last 100 metres.
+
+617
+00:42:41.675 --> 00:42:44.384
+Gated complexes add minutes no map shows.
+
+618
+00:42:45.734 --> 00:42:46.651
+Watch out:
+
+619
+00:42:46.931 --> 00:42:47.763
+11.
+
+620
+00:42:48.043 --> 00:42:49.174
+Promising the mean.
+
+621
+00:42:49.454 --> 00:42:51.886
+Half the customers are late by construction.
+
+622
+00:42:53.236 --> 00:42:54.153
+Watch out:
+
+623
+00:42:54.433 --> 00:42:55.223
+12.
+
+624
+00:42:55.503 --> 00:42:58.169
+Showing rider location outside deliveries.
+
+625
+00:42:58.449 --> 00:43:00.348
+Privacy breach and safety risk.
+
+626
+00:43:01.698 --> 00:43:02.573
+Part 8.
+
+627
+00:43:02.853 --> 00:43:04.197
+Interview Q and A.
+
+628
+00:43:05.447 --> 00:43:06.279
+Beginner.
+
+629
+00:43:06.559 --> 00:43:07.583
+Question 1.
+
+630
+00:43:07.863 --> 00:43:11.489
+Design the delivery tracking and dispatch system, main components?
+
+631
+00:43:11.769 --> 00:43:13.135
+Thirty-second answer:
+
+632
+00:43:13.415 --> 00:43:36.796
+Rider apps stream GPS to a gateway into Kafka; consumers maintain a live geo index (Redis GEO), feed tracking (SSE to customers) and history; a serviceability index answers which store serves an address; dispatch assigns orders to riders using the live index and an ETA service; the ETA service combines learned speeds, door times and live progress.
+
+633
+00:43:38.146 --> 00:43:39.149
+Question 2.
+
+634
+00:43:39.429 --> 00:43:42.117
+How do you find the nearest available riders quickly?
+
+635
+00:43:42.397 --> 00:43:43.762
+Thirty-second answer:
+
+636
+00:43:44.042 --> 00:43:45.301
+A spatial index:
+
+637
+00:43:45.581 --> 00:43:59.085
+Redis GEO (geohash in a sorted set) with GEOSEARCH by radius, or an in-memory grid or H3 index with expanding rings; filter by availability; then rank the few candidates by road ETA.
+
+638
+00:43:59.365 --> 00:44:01.989
+Keep positions fresh and prune stale riders.
+
+639
+00:44:03.339 --> 00:44:04.384
+Question 3.
+
+640
+00:44:04.664 --> 00:44:07.395
+How would you decide if an address is serviceable?
+
+641
+00:44:07.675 --> 00:44:09.040
+Thirty-second answer:
+
+642
+00:44:09.320 --> 00:44:25.107
+Store delivery zones as polygons; compile them into a grid or H3 index mapping cells to candidate polygons; at lookup, find the cell and run point-in-polygon on the few candidates; apply dynamic overrides (weather, store load).
+
+643
+00:44:25.387 --> 00:44:27.733
+Keep polygons versioned and validated.
+
+644
+00:44:29.083 --> 00:44:30.150
+Question 4.
+
+645
+00:44:30.430 --> 00:44:33.587
+How many writes per second does rider tracking generate?
+
+646
+00:44:33.867 --> 00:44:35.233
+Thirty-second answer:
+
+647
+00:44:35.513 --> 00:44:37.113
+Riders times ping rate:
+
+648
+00:44:37.393 --> 00:44:44.113
+50,000 riders at one ping per 4 s is 12,500 pings per second, with peaks higher.
+
+649
+00:44:44.393 --> 00:44:51.091
+Each ping goes to Kafka (replicated) and, if newsworthy, to the live index; history is written in batches.
+
+650
+00:44:52.441 --> 00:44:53.444
+Intermediate.
+
+651
+00:44:53.724 --> 00:44:54.833
+Question 5.
+
+652
+00:44:55.113 --> 00:44:57.887
+How do you ingest GPS pings reliably?
+
+653
+00:44:58.167 --> 00:44:59.532
+Thirty-second answer:
+
+654
+00:44:59.812 --> 00:45:18.073
+Gateway, then Kafka keyed by rider id; consumers batch updates to the live index with an atomic, timestamp-guarded write (Lua) so late pings don't move riders backwards; thin updates by movement; write raw pings to history; handle GPS noise (snapping, jump filtering).
+
+655
+00:45:19.423 --> 00:45:20.533
+Question 6.
+
+656
+00:45:20.813 --> 00:45:22.925
+How does live tracking reach the customer?
+
+657
+00:45:23.205 --> 00:45:24.570
+Thirty-second answer:
+
+658
+00:45:24.850 --> 00:45:41.725
+The tracking service consumes location events for active deliveries and pushes smoothed positions and ETAs over SSE to subscribed customers every few seconds, with resume and heartbeats; stale positions show last updated and are extrapolated along the route.
+
+659
+00:45:43.075 --> 00:45:44.163
+Question 7.
+
+660
+00:45:44.443 --> 00:45:47.728
+What's the difference between geohash, H3 and S2?
+
+661
+00:45:48.008 --> 00:45:49.373
+Thirty-second answer:
+
+662
+00:45:49.653 --> 00:45:52.064
+All map positions to hierarchical cells.
+
+663
+00:45:52.344 --> 00:45:59.661
+Geohash uses rectangular cells encoded as string prefixes (simple, but uneven sizes and edge effects).
+
+664
+00:45:59.941 --> 00:46:06.704
+H3 uses hexagons with equidistant neighbours and fixed resolutions (good for aggregates and smoothing).
+
+665
+00:46:06.984 --> 00:46:12.637
+S2 uses cells on a cube projection with a space-filling curve (good for region coverings).
+
+666
+00:46:13.987 --> 00:46:15.011
+Question 8.
+
+667
+00:46:15.291 --> 00:46:16.891
+How do you estimate an ETA?
+
+668
+00:46:17.171 --> 00:46:18.537
+Thirty-second answer:
+
+669
+00:46:18.817 --> 00:46:35.990
+Ride time from road distance and learned speeds per zone and hour (or a routing engine with traffic), plus learned last-100-metre time per building, plus packing time for pre-dispatch ETAs; update live from the rider's actual pace; promise at a percentile, not the mean.
+
+670
+00:46:37.340 --> 00:46:38.407
+Question 9.
+
+671
+00:46:38.687 --> 00:46:40.415
+How do you manage rider state?
+
+672
+00:46:40.695 --> 00:46:42.060
+Thirty-second answer:
+
+673
+00:46:42.340 --> 00:46:59.791
+An explicit state machine (offline, idle at store, assigned, delivering, returning) driven by app actions and geofence events, stored in Redis with the live position, consumed by dispatch; presence from the location stream with grace periods; stuck-state detection.
+
+674
+00:47:01.141 --> 00:47:01.909
+Senior.
+
+675
+00:47:02.189 --> 00:47:03.234
+Question 10.
+
+676
+00:47:03.514 --> 00:47:05.306
+Design the dispatch algorithm.
+
+677
+00:47:05.586 --> 00:47:06.951
+Thirty-second answer:
+
+678
+00:47:07.231 --> 00:47:28.095
+Every few seconds per store cluster, solve an assignment problem between orders (packed and soon to be packed) and riders (at store and returning soon), with costs from predicted delivery times, promise-breach penalties and batch detours; allow batches of 2 to 3 compatible orders; send offers with timeouts; re-plan continuously.
+
+679
+00:47:29.445 --> 00:47:30.576
+Question 11.
+
+680
+00:47:30.856 --> 00:47:33.224
+How do you keep promises accurate at checkout?
+
+681
+00:47:33.504 --> 00:47:34.869
+Thirty-second answer:
+
+682
+00:47:35.149 --> 00:47:52.899
+Compute the promise from the same models dispatch uses: packing time (store load), rider availability (predicted), ride and door ETAs, at a high percentile; adjust serviceability and promises dynamically when stores are overloaded or weather is bad; measure calibration.
+
+683
+00:47:54.249 --> 00:47:55.337
+Question 12.
+
+684
+00:47:55.617 --> 00:47:58.369
+How do you handle GPS noise and spoofing?
+
+685
+00:47:58.649 --> 00:48:00.014
+Thirty-second answer:
+
+686
+00:48:00.294 --> 00:48:17.467
+Filter impossible jumps (speed thresholds), snap to roads with map matching, smooth for display, fuse with network location; detect spoofing through consistency (speed, sensor data, mock-location flags, repeated identical coordinates) and flag accounts.
+
+687
+00:48:18.817 --> 00:48:20.097
+Question 13.
+
+688
+00:48:20.377 --> 00:48:23.215
+How do you partition dispatch as the platform grows?
+
+689
+00:48:23.495 --> 00:48:24.860
+Thirty-second answer:
+
+690
+00:48:25.140 --> 00:48:40.585
+By geography: each dispatcher owns a store cluster (a set of H3 cells), keeping optimisation problems small and data local; riders can move between clusters via handoff; cross-cluster rebalancing runs at a slower cadence.
+
+691
+00:48:41.935 --> 00:48:43.130
+Question 14.
+
+692
+00:48:43.410 --> 00:48:47.485
+How do you reduce the write load of rider tracking without losing freshness?
+
+693
+00:48:47.765 --> 00:48:49.130
+Thirty-second answer:
+
+694
+00:48:49.410 --> 00:49:03.085
+Adaptive ping rates by state (fast while delivering, slow while idle), movement-based thinning for the live index, batching and pipelining, compact encodings, and keeping every raw ping only in the stream and history.
+
+695
+00:49:04.435 --> 00:49:05.331
+Architect.
+
+696
+00:49:05.611 --> 00:49:06.805
+Question 15.
+
+697
+00:49:07.085 --> 00:49:11.693
+Design delivery for a 300-store quick-commerce platform end to end.
+
+698
+00:49:11.973 --> 00:49:13.339
+Thirty-second answer:
+
+699
+00:49:13.619 --> 00:49:29.789
+Polygon serviceability compiled to cell indexes; telemetry via Kafka to a timestamp-safe, batched, thinned Redis live index plus history; dispatch per store cluster with predicted availability, batching and matching; ETA service with learned speeds,
+
+700
+00:49:30.069 --> 00:49:39.776
+door times and live pace; SSE tracking with privacy; models trained daily from history; SLOs on freshness, promise-hit rate and ETA error.
+
+701
+00:49:41.126 --> 00:49:42.321
+Question 16.
+
+702
+00:49:42.601 --> 00:49:45.481
+How do you evaluate a new dispatch algorithm safely?
+
+703
+00:49:45.761 --> 00:49:47.126
+Thirty-second answer:
+
+704
+00:49:47.406 --> 00:50:08.227
+Replay historical days in a simulator (like L3, with real order and rider traces), compare delivery times, promise hits, rider earnings and fairness; then switchback experiments (alternate algorithms by time slot per store, since stores interact within a cluster) rather than user-level A or B tests; monitor guardrails.
+
+705
+00:50:09.577 --> 00:50:10.921
+Question 17.
+
+706
+00:50:11.201 --> 00:50:14.849
+What are the privacy and safety obligations around location?
+
+707
+00:50:15.129 --> 00:50:16.495
+Thirty-second answer:
+
+708
+00:50:16.775 --> 00:50:35.527
+Location is personal data for riders and customers: collect for stated purposes (dispatch, tracking, safety, payouts), minimise (show only during active deliveries, approximate before pickup), retain briefly, restrict access, audit, and support safety features (SOS, trip sharing).
+
+709
+00:50:36.877 --> 00:50:38.050
+Question 18.
+
+710
+00:50:38.330 --> 00:50:40.485
+Build or buy maps, routing and ETA?
+
+711
+00:50:40.765 --> 00:50:42.130
+Thirty-second answer:
+
+712
+00:50:42.410 --> 00:50:59.093
+Buy base maps and routing (maps APIs) or run open-source routing (OSRM, Valhalla, GraphHopper) on OpenStreetMap; build the parts that encode your operations: speeds learned from your riders, door times per building, packing times, and the promise logic.
+
+713
+00:51:00.443 --> 00:51:01.680
+Question 19.
+
+714
+00:51:01.960 --> 00:51:04.840
+How does delivery connect to the rest of the platform?
+
+715
+00:51:05.120 --> 00:51:06.485
+Thirty-second answer:
+
+716
+00:51:06.765 --> 00:51:23.320
+Checkout uses serviceability and promise ETAs (Ch 46); order events drive dispatch; chat uses rider presence (Ch 41); notifications announce states (Ch 40); payouts use history; support uses tracks and states.
+
+717
+00:51:24.670 --> 00:51:25.779
+Question 20.
+
+718
+00:51:26.059 --> 00:51:28.043
+What metrics show delivery is healthy?
+
+719
+00:51:28.323 --> 00:51:29.689
+Thirty-second answer:
+
+720
+00:51:29.969 --> 00:51:46.267
+Promise-hit rate by store and hour; order-to-door time distribution; live position freshness; dispatch latency and batch rate; ETA error and calibration; rider utilisation and earnings; offer decline rate; customer where is my order contacts.
+
+721
+00:51:47.617 --> 00:51:48.513
+Part 9.
+
+722
+00:51:48.793 --> 00:51:50.201
+Summary and Practice.
+
+723
+00:51:51.451 --> 00:51:52.539
+Key takeaways.
+
+724
+00:51:52.819 --> 00:51:56.553
+Geo queries = coarse index + exact check (L1).
+
+725
+00:51:56.833 --> 00:52:01.398
+Telemetry: stream, order-safe atomic updates, batching, thinning (L2).
+
+726
+00:52:01.678 --> 00:52:06.179
+Dispatch plans ahead: predicted availability, batching, matching (L3).
+
+727
+00:52:06.459 --> 00:52:11.878
+ETAs from learned speeds, door times and live pace; promise at a percentile (L4).
+
+728
+00:52:12.158 --> 00:52:15.017
+Privacy of positions is a design constraint.
+
+729
+00:52:16.367 --> 00:52:17.689
+Decision cheat sheet.
+
+730
+00:52:17.969 --> 00:52:19.313
+Here is a quick table:
+
+731
+00:52:19.593 --> 00:52:20.767
+Need, and Choice.
+
+732
+00:52:21.047 --> 00:52:22.156
+Serviceability:
+
+733
+00:52:22.436 --> 00:52:26.980
+Versioned polygons, then grid or H3 index + point-in-polygon.
+
+734
+00:52:27.260 --> 00:52:28.433
+Nearest riders:
+
+735
+00:52:28.713 --> 00:52:32.831
+Redis GEO or in-memory grid; road ETA for top candidates.
+
+736
+00:52:33.111 --> 00:52:34.071
+Ingestion:
+
+737
+00:52:34.351 --> 00:52:38.361
+Kafka keyed by rider, then Lua timestamp-guarded, batched writes.
+
+738
+00:52:38.641 --> 00:52:39.559
+Dispatch:
+
+739
+00:52:39.839 --> 00:52:44.319
+Periodic matching per cluster, predicted availability, 2-order batches.
+
+740
+00:52:44.599 --> 00:52:45.324
+ETA:
+
+741
+00:52:45.604 --> 00:52:51.065
+Zone times hour speeds + building door time + live pace; promise p85.
+
+742
+00:52:51.345 --> 00:52:52.177
+Tracking:
+
+743
+00:52:52.457 --> 00:52:55.231
+SSE with smoothing and staleness indicators.
+
+744
+00:52:56.581 --> 00:52:57.711
+Exercises.
+
+745
+00:52:57.991 --> 00:53:07.997
+(B2) In L1, vary the grid cell size (250 m, 1 km, 2 km) and plot polygon tests per lookup against index memory.
+
+746
+00:53:08.277 --> 00:53:15.530
+(B3) In L2, add adaptive ping rates (idle riders every 15 s) and measure the new ingest volume.
+
+747
+00:53:15.810 --> 00:53:21.506
+(B3) In L3, replace greedy assignment with the Hungarian algorithm every 30 s.
+
+748
+00:53:21.786 --> 00:53:23.130
+Does it beat D4?
+
+749
+00:53:23.410 --> 00:53:30.173
+(B3) In L4, add rain days that slow zones by 30% and see how each estimator degrades.
+
+750
+00:53:31.523 --> 00:53:37.432
+(B4) Design the location event schema and its retention across Kafka, Redis and the lake.
+
+751
+00:53:38.782 --> 00:53:39.785
+Further reading.
+
+752
+00:53:40.065 --> 00:53:41.281
+Uber engineering:
+
+753
+00:53:41.561 --> 00:53:45.358
+H3 hexagonal hierarchical index; DISCO dispatch.
+
+754
+00:53:45.638 --> 00:53:49.819
+DoorDash engineering: dispatch optimisation and ETA prediction.
+
+755
+00:53:50.099 --> 00:53:54.643
+Swiggy and Zomato engineering blogs on delivery ETAs and last-mile time.
+
+756
+00:53:54.923 --> 00:53:58.934
+Redis GEO documentation; Google S2 geometry library.
+
+757
+00:53:59.214 --> 00:54:03.971
+Kuhn, The Hungarian Method for the Assignment Problem (1955).
+
+758
+00:54:05.321 --> 00:54:06.559
+Related chapters.
+
+759
+00:54:06.839 --> 00:54:09.441
+Ch 03, Networking Essentials:
+
+760
+00:54:09.721 --> 00:54:10.959
+SSE tracking.
+
+761
+00:54:11.239 --> 00:54:14.908
+Ch 06, NoSQL and Polyglot Persistence:
+
+762
+00:54:15.188 --> 00:54:16.191
+Redis GEO.
+
+763
+00:54:16.471 --> 00:54:20.737
+Ch 14, Messaging and Event Streaming: the location topic.
+
+764
+00:54:21.017 --> 00:54:24.004
+Ch 41, Chat: presence from location.
+
+765
+00:54:24.284 --> 00:54:27.975
+Ch 46, Grocery Checkout: promises at checkout.
+
+766
+00:54:29.325 --> 00:54:30.925
+That's the end of this chapter.
+
+767
+00:54:31.205 --> 00:54:37.242
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+768
+00:54:37.522 --> 00:54:38.973
+See you in the next chapter.
+

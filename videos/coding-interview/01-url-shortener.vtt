@@ -1,0 +1,562 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.801
+URL Shortener Core:
+
+2
+00:00:02.081 --> 00:00:04.427
+Base62 and Id Allocation.
+
+3
+00:00:04.707 --> 00:00:08.505
+Chapter 1, from the Coding Interview part of the System Design Playbook.
+
+4
+00:00:10.255 --> 00:00:11.108
+Part 1.
+
+5
+00:00:11.388 --> 00:00:12.284
+Problem.
+
+6
+00:00:13.534 --> 00:00:27.230
+Implement the core of a URL shortener: turn a numeric id into a short base62 code and back, deduplicate long URLs, support custom aliases without collisions, and resolve codes for redirects.
+
+7
+00:00:28.580 --> 00:00:29.455
+Part 2.
+
+8
+00:00:29.735 --> 00:00:30.652
+Key idea.
+
+9
+00:00:31.902 --> 00:00:33.929
+Don't hash and hope for no collisions.
+
+10
+00:00:34.209 --> 00:00:41.526
+Allocate a unique id (a DB sequence, or per-node ranges from a counter service), then base62-encode it.
+
+11
+00:00:41.806 --> 00:00:46.777
+Seven characters cover 62⁷ about 3.5 trillion URLs.
+
+12
+00:00:47.057 --> 00:00:53.179
+Custom aliases live in the same keyspace and are claimed atomically (putIfAbsent here; INSERT...
+
+13
+00:00:53.459 --> 00:00:55.038
+ON CONFLICT in a DB).
+
+14
+00:00:55.318 --> 00:01:00.374
+Reads dominate (about 100:1), so resolve is a key lookup behind a cache.
+
+15
+00:01:01.724 --> 00:01:03.068
+Here is the diagram.
+
+16
+00:01:06.918 --> 00:01:07.814
+Part 3.
+
+17
+00:01:08.094 --> 00:01:08.947
+Solution.
+
+18
+00:01:10.197 --> 00:01:13.312
+Here is the Java code, UrlShortener.java.
+
+19
+00:01:13.592 --> 00:01:17.325
+It runs to 94 lines; the full listing is in the chapter.
+
+20
+00:01:17.605 --> 00:01:25.904
+Problem: design the core of a URL shortener: id generation, base62 codes, custom aliases, redirect lookup.
+
+21
+00:01:28.754 --> 00:01:29.671
+Part 4.
+
+22
+00:01:29.951 --> 00:01:30.783
+Walkthrough.
+
+23
+00:01:32.033 --> 00:01:33.377
+Here is a quick table:
+
+24
+00:01:33.657 --> 00:01:42.020
+Code, and Why. sb.append(ALPHABET.charAt((int) (id % 62))); id /= 62;... reverse():
+
+25
+00:01:42.300 --> 00:01:46.993
+Repeated division gives the digits least significant first, so reverse at the end.
+
+26
+00:01:47.273 --> 00:01:50.793
+Math.multiplyExact(id, 62) + digit:
+
+27
+00:01:51.073 --> 00:01:54.316
+Decoding user-supplied codes must detect overflow.
+
+28
+00:01:54.596 --> 00:02:00.655
+A 20-character code would wrap around silently with plain. new Shortener(100000000L):
+
+29
+00:02:00.935 --> 00:02:03.879
+Starting high avoids 1 to 2 character codes.
+
+30
+00:02:04.159 --> 00:02:14.292
+Sequential codes are guessable, so if that matters, encode id XOR secret or shuffle the bits. urlToCode.computeIfAbsent(url,...):
+
+31
+00:02:14.572 --> 00:02:20.012
+The same long URL returns the same code (optional, and it needs a reverse index).
+
+32
+00:02:20.292 --> 00:02:24.068
+Some products deliberately create a new code per user for analytics.
+
+33
+00:02:25.418 --> 00:02:30.538
+codeToUrl.putIfAbsent(alias, url)!= null, then taken:
+
+34
+00:02:30.818 --> 00:02:33.037
+An atomic claim of the custom alias.
+
+35
+00:02:34.387 --> 00:02:35.347
+Part 5.
+
+36
+00:02:35.627 --> 00:02:36.565
+Complexity.
+
+37
+00:02:37.815 --> 00:02:39.159
+Here is a quick table:
+
+38
+00:02:39.439 --> 00:02:42.746
+Approach, and Time, and Space. encode or decode.
+
+39
+00:02:43.026 --> 00:02:43.773
+Time:
+
+40
+00:02:44.053 --> 00:02:45.162
+O(code length).
+
+41
+00:02:45.442 --> 00:02:46.295
+Space:
+
+42
+00:02:46.575 --> 00:02:48.495
+O(1). shorten or resolve.
+
+43
+00:02:48.775 --> 00:02:49.522
+Time:
+
+44
+00:02:49.802 --> 00:02:51.018
+O(1) map ops.
+
+45
+00:02:51.298 --> 00:02:52.151
+Space:
+
+46
+00:02:52.431 --> 00:02:53.541
+O(URLs).
+
+47
+00:02:54.891 --> 00:02:55.829
+Part 6.
+
+48
+00:02:56.109 --> 00:02:56.835
+Run it.
+
+49
+00:02:58.085 --> 00:02:59.407
+Here is the shell code.
+
+50
+00:03:02.257 --> 00:03:44.619
+On screen: encode(125) = 21 (125 = 262 + 1). encode(3.5 trillion) = ZZZZZZZ (7 chars cover 62^7 = 3.5e12 URLs). short codes = 6LAze, 6LAzf (same URL again - 6LAze), alias big-sale. resolve(6LAze) = https://example.com or articles or 2025 or system-design?ref=newsletter. resolve(nope) = 404. alias taken: big-sale. decode of a 20-char code - overflow detected.
+
+51
+00:03:44.899 --> 00:03:45.646
+PASS.
+
+52
+00:03:48.496 --> 00:03:49.435
+Part 7.
+
+53
+00:03:49.715 --> 00:03:51.400
+Solve it with Spring Boot 4.
+
+54
+00:03:52.650 --> 00:04:07.349
+The counter becomes Redis INCRBY in blocks so every instance can mint ids without a round trip per link, custom aliases are claimed with an atomic SET NX, and the redirect path is served from a Caffeine @Cacheable cache.
+
+55
+00:04:08.699 --> 00:04:11.493
+The sequence diagram walks through it step by step.
+
+56
+00:04:11.773 --> 00:04:12.669
+C to A:
+
+57
+00:04:12.949 --> 00:04:16.021
+POST or api or v1 or urls url.
+
+58
+00:04:16.301 --> 00:04:18.648
+A to S: shorten(url, alias).
+
+59
+00:04:18.928 --> 00:04:20.635
+S to I: nextId().
+
+60
+00:04:20.915 --> 00:04:21.853
+I to R:
+
+61
+00:04:22.133 --> 00:04:26.784
+INCRBY shortener:id-block 1000 (once per 1,000 ids).
+
+62
+00:04:27.064 --> 00:04:28.003
+S to R:
+
+63
+00:04:28.283 --> 00:04:31.781
+SET shortener:code:base62(id) url.
+
+64
+00:04:32.061 --> 00:04:32.915
+A to C:
+
+65
+00:04:33.195 --> 00:04:38.357
+201 Location: https://sho.rt/code.
+
+66
+00:04:38.637 --> 00:04:39.533
+C to A:
+
+67
+00:04:39.813 --> 00:04:41.285
+GET or s/code.
+
+68
+00:04:41.565 --> 00:04:44.680
+A to S: resolve(code) @Cacheable short-urls.
+
+69
+00:04:44.960 --> 00:04:45.899
+S to R:
+
+70
+00:04:46.179 --> 00:04:48.824
+GET shortener:code:code (cache miss only).
+
+71
+00:04:49.104 --> 00:04:49.957
+A to C:
+
+72
+00:04:50.237 --> 00:04:52.947
+302 Location: long URL.
+
+73
+00:04:56.797 --> 00:04:57.629
+Service.
+
+74
+00:04:57.909 --> 00:05:00.895
+Here is the Java code, ShortenerService.java.
+
+75
+00:05:01.175 --> 00:05:04.994
+It runs to 37 lines; the full listing is in the chapter.
+
+76
+00:05:05.274 --> 00:05:06.383
+Custom alias:
+
+77
+00:05:06.663 --> 00:05:11.506
+SET NX makes claim this alias atomic, so two users can't both get it.
+
+78
+00:05:14.356 --> 00:05:15.423
+Id blocks.
+
+79
+00:05:15.703 --> 00:05:19.031
+Here is the Java code, IdBlockAllocator.java.
+
+80
+00:05:19.311 --> 00:05:23.023
+It runs to 33 lines; the full listing is in the chapter.
+
+81
+00:05:23.303 --> 00:05:35.335
+Hands out unique ids without a Redis round trip per id: each instance reserves a block of. @code idBlockSize ids with one atomic INCRBY, then serves them from memory.
+
+82
+00:05:35.615 --> 00:05:40.948
+Ids stay unique across instances; a crash only wastes the unused rest of a block.
+
+83
+00:05:43.798 --> 00:05:44.673
+Controller.
+
+84
+00:05:44.953 --> 00:05:47.961
+Here is the Java code, ShortenerController.java.
+
+85
+00:05:48.241 --> 00:05:51.974
+It runs to 35 lines; the full listing is in the chapter.
+
+86
+00:05:54.824 --> 00:05:55.997
+Base62.
+
+87
+00:05:56.277 --> 00:05:59.093
+Here is the Java code, Base62.java.
+
+88
+00:05:59.373 --> 00:06:03.107
+It runs to 26 lines; the full listing is in the chapter.
+
+89
+00:06:03.387 --> 00:06:09.531
+Same algorithm as the interview solution: bijective base62 over non-negative longs.
+
+90
+00:06:12.381 --> 00:06:13.725
+Run it as a service.
+
+91
+00:06:14.005 --> 00:06:19.615
+The integration test ShortenerIT.java drives the API against a real Redis.
+
+92
+00:06:19.895 --> 00:06:22.583
+This is its transcript ( request, response):
+
+93
+00:06:23.933 --> 00:06:24.851
+On screen:
+
+94
+00:06:25.131 --> 00:06:34.581
+POST or api or v1 or urls url:https://shop.example.com or sale or diwali?utm=mail.
+
+95
+00:06:34.861 --> 00:06:51.416
+201 Location: https://sho.rt or 1. code:1,shortUrl:https://sho.rt or 1,url:https://shop.example.com or sale or diwali?utm=mail.
+
+96
+00:06:51.696 --> 00:07:00.741
+POST or api or v1 or urls url:https://docs.example.com or a or very or long or path.
+
+97
+00:07:01.021 --> 00:07:17.405
+201 Location: https://sho.rt or 2. code:2,shortUrl:https://sho.rt or 2,url:https://docs.example.com or a or very or long or path.
+
+98
+00:07:17.685 --> 00:07:26.240
+POST or api or v1 or urls url:https://shop.example.com/,alias:big-sale.
+
+99
+00:07:26.520 --> 00:07:42.179
+201 Location: https://sho.rt or big-sale. code:big-sale,shortUrl:https://sho.rt or big-sale,url:https://shop.example.com/.
+
+100
+00:07:42.459 --> 00:07:51.077
+POST or api or v1 or urls url:https://other.example.com/,alias:big-sale.
+
+101
+00:07:51.357 --> 00:08:01.405
+409 detail:alias 'big-sale' is. taken,instance:/api or v1 or urls,status:409,title:Conflict.
+
+102
+00:08:01.685 --> 00:08:06.912
+POST or api or v1 or urls url:ftp://nope.
+
+103
+00:08:07.192 --> 00:08:08.707
+The rest is in the chapter.
+
+104
+00:08:11.557 --> 00:08:13.647
+What changes from the interview version.
+
+105
+00:08:13.927 --> 00:08:15.271
+Here is a quick table:
+
+106
+00:08:15.551 --> 00:08:20.906
+Interview, and Production (Spring Boot 4). long counter++ in one JVM:
+
+107
+00:08:21.186 --> 00:08:26.711
+INCRBY id blocks: unique across instances, 1 Redis call per 1,000 links.
+
+108
+00:08:26.991 --> 00:08:28.826
+HashMap alias check then put:
+
+109
+00:08:29.106 --> 00:08:34.631
+SET NX: claim-the-alias is atomic, so two users can't both win. lookup in a map:
+
+110
+00:08:34.911 --> 00:08:40.885
+Caffeine cache in front of Redis (links are immutable, so no invalidation needed). return a string:
+
+111
+00:08:41.165 --> 00:08:50.530
+201 Created + Location, 302 redirects, ProblemDetail for 400 or 404 or 409.
+
+112
+00:08:51.880 --> 00:08:55.080
+Trade-off to mention: sequential ids are guessable.
+
+113
+00:08:55.360 --> 00:09:06.859
+Shuffle them (for example, multiply by a constant modulo 62^7) or use random 7-character codes with SET NX retry if links must not be enumerable.
+
+114
+00:09:08.209 --> 00:09:09.083
+Part 8.
+
+115
+00:09:09.363 --> 00:09:10.473
+Common mistakes.
+
+116
+00:09:11.723 --> 00:09:18.016
+Using a hash of the URL (MD5 truncated to 7 characters) without handling collisions.
+
+117
+00:09:18.296 --> 00:09:21.645
+With billions of URLs, birthday collisions are certain.
+
+118
+00:09:21.925 --> 00:09:24.379
+A single global counter as a bottleneck.
+
+119
+00:09:24.659 --> 00:09:28.947
+Hand each node a block of ids (for example 1,000) at a time.
+
+120
+00:09:29.227 --> 00:09:35.008
+Not validating the target URL, which turns the service into an open-redirect and phishing tool.
+
+121
+00:09:35.288 --> 00:09:37.379
+Always returning 301.
+
+122
+00:09:37.659 --> 00:09:40.923
+Browsers cache it permanently, so you lose click analytics.
+
+123
+00:09:41.203 --> 00:09:43.869
+Use 302 if you need to count clicks.
+
+124
+00:09:45.219 --> 00:09:46.115
+Part 9.
+
+125
+00:09:46.395 --> 00:09:47.739
+Follow-up questions.
+
+126
+00:09:48.989 --> 00:09:49.864
+Question.
+
+127
+00:09:50.144 --> 00:09:52.939
+How do you scale id generation across regions?
+
+128
+00:09:53.219 --> 00:09:54.584
+Thirty-second answer:
+
+129
+00:09:54.864 --> 00:10:03.867
+Give each region or node its own range (a range allocator in ZooKeeper or a DB), or use Snowflake-style ids (problem 5).
+
+130
+00:10:04.147 --> 00:10:12.189
+Base62 of a 64-bit Snowflake id is about 11 characters, which is longer but needs no coordination.
+
+131
+00:10:13.539 --> 00:10:14.414
+Question.
+
+132
+00:10:14.694 --> 00:10:16.678
+How would you expire links and clean up?
+
+133
+00:10:16.958 --> 00:10:18.323
+Thirty-second answer:
+
+134
+00:10:18.603 --> 00:10:19.862
+Store expiresat.
+
+135
+00:10:20.142 --> 00:10:23.939
+The redirect path checks it (and the cache TTL is capped at it).
+
+136
+00:10:24.219 --> 00:10:29.937
+A background job or DynamoDB or Cassandra TTL deletes expired rows.
+
+137
+00:10:30.217 --> 00:10:34.675
+Don't reuse codes for a long time after they expire, to avoid confusion.
+
+138
+00:10:36.025 --> 00:10:37.625
+That's the end of this chapter.
+
+139
+00:10:37.905 --> 00:10:43.943
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+140
+00:10:44.223 --> 00:10:45.673
+See you in the next chapter.
+

@@ -1,0 +1,3270 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:04.449
+Grocery Checkout and Inventory Reservation.
+
+3
+00:00:04.729 --> 00:00:08.953
+Chapter 46, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:10.703 --> 00:00:11.663
+At a glance:
+
+5
+00:00:11.943 --> 00:00:13.116
+Chapter at a glance.
+
+6
+00:00:13.396 --> 00:00:14.399
+Reader bands:
+
+7
+00:00:14.679 --> 00:00:16.961
+B2, then B4, Prerequisites:
+
+8
+00:00:17.241 --> 00:00:26.863
+Ch 02 (hot-SKU estimate), Ch 05, Ch 13 (checkout saga), Ch 18, Ch 45, What you will build:
+
+9
+00:00:27.143 --> 00:00:43.825
+The grocery checkout: cart, then price and promo validation, then stock reservation in the customer's dark store, then payment, then order confirmation, with reservations that expire, dark-store stock that doesn't match the shelf, and 8 pm flash sales.
+
+10
+00:00:44.105 --> 00:00:59.145
+Earlier chapters deferred the hard parts here: the national single-SKU deal on one hot row (Ch 02, Ch 05), bucketing and a Redis front-gate, and checkout re-validates availability (Ch 22).
+
+11
+00:00:59.425 --> 00:01:03.969
+L1: the 1 rupeesonion deal (real PostgreSQL + Redis).
+
+12
+00:01:04.249 --> 00:01:08.324
+5,000 units, 20,000 attempts, 64 workers.
+
+13
+00:01:09.674 --> 00:01:19.594
+One row with an atomic conditional UPDATE sold out in 6.1 s (~820 per second, p99 254 ms).
+
+14
+00:01:19.874 --> 00:01:21.581
+SELECT FOR UPDATE was slower.
+
+15
+00:01:21.861 --> 00:01:26.789
+16 buckets sold out 4.7x faster (1.29 s).
+
+16
+00:01:27.069 --> 00:01:30.653
+Without a sold-out flag, though, the losers probed every bucket:
+
+17
+00:01:30.933 --> 00:01:35.391
+245,489 DB transactions.
+
+18
+00:01:35.671 --> 00:01:41.218
+A Redis front-gate kept the database to 5,000 transactions, yet sold out no faster.
+
+19
+00:01:41.498 --> 00:01:43.631
+All four designs oversold 0.
+
+20
+00:01:43.911 --> 00:01:45.895
+L2: how long to hold stock.
+
+21
+00:01:46.175 --> 00:01:50.698
+A flash sale of 10,000 boxes for 25,000 customers.
+
+22
+00:01:52.048 --> 00:02:00.987
+A 30-minute hold left 1,621 boxes unsold while 10,897 customers were told sold out.
+
+23
+00:02:01.267 --> 00:02:07.603
+A 3-minute hold sold everything but charged 460 slow payers for boxes already gone.
+
+24
+00:02:07.883 --> 00:02:16.736
+Holding 3 minutes and extending to 15 once payment starts sold 9,993 with 123 late captures.
+
+25
+00:02:17.016 --> 00:02:18.637
+L3: phantom stock.
+
+26
+00:02:18.917 --> 00:02:24.229
+Recorded stock overstated the shelf by 1,619 units in one day.
+
+27
+00:02:24.509 --> 00:02:29.715
+Selling to recorded stock left 3.91% of orders with a missing item.
+
+28
+00:02:31.065 --> 00:02:37.721
+A flat 2-unit buffer cut that to 1.23% but hid 2,160 real units.
+
+29
+00:02:38.001 --> 00:02:48.667
+A per-SKU buffer learned from pick failures, plus correcting the record on a failed pick, reached 0.40%, hiding 1,509 units.
+
+30
+00:02:48.947 --> 00:02:54.835
+L4: the 8 pm crowd, end to end (real HTTP + PostgreSQL).
+
+31
+00:02:55.115 --> 00:02:59.169
+8,000 customers arrived in 2 s for 2,000 boxes.
+
+32
+00:02:59.449 --> 00:03:10.115
+With no admission control, 7,575 got no answer in 25 s, and 1,838 buyers never heard that they'd bought.
+
+33
+00:03:11.465 --> 00:03:19.060
+A fast-503 limit answered everyone, but only 31% of buyers were among the first 2,000 to arrive.
+
+34
+00:03:19.340 --> 00:03:25.441
+A virtual waiting room answered everyone, and 92% of buyers were among the first 2,000.
+
+35
+00:03:25.721 --> 00:03:26.703
+Reading time:
+
+36
+00:03:26.983 --> 00:03:28.775
+110 min + code.
+
+37
+00:03:30.125 --> 00:03:30.978
+Part 1.
+
+38
+00:03:31.258 --> 00:03:33.178
+Introduction and Why It Matters.
+
+39
+00:03:34.428 --> 00:03:35.345
+A story:
+
+40
+00:03:35.625 --> 00:03:37.119
+Diwali at 8 pm.
+
+41
+00:03:37.399 --> 00:03:43.479
+Marketing announced 1 rupeesonions, 5,000 kg, 8 pm tonight across India.
+
+42
+00:03:43.759 --> 00:03:47.321
+The checkout team had load-tested for 3x normal traffic.
+
+43
+00:03:47.601 --> 00:03:49.991
+At 8:00:00:
+
+44
+00:03:50.271 --> 00:03:52.809
+One row became the whole company's bottleneck.
+
+45
+00:03:53.089 --> 00:03:56.759
+Every checkout with onions tried to decrement the same stock row.
+
+46
+00:03:57.039 --> 00:04:04.697
+Checkouts for customers who didn't even want onions slowed down, because the connection pool was full of transactions queued on that row.
+
+47
+00:04:04.977 --> 00:04:06.684
+Timeouts turned into retries.
+
+48
+00:04:06.964 --> 00:04:11.700
+Apps timed out after 3 seconds and retried; the retries joined the same queue.
+
+49
+00:04:11.980 --> 00:04:17.015
+The service was busy completing checkouts for people who had already given up and tapped again.
+
+50
+00:04:18.365 --> 00:04:20.157
+Sold out while carts held stock.
+
+51
+00:04:20.437 --> 00:04:24.383
+The first 5,000 checkouts reserved onions for 30 minutes.
+
+52
+00:04:24.663 --> 00:04:32.109
+Thousands abandoned, but their reservations kept the onions off sale until 8:30, long after the crowd had left.
+
+53
+00:04:32.389 --> 00:04:33.626
+Charged for nothing.
+
+54
+00:04:33.906 --> 00:04:41.863
+Customers whose UPI app took a long time paid after their reservation had expired and the onions had gone to someone else.
+
+55
+00:04:42.143 --> 00:04:43.679
+Missing items at the door.
+
+56
+00:04:43.959 --> 00:04:47.159
+For fresh produce, recorded stock overstated the shelf.
+
+57
+00:04:47.439 --> 00:04:53.498
+Pickers couldn't find items that checkout had happily sold; customers got partial orders and refunds.
+
+58
+00:04:54.848 --> 00:04:55.595
+Unfair.
+
+59
+00:04:55.875 --> 00:04:59.651
+Who got the deal depended on retry timing, not on who came first.
+
+60
+00:04:59.931 --> 00:05:01.467
+Social media noticed.
+
+61
+00:05:01.747 --> 00:05:15.613
+This chapter designs the checkout that survives 8 pm: fast and correct stock reservation under contention, reservations with sensible lifetimes, honesty about physical stock, and admission control that is fair.
+
+62
+00:05:16.963 --> 00:05:17.646
+Quote:
+
+63
+00:05:17.926 --> 00:05:19.590
+The thesis of this chapter.
+
+64
+00:05:19.870 --> 00:05:26.590
+Checkout is where scarce physical stock meets unbounded demand, and every design choice decides who gets what.
+
+65
+00:05:26.870 --> 00:05:37.387
+Contention on hot items is solved by spreading the lock (buckets), keeping losers away from the database (a gate) and never holding locks across round trips (L1).
+
+66
+00:05:37.667 --> 00:05:46.393
+Reservations are leases with a business-chosen lifetime; extend on evidence of intent, and handle late payments explicitly (L2).
+
+67
+00:05:46.673 --> 00:05:53.478
+Recorded stock is an estimate of the shelf; buffer where it's wrong and correct it from the picker's feedback (L3).
+
+68
+00:05:53.758 --> 00:06:00.051
+And under a crowd, admission control decides both whether the system survives and whether it's fair (L4).
+
+69
+00:06:01.401 --> 00:06:03.705
+Where this lives in the grocery platform.
+
+70
+00:06:03.985 --> 00:06:05.351
+Here is a quick table:
+
+71
+00:06:05.631 --> 00:06:07.273
+Step, and Service, and Notes.
+
+72
+00:06:07.553 --> 00:06:08.279
+Cart.
+
+73
+00:06:08.559 --> 00:06:09.391
+Service:
+
+74
+00:06:09.671 --> 00:06:10.695
+Cart service.
+
+75
+00:06:10.975 --> 00:06:11.785
+Notes:
+
+76
+00:06:12.065 --> 00:06:14.668
+Per customer; prices shown are indicative.
+
+77
+00:06:14.948 --> 00:06:15.865
+Validate.
+
+78
+00:06:16.145 --> 00:06:16.977
+Service:
+
+79
+00:06:17.257 --> 00:06:19.561
+Pricing, promotions, serviceability.
+
+80
+00:06:19.841 --> 00:06:20.652
+Notes:
+
+81
+00:06:20.932 --> 00:06:24.111
+Final prices, coupon budgets, slot availability.
+
+82
+00:06:24.391 --> 00:06:25.223
+Reserve.
+
+83
+00:06:25.503 --> 00:06:26.335
+Service:
+
+84
+00:06:26.615 --> 00:06:28.705
+Inventory service (per dark store).
+
+85
+00:06:28.985 --> 00:06:29.796
+Notes:
+
+86
+00:06:30.076 --> 00:06:32.380
+Leases on stock units; TTL.
+
+87
+00:06:32.660 --> 00:06:33.343
+Pay.
+
+88
+00:06:33.623 --> 00:06:34.455
+Service:
+
+89
+00:06:34.735 --> 00:06:36.953
+Payment service (Ch 45).
+
+90
+00:06:37.233 --> 00:06:38.044
+Notes:
+
+91
+00:06:38.324 --> 00:06:40.137
+Idempotent, webhook-driven.
+
+92
+00:06:40.417 --> 00:06:41.228
+Confirm.
+
+93
+00:06:41.508 --> 00:06:42.340
+Service:
+
+94
+00:06:42.620 --> 00:06:43.665
+Order service.
+
+95
+00:06:43.945 --> 00:06:44.756
+Notes:
+
+96
+00:06:45.036 --> 00:06:49.004
+Outbox events, then fulfilment, notifications (Ch 40).
+
+97
+00:06:49.284 --> 00:06:50.287
+Pick and pack.
+
+98
+00:06:50.567 --> 00:06:51.399
+Service:
+
+99
+00:06:51.679 --> 00:06:52.745
+Dark-store app.
+
+100
+00:06:53.025 --> 00:06:53.836
+Notes:
+
+101
+00:06:54.116 --> 00:06:57.273
+Reports missing items, then inventory corrections.
+
+102
+00:06:58.623 --> 00:07:08.949
+The checkout is a saga (Ch 13): reserve, then pay, then confirm, with compensations (release the reservation, refund) on failure or expiry.
+
+103
+00:07:10.299 --> 00:07:11.621
+Learning objectives.
+
+104
+00:07:11.901 --> 00:07:13.779
+By the end you will be able to:
+
+105
+00:07:14.059 --> 00:07:21.419
+Reserve stock correctly under extreme contention and choose between single rows, buckets, gates and queues (L1).
+
+106
+00:07:21.699 --> 00:07:25.603
+Design reservation lifetimes and the late-payment path (L2).
+
+107
+00:07:25.883 --> 00:07:31.045
+Handle inventory inaccuracy with learned buffers and feedback from picking (L3).
+
+108
+00:07:31.325 --> 00:07:35.336
+Protect checkout with admission control and a fair waiting room (L4).
+
+109
+00:07:36.686 --> 00:07:42.617
+Assemble the checkout saga with idempotency, price and promo consistency, and failure handling.
+
+110
+00:07:43.967 --> 00:07:44.841
+Part 2.
+
+111
+00:07:45.121 --> 00:07:47.020
+Core Concepts, Beginner to Deep.
+
+112
+00:07:48.270 --> 00:07:51.342
+Intuition: a counter with a limited batch of sweets.
+
+113
+00:07:51.622 --> 00:07:54.587
+A sweet shop has 5,000 boxes of a special.
+
+114
+00:07:54.867 --> 00:07:57.982
+If everyone crowds one counter, the queue is the counter.
+
+115
+00:07:58.262 --> 00:08:05.771
+Open 16 counters with a share of boxes each and the crowd moves faster, but sold out means asking every counter.
+
+116
+00:08:06.051 --> 00:08:12.878
+Put a guard at the door with a clicker who stops letting people in after 5,000, and the counters never see the crowd.
+
+117
+00:08:13.158 --> 00:08:16.337
+Give each buyer a few minutes to pay before the box goes back.
+
+118
+00:08:16.617 --> 00:08:22.121
+And remember that the shop's ledger may say 5,000 while a few boxes were dropped in the back.
+
+119
+00:08:23.471 --> 00:08:24.431
+Requirements.
+
+120
+00:08:24.711 --> 00:08:25.564
+Functional.
+
+121
+00:08:25.844 --> 00:08:35.081
+Checkout validates prices, promotions and delivery slot; reserves every line item in the customer's dark store; takes payment; confirms the order.
+
+122
+00:08:35.361 --> 00:08:41.271
+Partial availability: offer to proceed without unavailable items or suggest substitutes.
+
+123
+00:08:41.551 --> 00:08:45.049
+Reservations expire; abandoned checkouts release stock.
+
+124
+00:08:45.329 --> 00:08:48.252
+Flash sales with per-customer limits and fair access.
+
+125
+00:08:48.532 --> 00:08:49.641
+Non-functional.
+
+126
+00:08:50.991 --> 00:08:56.325
+Never oversell a reserved item beyond recorded stock; minimise shortfalls at picking.
+
+127
+00:08:56.605 --> 00:09:02.898
+Latency: checkout p99 1 s in normal load; graceful and fair under flash crowds.
+
+128
+00:09:03.178 --> 00:09:11.882
+Throughput: ~850 checkouts per second at normal peak (Ch 02); flash sales far above that on a few SKUs.
+
+129
+00:09:12.162 --> 00:09:16.855
+Availability: a hot SKU must not take down checkout for everything else.
+
+130
+00:09:18.205 --> 00:09:19.251
+Estimation.
+
+131
+00:09:19.531 --> 00:09:20.896
+Here is a quick table:
+
+132
+00:09:21.176 --> 00:09:22.605
+Quantity, and Estimate.
+
+133
+00:09:22.885 --> 00:09:30.139
+Checkouts at evening peak: ~850 per second nationally, spread over ~300 dark stores.
+
+134
+00:09:30.419 --> 00:09:31.827
+Per store per SKU:
+
+135
+00:09:32.107 --> 00:09:34.859
+Usually a few per second, row locks are fine.
+
+136
+00:09:35.139 --> 00:09:42.904
+National flash deal: ~250 per second+ on one SKU if stock is national (Ch 02).
+
+137
+00:09:43.184 --> 00:09:52.805
+Single-row lock throughput: ~800 reservations per second with a short transaction on the sandbox (L1); lower with longer transactions.
+
+138
+00:09:53.085 --> 00:09:54.728
+Reservations outstanding:
+
+139
+00:09:55.008 --> 00:09:57.035
+Checkouts per second times TTL:
+
+140
+00:09:57.315 --> 00:10:01.901
+850 per second times 10 min about 500k leases.
+
+141
+00:10:03.251 --> 00:10:06.494
+The ordinary case is easy because stock is per store.
+
+142
+00:10:06.774 --> 00:10:13.494
+The flash sale is hard because it concentrates demand on one row and brings a crowd far above normal load.
+
+143
+00:10:14.844 --> 00:10:16.743
+Reserving stock under contention.
+
+144
+00:10:17.023 --> 00:10:24.532
+L1 ran 20,000 attempts at 5,000 units from 64 workers against real PostgreSQL:
+
+145
+00:10:25.882 --> 00:10:27.247
+Here is a quick table:
+
+146
+00:10:27.527 --> 00:10:34.781
+Design, and Sold out in, and Reservations per second, and p99, and Oversold, and DB transactions.
+
+147
+00:10:35.061 --> 00:10:37.407
+One row, atomic conditional UPDATE.
+
+148
+00:10:37.687 --> 00:10:38.733
+Sold out in:
+
+149
+00:10:39.013 --> 00:10:40.677
+6.08 s.
+
+150
+00:10:40.957 --> 00:10:42.471
+Reservations per second:
+
+151
+00:10:42.751 --> 00:10:45.098
+822. p99:
+
+152
+00:10:45.378 --> 00:10:47.042
+254 ms.
+
+153
+00:10:47.322 --> 00:10:48.261
+Oversold:
+
+154
+00:10:48.541 --> 00:10:49.287
+0.
+
+155
+00:10:49.567 --> 00:10:50.954
+DB transactions:
+
+156
+00:10:51.234 --> 00:10:52.322
+20,000.
+
+157
+00:10:52.602 --> 00:10:54.970
+One row, SELECT FOR UPDATE then UPDATE.
+
+158
+00:10:55.250 --> 00:10:56.295
+Sold out in:
+
+159
+00:10:56.575 --> 00:10:58.069
+6.89 s.
+
+160
+00:10:58.349 --> 00:10:59.863
+Reservations per second:
+
+161
+00:11:00.143 --> 00:11:02.682
+726. p99:
+
+162
+00:11:02.962 --> 00:11:04.711
+299 ms.
+
+163
+00:11:04.991 --> 00:11:05.930
+Oversold:
+
+164
+00:11:06.210 --> 00:11:06.957
+0.
+
+165
+00:11:07.237 --> 00:11:08.623
+DB transactions:
+
+166
+00:11:08.903 --> 00:11:09.991
+20,000.
+
+167
+00:11:10.271 --> 00:11:11.509
+16 buckets.
+
+168
+00:11:11.789 --> 00:11:12.834
+Sold out in:
+
+169
+00:11:13.114 --> 00:11:14.565
+1.29 s.
+
+170
+00:11:14.845 --> 00:11:16.359
+Reservations per second:
+
+171
+00:11:16.639 --> 00:11:19.861
+3,864. p99:
+
+172
+00:11:20.141 --> 00:11:21.741
+107 ms.
+
+173
+00:11:22.021 --> 00:11:22.959
+Oversold:
+
+174
+00:11:23.239 --> 00:11:23.986
+0.
+
+175
+00:11:24.266 --> 00:11:25.653
+DB transactions:
+
+176
+00:11:25.933 --> 00:11:29.026
+245,489.
+
+177
+00:11:29.306 --> 00:11:31.311
+Redis front-gate + DB write.
+
+178
+00:11:31.591 --> 00:11:32.637
+Sold out in:
+
+179
+00:11:32.917 --> 00:11:34.623
+5.90 s.
+
+180
+00:11:34.903 --> 00:11:36.418
+Reservations per second:
+
+181
+00:11:36.698 --> 00:11:39.023
+848. p99:
+
+182
+00:11:39.303 --> 00:11:40.775
+250 ms.
+
+183
+00:11:41.055 --> 00:11:41.994
+Oversold:
+
+184
+00:11:42.274 --> 00:11:43.021
+0.
+
+185
+00:11:43.301 --> 00:11:44.687
+DB transactions:
+
+186
+00:11:44.967 --> 00:11:46.098
+5,000.
+
+187
+00:11:47.448 --> 00:11:49.603
+Atomic conditional update (UPDATE...
+
+188
+00:11:49.883 --> 00:11:58.843
+SET qty = qty minus 1 WHERE qty 0) is correct and minimal: the check and the write are one statement.
+
+189
+00:11:59.123 --> 00:12:01.896
+Holding a row lock across round trips (SELECT...
+
+190
+00:12:02.176 --> 00:12:04.693
+FOR UPDATE, then UPDATE) lengthens the queue.
+
+191
+00:12:04.973 --> 00:12:13.656
+Buckets split stock into N rows; each reservation picks one (randomly or by customer hash) and falls back to others when it's empty.
+
+192
+00:12:13.936 --> 00:12:15.621
+Lock throughput scales with N.
+
+193
+00:12:15.901 --> 00:12:19.165
+The cost: deciding sold out means checking every bucket.
+
+194
+00:12:19.445 --> 00:12:29.621
+Cache a sold-out flag (or a total counter) once all buckets reach zero, or losers keep probing, as L1's 245k transactions show.
+
+195
+00:12:29.901 --> 00:12:33.379
+Rebalance buckets near the end so no bucket strands stock.
+
+196
+00:12:34.729 --> 00:12:42.899
+A Redis gate (Lua decrement-if-positive) answers winners and losers in microseconds and keeps losers away from the database.
+
+197
+00:12:43.179 --> 00:12:51.137
+It is a second copy of the count: seed it from the database, and reconcile it, because a crash between gate and database leaks stock.
+
+198
+00:12:51.417 --> 00:12:56.430
+It doesn't speed up the winners, who still queue on the database row, combine it with buckets.
+
+199
+00:12:56.710 --> 00:13:04.795
+Queued reservations: put reservation requests on a partitioned queue and have a single consumer per SKU apply them in order.
+
+200
+00:13:05.075 --> 00:13:08.617
+That's throughput without lock contention, with asynchronous answers.
+
+201
+00:13:09.967 --> 00:13:19.908
+Keep the reservation transaction tiny: no payment calls, no remote calls, only the stock decrement and the reservation insert (Ch 05).
+
+202
+00:13:21.258 --> 00:13:22.879
+Reservations as leases.
+
+203
+00:13:23.159 --> 00:13:28.194
+A reservation is a lease: stock held for a customer until an expiry time.
+
+204
+00:13:28.474 --> 00:13:29.882
+Model it explicitly:
+
+205
+00:13:31.232 --> 00:13:32.832
+Here is the SQL code.
+
+206
+00:13:35.682 --> 00:13:45.175
+Expiry: a sweeper returns expired HELD quantities to stock (in the same transaction as the status change), plus lazy checks at confirmation.
+
+207
+00:13:45.455 --> 00:13:51.770
+Confirmation: payment captured, then reservation CONFIRMED (idempotently, Ch 45).
+
+208
+00:13:52.050 --> 00:13:54.994
+Late capture: payment arrives after expiry.
+
+209
+00:13:55.274 --> 00:13:58.303
+If stock is still available, re-reserve and confirm.
+
+210
+00:13:58.583 --> 00:14:02.786
+Otherwise auto-refund and tell the customer; never silently oversell.
+
+211
+00:14:03.066 --> 00:14:11.813
+L2 simulated a flash sale with 60% payers (median 90 s, 5% over 10 minutes) and 40% abandoners:
+
+212
+00:14:13.163 --> 00:14:14.528
+Here is a quick table:
+
+213
+00:14:14.808 --> 00:14:23.576
+Policy, and Sold (of 10,000), and Turned away while stock sat in abandoned carts, and Late captures refunded, and Unsold at end.
+
+214
+00:14:23.856 --> 00:14:25.008
+Hold 30 min.
+
+215
+00:14:25.288 --> 00:14:26.760
+Sold (of 10,000):
+
+216
+00:14:27.040 --> 00:14:29.259
+8,379.
+
+217
+00:14:29.539 --> 00:14:31.928
+Turned away while stock sat in abandoned carts:
+
+218
+00:14:32.208 --> 00:14:34.320
+10,897.
+
+219
+00:14:34.600 --> 00:14:36.179
+Late captures refunded:
+
+220
+00:14:36.459 --> 00:14:37.205
+0.
+
+221
+00:14:37.485 --> 00:14:38.637
+Unsold at end:
+
+222
+00:14:38.917 --> 00:14:40.987
+1,621.
+
+223
+00:14:41.267 --> 00:14:42.376
+Hold 10 min.
+
+224
+00:14:42.656 --> 00:14:44.128
+Sold (of 10,000):
+
+225
+00:14:44.408 --> 00:14:46.307
+9,830.
+
+226
+00:14:46.587 --> 00:14:48.976
+Turned away while stock sat in abandoned carts:
+
+227
+00:14:49.256 --> 00:14:50.707
+8,100.
+
+228
+00:14:50.987 --> 00:14:52.565
+Late captures refunded:
+
+229
+00:14:52.845 --> 00:14:53.933
+202.
+
+230
+00:14:54.213 --> 00:14:55.365
+Unsold at end:
+
+231
+00:14:55.645 --> 00:14:56.989
+170.
+
+232
+00:14:57.269 --> 00:14:58.379
+Hold 3 min.
+
+233
+00:14:58.659 --> 00:15:00.131
+Sold (of 10,000):
+
+234
+00:15:00.411 --> 00:15:01.413
+10,000.
+
+235
+00:15:01.693 --> 00:15:04.083
+Turned away while stock sat in abandoned carts:
+
+236
+00:15:04.363 --> 00:15:06.560
+7,417.
+
+237
+00:15:06.840 --> 00:15:08.419
+Late captures refunded:
+
+238
+00:15:08.699 --> 00:15:09.979
+460.
+
+239
+00:15:10.259 --> 00:15:11.411
+Unsold at end:
+
+240
+00:15:11.691 --> 00:15:12.437
+0.
+
+241
+00:15:12.717 --> 00:15:15.448
+3 min, extend to 15 when payment starts.
+
+242
+00:15:15.728 --> 00:15:17.200
+Sold (of 10,000):
+
+243
+00:15:17.480 --> 00:15:19.571
+9,993.
+
+244
+00:15:19.851 --> 00:15:22.240
+Turned away while stock sat in abandoned carts:
+
+245
+00:15:22.520 --> 00:15:24.760
+7,964.
+
+246
+00:15:25.040 --> 00:15:26.619
+Late captures refunded:
+
+247
+00:15:26.899 --> 00:15:28.328
+123.
+
+248
+00:15:28.608 --> 00:15:29.760
+Unsold at end:
+
+249
+00:15:30.040 --> 00:15:30.787
+7.
+
+250
+00:15:32.137 --> 00:15:37.449
+The TTL is a business trade between stranded stock and disappointed slow payers.
+
+251
+00:15:37.729 --> 00:15:43.211
+Extending on evidence of intent (the customer entered the payment flow) gets most of both.
+
+252
+00:15:43.491 --> 00:15:47.438
+Normal days tolerate longer holds; flash sales need short ones.
+
+253
+00:15:48.788 --> 00:15:51.135
+Physical stock versus recorded stock.
+
+254
+00:15:51.415 --> 00:15:54.316
+Recorded stock is an estimate of what's on the shelf.
+
+255
+00:15:54.596 --> 00:16:00.207
+Fresh produce, damage, misplacement and wastage make it wrong in one direction: phantom units.
+
+256
+00:16:00.487 --> 00:16:03.004
+L3 simulated a day in a dark store:
+
+257
+00:16:04.354 --> 00:16:05.719
+Here is a quick table:
+
+258
+00:16:05.999 --> 00:16:11.781
+Policy, and Orders with a missing item, and Units on the shelf hidden by the buffer, and Items sold.
+
+259
+00:16:12.061 --> 00:16:13.490
+Sell to recorded stock.
+
+260
+00:16:13.770 --> 00:16:15.349
+Orders with a missing item:
+
+261
+00:16:15.629 --> 00:16:17.314
+3.91%.
+
+262
+00:16:17.594 --> 00:16:19.642
+Units on the shelf hidden by the buffer:
+
+263
+00:16:19.922 --> 00:16:20.669
+0.
+
+264
+00:16:20.949 --> 00:16:22.037
+Items sold:
+
+265
+00:16:22.317 --> 00:16:25.111
+160,720.
+
+266
+00:16:25.391 --> 00:16:27.781
+Hide the last 2 units of every SKU.
+
+267
+00:16:28.061 --> 00:16:29.639
+Orders with a missing item:
+
+268
+00:16:29.919 --> 00:16:31.455
+1.23%.
+
+269
+00:16:31.735 --> 00:16:33.783
+Units on the shelf hidden by the buffer:
+
+270
+00:16:34.063 --> 00:16:35.877
+2,160.
+
+271
+00:16:36.157 --> 00:16:37.245
+Items sold:
+
+272
+00:16:37.525 --> 00:16:40.255
+158,680.
+
+273
+00:16:40.535 --> 00:16:43.223
+Per-SKU buffer from last week's pick failures.
+
+274
+00:16:43.503 --> 00:16:45.082
+Orders with a missing item:
+
+275
+00:16:45.362 --> 00:16:47.325
+0.50%.
+
+276
+00:16:47.605 --> 00:16:49.653
+Units on the shelf hidden by the buffer:
+
+277
+00:16:49.933 --> 00:16:51.725
+1,509.
+
+278
+00:16:52.005 --> 00:16:53.093
+Items sold:
+
+279
+00:16:53.373 --> 00:16:59.282
+159,267. + correct the record when a pick fails.
+
+280
+00:16:59.562 --> 00:17:01.141
+Orders with a missing item:
+
+281
+00:17:01.421 --> 00:17:03.319
+0.40%.
+
+282
+00:17:03.599 --> 00:17:05.647
+Units on the shelf hidden by the buffer:
+
+283
+00:17:05.927 --> 00:17:07.719
+1,509.
+
+284
+00:17:07.999 --> 00:17:09.087
+Items sold:
+
+285
+00:17:09.367 --> 00:17:12.738
+159,267.
+
+286
+00:17:14.088 --> 00:17:21.533
+Learn buffers per SKU from pick failures and cycle counts: large for fresh produce, near zero for packaged goods.
+
+287
+00:17:21.813 --> 00:17:32.181
+Close the loop: when a picker reports an item missing, correct recorded stock immediately (and trigger a cycle count), so the next checkout doesn't sell the same phantom unit.
+
+288
+00:17:32.461 --> 00:17:33.763
+Buffers cost sales.
+
+289
+00:17:34.043 --> 00:17:40.571
+The right level is a business trade between refunds and support contacts on one side, and hidden stock on the other.
+
+290
+00:17:40.851 --> 00:17:47.251
+Offer substitutions at checkout for low-confidence items (if unavailable, replace with a similar item?).
+
+291
+00:17:48.601 --> 00:17:50.841
+Admission control and the waiting room.
+
+292
+00:17:51.121 --> 00:17:53.873
+A flash crowd far exceeds checkout capacity.
+
+293
+00:17:54.153 --> 00:18:00.937
+L4 sent 8,000 customers in 2 seconds at a real checkout service with 10 database connections:
+
+294
+00:18:02.287 --> 00:18:03.652
+Here is a quick table:
+
+295
+00:18:03.932 --> 00:18:13.127
+Design, and Bought, and Told sold out, and No answer in 25 s, and Answer p99, and Buyers among the first 2,000 to arrive.
+
+296
+00:18:13.407 --> 00:18:14.815
+No admission control.
+
+297
+00:18:15.095 --> 00:18:15.884
+Bought:
+
+298
+00:18:16.164 --> 00:18:21.028
+162 (+1,838 who never heard back).
+
+299
+00:18:21.308 --> 00:18:22.396
+Told sold out:
+
+300
+00:18:22.676 --> 00:18:24.105
+263.
+
+301
+00:18:24.385 --> 00:18:26.220
+No answer in 25 s:
+
+302
+00:18:26.500 --> 00:18:28.996
+7,575.
+
+303
+00:18:29.276 --> 00:18:30.684
+Answer p99:
+
+304
+00:18:30.964 --> 00:18:32.436
+24.8 s.
+
+305
+00:18:32.716 --> 00:18:35.084
+Buyers among the first 2,000 to arrive:
+
+306
+00:18:35.364 --> 00:18:36.644
+43%.
+
+307
+00:18:36.924 --> 00:18:40.487
+40 in flight, fast 503 + Retry-After.
+
+308
+00:18:40.767 --> 00:18:41.556
+Bought:
+
+309
+00:18:41.836 --> 00:18:42.817
+2,000.
+
+310
+00:18:43.097 --> 00:18:44.185
+Told sold out:
+
+311
+00:18:44.465 --> 00:18:45.575
+6,000.
+
+312
+00:18:45.855 --> 00:18:47.689
+No answer in 25 s:
+
+313
+00:18:47.969 --> 00:18:48.716
+0.
+
+314
+00:18:48.996 --> 00:18:50.404
+Answer p99:
+
+315
+00:18:50.684 --> 00:18:52.007
+9.5 s.
+
+316
+00:18:52.287 --> 00:18:54.655
+Buyers among the first 2,000 to arrive:
+
+317
+00:18:54.935 --> 00:18:56.172
+31%.
+
+318
+00:18:56.452 --> 00:18:59.631
+Virtual waiting room, 300 per second FIFO.
+
+319
+00:18:59.911 --> 00:19:00.700
+Bought:
+
+320
+00:19:00.980 --> 00:19:01.961
+2,000.
+
+321
+00:19:02.241 --> 00:19:03.329
+Told sold out:
+
+322
+00:19:03.609 --> 00:19:04.719
+6,000.
+
+323
+00:19:04.999 --> 00:19:06.833
+No answer in 25 s:
+
+324
+00:19:07.113 --> 00:19:07.860
+0.
+
+325
+00:19:08.140 --> 00:19:09.548
+Answer p99:
+
+326
+00:19:09.828 --> 00:19:11.172
+9.9 s.
+
+327
+00:19:11.452 --> 00:19:13.820
+Buyers among the first 2,000 to arrive:
+
+328
+00:19:14.100 --> 00:19:15.359
+92%.
+
+329
+00:19:16.709 --> 00:19:26.565
+No admission control: requests queue for connections inside the service, clients time out and retry, and the service does work for people who have already given up.
+
+330
+00:19:26.845 --> 00:19:31.239
+1,838 customers bought a box and never learned it.
+
+331
+00:19:31.519 --> 00:19:41.781
+Load shedding (a concurrency limit with a fast 503) saves the service (Ch 18), but the winners are whoever's retry lands at the right moment.
+
+332
+00:19:43.131 --> 00:19:48.933
+A waiting room hands out tickets in arrival order and admits them at a rate the backend can sustain.
+
+333
+00:19:49.213 --> 00:19:54.824
+The database sees a steady load, every customer has a position, and first come is first served.
+
+334
+00:19:55.104 --> 00:20:05.131
+Real waiting rooms add a pre-queue before the sale starts (randomised order among early arrivals), per-customer limits, and bot protection (Ch 39).
+
+335
+00:20:05.411 --> 00:20:11.064
+Idempotent checkout: a customer's retry must return their existing order, not sold out.
+
+336
+00:20:12.414 --> 00:20:14.846
+Prices, promotions and coupon budgets.
+
+337
+00:20:15.126 --> 00:20:22.934
+The cart shows indicative prices; checkout recomputes with the current price list and promotions and shows changes before payment.
+
+338
+00:20:23.214 --> 00:20:36.931
+Coupon budgets (first 10,000 orders get 100 rupeesoff) are another hot counter: use the same techniques (atomic decrement, buckets, gates) and reserve the budget with the order, releasing it on expiry.
+
+339
+00:20:37.211 --> 00:20:46.833
+Snapshot the final price, tax and promo per line into the order (immutable) for invoices (Ch 36) and refunds (Ch 45).
+
+340
+00:20:48.183 --> 00:20:49.399
+The checkout saga.
+
+341
+00:20:49.679 --> 00:20:55.204
+POST or checkout with an idempotency key, then validate cart, prices, promos, slot.
+
+342
+00:20:55.484 --> 00:21:00.604
+Reserve all lines in one transaction per store (or all-or-nothing with compensation).
+
+343
+00:21:00.884 --> 00:21:03.529
+Partial availability, then ask the customer.
+
+344
+00:21:03.809 --> 00:21:08.268
+Create the payment (Ch 45) with the checkout id as reference.
+
+345
+00:21:08.548 --> 00:21:16.143
+On payment captured (event), then confirm reservations and create the order (outbox, then fulfilment, notifications).
+
+346
+00:21:16.423 --> 00:21:23.313
+On failure, abandonment or expiry, then release reservations; late capture, then re-reserve or refund.
+
+347
+00:21:24.663 --> 00:21:32.173
+Everything keyed by checkout id; every step idempotent; stuck sagas surface as NEEDSATTENTION (Ch 13).
+
+348
+00:21:33.523 --> 00:21:34.653
+Interview framing.
+
+349
+00:21:34.933 --> 00:21:36.235
+Draw the saga first.
+
+350
+00:21:36.515 --> 00:21:44.941
+Then go deep on stock reservation under contention with the options table, and on the reservation lease (TTL trade-off, late captures).
+
+351
+00:21:45.221 --> 00:21:58.085
+Staff-level signals: phantom inventory and feedback from picking, admission control and fairness, idempotent retries returning the original outcome, and keeping payment calls out of database transactions.
+
+352
+00:21:59.435 --> 00:22:00.331
+Part 3.
+
+353
+00:22:00.611 --> 00:22:02.339
+Architecture and Diagrams.
+
+354
+00:22:03.589 --> 00:22:04.656
+Component view.
+
+355
+00:22:04.936 --> 00:22:06.280
+Here is the diagram.
+
+356
+00:22:10.130 --> 00:22:13.223
+Sequence: happy path, checkout with a hot SKU.
+
+357
+00:22:13.503 --> 00:22:16.170
+The sequence diagram walks through it step by step.
+
+358
+00:22:16.450 --> 00:22:17.303
+A to C:
+
+359
+00:22:17.583 --> 00:22:21.274
+POST checkout, key ck-5521.
+
+360
+00:22:21.554 --> 00:22:24.285
+C to C: recompute prices and promos.
+
+361
+00:22:24.565 --> 00:22:29.066
+C to I: reserve onion x1, milk x2 in store 17.
+
+362
+00:22:29.346 --> 00:22:32.461
+I to G: gate onion - decrement if positive.
+
+363
+00:22:32.741 --> 00:22:34.255
+G to I: admitted.
+
+364
+00:22:34.535 --> 00:22:42.685
+I to D: update bucket 9 qty minus 1 where qty positive, insert reservation expires in 3 min.
+
+365
+00:22:42.965 --> 00:22:44.458
+D to I: reserved.
+
+366
+00:22:44.738 --> 00:22:48.045
+I to C: reservation r-771.
+
+367
+00:22:48.325 --> 00:22:53.551
+C to P: create payment, reference ck-5521.
+
+368
+00:22:53.831 --> 00:22:56.114
+P to A: open UPI intent.
+
+369
+00:22:56.394 --> 00:22:58.463
+A to P: customer starts paying.
+
+370
+00:22:58.743 --> 00:23:02.669
+P to C: payment started - extend reservation to 15 min.
+
+371
+00:23:02.949 --> 00:23:04.847
+P to C: payment captured.
+
+372
+00:23:05.127 --> 00:23:10.247
+C to I: confirm r-771. and so on, as shown on screen.
+
+373
+00:23:14.097 --> 00:23:17.532
+Sequence: failure path, late capture after expiry.
+
+374
+00:23:17.812 --> 00:23:20.479
+The sequence diagram walks through it step by step.
+
+375
+00:23:20.759 --> 00:23:25.260
+S to I: reservation r-812 expired, return stock.
+
+376
+00:23:25.540 --> 00:23:29.081
+I to I: status EXPIRED, qty back to bucket.
+
+377
+00:23:29.361 --> 00:23:34.908
+P to C: payment captured for ck-6120, 14 minutes later.
+
+378
+00:23:35.188 --> 00:23:37.599
+C to I: re-reserve the same items.
+
+379
+00:23:37.879 --> 00:23:39.607
+I to C: reserved again.
+
+380
+00:23:39.887 --> 00:23:41.721
+C to C: confirm order.
+
+381
+00:23:42.001 --> 00:23:43.708
+I to C: unavailable.
+
+382
+00:23:43.988 --> 00:23:48.447
+C to P: refund in full, reference ck-6120.
+
+383
+00:23:48.727 --> 00:23:51.799
+C to C: notify customer - sorry, refunded.
+
+384
+00:23:55.649 --> 00:23:57.782
+State: a reservation's lifecycle.
+
+385
+00:23:58.062 --> 00:23:59.406
+Here is the diagram.
+
+386
+00:24:03.256 --> 00:24:04.173
+Part 4.
+
+387
+00:24:04.453 --> 00:24:06.075
+Design Document Excerpt:
+
+388
+00:24:06.355 --> 00:24:08.253
+Checkout and Inventory v2.
+
+389
+00:24:09.503 --> 00:24:10.250
+Note:
+
+390
+00:24:10.530 --> 00:24:14.242
+Design Document (excerpt), Checkout and Inventory v2.
+
+391
+00:24:14.522 --> 00:24:15.418
+Status:
+
+392
+00:24:15.698 --> 00:24:16.978
+Accepted, Authors:
+
+393
+00:24:17.258 --> 00:24:19.541
+Checkout and Inventory teams, Reviewers:
+
+394
+00:24:19.821 --> 00:24:22.573
+Payments, Dark-store ops, Marketing, SRE.
+
+395
+00:24:22.853 --> 00:24:38.810
+Context, Diwali flash sale: one hot row saturated the pool; timeouts and retries amplified load; 30-minute holds stranded stock; late payments charged for sold-out items; phantom stock caused missing items; outcomes were unfair.
+
+396
+00:24:40.160 --> 00:25:01.621
+Decision, Atomic conditional updates with stock buckets for hot SKUs and a Redis gate for flash sales; reservation leases with short TTL extended on payment start and an explicit late-capture path; per-SKU buffers learned from picking plus immediate corrections; waiting room with FIFO admission for flash sales; idempotent checkout.
+
+397
+00:25:02.971 --> 00:25:16.646
+Related ADRs, ADR-320 Reservation = one small transaction: conditional UPDATE + INSERT; no remote calls inside (L1); ADR-321 Hot SKUs:
+
+398
+00:25:16.926 --> 00:25:30.302
+16 buckets, sold-out flag, Redis gate seeded from DB and reconciled every minute (L1); ADR-322 TTL 3 min, extend to 15 min on payment start; late capture,
+
+399
+00:25:30.582 --> 00:25:57.014
+then re-reserve or auto-refund (L2); ADR-323 Per-SKU buffers from 7-day pick failures; picker missing corrects stock and opens a cycle count (L3); ADR-324 Flash sales behind a waiting room admitting at 70% of measured checkout capacity, FIFO with randomised pre-queue (L4); ADR-325 Checkout idempotency key returns the original outcome.
+
+400
+00:25:57.294 --> 00:25:58.254
+Requirements.
+
+401
+00:25:59.604 --> 00:26:05.684
+R1 Zero oversell against recorded stock; missing-item orders 0.5%.
+
+402
+00:26:05.964 --> 00:26:10.487
+R2 Flash sales never degrade checkout for other items (bulkheads).
+
+403
+00:26:10.767 --> 00:26:19.279
+R3 Every customer in a flash sale gets an answer within 30 s; buyers ≥ 90% in arrival order.
+
+404
+00:26:19.559 --> 00:26:23.569
+R4 Late captures refunded automatically within 5 minutes.
+
+405
+00:26:23.849 --> 00:26:30.164
+R5 Stranded stock (held by abandoned checkouts) 5% of flash-sale stock at any time.
+
+406
+00:26:30.444 --> 00:26:31.852
+Decisions in detail.
+
+407
+00:26:33.202 --> 00:26:47.197
+Stock model (ADR-320 or 321). stock(store, sku, bucket, qty CHECK qty = 0); buckets = 1 normally, 16 for configured hot SKUs.
+
+408
+00:26:47.477 --> 00:26:50.058
+Leases (ADR-322).
+
+409
+00:26:50.338 --> 00:26:56.034
+Reservation rows with expiresat; sweeper every 10 s; payment-started events extend.
+
+410
+00:26:56.314 --> 00:26:58.938
+Accuracy (ADR-323).
+
+411
+00:26:59.218 --> 00:27:06.237
+Buffer = ceil(1.5 times daily average misses) per SKU per store; nightly recompute.
+
+412
+00:27:06.517 --> 00:27:09.375
+Waiting room (ADR-324).
+
+413
+00:27:09.655 --> 00:27:14.797
+Edge-hosted queue; tokens signed; admission rate adjusted from checkout latency.
+
+414
+00:27:16.147 --> 00:27:19.197
+Idempotency (ADR-325).
+
+415
+00:27:19.477 --> 00:27:22.955
+Keys stored with outcome for 24 h (Ch 20).
+
+416
+00:27:23.235 --> 00:27:24.259
+Consequences.
+
+417
+00:27:24.539 --> 00:27:34.160
+More moving parts for flash sales (gate, buckets, waiting room); buffers hide some sellable stock; short TTLs require the late-capture path.
+
+418
+00:27:34.440 --> 00:27:42.440
+In return: sales that finish in seconds without collateral damage, fewer missing items, and outcomes customers can see are fair.
+
+419
+00:27:43.790 --> 00:27:44.750
+Part 5.
+
+420
+00:27:45.030 --> 00:27:47.014
+Hands-On Code, Level Ladder.
+
+421
+00:27:48.264 --> 00:27:49.032
+Info:
+
+422
+00:27:49.312 --> 00:27:50.400
+What's real here.
+
+423
+00:27:50.680 --> 00:27:53.197
+All four labs are JDK 21.
+
+424
+00:27:53.477 --> 00:27:59.131
+L1 and L4 run against a real PostgreSQL 16 with durable commits.
+
+425
+00:27:59.411 --> 00:28:08.776
+L1 also uses a real Redis 7 for the gate, and L4 runs a real HTTP checkout service with real HTTP clients.
+
+426
+00:28:09.056 --> 00:28:17.120
+L2 and L3 are deterministic simulations; customer behaviour, payment times and shrinkage rates are stated assumptions.
+
+427
+00:28:17.400 --> 00:28:18.979
+Timings vary by machine.
+
+428
+00:28:20.329 --> 00:28:33.107
+L1 needs PostgreSQL 16 on port 5581 (database shop) and Redis 7 on port 6390; L4 needs PostgreSQL.
+
+429
+00:28:33.387 --> 00:28:40.129
+Both need postgresql-42.7.4.jar and -Duser.timezone=UTC.
+
+430
+00:28:40.409 --> 00:28:44.547
+Run every lab with -Dstdout.encoding=UTF-8.
+
+431
+00:28:45.897 --> 00:28:48.031
+L1, The 1 rupeesonion deal.
+
+432
+00:28:48.311 --> 00:28:49.249
+Requirement:
+
+433
+00:28:49.529 --> 00:28:53.028
+5,000 units of one SKU, a national crowd.
+
+434
+00:28:53.308 --> 00:28:57.596
+Never oversell, sell out fast, and don't let the rest of the platform feel it.
+
+435
+00:28:57.876 --> 00:29:03.444
+Four reservation designs against real PostgreSQL, with Redis as the gate in D.
+
+436
+00:29:03.724 --> 00:29:06.561
+64 workers make 20,000 attempts.
+
+437
+00:29:07.911 --> 00:29:10.813
+Here is the Java code, HotSkuL1.java.
+
+438
+00:29:11.093 --> 00:29:15.253
+It runs to 189 lines; the full listing is in the chapter.
+
+439
+00:29:15.533 --> 00:29:35.074
+HotSkuL1.java, run with (PostgreSQL 16 on:5581 db shop, Redis 7 on:6390): java -cp postgresql-42.7.4.jar -Duser.timezone=UTC HotSkuL1.java.
+
+440
+00:29:35.354 --> 00:29:37.573
+THE NATIONAL 1 rupeesONION DEAL.
+
+441
+00:29:37.853 --> 00:29:45.533
+5,000 units, one SKU, and 64 concurrent checkout workers hammering it (Ch 02 flagged this.
+
+442
+00:29:48.383 --> 00:29:49.300
+On screen:
+
+443
+00:29:49.580 --> 00:29:55.895
+One SKU, 5,000 units, 20,000 reservation attempts from 64 concurrent workers.
+
+444
+00:29:56.175 --> 00:30:06.393
+(PostgreSQL 16, durable commits). design sold sold out in reserv./s p99 oversold DB transactions. attempted.
+
+445
+00:30:06.673 --> 00:30:17.468
+A) one row, atomic conditional UPDATE 5,000 6.08 s 822 254.4 ms 0 20,000.
+
+446
+00:30:17.748 --> 00:30:28.543
+B) one row, SELECT FOR UPDATE then UPDATE 5,000 6.89 s 726 299.2 ms 0 20,000.
+
+447
+00:30:28.823 --> 00:30:42.455
+C) 16 buckets, random then fallback 5,000 1.29 s 3,864 107.3 ms 0 245,489.
+
+448
+00:30:42.735 --> 00:31:04.089
+D) Redis Lua front-gate + DB write 5,000 5.90 s 848 249.7 ms 0 5,000. then one row is correct and simple, and every buyer queues on its lock: ~800. reservations per second here, with a p99 over. a quarter of a second.
+
+449
+00:31:04.369 --> 00:31:07.612
+Holding the lock across two round trips (FOR UPDATE, then.
+
+450
+00:31:07.892 --> 00:31:09.407
+The rest is in the chapter.
+
+451
+00:31:12.257 --> 00:31:13.110
+Reading it:
+
+452
+00:31:13.390 --> 00:31:21.155
+A: ~820 reservations per second on one row, with a quarter-second p99 for everyone in the queue.
+
+453
+00:31:21.435 --> 00:31:24.891
+B holds the lock across two round trips and is slower still.
+
+454
+00:31:25.171 --> 00:31:25.875
+C:
+
+455
+00:31:26.155 --> 00:31:29.398
+16 buckets sold out 4.7x faster.
+
+456
+00:31:29.678 --> 00:31:36.121
+Once stock was gone, though, each of the remaining ~15,000 attempts tried all 16 buckets:
+
+457
+00:31:36.401 --> 00:31:41.713
+245,489 transactions to say sold out.
+
+458
+00:31:41.993 --> 00:31:43.785
+Exercise 1 adds the flag.
+
+459
+00:31:44.065 --> 00:31:53.110
+D: the gate answered the 15,000 losers without the database (5,000 transactions in total), but the winners still queued on one row.
+
+460
+00:31:53.390 --> 00:31:55.801
+Exercise 2 combines gate and buckets.
+
+461
+00:31:57.151 --> 00:31:58.089
+Oversold:
+
+462
+00:31:58.369 --> 00:31:59.521
+0 everywhere.
+
+463
+00:31:59.801 --> 00:32:05.113
+The designs differ in speed and in how much work the database does, not in correctness.
+
+464
+00:32:06.463 --> 00:32:08.426
+L2, How long to hold stock.
+
+465
+00:32:08.706 --> 00:32:09.645
+Requirement:
+
+466
+00:32:09.925 --> 00:32:15.429
+Hold stock long enough for real payers, short enough that abandoned carts don't starve everyone else.
+
+467
+00:32:15.709 --> 00:32:18.823
+An event-driven simulation of a one-hour flash sale:
+
+468
+00:32:19.103 --> 00:32:24.906
+10,000 boxes, 25,000 customers, realistic payment times and abandonment.
+
+469
+00:32:26.256 --> 00:32:30.139
+Here is the Java code, ReservationTtlL2.java.
+
+470
+00:32:30.419 --> 00:32:34.451
+It runs to 101 lines; the full listing is in the chapter.
+
+471
+00:32:34.731 --> 00:32:44.117
+ReservationTtlL2.java, run with: java ReservationTtlL2.java (JDK 21, no dependencies).
+
+472
+00:32:44.397 --> 00:32:46.936
+HOW LONG DO YOU HOLD STOCK FOR SOMEONE WHO MIGHT PAY?
+
+473
+00:32:47.216 --> 00:32:48.603
+A one-hour flash sale:
+
+474
+00:32:48.883 --> 00:32:54.067
+10,000 mango boxes, 25,000 customers. arriving (fixed seed).
+
+475
+00:32:54.347 --> 00:32:55.968
+Checkout reserves one box.
+
+476
+00:32:56.248 --> 00:33:01.773
+60% of customers go on to pay, median 90 s (switching to the UPI app.
+
+477
+00:33:04.623 --> 00:33:05.541
+On screen:
+
+478
+00:33:05.821 --> 00:33:06.759
+Flash sale:
+
+479
+00:33:07.039 --> 00:33:24.959
+10,000 boxes, 25,000 customers over 1 hour; 60% pay (median 90 s, 5% 10. min), 40% abandon. reservation policy sold turned away while stock late captures unsold at end. sat in abandoned. carts refunded.
+
+480
+00:33:25.239 --> 00:33:34.583
+T30) hold 30 minutes 8,379 10,897 0 1,621.
+
+481
+00:33:34.863 --> 00:33:42.031
+T10) hold 10 minutes 9,830 8,100 202 170.
+
+482
+00:33:42.311 --> 00:33:48.541
+T3) hold 3 minutes 10,000 7,417 460 0.
+
+483
+00:33:48.821 --> 00:34:07.189
+T3 plus) hold 3 minutes, extend to 15 when paying starts 9,993 7,964 123 7. then a long hold protects slow payers and starves everyone else: boxes sit in carts. that will never pay while.
+
+484
+00:34:07.469 --> 00:34:08.983
+The rest is in the chapter.
+
+485
+00:34:11.833 --> 00:34:12.687
+Reading it:
+
+486
+00:34:12.967 --> 00:34:13.948
+30 minutes:
+
+487
+00:34:14.228 --> 00:34:18.217
+1,621 boxes unsold at the end.
+
+488
+00:34:18.497 --> 00:34:26.199
+They sat in abandoned carts until after the crowd left, while 10,897 customers were told sold out.
+
+489
+00:34:26.479 --> 00:34:34.329
+3 minutes: everything sold, but 460 slow payers were charged for boxes their reservation no longer held.
+
+490
+00:34:34.609 --> 00:34:37.020
+3 minutes + extend when paying starts:
+
+491
+00:34:37.300 --> 00:34:42.249
+9,993 sold and 123 late captures.
+
+492
+00:34:42.529 --> 00:34:45.729
+The extension targets the people who are actually paying.
+
+493
+00:34:46.009 --> 00:34:51.087
+The remaining late captures are the 5% whose payments take longer than 15 minutes.
+
+494
+00:34:52.437 --> 00:34:54.015
+L3, Phantom stock.
+
+495
+00:34:54.295 --> 00:34:55.234
+Requirement:
+
+496
+00:34:55.514 --> 00:35:02.575
+Customers shouldn't find items missing at the door because our records were optimistic, and we shouldn't hide half the shelf to avoid it.
+
+497
+00:35:02.855 --> 00:35:04.967
+One simulated day in a dark store:
+
+498
+00:35:05.247 --> 00:35:11.967
+2,000 SKUs, 30,000 orders, shrinkage concentrated in fresh produce, and four stock policies.
+
+499
+00:35:13.317 --> 00:35:16.709
+Here is the Java code, PhantomStockL3.java.
+
+500
+00:35:16.989 --> 00:35:20.829
+It runs to 95 lines; the full listing is in the chapter.
+
+501
+00:35:21.109 --> 00:35:29.237
+PhantomStockL3.java, run with: java PhantomStockL3.java (JDK 21, no dependencies).
+
+502
+00:35:29.517 --> 00:35:31.907
+THE SYSTEM SAYS 3, THE SHELF HAS 1.
+
+503
+00:35:32.187 --> 00:35:40.827
+A dark store's recorded stock drifts from what's physically on the shelf: damaged. produce, misplaced items, unrecorded wastage, theft.
+
+504
+00:35:41.107 --> 00:35:44.989
+Checkout reserves against RECORDED stock; the picker finds out the.
+
+505
+00:35:47.839 --> 00:35:48.757
+On screen:
+
+506
+00:35:49.037 --> 00:35:50.018
+Dark store:
+
+507
+00:35:50.298 --> 00:36:06.661
+2,000 SKUs (25% fresh), 30,000 orders; recorded stock overstates the shelf. by 1,619 units in total. policy orders with a units on shelf, items sold. missing item hidden by. buffer.
+
+508
+00:36:06.941 --> 00:36:14.770
+P1) sell down to recorded stock 3.91% 0 160,720.
+
+509
+00:36:15.050 --> 00:36:25.055
+P2) hide the last 2 units of every SKU 1.23% 2,160 158,680.
+
+510
+00:36:25.335 --> 00:36:36.834
+P3) per-SKU buffer from last week's pick failures 0.50% 1,509 159,267.
+
+511
+00:36:37.114 --> 00:36:56.613
+P4) P3 + correct recorded stock when a pick fails 0.40% 1,509 159,267. then selling to recorded stock turns every discrepancy into a disappointed customer at. the door, refunds, missing.
+
+512
+00:36:56.893 --> 00:36:58.407
+The rest is in the chapter.
+
+513
+00:37:01.257 --> 00:37:02.111
+Reading it:
+
+514
+00:37:02.391 --> 00:37:04.844
+Recorded stock sells every phantom unit:
+
+515
+00:37:05.124 --> 00:37:08.900
+3.91% of orders arrive with something missing.
+
+516
+00:37:09.180 --> 00:37:17.756
+A flat buffer cuts that to 1.23%, but hides 2,160 real units and still under-protects fresh produce.
+
+517
+00:37:18.036 --> 00:37:21.172
+A learned per-SKU buffer does better on both counts:
+
+518
+00:37:21.452 --> 00:37:26.508
+0.50%, with 1,509 hidden units.
+
+519
+00:37:26.788 --> 00:37:30.308
+Correcting the record on a failed pick stops repeat failures:
+
+520
+00:37:30.588 --> 00:37:32.487
+0.40%.
+
+521
+00:37:33.837 --> 00:37:39.490
+Every buffer costs sales (compare items sold with P1); the level is a business decision.
+
+522
+00:37:40.840 --> 00:37:43.613
+L4, The 8 pm crowd, end to end.
+
+523
+00:37:43.893 --> 00:37:44.832
+Requirement:
+
+524
+00:37:45.112 --> 00:37:49.400
+8,000 people tap 'Buy' within two seconds for 2,000 boxes.
+
+525
+00:37:49.680 --> 00:37:55.184
+Everyone gets an answer quickly, the service survives, and the first to arrive are the first served.
+
+526
+00:37:55.464 --> 00:38:10.269
+A real checkout service (JDK HttpServer, 10 PostgreSQL connections, ~20 ms of DB work per checkout) and 8,000 real HTTP clients that time out at 3 s and retry.
+
+527
+00:38:10.549 --> 00:38:12.171
+Three admission strategies.
+
+528
+00:38:13.521 --> 00:38:16.593
+Here is the Java code, WaitingRoomL4.java.
+
+529
+00:38:16.873 --> 00:38:21.331
+It runs to 225 lines; the full listing is in the chapter.
+
+530
+00:38:21.611 --> 00:38:41.771
+WaitingRoomL4.java, run with (PostgreSQL 16 on:5581, db shop): java -cp postgresql-42.7.4.jar -Duser.timezone=UTC -Dsun.net.httpserver.nodelay=true WaitingRoomL4.java.
+
+531
+00:38:42.051 --> 00:38:44.377
+THE 8 PM FLASH SALE, END TO END.
+
+532
+00:38:44.657 --> 00:38:50.758
+A real checkout service (JDK HttpServer on virtual threads) with a 10-connection.
+
+533
+00:38:53.608 --> 00:38:54.525
+On screen:
+
+534
+00:38:54.805 --> 00:39:16.544
+Checkout service (10 DB connections, ~20 ms DB work per checkout), 2,000 boxes, 8,000. customers arriving within 2 s;. clients time out at 3 s and retry. design bought told sold no answer answer p50 answer p99 fair (bought. out in 25 s and. first 2,000).
+
+535
+00:39:16.824 --> 00:39:30.584
+W1) no admission control 162 263 7,575 22.48 s 24.76 s 43.4%.
+
+536
+00:39:30.864 --> 00:39:39.952
+(2,000 orders in the database, 1,838 buyers never heard back: their request. timed out after the box was theirs).
+
+537
+00:39:40.232 --> 00:39:52.072
+W2) 40 in flight, fast 503 + Retry-After 2,000 6,000 0 7.72 s 9.47 s 31.2%.
+
+538
+00:39:52.352 --> 00:40:04.576
+W3) virtual waiting room, admit 300 per second FIFO 2,000 6,000 0 7.93 s 9.91 s 91.7%.
+
+539
+00:40:04.856 --> 00:40:06.371
+The rest is in the chapter.
+
+540
+00:40:09.221 --> 00:40:10.074
+Reading it:
+
+541
+00:40:10.354 --> 00:40:17.223
+W1: the database sold all 2,000 boxes, but only 162 customers heard so.
+
+542
+00:40:17.503 --> 00:40:28.597
+1,838 buyers timed out after their box was already theirs, and 7,575 customers got no answer within 25 s.
+
+543
+00:40:28.877 --> 00:40:37.111
+This is the retry storm: requests queued inside the service for connections, clients gave up and retried, and the retries joined the queue.
+
+544
+00:40:37.391 --> 00:40:43.045
+W2: the concurrency limit sheds quickly and everyone gets an answer in under 10 s.
+
+545
+00:40:43.325 --> 00:40:50.386
+But who wins depends on retry timing: only 31% of buyers were among the first 2,000 arrivals.
+
+546
+00:40:51.736 --> 00:40:59.501
+W3: the waiting room answers everyone in a similar time, and 92% of buyers were among the first 2,000.
+
+547
+00:40:59.781 --> 00:41:02.939
+The database saw a steady 300 checkouts per second.
+
+548
+00:41:03.219 --> 00:41:05.181
+Idempotent checkout matters here too.
+
+549
+00:41:05.461 --> 00:41:12.821
+The first version of this lab returned sold out to customers whose earlier, timed-out request had already bought them a box.
+
+550
+00:41:13.101 --> 00:41:15.149
+The fix returns the existing order.
+
+551
+00:41:16.499 --> 00:41:17.438
+Part 6.
+
+552
+00:41:17.718 --> 00:41:18.998
+Production Concerns.
+
+553
+00:41:20.248 --> 00:41:21.400
+Failure modes.
+
+554
+00:41:21.680 --> 00:41:23.045
+Here is a quick table:
+
+555
+00:41:23.325 --> 00:41:25.608
+Failure, and Symptom, and Mitigation.
+
+556
+00:41:25.888 --> 00:41:26.805
+Hot row.
+
+557
+00:41:27.085 --> 00:41:27.896
+Symptom:
+
+558
+00:41:28.176 --> 00:41:31.120
+Pool exhaustion, collateral latency (L1).
+
+559
+00:41:31.400 --> 00:41:32.403
+Mitigation:
+
+560
+00:41:32.683 --> 00:41:35.456
+Buckets, gate, bulkheads per SKU class.
+
+561
+00:41:35.736 --> 00:41:37.293
+Locks across round trips.
+
+562
+00:41:37.573 --> 00:41:38.384
+Symptom:
+
+563
+00:41:38.664 --> 00:41:40.200
+Longer queues (L1).
+
+564
+00:41:40.480 --> 00:41:41.483
+Mitigation:
+
+565
+00:41:41.763 --> 00:41:44.259
+Conditional UPDATE, tiny transactions.
+
+566
+00:41:44.539 --> 00:41:46.032
+Probing empty buckets.
+
+567
+00:41:46.312 --> 00:41:47.123
+Symptom:
+
+568
+00:41:47.403 --> 00:41:49.771
+DB flooded after sell-out (L1).
+
+569
+00:41:50.051 --> 00:41:51.053
+Mitigation:
+
+570
+00:41:51.333 --> 00:41:52.507
+Sold-out flag.
+
+571
+00:41:52.787 --> 00:41:54.301
+Gate or DB drift.
+
+572
+00:41:54.581 --> 00:41:55.392
+Symptom:
+
+573
+00:41:55.672 --> 00:41:57.293
+Leaked or oversold stock.
+
+574
+00:41:57.573 --> 00:41:58.576
+Mitigation:
+
+575
+00:41:58.856 --> 00:42:02.312
+Seed from DB, reconcile, gate never authoritative.
+
+576
+00:42:02.592 --> 00:42:03.595
+Long holds.
+
+577
+00:42:03.875 --> 00:42:04.685
+Symptom:
+
+578
+00:42:04.965 --> 00:42:06.565
+Stranded stock (L2).
+
+579
+00:42:06.845 --> 00:42:07.848
+Mitigation:
+
+580
+00:42:08.128 --> 00:42:10.624
+Short TTL + extension on intent.
+
+581
+00:42:10.904 --> 00:42:12.035
+Late captures.
+
+582
+00:42:12.315 --> 00:42:13.125
+Symptom:
+
+583
+00:42:13.405 --> 00:42:15.197
+Charged, no item (L2).
+
+584
+00:42:15.477 --> 00:42:16.480
+Mitigation:
+
+585
+00:42:16.760 --> 00:42:18.509
+Re-reserve or auto-refund.
+
+586
+00:42:19.859 --> 00:42:20.990
+Phantom stock.
+
+587
+00:42:21.270 --> 00:42:22.081
+Symptom:
+
+588
+00:42:22.361 --> 00:42:23.961
+Missing items (L3).
+
+589
+00:42:24.241 --> 00:42:25.243
+Mitigation:
+
+590
+00:42:25.523 --> 00:42:27.422
+Learned buffers, picker feedback.
+
+591
+00:42:27.702 --> 00:42:28.769
+Flash crowd.
+
+592
+00:42:29.049 --> 00:42:29.859
+Symptom:
+
+593
+00:42:30.139 --> 00:42:33.190
+Timeouts, retry storms, unfairness (L4).
+
+594
+00:42:33.470 --> 00:42:34.473
+Mitigation:
+
+595
+00:42:34.753 --> 00:42:36.971
+Waiting room, idempotent retries.
+
+596
+00:42:38.321 --> 00:42:39.409
+Observability.
+
+597
+00:42:39.689 --> 00:42:44.468
+Reservation latency and lock waits per SKU; top contended rows.
+
+598
+00:42:44.748 --> 00:42:50.316
+Held versus confirmed versus expired reservations; stranded stock; late captures.
+
+599
+00:42:50.596 --> 00:42:54.308
+Pick shortfalls per SKU or store; buffer effectiveness.
+
+600
+00:42:54.588 --> 00:42:58.556
+Waiting-room queue length, admission rate, time to answer, abandonment.
+
+601
+00:42:59.906 --> 00:43:00.845
+Security.
+
+602
+00:43:01.125 --> 00:43:05.583
+Bot protection and per-customer limits on flash deals (Ch 39).
+
+603
+00:43:05.863 --> 00:43:09.021
+Signed waiting-room tokens bound to customer and sale.
+
+604
+00:43:09.301 --> 00:43:12.373
+Server-side price and promo computation only.
+
+605
+00:43:13.723 --> 00:43:14.619
+Performance.
+
+606
+00:43:14.899 --> 00:43:18.611
+Reservation transaction: two statements, no remote calls.
+
+607
+00:43:18.891 --> 00:43:22.560
+Separate connection pools (bulkheads) for flash-sale SKUs.
+
+608
+00:43:22.840 --> 00:43:27.640
+Pre-warm and pre-scale before announced sales; load test with the real crowd shape.
+
+609
+00:43:28.990 --> 00:43:29.715
+Cost.
+
+610
+00:43:29.995 --> 00:43:37.398
+Flash-sale infrastructure (gate, waiting room) is used a few hours a month: edge-hosted and serverless options fit.
+
+611
+00:43:37.678 --> 00:43:44.441
+Buffers trade hidden stock for fewer refunds and support calls; measure both in rupees (Ch 35).
+
+612
+00:43:45.791 --> 00:43:46.729
+Part 7.
+
+613
+00:43:47.009 --> 00:43:48.716
+Anti-Patterns and Pitfalls.
+
+614
+00:43:49.966 --> 00:43:50.883
+Watch out:
+
+615
+00:43:51.163 --> 00:43:51.803
+1.
+
+616
+00:43:52.083 --> 00:43:53.790
+Read-check-write stock updates.
+
+617
+00:43:54.070 --> 00:43:57.441
+Race conditions oversell; use a conditional UPDATE.
+
+618
+00:43:58.791 --> 00:43:59.708
+Watch out:
+
+619
+00:43:59.988 --> 00:44:00.692
+2.
+
+620
+00:44:00.972 --> 00:44:03.873
+Payment calls inside the reservation transaction.
+
+621
+00:44:04.153 --> 00:44:05.625
+Locks held for seconds.
+
+622
+00:44:06.975 --> 00:44:07.893
+Watch out:
+
+623
+00:44:08.173 --> 00:44:08.919
+3.
+
+624
+00:44:09.199 --> 00:44:17.242
+One row for a national deal. ~800 per second and a 250 ms p99 for everyone (L1).
+
+625
+00:44:18.592 --> 00:44:19.509
+Watch out:
+
+626
+00:44:19.789 --> 00:44:20.493
+4.
+
+627
+00:44:20.773 --> 00:44:22.629
+Buckets without a sold-out flag.
+
+628
+00:44:22.909 --> 00:44:25.555
+Losers probe every bucket forever (L1).
+
+629
+00:44:26.905 --> 00:44:27.822
+Watch out:
+
+630
+00:44:28.102 --> 00:44:28.870
+5.
+
+631
+00:44:29.150 --> 00:44:31.070
+Treating the Redis gate as the truth.
+
+632
+00:44:31.350 --> 00:44:33.334
+It drifts; the database decides.
+
+633
+00:44:34.684 --> 00:44:35.601
+Watch out:
+
+634
+00:44:35.881 --> 00:44:36.628
+6.
+
+635
+00:44:36.908 --> 00:44:39.276
+Long reservation holds in flash sales.
+
+636
+00:44:39.556 --> 00:44:42.201
+Stock stranded in abandoned carts (L2).
+
+637
+00:44:43.551 --> 00:44:44.469
+Watch out:
+
+638
+00:44:44.749 --> 00:44:45.495
+7.
+
+639
+00:44:45.775 --> 00:44:47.226
+No late-capture path.
+
+640
+00:44:47.506 --> 00:44:50.237
+Customers charged for items that are gone (L2).
+
+641
+00:44:51.587 --> 00:44:52.504
+Watch out:
+
+642
+00:44:52.784 --> 00:44:53.467
+8.
+
+643
+00:44:53.747 --> 00:44:55.304
+Believing recorded stock.
+
+644
+00:44:55.584 --> 00:44:58.336
+Phantom units become missing items (L3).
+
+645
+00:44:59.686 --> 00:45:00.603
+Watch out:
+
+646
+00:45:00.883 --> 00:45:01.630
+9.
+
+647
+00:45:01.910 --> 00:45:03.446
+Ignoring picker feedback.
+
+648
+00:45:03.726 --> 00:45:06.542
+The same phantom unit is sold again and again.
+
+649
+00:45:07.892 --> 00:45:08.809
+Watch out:
+
+650
+00:45:09.089 --> 00:45:09.793
+10.
+
+651
+00:45:10.073 --> 00:45:11.481
+No admission control.
+
+652
+00:45:11.761 --> 00:45:15.153
+Retry storms; buyers who never learn they bought (L4).
+
+653
+00:45:16.503 --> 00:45:17.421
+Watch out:
+
+654
+00:45:17.701 --> 00:45:18.533
+11.
+
+655
+00:45:18.813 --> 00:45:20.797
+Non-idempotent checkout retries.
+
+656
+00:45:21.077 --> 00:45:23.615
+Sold out shown to a customer who already bought.
+
+657
+00:45:24.965 --> 00:45:25.883
+Watch out:
+
+658
+00:45:26.163 --> 00:45:26.952
+12.
+
+659
+00:45:27.232 --> 00:45:28.320
+Unfair access.
+
+660
+00:45:28.600 --> 00:45:32.141
+Retry luck decides winners (L4), customers notice.
+
+661
+00:45:33.491 --> 00:45:34.366
+Part 8.
+
+662
+00:45:34.646 --> 00:45:35.990
+Interview Q and A.
+
+663
+00:45:37.240 --> 00:45:38.072
+Beginner.
+
+664
+00:45:38.352 --> 00:45:39.376
+Question 1.
+
+665
+00:45:39.656 --> 00:45:41.555
+How do you prevent overselling stock?
+
+666
+00:45:41.835 --> 00:45:43.200
+Thirty-second answer:
+
+667
+00:45:43.480 --> 00:45:52.077
+Make the check and the decrement one atomic operation, UPDATE stock SET qty = qty minus 1 WHERE sku =?
+
+668
+00:45:52.357 --> 00:46:00.677
+AND qty 0, and treat zero rows updated as not available, with a CHECK (qty = 0) as a safety net.
+
+669
+00:46:00.957 --> 00:46:03.816
+Record the reservation in the same transaction.
+
+670
+00:46:04.096 --> 00:46:06.229
+Never read, check in code, then write.
+
+671
+00:46:07.579 --> 00:46:08.582
+Question 2.
+
+672
+00:46:08.862 --> 00:46:11.763
+What is a stock reservation and why does it expire?
+
+673
+00:46:12.043 --> 00:46:13.409
+Thirty-second answer:
+
+674
+00:46:13.689 --> 00:46:18.809
+A lease: stock set aside for a checkout until payment completes or the lease expires.
+
+675
+00:46:19.089 --> 00:46:25.937
+It prevents selling the same unit twice while the customer pays, and expiry returns stock from abandoned checkouts.
+
+676
+00:46:26.217 --> 00:46:30.590
+The TTL is a business choice between stranded stock and slow payers.
+
+677
+00:46:31.940 --> 00:46:32.985
+Question 3.
+
+678
+00:46:33.265 --> 00:46:34.695
+What is the checkout flow?
+
+679
+00:46:34.975 --> 00:46:36.340
+Thirty-second answer:
+
+680
+00:46:36.620 --> 00:46:54.092
+Validate cart, prices, promos and slot; reserve stock; create payment; on capture confirm reservations and create the order; on failure or expiry release reservations; everything idempotent under a checkout id; implemented as a saga with an outbox.
+
+681
+00:46:55.442 --> 00:46:56.509
+Question 4.
+
+682
+00:46:56.789 --> 00:46:59.882
+Why is a flash sale harder than normal peak traffic?
+
+683
+00:47:00.162 --> 00:47:01.527
+Thirty-second answer:
+
+684
+00:47:01.807 --> 00:47:12.965
+Normal load is spread across stores and SKUs; a flash sale concentrates demand on one SKU (one hot row) and brings a crowd far above capacity within seconds.
+
+685
+00:47:13.245 --> 00:47:20.754
+That causes lock contention, pool exhaustion, timeouts and retry storms, and fairness becomes visible to customers.
+
+686
+00:47:22.104 --> 00:47:23.107
+Intermediate.
+
+687
+00:47:23.387 --> 00:47:24.496
+Question 5.
+
+688
+00:47:24.776 --> 00:47:29.427
+How do you handle a single SKU with thousands of reservations per second?
+
+689
+00:47:29.707 --> 00:47:31.072
+Thirty-second answer:
+
+690
+00:47:31.352 --> 00:47:46.499
+Split its stock into buckets (N rows) so locks spread; cache a sold-out flag; put a Redis decrement-if-positive gate in front to reject losers without touching the database; or queue reservations per SKU to a single consumer.
+
+691
+00:47:46.779 --> 00:47:51.344
+Keep the reservation transaction tiny and isolate the SKU's traffic.
+
+692
+00:47:52.694 --> 00:47:53.803
+Question 6.
+
+693
+00:47:54.083 --> 00:47:56.601
+SELECT FOR UPDATE or a conditional UPDATE?
+
+694
+00:47:56.881 --> 00:47:58.246
+Thirty-second answer:
+
+695
+00:47:58.526 --> 00:48:07.401
+A conditional UPDATE does the check and write in one statement and holds the lock only for that statement's duration inside a short transaction.
+
+696
+00:48:07.681 --> 00:48:11.350
+SELECT FOR UPDATE holds the lock across at least two round trips.
+
+697
+00:48:11.630 --> 00:48:16.302
+Use FOR UPDATE only when the decision needs data you can't express in the UPDATE.
+
+698
+00:48:17.652 --> 00:48:18.740
+Question 7.
+
+699
+00:48:19.020 --> 00:48:21.367
+How do you release stock from abandoned checkouts?
+
+700
+00:48:21.647 --> 00:48:23.012
+Thirty-second answer:
+
+701
+00:48:23.292 --> 00:48:35.687
+Reservations carry expiresat; a sweeper periodically marks expired HELD reservations EXPIRED and returns their quantity in the same transaction; confirmation checks expiry too.
+
+702
+00:48:35.967 --> 00:48:39.913
+Payment events extend active leases when the customer starts paying.
+
+703
+00:48:41.263 --> 00:48:42.287
+Question 8.
+
+704
+00:48:42.567 --> 00:48:46.066
+How do you keep prices and promotions consistent through checkout?
+
+705
+00:48:46.346 --> 00:48:47.711
+Thirty-second answer:
+
+706
+00:48:47.991 --> 00:49:01.879
+Recompute prices and promos server-side at checkout, show changes before payment, reserve coupon budgets like stock, and snapshot final line prices, taxes and discounts into the order for invoices and refunds.
+
+707
+00:49:03.229 --> 00:49:04.296
+Question 9.
+
+708
+00:49:04.576 --> 00:49:07.307
+What's phantom inventory and how do you deal with it?
+
+709
+00:49:07.587 --> 00:49:08.952
+Thirty-second answer:
+
+710
+00:49:09.232 --> 00:49:14.523
+Recorded stock that isn't physically on the shelf (damage, wastage, misplacement, theft).
+
+711
+00:49:14.803 --> 00:49:17.085
+Checkout sells it; pickers can't find it.
+
+712
+00:49:17.365 --> 00:49:26.219
+Mitigate with per-SKU buffers learned from pick failures, immediate record correction when a pick fails, cycle counts, and substitution options.
+
+713
+00:49:27.569 --> 00:49:28.337
+Senior.
+
+714
+00:49:28.617 --> 00:49:29.662
+Question 10.
+
+715
+00:49:29.942 --> 00:49:32.246
+Design admission control for a flash sale.
+
+716
+00:49:32.526 --> 00:49:33.891
+Thirty-second answer:
+
+717
+00:49:34.171 --> 00:49:52.262
+A waiting room in front of checkout: customers get signed tickets in arrival order (with a randomised pre-queue for those who arrive before start), are admitted at a rate the backend sustains (adjusted from latency), poll with server-suggested intervals, and check out idempotently when admitted.
+
+718
+00:49:52.542 --> 00:49:54.995
+Add per-customer limits and bot protection.
+
+719
+00:49:56.345 --> 00:49:57.476
+Question 11.
+
+720
+00:49:57.756 --> 00:50:00.849
+A payment completes after its reservation expired.
+
+721
+00:50:01.129 --> 00:50:02.068
+What happens?
+
+722
+00:50:02.348 --> 00:50:03.713
+Thirty-second answer:
+
+723
+00:50:03.993 --> 00:50:14.468
+The checkout saga handles it explicitly: try to re-reserve the items; if available, confirm the order; if not, refund automatically and notify the customer.
+
+724
+00:50:14.748 --> 00:50:18.055
+Never confirm without stock, and never ignore the payment.
+
+725
+00:50:19.405 --> 00:50:20.493
+Question 12.
+
+726
+00:50:20.773 --> 00:50:24.634
+How do you keep a hot SKU from slowing down every other checkout?
+
+727
+00:50:24.914 --> 00:50:26.279
+Thirty-second answer:
+
+728
+00:50:26.559 --> 00:50:39.765
+Bulkheads: separate connection pools or even a separate service path for flash SKUs, admission control in front of them, timeouts shorter than the pool wait, and a gate that rejects losers without touching the database.
+
+729
+00:50:40.045 --> 00:50:42.669
+Normal SKUs keep their own capacity.
+
+730
+00:50:44.019 --> 00:50:45.299
+Question 13.
+
+731
+00:50:45.579 --> 00:50:48.053
+How would you use Redis in inventory, safely?
+
+732
+00:50:48.333 --> 00:50:49.699
+Thirty-second answer:
+
+733
+00:50:49.979 --> 00:51:07.131
+As a front-gate or cache, not the source of truth: seed counts from the database, decrement atomically with Lua, write winners durably to the database, reconcile gate and database periodically (and after crashes), and fall back to database-only if Redis is unavailable.
+
+734
+00:51:08.481 --> 00:51:09.675
+Question 14.
+
+735
+00:51:09.955 --> 00:51:11.918
+How do you make checkout retries safe?
+
+736
+00:51:12.198 --> 00:51:13.563
+Thirty-second answer:
+
+737
+00:51:13.843 --> 00:51:30.185
+An idempotency key per checkout attempt stored with its outcome: retries return the original result (order created, or failure reason) rather than re-running reservation or payment; downstream calls carry the checkout id; consumers dedupe by it.
+
+738
+00:51:31.535 --> 00:51:32.431
+Architect.
+
+739
+00:51:32.711 --> 00:51:33.905
+Question 15.
+
+740
+00:51:34.185 --> 00:51:40.671
+Design checkout and inventory reservation for a 300-store quick-commerce platform end to end.
+
+741
+00:51:40.951 --> 00:51:42.316
+Thirty-second answer:
+
+742
+00:51:42.596 --> 00:51:56.463
+Inventory per dark store with atomic conditional updates; buckets and a Redis gate for hot SKUs; reservation leases with short TTLs extended on payment start; a checkout saga with idempotency,
+
+743
+00:51:56.743 --> 00:52:09.009
+outbox and explicit late-capture handling; per-SKU buffers and picker feedback; waiting rooms and bulkheads for flash sales; observability on contention, leases, shortfalls and fairness.
+
+744
+00:52:10.359 --> 00:52:11.554
+Question 16.
+
+745
+00:52:11.834 --> 00:52:14.415
+How do you estimate and load-test a flash sale?
+
+746
+00:52:14.695 --> 00:52:16.061
+Thirty-second answer:
+
+747
+00:52:16.341 --> 00:52:36.565
+Estimate peak arrivals from audience times click-through times time window, per SKU and per store; compute required reservation rate versus per-row capacity; load-test with the real crowd shape (a spike in seconds, retries with timeouts), not a ramp; verify admission, bulkheads and fairness; rehearse the runbook.
+
+748
+00:52:37.915 --> 00:52:39.259
+Question 17.
+
+749
+00:52:39.539 --> 00:52:42.355
+Reserve inventory at add-to-cart or at checkout?
+
+750
+00:52:42.635 --> 00:52:44.000
+Thirty-second answer:
+
+751
+00:52:44.280 --> 00:52:50.360
+At checkout for most grocery flows: add-to-cart reservations strand stock for browsing customers.
+
+752
+00:52:50.640 --> 00:52:55.739
+Exceptions: extremely scarce items where a short cart hold improves experience.
+
+753
+00:52:56.019 --> 00:53:01.139
+In both cases, use leases with short TTLs and show availability honestly.
+
+754
+00:53:02.489 --> 00:53:03.662
+Question 18.
+
+755
+00:53:03.942 --> 00:53:08.038
+How do inventory accuracy and the checkout connect organisationally?
+
+756
+00:53:08.318 --> 00:53:09.683
+Thirty-second answer:
+
+757
+00:53:09.963 --> 00:53:18.859
+Accuracy is a joint data loop: dark-store ops (counts, wastage recording, picker scans) feed inventory; checkout consumes it with buffers.
+
+758
+00:53:19.139 --> 00:53:29.081
+Define shared metrics (pick shortfall rate, cycle-count variance), give ops tools to correct stock quickly, and make buffer policy a joint business decision.
+
+759
+00:53:30.431 --> 00:53:31.668
+Question 19.
+
+760
+00:53:31.948 --> 00:53:33.697
+How do you make flash sales fair?
+
+761
+00:53:33.977 --> 00:53:35.343
+Thirty-second answer:
+
+762
+00:53:35.623 --> 00:53:49.617
+A waiting room with arrival-order admission (randomised among pre-start arrivals), per-customer limits, bot and multi-account detection, signed tickets, and transparent positions; no advantage from faster retries.
+
+763
+00:53:49.897 --> 00:53:53.161
+Measure fairness (buyers' arrival ranks) and publish rules.
+
+764
+00:53:54.511 --> 00:53:55.621
+Question 20.
+
+765
+00:53:55.901 --> 00:53:57.991
+What metrics prove checkout is healthy?
+
+766
+00:53:58.271 --> 00:53:59.637
+Thirty-second answer:
+
+767
+00:53:59.917 --> 00:54:18.989
+Checkout success rate and latency; reservation lock waits per SKU; held or expired or confirmed ratios; stranded stock and late captures; missing-item rate at picking; oversell (must be 0); waiting-room time-to-answer and fairness during sales; conversion from cart to order.
+
+768
+00:54:20.339 --> 00:54:21.235
+Part 9.
+
+769
+00:54:21.515 --> 00:54:22.923
+Summary and Practice.
+
+770
+00:54:24.173 --> 00:54:25.261
+Key takeaways.
+
+771
+00:54:25.541 --> 00:54:31.706
+Atomic conditional updates in tiny transactions; never hold locks across round trips (L1).
+
+772
+00:54:31.986 --> 00:54:38.023
+Hot SKUs: buckets + sold-out flag + Redis gate; the database stays authoritative (L1).
+
+773
+00:54:38.303 --> 00:54:44.917
+Reservations are leases: short TTL, extend on intent, explicit late-capture path (L2).
+
+774
+00:54:45.197 --> 00:54:49.826
+Recorded stock is an estimate: learned buffers and picker feedback (L3).
+
+775
+00:54:50.106 --> 00:54:56.165
+Flash crowds need a waiting room for survival and fairness; retries must be idempotent (L4).
+
+776
+00:54:57.515 --> 00:54:58.837
+Decision cheat sheet.
+
+777
+00:54:59.117 --> 00:55:00.483
+Here is a quick table:
+
+778
+00:55:00.763 --> 00:55:01.936
+Need, and Choice.
+
+779
+00:55:02.216 --> 00:55:03.603
+Normal reservations:
+
+780
+00:55:03.883 --> 00:55:06.251
+Conditional UPDATE + INSERT per store.
+
+781
+00:55:06.531 --> 00:55:07.427
+Hot SKU:
+
+782
+00:55:07.707 --> 00:55:10.928
+16 plus buckets, sold-out flag, Redis gate.
+
+783
+00:55:11.208 --> 00:55:12.723
+Reservation TTL:
+
+784
+00:55:13.003 --> 00:55:17.867
+3 min in sales, extend to 15 on payment start; longer on normal days.
+
+785
+00:55:18.147 --> 00:55:19.213
+Late capture:
+
+786
+00:55:19.493 --> 00:55:21.243
+Re-reserve or auto-refund.
+
+787
+00:55:21.523 --> 00:55:22.952
+Inventory accuracy:
+
+788
+00:55:23.232 --> 00:55:26.475
+Per-SKU buffers, picker corrections, cycle counts.
+
+789
+00:55:26.755 --> 00:55:27.779
+Flash crowd:
+
+790
+00:55:28.059 --> 00:55:31.685
+Waiting room FIFO + bulkheads + idempotent checkout.
+
+791
+00:55:33.035 --> 00:55:34.166
+Exercises.
+
+792
+00:55:34.446 --> 00:55:37.881
+(B2) In L1, add a sold-out flag to design C.
+
+793
+00:55:38.161 --> 00:55:40.294
+How many DB transactions remain?
+
+794
+00:55:40.574 --> 00:55:44.371
+(B3) In L1, combine the Redis gate with 16 buckets.
+
+795
+00:55:44.651 --> 00:55:46.230
+Does sell-out time improve?
+
+796
+00:55:46.510 --> 00:55:54.574
+(B3) In L2, add a per-customer limit of 2 boxes and a 20% share of customers who re-try after abandonment.
+
+797
+00:55:54.854 --> 00:56:03.579
+(B3) In L3, vary the buffer multiplier (0.5 to 3.0) and plot missing-item orders against hidden units.
+
+798
+00:56:04.929 --> 00:56:11.180
+(B4) In L4, make the admission rate adaptive (increase while p95 500 ms).
+
+799
+00:56:11.460 --> 00:56:12.911
+What rate does it settle at?
+
+800
+00:56:14.261 --> 00:56:15.263
+Further reading.
+
+801
+00:56:15.543 --> 00:56:20.429
+Shopify engineering on flash sales and resiliency (pausing checkout, queues).
+
+802
+00:56:20.709 --> 00:56:22.479
+Amazon Builders' Library:
+
+803
+00:56:22.759 --> 00:56:27.559
+Avoiding insurmountable queue backlogs, Using load shedding to avoid overload.
+
+804
+00:56:27.839 --> 00:56:30.655
+Queue-it and Cloudflare Waiting Room documentation.
+
+805
+00:56:30.935 --> 00:56:37.805
+Research on retail inventory record inaccuracy (for example, DeHoratius and Raman, 2008).
+
+806
+00:56:38.085 --> 00:56:41.989
+PostgreSQL documentation on row locking and UPDATE...
+
+807
+00:56:42.269 --> 00:56:43.143
+RETURNING.
+
+808
+00:56:44.493 --> 00:56:45.731
+Related chapters.
+
+809
+00:56:46.011 --> 00:56:52.411
+Ch 02, Estimation and Ch 05, Relational Databases: the hot-row limit.
+
+810
+00:56:52.691 --> 00:56:56.573
+Ch 13, Distributed Transactions: the checkout saga.
+
+811
+00:56:56.853 --> 00:57:00.885
+Ch 18, Resilience Patterns: load shedding and bulkheads.
+
+812
+00:57:01.165 --> 00:57:05.880
+Ch 39, Distributed Rate Limiter: per-customer limits and bots.
+
+813
+00:57:06.160 --> 00:57:10.789
+Ch 45, Payment System: captures, late captures and refunds.
+
+814
+00:57:11.069 --> 00:57:16.253
+Ch 47, Delivery Dispatch and Live Tracking: what happens after the order.
+
+815
+00:57:17.603 --> 00:57:19.203
+That's the end of this chapter.
+
+816
+00:57:19.483 --> 00:57:25.606
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+817
+00:57:25.886 --> 00:57:27.337
+See you in the next chapter.
+

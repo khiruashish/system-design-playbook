@@ -1,0 +1,3258 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:04.022
+Pricing, Promotions and Coupons Engine.
+
+3
+00:00:04.302 --> 00:00:08.569
+Chapter 49, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:10.319 --> 00:00:11.279
+At a glance:
+
+5
+00:00:11.559 --> 00:00:12.732
+Chapter at a glance.
+
+6
+00:00:13.012 --> 00:00:14.015
+Reader bands:
+
+7
+00:00:14.295 --> 00:00:16.577
+B2, then B4, Prerequisites:
+
+8
+00:00:16.857 --> 00:00:32.729
+Ch 04 (API design), Ch 45 (ledger, refunds), Ch 46 (checkout, coupon budgets as hot counters), What you will build: pricing-service and promotion-service from the platform map (Ch 00).
+
+9
+00:00:33.009 --> 00:00:50.311
+They cover: money arithmetic that never loses a paisa;. a promotion engine that finds the applicable offers among 20,000 in microseconds and combines them deterministically;. campaign budgets paced across a week and aimed at customers the coupon actually moves;.
+
+10
+00:00:51.661 --> 00:00:55.714
+markdowns that turn expiring stock into margin instead of waste.
+
+11
+00:00:55.994 --> 00:00:59.791
+Ch 46 handled coupon budgets as hot counters.
+
+12
+00:01:00.071 --> 00:01:03.677
+This chapter is about what a price is and how offers combine.
+
+13
+00:01:03.957 --> 00:01:05.791
+L1: money is integers.
+
+14
+00:01:06.071 --> 00:01:07.927
+Across 200,000 carts:
+
+15
+00:01:08.207 --> 00:01:15.247
+Double rupees with (long)(d100) gave 44,961 wrong invoice totals.
+
+16
+00:01:15.527 --> 00:01:19.495
+Rounding at the end still left 3,352.
+
+17
+00:01:19.775 --> 00:01:21.418
+Integer paise gave 0.
+
+18
+00:01:22.768 --> 00:01:36.784
+Spreading a 75 rupeescoupon across the lines by rounding each share left 106,913 carts whose shares didn't add up to 75. rupeesThe largest-remainder method left 0.
+
+19
+00:01:37.064 --> 00:01:43.955
+Refunds recomputed at refund time overpaid on 171,915 carts.
+
+20
+00:01:44.235 --> 00:01:47.563
+Refunds of each line's stored share overpaid on 0.
+
+21
+00:01:47.843 --> 00:01:49.677
+L2: the promotion engine.
+
+22
+00:01:49.957 --> 00:01:53.733
+Across 20,020 promotions and 20,000 carts:
+
+23
+00:01:54.013 --> 00:01:57.661
+Scanning every promotion took 3.8 ms p50.
+
+24
+00:01:57.941 --> 00:02:02.549
+An index by SKU, category and brand took 57 µs.
+
+25
+00:02:03.899 --> 00:02:20.497
+Apply every match gave a different total for 19,594 carts depending on evaluation order, sold 247,854 lines below the margin floor, and charged customers ~20% of list price.
+
+26
+00:02:20.777 --> 00:02:23.934
+Explicit combination rules gave 0 and 0.
+
+27
+00:02:24.214 --> 00:02:32.342
+Choosing marketing's priority offer versus the customer's best offer is a 10. rupees4M (~12%) decision.
+
+28
+00:02:32.622 --> 00:02:34.990
+L3: budget pacing (simulation).
+
+29
+00:02:35.270 --> 00:02:37.019
+A 5 lakh rupees coupon:
+
+30
+00:02:38.369 --> 00:02:41.633
+First come, first served spent the budget in 13 hours.
+
+31
+00:02:41.913 --> 00:02:53.049
+Pacing kept it live for 164 of 168 hours, but bought the same ~1,160 to 1,190 incremental orders.
+
+32
+00:02:53.329 --> 00:03:01.393
+Targeting by predicted uplift took cost per incremental order from 430 rupeesto 234 rupees.
+
+33
+00:03:01.673 --> 00:03:04.511
+L4: perishable markdowns (simulation).
+
+34
+00:03:04.791 --> 00:03:09.015
+No markdowns wasted 24,686 units.
+
+35
+00:03:09.295 --> 00:03:17.423
+A flat 30% off on the last day wasted 1,897 and added 9.1 lakh rupees margin.
+
+36
+00:03:18.773 --> 00:03:31.061
+A per-SKU markdown that maximises expected revenue earned the most margin, 44.6 lakh rupees versus 34.2 lakh rupees, with the least cannibalisation.
+
+37
+00:03:31.341 --> 00:03:32.322
+Reading time:
+
+38
+00:03:32.602 --> 00:03:34.223
+100 min + code.
+
+39
+00:03:35.573 --> 00:03:36.427
+Part 1.
+
+40
+00:03:36.707 --> 00:03:38.627
+Introduction and Why It Matters.
+
+41
+00:03:39.877 --> 00:03:42.053
+A story: the 0 rupeesorder.
+
+42
+00:03:42.333 --> 00:03:52.466
+On the first Big Savings Day, a customer's cart of 2,340 rupeeschecked out at 0.00. rupeesThree things had lined up:
+
+43
+00:03:52.746 --> 00:03:55.434
+A 25% brand offer on detergent.
+
+44
+00:03:55.714 --> 00:04:01.005
+A 30% category offer on home care, which the engine also applied to the same line.
+
+45
+00:04:01.285 --> 00:04:09.989
+A 200 rupeesoff over 1,999 rupees cart offer checked against the pre-discount total, plus a bank offer.
+
+46
+00:04:11.339 --> 00:04:13.195
+Each rule was correct on its own.
+
+47
+00:04:13.475 --> 00:04:16.077
+Nobody had written down which rules could combine.
+
+48
+00:04:16.357 --> 00:04:20.859
+By the time the screenshot went viral, 3,000 carts had been bought at a loss.
+
+49
+00:04:21.139 --> 00:04:22.248
+The same quarter:
+
+50
+00:04:22.528 --> 00:04:24.725
+Finance couldn't reconcile GST.
+
+51
+00:04:25.005 --> 00:04:32.941
+Invoice totals differed from the sum of line totals by a paisa or two on tens of thousands of orders, because amounts were double.
+
+52
+00:04:34.291 --> 00:04:35.443
+Refunds were wrong.
+
+53
+00:04:35.723 --> 00:04:44.513
+When a customer returned one item from a couponed order, the refund was the item's list price, so every return quietly refunded the coupon again.
+
+54
+00:04:44.793 --> 00:04:53.753
+The first-order coupon ran out by 10 am on day one of a week-long campaign, mostly redeemed by customers who ordered every day anyway.
+
+55
+00:04:54.033 --> 00:05:02.502
+The Jayanagar store threw away 300 packets of milk and bread a week, because nobody was allowed to mark down stock expiring tomorrow.
+
+56
+00:05:03.852 --> 00:05:05.559
+Pricing looks like arithmetic.
+
+57
+00:05:05.839 --> 00:05:14.351
+It is actually money correctness, rule combination, budget control and inventory economics, and every mistake is paid for in cash.
+
+58
+00:05:15.701 --> 00:05:16.383
+Quote:
+
+59
+00:05:16.663 --> 00:05:18.327
+The thesis of this chapter.
+
+60
+00:05:18.607 --> 00:05:25.071
+Money is integers (paise), and any amount split across lines is split exactly once and stored (L1).
+
+61
+00:05:25.351 --> 00:05:34.951
+Promotions are indexed rules that combine under explicit, deterministic policies: one offer per line per group, a fixed group order, and a margin floor.
+
+62
+00:05:35.231 --> 00:05:38.965
+Which offer wins is a business decision, made on purpose (L2).
+
+63
+00:05:39.245 --> 00:05:46.818
+Budgets are paced to traffic, and coupons are targeted by incrementality, not handed to whoever arrives first (L3).
+
+64
+00:05:47.098 --> 00:05:55.845
+Prices move with the inventory's clock: markdowns sized per SKU recover margin from stock that would otherwise be waste (L4).
+
+65
+00:05:57.195 --> 00:05:59.499
+Where this lives in the grocery platform.
+
+66
+00:05:59.779 --> 00:06:01.144
+Here is a quick table:
+
+67
+00:06:01.424 --> 00:06:03.771
+Concern, and Owner, and Data, and Store.
+
+68
+00:06:04.051 --> 00:06:06.696
+List prices per store or city, MRP.
+
+69
+00:06:06.976 --> 00:06:08.448
+Owner: pricing-service.
+
+70
+00:06:08.728 --> 00:06:09.539
+Data:
+
+71
+00:06:09.819 --> 00:06:11.589
+Price books, effective dates.
+
+72
+00:06:11.869 --> 00:06:12.659
+Store:
+
+73
+00:06:12.939 --> 00:06:17.568
+PostgreSQL + Redis cache; pricing.price.changed.v1.
+
+74
+00:06:17.848 --> 00:06:19.896
+Tax (GST by HSN).
+
+75
+00:06:20.176 --> 00:06:21.648
+Owner: pricing-service.
+
+76
+00:06:21.928 --> 00:06:22.739
+Data:
+
+77
+00:06:23.019 --> 00:06:24.427
+Rates, rounding rules.
+
+78
+00:06:24.707 --> 00:06:25.496
+Store:
+
+79
+00:06:25.776 --> 00:06:27.419
+Config with effective dates.
+
+80
+00:06:27.699 --> 00:06:29.107
+Promotions and offers.
+
+81
+00:06:29.387 --> 00:06:30.923
+Owner: promotion-service.
+
+82
+00:06:31.203 --> 00:06:32.013
+Data:
+
+83
+00:06:32.293 --> 00:06:34.875
+Rules, targeting, priorities, budgets.
+
+84
+00:06:35.155 --> 00:06:35.944
+Store:
+
+85
+00:06:36.224 --> 00:06:39.467
+PostgreSQL (source), then in-memory indexes.
+
+86
+00:06:39.747 --> 00:06:41.005
+Coupons (codes).
+
+87
+00:06:41.285 --> 00:06:42.821
+Owner: promotion-service.
+
+88
+00:06:43.101 --> 00:06:43.912
+Data:
+
+89
+00:06:44.192 --> 00:06:45.920
+Codes, limits, redemptions.
+
+90
+00:06:46.200 --> 00:06:46.989
+Store:
+
+91
+00:06:47.269 --> 00:06:50.939
+PostgreSQL + Redis counters (Ch 46).
+
+92
+00:06:51.219 --> 00:06:52.627
+Quote or cart pricing.
+
+93
+00:06:52.907 --> 00:06:53.611
+Owner:
+
+94
+00:06:53.891 --> 00:06:55.192
+Pricing API.
+
+95
+00:06:55.472 --> 00:06:56.283
+Data:
+
+96
+00:06:56.563 --> 00:06:59.656
+Price + promotions + tax, then line amounts.
+
+97
+00:06:59.936 --> 00:07:00.725
+Store:
+
+98
+00:07:01.005 --> 00:07:02.221
+Stateless compute.
+
+99
+00:07:03.571 --> 00:07:04.979
+Final price record.
+
+100
+00:07:05.259 --> 00:07:05.963
+Owner:
+
+101
+00:07:06.243 --> 00:07:06.969
+Order.
+
+102
+00:07:07.249 --> 00:07:08.059
+Data:
+
+103
+00:07:08.339 --> 00:07:10.857
+Line amounts, allocated discounts, tax.
+
+104
+00:07:11.137 --> 00:07:11.926
+Store:
+
+105
+00:07:12.206 --> 00:07:14.425
+Order DB (immutable snapshot).
+
+106
+00:07:14.705 --> 00:07:16.347
+Campaign budgets and pacing.
+
+107
+00:07:16.627 --> 00:07:18.163
+Owner: promotion-service.
+
+108
+00:07:18.443 --> 00:07:19.254
+Data:
+
+109
+00:07:19.534 --> 00:07:21.305
+Spend, pacing multiplier.
+
+110
+00:07:21.585 --> 00:07:22.374
+Store:
+
+111
+00:07:22.654 --> 00:07:24.083
+Redis + analytics.
+
+112
+00:07:24.363 --> 00:07:25.281
+Markdowns.
+
+113
+00:07:25.561 --> 00:07:27.779
+Owner: pricing-service + store ops.
+
+114
+00:07:28.059 --> 00:07:28.870
+Data:
+
+115
+00:07:29.150 --> 00:07:31.646
+Expiry batches, markdown decisions.
+
+116
+00:07:31.926 --> 00:07:32.715
+Store:
+
+117
+00:07:32.995 --> 00:07:34.553
+Inventory + pricing.
+
+118
+00:07:35.903 --> 00:07:37.225
+Learning objectives.
+
+119
+00:07:37.505 --> 00:07:39.383
+By the end you will be able to:
+
+120
+00:07:39.663 --> 00:07:45.103
+Represent and split money correctly: rounding, tax, proration and refunds (L1).
+
+121
+00:07:45.383 --> 00:07:52.103
+Design a promotion engine: rule model, indexing, combination policy and determinism (L2).
+
+122
+00:07:52.383 --> 00:07:56.244
+Control campaign spend: pacing and incrementality (L3).
+
+123
+00:07:56.524 --> 00:07:59.916
+Price perishables dynamically with markdowns (L4).
+
+124
+00:08:01.266 --> 00:08:08.882
+Handle price changes, quotes versus final prices, audit, and regulation (MRP, GST, dark patterns).
+
+125
+00:08:10.232 --> 00:08:11.107
+Part 2.
+
+126
+00:08:11.387 --> 00:08:13.285
+Core Concepts, Beginner to Deep.
+
+127
+00:08:14.535 --> 00:08:17.095
+Intuition: the supermarket till receipt.
+
+128
+00:08:17.375 --> 00:08:19.423
+A till receipt is a small contract.
+
+129
+00:08:19.703 --> 00:08:21.922
+Every line has a price and a discount.
+
+130
+00:08:22.202 --> 00:08:23.909
+The totals add up exactly.
+
+131
+00:08:24.189 --> 00:08:26.813
+The tax is computed per line by fixed rules.
+
+132
+00:08:27.093 --> 00:08:32.447
+If you return one item, the cashier refunds what you paid for that item, not the shelf price.
+
+133
+00:08:32.727 --> 00:08:42.327
+Behind the till, the store decided which offers may combine, how much each promotion may cost, and when to put the yellow reduced stickers on tomorrow's milk.
+
+134
+00:08:42.607 --> 00:08:47.002
+This chapter builds that till and those decisions for millions of carts a day.
+
+135
+00:08:48.352 --> 00:08:49.312
+Requirements.
+
+136
+00:08:49.592 --> 00:08:50.445
+Functional.
+
+137
+00:08:50.725 --> 00:08:56.677
+Price books by store or city with effective dates; MRP ceilings on packaged goods (VERIFY:
+
+138
+00:08:56.957 --> 00:09:02.504
+Legal Metrology (Packaged Commodities) Rules, selling above MRP is not permitted).
+
+139
+00:09:02.784 --> 00:09:14.411
+Promotions: % off (SKU or category or brand), buy-X-get-Y, bundles, tiered cart discounts, bank or payment offers, coupon codes, first-order offers, free delivery.
+
+140
+00:09:14.691 --> 00:09:19.320
+Targeting (new users, segments, cities), schedules, usage limits, budgets.
+
+141
+00:09:20.670 --> 00:09:29.054
+Cart quote: line prices, applied offers with reasons, taxes, totals; add 120 rupeesmore for free delivery hints.
+
+142
+00:09:29.334 --> 00:09:35.179
+Final pricing at checkout, stored immutably on the order; refunds and seller settlement use it.
+
+143
+00:09:35.459 --> 00:09:36.569
+Non-functional.
+
+144
+00:09:36.849 --> 00:09:41.393
+Cart quote p99 50 ms (it runs on every cart change).
+
+145
+00:09:41.673 --> 00:09:46.942
+Deterministic: the same cart and the same rules give the same price on every server.
+
+146
+00:09:48.292 --> 00:09:51.151
+Exact money: sums reconcile to the paisa.
+
+147
+00:09:51.431 --> 00:09:54.268
+Auditable: why this price, which rule, which version.
+
+148
+00:09:55.618 --> 00:09:56.663
+Estimation.
+
+149
+00:09:56.943 --> 00:09:58.309
+Here is a quick table:
+
+150
+00:09:58.589 --> 00:10:00.018
+Quantity, and Estimate.
+
+151
+00:10:00.298 --> 00:10:01.855
+SKUs times stores:
+
+152
+00:10:02.135 --> 00:10:10.178
+50k SKUs times 300 stores, then up to 15M price points (mostly inherited from city price books).
+
+153
+00:10:10.458 --> 00:10:11.695
+Active promotions:
+
+154
+00:10:11.975 --> 00:10:14.514
+10k, 50k (brands fund many).
+
+155
+00:10:14.794 --> 00:10:15.562
+Quotes:
+
+156
+00:10:15.842 --> 00:10:19.682
+Every cart change: ~20 to 50k per second at peak.
+
+157
+00:10:19.962 --> 00:10:26.895
+Orders: ~1.5M per day, ~15 lines each, then 22M priced lines per day stored.
+
+158
+00:10:27.175 --> 00:10:31.378
+Price changes: ~100k per day; bursts during sales.
+
+159
+00:10:32.728 --> 00:10:39.149
+Quotes are the hot path: pure computation over in-memory indexes, with no database calls per quote.
+
+160
+00:10:40.499 --> 00:10:41.609
+Money correctness.
+
+161
+00:10:41.889 --> 00:10:47.777
+Integer minor units (paise) in long, or BigDecimal with an explicit scale and rounding mode.
+
+162
+00:10:48.057 --> 00:10:48.995
+Never double.
+
+163
+00:10:49.275 --> 00:10:56.614
+Rounding is a rule: which mode (HALFUP?), at which level (per line or per invoice), in which order (discount before tax).
+
+164
+00:10:56.894 --> 00:11:01.886
+Tax rules may fix some of these (VERIFY GST invoice rules with finance).
+
+165
+00:11:02.166 --> 00:11:13.067
+Allocation: a cart-level amount (coupon, delivery fee waiver, bank offer) is spread across lines once, using the largest-remainder method, so the shares sum exactly.
+
+166
+00:11:13.347 --> 00:11:19.363
+This matters because tax applies to discounted line value, and refunds and seller payouts are per line.
+
+167
+00:11:20.713 --> 00:11:26.708
+Store it: the order keeps each line's list price, allocated discounts, taxable value and tax.
+
+168
+00:11:26.988 --> 00:11:28.887
+Refunds use the stored values.
+
+169
+00:11:29.167 --> 00:11:30.617
+L1 measured all of it:
+
+170
+00:11:31.967 --> 00:11:33.333
+Here is a quick table:
+
+171
+00:11:33.613 --> 00:11:35.789
+Check (200k carts), and Wrong.
+
+172
+00:11:36.069 --> 00:11:38.501
+Double rupees, (long)(d100):
+
+173
+00:11:38.781 --> 00:11:42.749
+44,961 carts' invoice totals.
+
+174
+00:11:43.029 --> 00:11:45.311
+Double rupees, Math.round at the end:
+
+175
+00:11:45.591 --> 00:11:54.253
+3,352 (every one a per-line tax landing on 0.4999... instead of 0.5).
+
+176
+00:11:54.533 --> 00:11:55.471
+Long paise:
+
+177
+00:11:55.751 --> 00:11:56.498
+0.
+
+178
+00:11:56.778 --> 00:11:58.954
+Coupon shares rounded independently:
+
+179
+00:11:59.234 --> 00:12:04.333
+106,913 carts don't sum to 75 rupees.
+
+180
+00:12:04.613 --> 00:12:05.850
+Largest remainder:
+
+181
+00:12:06.130 --> 00:12:06.877
+0.
+
+182
+00:12:07.157 --> 00:12:08.458
+Refund list price:
+
+183
+00:12:08.738 --> 00:12:15.671
+184,688 carts over-refunded, 1.39 crore rupees in total.
+
+184
+00:12:15.951 --> 00:12:18.127
+Refund recomputed at refund time:
+
+185
+00:12:18.407 --> 00:12:23.314
+171,915 carts, 32 lakh rupees.
+
+186
+00:12:24.664 --> 00:12:25.965
+Refund stored share:
+
+187
+00:12:26.245 --> 00:12:26.992
+0.
+
+188
+00:12:28.342 --> 00:12:29.558
+The promotion model.
+
+189
+00:12:29.838 --> 00:12:31.843
+A promotion is data, not code:
+
+190
+00:12:33.193 --> 00:12:51.113
+On screen: promotion: id, name, funding (platform brand bank), status, version. schedule: startsat, endsat, days or hours. targeting: cities, stores, segments (new user, lapsed), channels. condition: line predicate (sku in or category or brand), min qty,
+
+191
+00:12:51.393 --> 00:13:09.249
+cart threshold. payment instrument. benefit: pctoff flatoff buyxgety fixedprice freedelivery, cap. combination: group (ITEM CART PAYMENT SHIPPING), priority, stackablewith. excludesdiscounteditems. limits: percustomer, totalredemptions, budget.
+
+192
+00:13:12.099 --> 00:13:14.083
+Groups define the stacking policy.
+
+193
+00:13:14.363 --> 00:13:24.497
+For example: at most one ITEM offer per line, one CART offer, one PAYMENT offer, one SHIPPING offer, applied in the order ITEM, then CART, then PAYMENT, then SHIPPING.
+
+194
+00:13:24.777 --> 00:13:33.801
+Floors: never price a line below a margin floor (unless the offer is funded by a brand that explicitly allows it), and never above MRP.
+
+195
+00:13:34.081 --> 00:13:38.646
+Versioned: quotes record the promotion versions they used; orders keep them.
+
+196
+00:13:39.996 --> 00:13:41.703
+Indexing and evaluation.
+
+197
+00:13:41.983 --> 00:13:47.657
+Evaluation is: find the candidates, filter them by targeting and schedule, then combine.
+
+198
+00:13:47.937 --> 00:13:48.748
+L2:
+
+199
+00:13:50.098 --> 00:13:51.463
+Here is a quick table:
+
+200
+00:13:51.743 --> 00:13:58.570
+Engine, and p50, and p99, and Order-dependent carts, and Lines below floor, and Customers pay.
+
+201
+00:13:58.850 --> 00:14:01.389
+Scan all, apply every match. p50:
+
+202
+00:14:01.669 --> 00:14:05.466
+3,818 µs. p99:
+
+203
+00:14:05.746 --> 00:14:08.498
+7,822 µs.
+
+204
+00:14:08.778 --> 00:14:10.165
+Order-dependent carts:
+
+205
+00:14:10.445 --> 00:14:12.898
+19,594.
+
+206
+00:14:13.178 --> 00:14:14.458
+Lines below floor:
+
+207
+00:14:14.738 --> 00:14:18.045
+247,854.
+
+208
+00:14:18.325 --> 00:14:19.434
+Customers pay:
+
+209
+00:14:19.714 --> 00:14:21.591
+2.21 crore rupees.
+
+210
+00:14:21.871 --> 00:14:24.367
+Index, apply every match. p50:
+
+211
+00:14:24.647 --> 00:14:27.293
+57 µs. p99:
+
+212
+00:14:27.573 --> 00:14:29.407
+181 µs.
+
+213
+00:14:29.687 --> 00:14:31.074
+Order-dependent carts:
+
+214
+00:14:31.354 --> 00:14:33.807
+19,594.
+
+215
+00:14:34.087 --> 00:14:35.367
+Lines below floor:
+
+216
+00:14:35.647 --> 00:14:38.954
+247,854.
+
+217
+00:14:39.234 --> 00:14:40.343
+Customers pay:
+
+218
+00:14:40.623 --> 00:14:42.501
+2.21 crore rupees.
+
+219
+00:14:42.781 --> 00:14:47.751
+Index + one item offer by priority, cart, bank, floor. p50:
+
+220
+00:14:48.031 --> 00:14:50.698
+75 µs. p99:
+
+221
+00:14:50.978 --> 00:14:52.749
+211 µs.
+
+222
+00:14:53.029 --> 00:14:54.415
+Order-dependent carts:
+
+223
+00:14:54.695 --> 00:14:55.442
+0.
+
+224
+00:14:55.722 --> 00:14:57.002
+Lines below floor:
+
+225
+00:14:57.282 --> 00:14:58.029
+0.
+
+226
+00:14:58.309 --> 00:14:59.418
+Customers pay:
+
+227
+00:14:59.698 --> 00:15:01.746
+8.69 crore rupees.
+
+228
+00:15:02.026 --> 00:15:05.290
+Index + best item offer per line. p50:
+
+229
+00:15:05.570 --> 00:15:08.173
+86 µs. p99:
+
+230
+00:15:08.453 --> 00:15:10.501
+237 µs.
+
+231
+00:15:10.781 --> 00:15:12.167
+Order-dependent carts:
+
+232
+00:15:12.447 --> 00:15:13.194
+0.
+
+233
+00:15:13.474 --> 00:15:14.754
+Lines below floor:
+
+234
+00:15:15.034 --> 00:15:15.781
+0.
+
+235
+00:15:16.061 --> 00:15:17.170
+Customers pay:
+
+236
+00:15:17.450 --> 00:15:19.583
+7.65 crore rupees.
+
+237
+00:15:20.933 --> 00:15:22.149
+(List price total:
+
+238
+00:15:22.429 --> 00:15:24.669
+11.15 crore rupees.).
+
+239
+00:15:24.949 --> 00:15:33.504
+Inverted indexes map SKU, then offers, category, then offers and brand, then offers, plus a short list of cart and payment offers.
+
+240
+00:15:33.784 --> 00:15:40.227
+Build them from the rules database, and hot-swap them on change (versioned snapshot, atomic reference swap).
+
+241
+00:15:40.507 --> 00:15:43.152
+Apply every match is a bug, not a policy.
+
+242
+00:15:43.432 --> 00:15:46.973
+It is order-dependent, so two servers can quote two prices.
+
+243
+00:15:47.253 --> 00:15:50.176
+It stacks everything, and it breaks margin floors.
+
+244
+00:15:51.526 --> 00:15:56.902
+Priority versus best-for-customer is a ~12% revenue decision in L2.
+
+245
+00:15:57.182 --> 00:16:02.921
+Neither is wrong, but it must be chosen deliberately and shown to the customer (best offer applied).
+
+246
+00:16:03.201 --> 00:16:10.945
+Harder combinatorics (bundles that share items, cheapest item free across lines) become small optimisation problems.
+
+247
+00:16:11.225 --> 00:16:16.067
+Bound them: evaluate a few candidate plans and keep the best, with a time budget.
+
+248
+00:16:17.417 --> 00:16:19.252
+Quotes versus final prices.
+
+249
+00:16:19.532 --> 00:16:21.495
+Cart quote: fast and advisory.
+
+250
+00:16:21.775 --> 00:16:23.865
+It may use cached prices seconds old.
+
+251
+00:16:24.145 --> 00:16:27.708
+Checkout price: recomputed server-side with the current rules.
+
+252
+00:16:27.988 --> 00:16:34.345
+If it differs from what the customer last saw, the customer sees the change before paying (Ch 46).
+
+253
+00:16:34.625 --> 00:16:38.593
+Order snapshot: immutable line-level amounts with rule versions.
+
+254
+00:16:38.873 --> 00:16:46.575
+Everything after checkout (invoice, GST filing, refunds, seller settlement in Ch 45) reads the snapshot.
+
+255
+00:16:46.855 --> 00:16:48.241
+Nothing recomputes it.
+
+256
+00:16:49.591 --> 00:16:51.789
+Budgets, pacing and incrementality.
+
+257
+00:16:52.069 --> 00:16:56.399
+A coupon's cost is certain; its benefit is only the orders it causes.
+
+258
+00:16:56.679 --> 00:16:57.533
+L3:
+
+259
+00:16:58.883 --> 00:17:00.248
+Here is a quick table:
+
+260
+00:17:00.528 --> 00:17:07.099
+Policy, and Incremental orders, and ₹ per incremental order, and Hours live of 168.
+
+261
+00:17:07.379 --> 00:17:08.957
+First come, first served.
+
+262
+00:17:09.237 --> 00:17:10.517
+Incremental orders:
+
+263
+00:17:10.797 --> 00:17:14.765
+1,189. ₹ per incremental order:
+
+264
+00:17:15.045 --> 00:17:16.304
+420.
+
+265
+00:17:16.584 --> 00:17:18.696
+Hours live of 168:
+
+266
+00:17:18.976 --> 00:17:19.829
+13.
+
+267
+00:17:20.109 --> 00:17:21.368
+Equal daily caps.
+
+268
+00:17:21.648 --> 00:17:22.928
+Incremental orders:
+
+269
+00:17:23.208 --> 00:17:27.389
+1,167. ₹ per incremental order:
+
+270
+00:17:27.669 --> 00:17:29.013
+428.
+
+271
+00:17:29.293 --> 00:17:31.405
+Hours live of 168:
+
+272
+00:17:31.685 --> 00:17:32.667
+46.
+
+273
+00:17:32.947 --> 00:17:34.120
+Paced to traffic.
+
+274
+00:17:34.400 --> 00:17:35.680
+Incremental orders:
+
+275
+00:17:35.960 --> 00:17:40.120
+1,164. ₹ per incremental order:
+
+276
+00:17:40.400 --> 00:17:41.637
+430.
+
+277
+00:17:41.917 --> 00:17:44.029
+Hours live of 168:
+
+278
+00:17:44.309 --> 00:17:45.760
+164.
+
+279
+00:17:46.040 --> 00:17:48.408
+Paced + targeted by predicted uplift.
+
+280
+00:17:48.688 --> 00:17:49.968
+Incremental orders:
+
+281
+00:17:50.248 --> 00:17:54.195
+2,135. ₹ per incremental order:
+
+282
+00:17:54.475 --> 00:17:55.861
+234.
+
+283
+00:17:56.141 --> 00:17:58.253
+Hours live of 168:
+
+284
+00:17:58.533 --> 00:17:59.963
+161.
+
+285
+00:18:01.313 --> 00:18:08.161
+Pacing (probabilistic throttling with feedback every few minutes, as in ad budgets) spreads the spend over time.
+
+286
+00:18:08.441 --> 00:18:11.235
+It fixes coverage and fairness, not efficiency.
+
+287
+00:18:11.515 --> 00:18:17.787
+Feed known events (a TV ad, a festival) into the expected curve, or pacing will hold them back.
+
+288
+00:18:18.067 --> 00:18:22.654
+Incrementality: most redemptions go to customers who would have ordered anyway.
+
+289
+00:18:22.934 --> 00:18:29.846
+Uplift models target the persuadable, and holdout groups (customers who never see the offer) measure the real effect.
+
+290
+00:18:30.126 --> 00:18:34.670
+Budget enforcement is still an atomic counter (Ch 46 L1).
+
+291
+00:18:34.950 --> 00:18:38.811
+Pacing decides who sees the offer; the counter decides who gets it.
+
+292
+00:18:40.161 --> 00:18:44.769
+Abuse: new-account farming for first-order coupons, and coupon-code sharing.
+
+293
+00:18:45.049 --> 00:18:50.745
+Use device and payment fingerprints, per-customer limits, and rate limits (Ch 39).
+
+294
+00:18:52.095 --> 00:18:54.101
+Dynamic pricing and markdowns.
+
+295
+00:18:54.381 --> 00:18:56.343
+Perishables: stock has a clock.
+
+296
+00:18:56.623 --> 00:19:00.826
+A unit written off earns nothing; a unit sold at a markdown earns something.
+
+297
+00:19:01.106 --> 00:19:01.981
+L4:
+
+298
+00:19:03.331 --> 00:19:04.696
+Here is a quick table:
+
+299
+00:19:04.976 --> 00:19:08.283
+Policy, and Waste, and Gross margin, and Cannibalised.
+
+300
+00:19:08.563 --> 00:19:09.672
+No markdowns.
+
+301
+00:19:09.952 --> 00:19:10.720
+Waste:
+
+302
+00:19:10.000 --> 00:19:13.475
+24,686.
+
+303
+00:19:13.755 --> 00:19:14.843
+Gross margin:
+
+304
+00:19:15.123 --> 00:19:17.256
+34.2 lakh rupees.
+
+305
+00:19:17.536 --> 00:19:18.581
+Cannibalised:
+
+306
+00:19:18.861 --> 00:19:19.608
+0.
+
+307
+00:19:19.888 --> 00:19:21.701
+30% off on the last day.
+
+308
+00:19:21.981 --> 00:19:22.749
+Waste:
+
+309
+00:19:23.029 --> 00:19:25.227
+1,897.
+
+310
+00:19:25.507 --> 00:19:26.595
+Gross margin:
+
+311
+00:19:26.875 --> 00:19:29.008
+43.3 lakh rupees.
+
+312
+00:19:29.288 --> 00:19:30.333
+Cannibalised:
+
+313
+00:19:30.613 --> 00:19:33.344
+33,987.
+
+314
+00:19:33.624 --> 00:19:35.523
+50% off on the last day.
+
+315
+00:19:35.803 --> 00:19:36.571
+Waste:
+
+316
+00:19:36.851 --> 00:19:38.216
+235.
+
+317
+00:19:38.496 --> 00:19:39.584
+Gross margin:
+
+318
+00:19:39.864 --> 00:19:41.933
+41.8 lakh rupees.
+
+319
+00:19:42.213 --> 00:19:43.259
+Cannibalised:
+
+320
+00:19:43.539 --> 00:19:46.205
+32,336.
+
+321
+00:19:46.485 --> 00:19:48.981
+Per-SKU expected-revenue markdown.
+
+322
+00:19:49.261 --> 00:19:50.029
+Waste:
+
+323
+00:19:50.309 --> 00:19:52.080
+2,807.
+
+324
+00:19:52.360 --> 00:19:53.448
+Gross margin:
+
+325
+00:19:53.728 --> 00:19:55.797
+44.6 lakh rupees.
+
+326
+00:19:56.077 --> 00:19:57.123
+Cannibalised:
+
+327
+00:19:57.403 --> 00:19:59.771
+28,511.
+
+328
+00:20:01.121 --> 00:20:07.478
+Optimise the right objective: the best-margin policy wastes a little more than a flat 30%.
+
+329
+00:20:07.758 --> 00:20:13.667
+If waste has its own cost (sustainability targets, disposal), put that cost in the objective.
+
+330
+00:20:13.947 --> 00:20:19.067
+Surge and personalised pricing: dynamic delivery fees by demand are common.
+
+331
+00:20:19.347 --> 00:20:24.169
+Personalised product prices raise fairness, trust and regulatory questions.
+
+332
+00:20:24.449 --> 00:20:36.118
+The Consumer Protection (E-Commerce) Rules and the 2023 guidelines on dark patterns (drip pricing, false urgency) apply in India (VERIFY scope with legal).
+
+333
+00:20:37.468 --> 00:20:45.383
+Guardrails: bounds per change, maximum change per day, MRP ceiling, human approval for large moves, and a kill switch.
+
+334
+00:20:46.733 --> 00:20:48.375
+Price changes and caches.
+
+335
+00:20:48.655 --> 00:20:50.981
+Price books change with effective timestamps.
+
+336
+00:20:51.261 --> 00:20:57.959
+Publish pricing.price.changed.v1 events, and update Redis and the in-memory caches in the quote service.
+
+337
+00:20:58.239 --> 00:21:00.714
+Checkout validates against the source of truth.
+
+338
+00:21:00.994 --> 00:21:10.679
+Bulk changes at sale start: pre-publish them with a future effective time, so every node switches at the same moment and no midnight rush of writes is needed.
+
+339
+00:21:10.959 --> 00:21:13.562
+Audit: who changed which price, when and why.
+
+340
+00:21:13.842 --> 00:21:22.226
+Mistaken prices (9 rupeesinstead of 999 rupees) need a fast rollback and a policy for honouring orders.
+
+341
+00:21:23.576 --> 00:21:24.707
+Interview framing.
+
+342
+00:21:24.987 --> 00:21:30.192
+Design a coupon or promotion system or design pricing for an e-commerce platform.
+
+343
+00:21:30.472 --> 00:21:41.629
+Cover: money representation;. the rule model;. indexing;. a deterministic combination policy;. quote versus final price versus snapshot;. budgets and abuse;.
+
+344
+00:21:42.979 --> 00:21:44.174
+incrementality.
+
+345
+00:21:44.454 --> 00:21:56.849
+Staff-level signals: saying apply every match is order-dependent;. storing allocated discounts per line;. measuring incrementality with holdouts;. naming the MRP and dark-pattern constraints.
+
+346
+00:21:58.199 --> 00:21:59.095
+Part 3.
+
+347
+00:21:59.375 --> 00:22:01.103
+Architecture and Diagrams.
+
+348
+00:22:02.353 --> 00:22:03.419
+Component view.
+
+349
+00:22:03.699 --> 00:22:05.043
+Here is the diagram.
+
+350
+00:22:08.893 --> 00:22:11.987
+Sequence: happy path, cart quote to order snapshot.
+
+351
+00:22:12.267 --> 00:22:14.933
+The sequence diagram walks through it step by step.
+
+352
+00:22:15.213 --> 00:22:19.672
+A to Q: quote cart 14 lines, store 17, bank HDFC.
+
+353
+00:22:19.952 --> 00:22:23.387
+Q to Q: index lookup, 23 candidate offers.
+
+354
+00:22:23.667 --> 00:22:28.275
+Q to Q: combine ITEM then CART then PAYMENT, floor and MRP checks.
+
+355
+00:22:28.555 --> 00:22:35.808
+Q to A: lines, offers applied with reasons, tax, total 1,842.37.
+
+356
+00:22:36.088 --> 00:22:37.688
+A to C: place order.
+
+357
+00:22:37.968 --> 00:22:41.019
+C to Q: final price with current rule versions.
+
+358
+00:22:41.299 --> 00:22:46.888
+Q to C: total 1,842.37, allocations per line.
+
+359
+00:22:47.168 --> 00:22:49.963
+C to R: reserve coupon use and budget.
+
+360
+00:22:50.243 --> 00:22:51.757
+R to C: ok.
+
+361
+00:22:52.037 --> 00:22:56.496
+C to O: store snapshot - line amounts, allocations, tax, versions.
+
+362
+00:23:00.346 --> 00:23:04.037
+Sequence: failure path, price changed and budget exhausted.
+
+363
+00:23:04.317 --> 00:23:06.983
+The sequence diagram walks through it step by step.
+
+364
+00:23:07.263 --> 00:23:12.746
+A to C: place order, last seen total 1,842.37.
+
+365
+00:23:13.026 --> 00:23:14.733
+C to Q: final price.
+
+366
+00:23:15.013 --> 00:23:22.181
+Q to C: total 1,905.10 - atta price changed at 18:00.
+
+367
+00:23:22.461 --> 00:23:27.623
+C to A: price updated, confirm 1,905.10.
+
+368
+00:23:27.903 --> 00:23:29.354
+A to C: confirm.
+
+369
+00:23:29.634 --> 00:23:33.047
+C to R: reserve campaign budget for FIRST100.
+
+370
+00:23:33.327 --> 00:23:35.439
+R to C: budget exhausted.
+
+371
+00:23:35.719 --> 00:23:38.322
+C to Q: reprice without FIRST100.
+
+372
+00:23:38.602 --> 00:23:41.674
+Q to C: total 2,005.10.
+
+373
+00:23:41.954 --> 00:23:47.330
+C to A: offer ended, confirm 2,005.10 or remove items.
+
+374
+00:23:51.180 --> 00:23:53.164
+State: a promotion's lifecycle.
+
+375
+00:23:53.444 --> 00:23:54.788
+Here is the diagram.
+
+376
+00:23:58.638 --> 00:23:59.555
+Part 4.
+
+377
+00:23:59.835 --> 00:24:01.457
+Design Document Excerpt:
+
+378
+00:24:01.737 --> 00:24:04.062
+Pricing and Promotions Platform v2.
+
+379
+00:24:05.312 --> 00:24:06.059
+Note:
+
+380
+00:24:06.339 --> 00:24:10.541
+Design Document (excerpt), Pricing and Promotions Platform v2.
+
+381
+00:24:10.821 --> 00:24:11.717
+Status:
+
+382
+00:24:11.997 --> 00:24:13.277
+Accepted, Authors:
+
+383
+00:24:13.557 --> 00:24:15.541
+Pricing platform team, Reviewers:
+
+384
+00:24:15.821 --> 00:24:19.277
+Finance, Tax, Legal, Marketing, Checkout, SRE.
+
+385
+00:24:19.557 --> 00:24:23.163
+Context, double amounts broke GST reconciliation.
+
+386
+00:24:23.443 --> 00:24:27.069
+Apply every match stacked offers into 0 rupeesorders.
+
+387
+00:24:27.349 --> 00:24:29.248
+Refunds re-granted coupons.
+
+388
+00:24:29.528 --> 00:24:33.197
+Coupons ran out in hours on non-incremental customers.
+
+389
+00:24:33.477 --> 00:24:34.928
+Perishables were wasted.
+
+390
+00:24:36.278 --> 00:24:41.633
+Decision, Integer paise everywhere, with largest-remainder allocation stored per line.
+
+391
+00:24:41.913 --> 00:24:48.761
+Promotion rules as versioned data in groups, with a fixed combination order and margin or MRP floors.
+
+392
+00:24:49.041 --> 00:24:51.622
+Inverted indexes hot-swapped in quote nodes.
+
+393
+00:24:51.902 --> 00:24:54.078
+Best-for-customer within the ITEM group.
+
+394
+00:24:54.358 --> 00:24:57.899
+Pacing plus uplift targeting for campaigns, with holdouts.
+
+395
+00:24:58.179 --> 00:25:02.659
+Per-SKU expected-revenue markdowns for perishables, with guardrails.
+
+396
+00:25:04.009 --> 00:25:12.692
+Related ADRs, ADR-350 Money = long paise, HALFUP per line, discount allocated before tax (L1).
+
+397
+00:25:12.972 --> 00:25:20.183
+ADR-351 Order snapshot is the only input to invoices, refunds and settlement (L1).
+
+398
+00:25:20.463 --> 00:25:28.719
+ADR-352 Combination groups ITEM, then CART, then PAYMENT, then SHIPPING, one per group, floors (L2).
+
+399
+00:25:28.999 --> 00:25:38.087
+ADR-353 ITEM group picks the best offer for the customer (L2; Finance signed off on the ~12% difference).
+
+400
+00:25:38.367 --> 00:25:45.876
+ADR-354 Campaign pacing every 15 min, uplift targeting, 5% holdout (L3).
+
+401
+00:25:46.156 --> 00:25:54.497
+ADR-355 Markdown optimiser per SKU per day, max 50%, never above MRP (L4).
+
+402
+00:25:54.777 --> 00:25:55.737
+Requirements.
+
+403
+00:25:57.087 --> 00:25:57.919
+R1:
+
+404
+00:25:58.199 --> 00:26:03.917
+0 paise mismatches between invoice totals and line sums; allocations sum exactly.
+
+405
+00:26:04.197 --> 00:26:05.029
+R2:
+
+406
+00:26:05.309 --> 00:26:12.007
+Quote p99 50 ms; identical results on every node for the same cart and rule version.
+
+407
+00:26:12.287 --> 00:26:13.141
+R3:
+
+408
+00:26:13.421 --> 00:26:20.269
+No line below its margin floor unless it is brand-funded with explicit permission; never above MRP.
+
+409
+00:26:20.549 --> 00:26:21.445
+R4:
+
+410
+00:26:21.725 --> 00:26:25.330
+Every campaign reports incremental orders against a holdout.
+
+411
+00:26:25.610 --> 00:26:26.485
+R5:
+
+412
+00:26:26.765 --> 00:26:31.159
+Perishable waste reduced 80% without reducing gross margin.
+
+413
+00:26:32.509 --> 00:26:33.917
+Decisions in detail.
+
+414
+00:26:34.197 --> 00:26:37.867
+Money (ADR-350 or 351).
+
+415
+00:26:38.147 --> 00:26:43.501
+A shared Money library, long paise, and banned double in pricing code by a static check.
+
+416
+00:26:43.781 --> 00:26:49.349
+Snapshots carry list, itemdiscount, cartallocation, paymentallocation, taxable, tax.
+
+417
+00:26:49.629 --> 00:26:53.576
+Engine (ADR-352 or 353).
+
+418
+00:26:53.856 --> 00:27:01.067
+The rules DB feeds a compiler that builds indexes; nodes swap atomically, and quotes record the index version.
+
+419
+00:27:01.347 --> 00:27:05.656
+Bundles are evaluated with a bounded plan search ( at most 5 ms).
+
+420
+00:27:07.006 --> 00:27:09.715
+Campaigns (ADR-354).
+
+421
+00:27:09.995 --> 00:27:13.921
+The pacing controller writes a show-probability per campaign to Redis.
+
+422
+00:27:14.201 --> 00:27:16.483
+Checkout reserves the budget atomically.
+
+423
+00:27:16.763 --> 00:27:18.939
+Uplift models are retrained weekly.
+
+424
+00:27:19.219 --> 00:27:22.057
+Markdowns (ADR-355).
+
+425
+00:27:22.337 --> 00:27:26.369
+A nightly batch proposes; the store app confirms stickers and labels.
+
+426
+00:27:26.649 --> 00:27:29.145
+The response model is learned from sell-through.
+
+427
+00:27:29.425 --> 00:27:30.449
+Consequences.
+
+428
+00:27:30.729 --> 00:27:44.467
+Costs we accept: a rules compiler and index versions to operate; Finance governance of promotion groups; data science dependencies (uplift, markdown response models); legal review of dynamic pricing.
+
+429
+00:27:45.817 --> 00:27:52.175
+What we gain: exact money, deterministic prices, a campaign spend that buys orders, and less waste.
+
+430
+00:27:53.525 --> 00:27:54.485
+Part 5.
+
+431
+00:27:54.765 --> 00:27:56.749
+Hands-On Code, Level Ladder.
+
+432
+00:27:57.999 --> 00:27:58.767
+Info:
+
+433
+00:27:59.047 --> 00:28:00.135
+What's real here.
+
+434
+00:28:00.415 --> 00:28:04.319
+All four labs are JDK 21 with no dependencies.
+
+435
+00:28:04.599 --> 00:28:13.772
+L1 computes real arithmetic on 200,000 synthetic carts: double versus long versus BigDecimal, allocation and refunds.
+
+436
+00:28:14.052 --> 00:28:20.751
+L2 is a real engine over 20,020 synthetic promotions, and its per-cart timings are measured.
+
+437
+00:28:21.031 --> 00:28:24.252
+L3 and L4 are simulations with fixed seeds.
+
+438
+00:28:24.532 --> 00:28:32.532
+The customer-response models (coupon uplift, markdown response) and the GST rates used are stated assumptions (VERIFY).
+
+439
+00:28:33.882 --> 00:28:36.762
+All labs are single-file JDK 21.
+
+440
+00:28:37.042 --> 00:28:42.311
+Run them with java -Dstdout.encoding=UTF-8 File.java.
+
+441
+00:28:43.661 --> 00:28:45.411
+L1, Money is integers.
+
+442
+00:28:45.691 --> 00:28:46.629
+Requirement:
+
+443
+00:28:46.909 --> 00:28:51.517
+Every invoice total, discount split and refund must be exact to the paisa.
+
+444
+00:28:51.797 --> 00:28:55.275
+200,000 carts priced with double and with long paise.
+
+445
+00:28:55.555 --> 00:29:02.808
+A 75 rupeescoupon is split across lines two ways, and each cart is then refunded line by line three ways.
+
+446
+00:29:04.158 --> 00:29:06.761
+Here is the Java code, MoneyL1.java.
+
+447
+00:29:07.041 --> 00:29:11.350
+It runs to 137 lines; the full listing is in the chapter.
+
+448
+00:29:11.630 --> 00:29:18.393
+MoneyL1.java, run with: java MoneyL1.java (JDK 21, no dependencies).
+
+449
+00:29:18.673 --> 00:29:19.931
+MONEY IS INTEGERS.
+
+450
+00:29:20.211 --> 00:29:41.801
+200,000 grocery carts (fixed seed), 3 to 30 lines each, prices 5 rupees, 900 rupeeswith paise, GST 0 or 5 or 12 or 18%. per line (rates here are illustrative, VERIFY per HSN code), and a 75 rupeescart-level coupon on carts over 999 rupees.
+
+451
+00:29:44.651 --> 00:29:45.568
+On screen:
+
+452
+00:29:45.848 --> 00:29:57.965
+200,000 carts, 3 to 20 lines, GST 0 or 5 or 12 or 18% per line, 75 rupeescoupon on carts over 999 rupees.
+
+453
+00:29:58.245 --> 00:30:01.147
+M1) double rupees, (long)(d100):
+
+454
+00:30:01.427 --> 00:30:09.128
+44,961 carts with the invoice total wrong by at. least 1 paisa (worst 3 paise).
+
+455
+00:30:09.408 --> 00:30:12.096
+M1) double rupees, Math.round at the end:
+
+456
+00:30:12.376 --> 00:30:15.085
+3,352 carts wrong.
+
+457
+00:30:15.365 --> 00:30:16.603
+M2) long paise:
+
+458
+00:30:16.883 --> 00:30:18.163
+0 carts wrong.
+
+459
+00:30:18.443 --> 00:30:24.992
+184,688 carts got the coupon; it must be spread over their lines:
+
+460
+00:30:25.272 --> 00:30:27.597
+P1) round each share independently:
+
+461
+00:30:27.877 --> 00:30:32.379
+106,913 carts whose shares don't add up to.
+
+462
+00:30:32.659 --> 00:30:39.933
+75.00 rupees (131,714 paise adrift in total).
+
+463
+00:30:40.213 --> 00:30:42.005
+P2) largest remainder:
+
+464
+00:30:42.285 --> 00:30:46.317
+0 carts. the customer returns every line, one at a time:
+
+465
+00:30:46.597 --> 00:30:48.112
+The rest is in the chapter.
+
+466
+00:30:50.962 --> 00:30:53.159
+Reading it: double fails in two ways:
+
+467
+00:30:53.439 --> 00:30:57.919
+Truncating to paise loses a paisa on about 22% of carts.
+
+468
+00:30:58.199 --> 00:31:03.298
+Even rounding correctly at the end leaves 3,352 carts wrong.
+
+469
+00:31:03.578 --> 00:31:09.253
+A separate check confirmed every one of them is a per-line tax that landed a hair below.5.
+
+470
+00:31:09.533 --> 00:31:21.415
+Allocation: rounding each share independently leaves more than half the couponed carts' shares not adding up to 75.00. rupeesThe largest-remainder method never does.
+
+471
+00:31:22.765 --> 00:31:27.331
+Refunds: only the shares stored at checkout refund exactly what was paid.
+
+472
+00:31:27.611 --> 00:31:30.832
+Refunding list price re-grants the coupon every time.
+
+473
+00:31:31.112 --> 00:31:36.488
+Recomputing at refund time breaks when a return drops the cart below the coupon's threshold.
+
+474
+00:31:37.838 --> 00:31:39.651
+L2, The promotion engine.
+
+475
+00:31:39.931 --> 00:31:40.870
+Requirement:
+
+476
+00:31:41.150 --> 00:31:48.361
+Quote any cart in well under a millisecond, give the same price on every server, and never sell below the margin floor.
+
+477
+00:31:48.641 --> 00:31:53.590
+20,020 promotions and 20,000 carts, run through four engines.
+
+478
+00:31:54.940 --> 00:31:58.353
+Here is the Java code, PromoEngineL2.java.
+
+479
+00:31:58.633 --> 00:32:02.793
+It runs to 207 lines; the full listing is in the chapter.
+
+480
+00:32:03.073 --> 00:32:11.095
+PromoEngineL2.java, run with: java PromoEngineL2.java (JDK 21, no dependencies).
+
+481
+00:32:11.375 --> 00:32:14.596
+WHICH OFFERS APPLY TO THIS CART, AND HOW DO THEY COMBINE?
+
+482
+00:32:14.876 --> 00:32:30.833
+50,000 SKUs in 800 categories and 2,000 brands; 20,000 live. item promotions (fixed seed): % off a SKU list, % off a category, % off a brand, buy-2-get-1 on a SKU; plus 12 auto-.
+
+483
+00:32:33.683 --> 00:32:34.601
+On screen:
+
+484
+00:32:34.881 --> 00:32:44.523
+20,020 promotions (20 cart-level or bank), 20,000 carts of 4 to 25 lines; floor = 60% of. price.
+
+485
+00:32:44.803 --> 00:33:01.294
+291,017 lines; list-price total 111,537,653 rupees. engine p50 p99 order-dependent lines below customers pay. carts. floor.
+
+486
+00:33:01.574 --> 00:33:02.321
+(total).
+
+487
+00:33:02.601 --> 00:33:14.377
+E1) scan all promotions, apply every match in stored order 3818.0 µs 7821.9 µs.
+
+488
+00:33:14.657 --> 00:33:25.089
+19,594 247,854 22,128,688.
+
+489
+00:33:25.369 --> 00:33:36.697
+E2) indexed lookup, apply every match in stored order 57.4 µs 181.1 µs 19,594.
+
+490
+00:33:36.977 --> 00:33:44.849
+247,854 22,128,688.
+
+491
+00:33:45.129 --> 00:33:46.643
+The rest is in the chapter.
+
+492
+00:33:49.493 --> 00:33:50.347
+Reading it:
+
+493
+00:33:50.627 --> 00:33:54.957
+Indexing fixes speed (about 60x faster) but not correctness.
+
+494
+00:33:55.237 --> 00:33:58.672
+E1 and E2 give identical, equally wrong prices.
+
+495
+00:33:58.952 --> 00:34:02.515
+Apply every match charges about 20% of list price.
+
+496
+00:34:02.795 --> 00:34:10.005
+It sells about 248k lines below the floor, and almost every cart's total depends on evaluation order.
+
+497
+00:34:10.285 --> 00:34:17.603
+Explicit groups and floors (E3 and E4) are deterministic and safe, for about 20 µs more per cart.
+
+498
+00:34:18.953 --> 00:34:28.467
+E3 versus E4: marketing's priority order versus the customer's best offer is a 1.04 crore rupees difference on this data.
+
+499
+00:34:28.747 --> 00:34:30.219
+It is a business decision.
+
+500
+00:34:31.569 --> 00:34:34.236
+L3, Budget pacing and incrementality.
+
+501
+00:34:34.516 --> 00:34:35.455
+Requirement:
+
+502
+00:34:35.735 --> 00:34:40.961
+Make a 5 lakh rupees coupon last the week and buy as many new orders as possible.
+
+503
+00:34:41.241 --> 00:34:46.255
+700,000 sessions with an evening peak and a TV-ad surge on day 4.
+
+504
+00:34:46.535 --> 00:34:50.545
+The coupon's response model is an assumption (VERIFY with holdouts).
+
+505
+00:34:51.895 --> 00:34:55.287
+Here is the Java code, BudgetPacingL3.java.
+
+506
+00:34:55.567 --> 00:34:59.621
+It runs to 105 lines; the full listing is in the chapter.
+
+507
+00:34:59.901 --> 00:35:07.943
+BudgetPacingL3.java, run with: java BudgetPacingL3.java (JDK 21, no dependencies).
+
+508
+00:35:08.223 --> 00:35:10.058
+A 5 rupeesLAKH CAMPAIGN:
+
+509
+00:35:10.338 --> 00:35:13.261
+100 rupeesoff your next order, 7 days.
+
+510
+00:35:13.541 --> 00:35:23.333
+700,000 eligible app sessions (fixed seed) follow the usual. daily curve (evening peak) with a TV ad on day 4 doubling traffic.
+
+511
+00:35:23.613 --> 00:35:26.151
+Each session has a baseline chance to order.
+
+512
+00:35:29.001 --> 00:35:29.919
+On screen:
+
+513
+00:35:30.199 --> 00:35:48.033
+5,00,000 rupeesbudget, 100 rupeesper redemption, 7 days, 700,000 eligible sessions (TV ad. doubles day 4). policy spent redemptions incremental ₹ per incremental hours live day-4. orders. order.
+
+514
+00:35:48.313 --> 00:35:48.996
+(of.
+
+515
+00:35:49.276 --> 00:35:51.324
+168). spend.
+
+516
+00:35:51.604 --> 00:36:01.695
+P1) first come, first served 500,000 rupees5,000 1,189 420 13 0%.
+
+517
+00:36:01.975 --> 00:36:15.052
+P2) equal daily caps 499,900 rupees4,999 1,167 428 46 14%.
+
+518
+00:36:15.332 --> 00:36:27.065
+P3) paced to the expected traffic curve 500,000 rupees5,000 1,164 430 164 14%.
+
+519
+00:36:27.345 --> 00:36:40.849
+P4) P3 + show only to top-half predicted uplift 500,000 rupees5,000 2,135 234 161 14%.
+
+520
+00:36:41.129 --> 00:36:42.644
+The rest is in the chapter.
+
+521
+00:36:45.494 --> 00:36:46.347
+Reading it:
+
+522
+00:36:46.627 --> 00:36:50.211
+First come, first served spends the whole budget in 13 hours.
+
+523
+00:36:50.491 --> 00:36:52.433
+Daily caps run dry each morning.
+
+524
+00:36:52.713 --> 00:37:03.145
+Pacing keeps the offer live for 164 hours but buys the same ~1,160 to 1,190 incremental orders.
+
+525
+00:37:03.425 --> 00:37:05.707
+It improves coverage, not efficiency.
+
+526
+00:37:05.987 --> 00:37:10.403
+Uplift targeting nearly doubles the incremental orders for the same money.
+
+527
+00:37:10.683 --> 00:37:16.529
+Day 4: every paced policy holds it to its planned 14% share, even though traffic doubled.
+
+528
+00:37:16.809 --> 00:37:18.409
+Put known events in the plan.
+
+529
+00:37:19.759 --> 00:37:21.977
+L4, Markdowns for perishables.
+
+530
+00:37:22.257 --> 00:37:23.196
+Requirement:
+
+531
+00:37:23.476 --> 00:37:27.167
+Waste less of what expires tomorrow without giving away margin.
+
+532
+00:37:27.447 --> 00:37:30.263
+60 perishable SKUs over 90 days.
+
+533
+00:37:30.543 --> 00:37:34.532
+The response to markdowns is an assumption (VERIFY with store tests).
+
+534
+00:37:35.882 --> 00:37:38.975
+Here is the Java code, MarkdownL4.java.
+
+535
+00:37:39.255 --> 00:37:43.437
+It runs to 122 lines; the full listing is in the chapter.
+
+536
+00:37:43.717 --> 00:37:51.141
+MarkdownL4.java, run with: java MarkdownL4.java (JDK 21, no dependencies).
+
+537
+00:37:51.421 --> 00:37:53.277
+PRICING WHAT'S ABOUT TO EXPIRE.
+
+538
+00:37:53.557 --> 00:38:02.602
+One dark store, 60 perishable SKUs (milk, bread, greens, cut fruit; shelf life 2 to 5. days), 90 days, fixed seed.
+
+539
+00:38:02.882 --> 00:38:09.111
+Each morning the store receives enough to cover expected demand + 20% safety stock; units.
+
+540
+00:38:11.961 --> 00:38:12.879
+On screen:
+
+541
+00:38:13.159 --> 00:38:27.239
+60 perishable SKUs, 90 days, cost 62% of price, oldest-first picking, 20% safety. stock. markdown policy units wasted revenue (₹) gross margin full-price sales.
+
+542
+00:38:27.519 --> 00:38:29.033
+(₹). cannibalised.
+
+543
+00:38:29.313 --> 00:38:43.180
+K1) no markdowns 24,686 13,958,747 3,421,187 0.
+
+544
+00:38:43.460 --> 00:39:00.228
+K2) 30% off on the last day 1,897 14,870,128 4,332,569 33,987.
+
+545
+00:39:00.508 --> 00:39:16.316
+K3) 50% off on the last day 235 14,719,355 4,181,795 32,336.
+
+546
+00:39:16.596 --> 00:39:39.977
+K4) per-SKU markdown maximising expected revenue 2,807 14,997,890 4,460,331 28,511. then without markdowns the safety stock becomes waste (24,686 units).
+
+547
+00:39:40.257 --> 00:39:43.095
+Any last-day. markdown recovers most of it.
+
+548
+00:39:43.375 --> 00:39:44.889
+The rest is in the chapter.
+
+549
+00:39:47.739 --> 00:39:48.593
+Reading it:
+
+550
+00:39:48.873 --> 00:39:53.118
+No markdowns throws away 24,686 units.
+
+551
+00:39:53.398 --> 00:39:59.798
+A flat 30% off recovers almost all of them and adds 9.1 lakh rupees of margin.
+
+552
+00:40:00.078 --> 00:40:02.638
+50% off clears more but earns less.
+
+553
+00:40:02.918 --> 00:40:10.299
+The per-SKU expected-revenue choice earns the most (44.6 lakh rupees) with the least cannibalisation.
+
+554
+00:40:10.579 --> 00:40:15.145
+It wastes slightly more than flat 30% because it optimises margin.
+
+555
+00:40:15.425 --> 00:40:17.921
+Add a waste cost if waste matters in itself.
+
+556
+00:40:19.271 --> 00:40:20.209
+Part 6.
+
+557
+00:40:20.489 --> 00:40:21.769
+Production Concerns.
+
+558
+00:40:23.019 --> 00:40:24.171
+Failure modes.
+
+559
+00:40:24.451 --> 00:40:25.817
+Here is a quick table:
+
+560
+00:40:26.097 --> 00:40:29.211
+Failure, and Symptom, and Mitigation. double money.
+
+561
+00:40:29.491 --> 00:40:30.302
+Symptom:
+
+562
+00:40:30.582 --> 00:40:34.337
+Paise mismatches, GST reconciliation breaks (L1).
+
+563
+00:40:34.617 --> 00:40:35.619
+Mitigation:
+
+564
+00:40:35.899 --> 00:40:37.755
+Integer paise; static checks.
+
+565
+00:40:38.035 --> 00:40:39.742
+Independent rounding of shares.
+
+566
+00:40:40.022 --> 00:40:40.833
+Symptom:
+
+567
+00:40:41.113 --> 00:40:43.161
+Allocations don't sum (L1).
+
+568
+00:40:43.441 --> 00:40:44.443
+Mitigation:
+
+569
+00:40:44.723 --> 00:40:45.939
+Largest remainder.
+
+570
+00:40:46.219 --> 00:40:47.649
+Recomputed refunds.
+
+571
+00:40:47.929 --> 00:40:48.739
+Symptom:
+
+572
+00:40:49.019 --> 00:40:50.513
+Over-refunds (L1).
+
+573
+00:40:50.793 --> 00:40:51.795
+Mitigation:
+
+574
+00:40:52.075 --> 00:40:53.590
+Stored line allocations.
+
+575
+00:40:53.870 --> 00:40:55.406
+Full scan of promotions.
+
+576
+00:40:55.686 --> 00:40:56.497
+Symptom:
+
+577
+00:40:56.777 --> 00:40:58.249
+Slow quotes (L2).
+
+578
+00:40:58.529 --> 00:40:59.531
+Mitigation:
+
+579
+00:40:59.811 --> 00:41:01.091
+Inverted indexes.
+
+580
+00:41:01.371 --> 00:41:02.673
+Apply every match.
+
+581
+00:41:02.953 --> 00:41:03.763
+Symptom:
+
+582
+00:41:04.043 --> 00:41:07.841
+0 rupeesorders, non-deterministic prices (L2).
+
+583
+00:41:08.121 --> 00:41:09.123
+Mitigation:
+
+584
+00:41:09.403 --> 00:41:10.790
+Groups, order, floors.
+
+585
+00:41:11.070 --> 00:41:12.393
+First-come coupons.
+
+586
+00:41:12.673 --> 00:41:13.483
+Symptom:
+
+587
+00:41:13.763 --> 00:41:15.619
+Budget gone in hours (L3).
+
+588
+00:41:15.899 --> 00:41:16.902
+Mitigation:
+
+589
+00:41:17.182 --> 00:41:18.035
+Pacing.
+
+590
+00:41:19.385 --> 00:41:20.793
+Untargeted coupons.
+
+591
+00:41:21.073 --> 00:41:21.884
+Symptom:
+
+592
+00:41:22.164 --> 00:41:25.001
+Paying for orders that would happen anyway (L3).
+
+593
+00:41:25.281 --> 00:41:26.284
+Mitigation:
+
+594
+00:41:26.564 --> 00:41:28.313
+Uplift targeting, holdouts.
+
+595
+00:41:28.593 --> 00:41:29.703
+No markdowns.
+
+596
+00:41:29.983 --> 00:41:30.793
+Symptom:
+
+597
+00:41:31.073 --> 00:41:32.332
+Waste (L4).
+
+598
+00:41:32.612 --> 00:41:33.615
+Mitigation:
+
+599
+00:41:33.895 --> 00:41:35.580
+Expiry-aware markdowns.
+
+600
+00:41:35.860 --> 00:41:36.991
+Mistyped price.
+
+601
+00:41:37.271 --> 00:41:38.081
+Symptom:
+
+602
+00:41:38.361 --> 00:41:41.689
+9 rupeesfor a 999 rupeesitem.
+
+603
+00:41:41.969 --> 00:41:42.972
+Mitigation:
+
+604
+00:41:43.252 --> 00:41:46.132
+Bounds on change %, approval, kill switch.
+
+605
+00:41:47.482 --> 00:41:48.570
+Observability.
+
+606
+00:41:48.850 --> 00:41:52.754
+Quote latency and index version per node (detect split versions).
+
+607
+00:41:53.034 --> 00:41:58.261
+Discount depth distribution per promotion; lines at the floor; orders below cost.
+
+608
+00:41:58.541 --> 00:42:05.367
+Budget spend versus pacing plan; redemptions per customer or device; incrementality versus holdout.
+
+609
+00:42:05.647 --> 00:42:12.901
+Allocation checks (sum = amount) as a runtime assertion; invoice versus line sum reconciliation.
+
+610
+00:42:13.181 --> 00:42:16.381
+Waste and markdown sell-through per SKU and store.
+
+611
+00:42:17.731 --> 00:42:19.843
+Security, compliance and fairness.
+
+612
+00:42:20.123 --> 00:42:26.032
+Coupon codes: unguessable, rate-limited redemption attempts, per-customer and per-device limits.
+
+613
+00:42:26.312 --> 00:42:34.355
+MRP ceiling, GST invoice correctness, dark-pattern rules for displayed prices and urgency (VERIFY with legal).
+
+614
+00:42:34.635 --> 00:42:41.909
+Brand-funded promotions need contract terms and reporting (who pays which rupee), which the per-line allocations enable.
+
+615
+00:42:42.189 --> 00:42:47.309
+Personalised pricing: document policy; avoid discriminatory attributes.
+
+616
+00:42:48.659 --> 00:42:49.555
+Performance.
+
+617
+00:42:49.835 --> 00:42:56.043
+Quote nodes keep price books and promotion indexes in memory; they rebuild on events and swap atomically.
+
+618
+00:42:56.323 --> 00:42:59.993
+Precompute per-SKU candidate lists at index build time.
+
+619
+00:43:00.273 --> 00:43:04.219
+Cache quotes by (cart hash, index version) for repeated cart views.
+
+620
+00:43:05.569 --> 00:43:06.295
+Cost.
+
+621
+00:43:06.575 --> 00:43:12.996
+Discounts are the biggest cost in this chapter, far above infrastructure: measure incrementality (L3).
+
+622
+00:43:13.276 --> 00:43:16.796
+Brand funding shifts cost: track by funding source per line.
+
+623
+00:43:17.076 --> 00:43:22.473
+Markdowns trade price for waste: optimise margin with a waste cost term (L4).
+
+624
+00:43:23.823 --> 00:43:24.762
+Part 7.
+
+625
+00:43:25.042 --> 00:43:26.749
+Anti-Patterns and Pitfalls.
+
+626
+00:43:27.999 --> 00:43:28.916
+Watch out:
+
+627
+00:43:29.196 --> 00:43:29.836
+1.
+
+628
+00:43:30.116 --> 00:43:31.204
+Money as double.
+
+629
+00:43:31.484 --> 00:43:38.609
+44,961 of 200k invoices were off by a paisa or more (L1).
+
+630
+00:43:39.959 --> 00:43:40.877
+Watch out:
+
+631
+00:43:41.157 --> 00:43:41.861
+2.
+
+632
+00:43:42.141 --> 00:43:44.018
+Rounding each share independently.
+
+633
+00:43:44.298 --> 00:43:46.879
+The shares don't add up to the discount (L1).
+
+634
+00:43:48.229 --> 00:43:49.147
+Watch out:
+
+635
+00:43:49.427 --> 00:43:50.173
+3.
+
+636
+00:43:50.453 --> 00:43:52.672
+Recomputing prices after the order.
+
+637
+00:43:52.952 --> 00:43:56.323
+Refunds and settlements disagree with what was paid (L1).
+
+638
+00:43:57.673 --> 00:43:58.590
+Watch out:
+
+639
+00:43:58.870 --> 00:43:59.574
+4.
+
+640
+00:43:59.854 --> 00:44:01.838
+Scanning every promotion per cart.
+
+641
+00:44:02.118 --> 00:44:05.105
+Milliseconds per quote at 20k rules (L2).
+
+642
+00:44:06.455 --> 00:44:07.372
+Watch out:
+
+643
+00:44:07.652 --> 00:44:08.420
+5.
+
+644
+00:44:08.700 --> 00:44:10.385
+Apply everything that matches.
+
+645
+00:44:10.665 --> 00:44:14.100
+Order-dependent totals and 0 rupeescarts (L2).
+
+646
+00:44:15.450 --> 00:44:16.367
+Watch out:
+
+647
+00:44:16.647 --> 00:44:17.394
+6.
+
+648
+00:44:17.674 --> 00:44:20.085
+No margin floor or MRP check.
+
+649
+00:44:20.365 --> 00:44:22.413
+Loss-making or illegal prices.
+
+650
+00:44:23.763 --> 00:44:24.680
+Watch out:
+
+651
+00:44:24.960 --> 00:44:25.707
+7.
+
+652
+00:44:25.987 --> 00:44:27.608
+Implicit offer priority.
+
+653
+00:44:27.888 --> 00:44:31.856
+A ~12% revenue decision made by accident (L2).
+
+654
+00:44:33.206 --> 00:44:34.123
+Watch out:
+
+655
+00:44:34.403 --> 00:44:35.086
+8.
+
+656
+00:44:35.366 --> 00:44:36.987
+First-come coupon budgets.
+
+657
+00:44:37.267 --> 00:44:40.147
+Spent in hours on whoever arrived first (L3).
+
+658
+00:44:41.497 --> 00:44:42.415
+Watch out:
+
+659
+00:44:42.695 --> 00:44:43.441
+9.
+
+660
+00:44:43.721 --> 00:44:45.748
+Measuring coupons by redemptions.
+
+661
+00:44:46.028 --> 00:44:49.100
+Most redemptions weren't caused by the coupon (L3).
+
+662
+00:44:50.450 --> 00:44:51.367
+Watch out:
+
+663
+00:44:51.647 --> 00:44:52.351
+10.
+
+664
+00:44:52.631 --> 00:44:54.509
+Pacing that ignores known events.
+
+665
+00:44:54.789 --> 00:44:56.837
+It holds back the surge you paid for.
+
+666
+00:44:58.187 --> 00:44:59.104
+Watch out:
+
+667
+00:44:59.384 --> 00:45:00.216
+11.
+
+668
+00:45:00.496 --> 00:45:02.480
+One flat markdown for everything.
+
+669
+00:45:02.760 --> 00:45:05.619
+Either waste or given-away margin (L4).
+
+670
+00:45:06.969 --> 00:45:07.886
+Watch out:
+
+671
+00:45:08.166 --> 00:45:08.955
+12.
+
+672
+00:45:09.235 --> 00:45:11.689
+Price changes without bounds or approval.
+
+673
+00:45:11.969 --> 00:45:14.614
+One typo sells the store out at 9 rupees.
+
+674
+00:45:15.964 --> 00:45:16.839
+Part 8.
+
+675
+00:45:17.119 --> 00:45:18.463
+Interview Q and A.
+
+676
+00:45:19.713 --> 00:45:20.545
+Beginner.
+
+677
+00:45:20.825 --> 00:45:21.849
+Question 1.
+
+678
+00:45:22.129 --> 00:45:24.795
+How should money be represented in a pricing system?
+
+679
+00:45:25.075 --> 00:45:26.441
+Thirty-second answer:
+
+680
+00:45:26.721 --> 00:45:34.571
+As integers in the smallest unit (paise) in a long, or as BigDecimal with an explicit scale and rounding mode, never double.
+
+681
+00:45:34.851 --> 00:45:41.102
+Rounding rules (mode, level, order of discount and tax) are explicit and shared by every service.
+
+682
+00:45:42.452 --> 00:45:43.455
+Question 2.
+
+683
+00:45:43.735 --> 00:45:46.039
+Design a coupon system, the main parts?
+
+684
+00:45:46.319 --> 00:45:47.684
+Thirty-second answer:
+
+685
+00:45:47.964 --> 00:46:05.607
+Coupon rules as data (conditions, benefit, limits, schedule, targeting); codes; validation and quoting in the pricing engine; atomic redemption against per-customer limits and budgets at checkout; release on cancellation; abuse controls; reporting with holdouts.
+
+686
+00:46:06.957 --> 00:46:08.002
+Question 3.
+
+687
+00:46:08.282 --> 00:46:11.034
+How do you split a cart-level discount across lines?
+
+688
+00:46:11.314 --> 00:46:12.679
+Thirty-second answer:
+
+689
+00:46:12.959 --> 00:46:23.861
+Proportionally to line value using the largest-remainder method: floor each share, then distribute the leftover paise to the largest fractional parts, so the shares sum exactly.
+
+690
+00:46:24.141 --> 00:46:26.082
+Store each line's share on the order.
+
+691
+00:46:27.432 --> 00:46:28.499
+Question 4.
+
+692
+00:46:28.779 --> 00:46:31.253
+How do refunds work for a discounted order?
+
+693
+00:46:31.533 --> 00:46:32.899
+Thirty-second answer:
+
+694
+00:46:33.179 --> 00:46:40.859
+Refund what was paid for the line: list price minus its stored allocated discounts plus its tax, from the order snapshot.
+
+695
+00:46:41.139 --> 00:46:43.656
+Don't recompute from the current cart or rules.
+
+696
+00:46:45.006 --> 00:46:46.009
+Intermediate.
+
+697
+00:46:46.289 --> 00:46:47.398
+Question 5.
+
+698
+00:46:47.678 --> 00:46:51.049
+How does a promotion engine find applicable offers fast?
+
+699
+00:46:51.329 --> 00:46:52.694
+Thirty-second answer:
+
+700
+00:46:52.974 --> 00:47:08.270
+Compile rules into inverted indexes (SKU, then offers, category, then offers, brand, then offers) plus a short list of cart or payment offers; for a cart, look up each line's candidates, filter by schedule and targeting, then combine.
+
+701
+00:47:08.550 --> 00:47:12.283
+Keep indexes in memory and hot-swap them on rule changes.
+
+702
+00:47:13.633 --> 00:47:14.743
+Question 6.
+
+703
+00:47:15.023 --> 00:47:16.495
+How should offers combine?
+
+704
+00:47:16.775 --> 00:47:18.140
+Thirty-second answer:
+
+705
+00:47:18.420 --> 00:47:34.783
+By explicit groups and order: for example, at most one item offer per line, then one cart offer (possibly excluding discounted items), then one payment offer, then shipping; enforce margin floors and MRP; record which offers applied and why.
+
+706
+00:47:36.133 --> 00:47:37.221
+Question 7.
+
+707
+00:47:37.501 --> 00:47:39.613
+Why must pricing be deterministic?
+
+708
+00:47:39.893 --> 00:47:41.258
+Thirty-second answer:
+
+709
+00:47:41.538 --> 00:47:54.125
+Different servers (or retries) must quote the same price for the same cart and rules; otherwise customers see prices change between cart and checkout, support can't explain totals, and audits fail.
+
+710
+00:47:54.405 --> 00:47:58.991
+Determinism needs fixed evaluation order, versioned rules, and tie-breaks.
+
+711
+00:48:00.341 --> 00:48:01.365
+Question 8.
+
+712
+00:48:01.645 --> 00:48:05.144
+Quote versus final price versus snapshot, what's the difference?
+
+713
+00:48:05.424 --> 00:48:06.789
+Thirty-second answer:
+
+714
+00:48:07.069 --> 00:48:22.621
+The quote is fast and advisory for cart views; the final price is recomputed authoritatively at checkout with current rules and shown if changed; the snapshot is the immutable per-line record on the order that every downstream process uses.
+
+715
+00:48:23.971 --> 00:48:25.038
+Question 9.
+
+716
+00:48:25.318 --> 00:48:27.899
+How do you roll out a mass price change for a sale?
+
+717
+00:48:28.179 --> 00:48:29.545
+Thirty-second answer:
+
+718
+00:48:29.825 --> 00:48:43.627
+Pre-publish price books with a future effective time; nodes load them ahead and switch at that instant; bounds and approvals on large changes; monitoring of discount depth and orders below cost; kill switch and rollback.
+
+719
+00:48:44.977 --> 00:48:45.745
+Senior.
+
+720
+00:48:46.025 --> 00:48:47.071
+Question 10.
+
+721
+00:48:47.351 --> 00:48:50.337
+How do you stop a campaign budget from running out in hours?
+
+722
+00:48:50.617 --> 00:48:51.983
+Thirty-second answer:
+
+723
+00:48:52.263 --> 00:49:05.553
+Pace it: a controller adjusts the probability of showing the offer every few minutes so spend follows the expected traffic curve (with known events included), while the atomic budget counter enforces the hard limit.
+
+724
+00:49:06.903 --> 00:49:08.034
+Question 11.
+
+725
+00:49:08.314 --> 00:49:09.914
+How do you know a coupon worked?
+
+726
+00:49:10.194 --> 00:49:11.559
+Thirty-second answer:
+
+727
+00:49:11.839 --> 00:49:20.181
+Measure incremental orders against a randomised holdout that never sees it; redemptions alone count people who would have bought anyway.
+
+728
+00:49:20.461 --> 00:49:22.530
+Then target by predicted uplift.
+
+729
+00:49:23.880 --> 00:49:24.968
+Question 12.
+
+730
+00:49:25.248 --> 00:49:26.848
+How would you price perishables?
+
+731
+00:49:27.128 --> 00:49:28.493
+Thirty-second answer:
+
+732
+00:49:28.773 --> 00:49:45.200
+Track stock by expiry batch; each day, per SKU, choose a markdown for units near expiry by maximising expected revenue (or margin minus waste cost) given stock, demand and response estimates; bound it; learn response from sell-through.
+
+733
+00:49:46.550 --> 00:49:47.830
+Question 13.
+
+734
+00:49:48.110 --> 00:49:49.923
+How do you prevent coupon abuse?
+
+735
+00:49:50.203 --> 00:49:51.569
+Thirty-second answer:
+
+736
+00:49:51.849 --> 00:50:08.254
+Per-customer, device and payment-instrument limits; new-account risk signals (device fingerprint, phone age, address reuse); rate-limited code attempts; unguessable codes; release on cancellation only after checks; monitoring of redemption clusters.
+
+737
+00:50:09.604 --> 00:50:10.799
+Question 14.
+
+738
+00:50:11.079 --> 00:50:13.980
+How do brand-funded promotions change the design?
+
+739
+00:50:14.260 --> 00:50:15.625
+Thirty-second answer:
+
+740
+00:50:15.905 --> 00:50:28.364
+Every line's discount needs a funding source so the brand can be billed or settled; stacking rules may differ by funder; reporting per brand; contracts cap spend; the allocation per line makes it possible.
+
+741
+00:50:29.714 --> 00:50:30.610
+Architect.
+
+742
+00:50:30.890 --> 00:50:32.085
+Question 15.
+
+743
+00:50:32.365 --> 00:50:36.269
+Design pricing and promotions for a large grocery platform.
+
+744
+00:50:36.549 --> 00:50:37.914
+Thirty-second answer:
+
+745
+00:50:38.194 --> 00:51:01.405
+Price books with effective dates and MRP; promotion rules as versioned data with groups, floors and budgets; a rules compiler feeding in-memory indexes in stateless quote nodes; deterministic combination; checkout reprice and immutable snapshots with per-line allocations; pacing and uplift targeting for campaigns; markdown optimiser; audit and governance.
+
+746
+00:51:02.755 --> 00:51:03.949
+Question 16.
+
+747
+00:51:04.229 --> 00:51:06.000
+How do you test a pricing engine?
+
+748
+00:51:06.280 --> 00:51:07.645
+Thirty-second answer:
+
+749
+00:51:07.925 --> 00:51:26.144
+Golden carts with expected totals reviewed by finance; property tests (rule order shuffles give the same result; allocations sum; no line below floor or above MRP); replay of production carts against a new engine version (shadow pricing) with diff reports; canary by store.
+
+750
+00:51:27.494 --> 00:51:28.838
+Question 17.
+
+751
+00:51:29.118 --> 00:51:32.254
+What are the regulatory constraints on pricing in India?
+
+752
+00:51:32.534 --> 00:51:33.899
+Thirty-second answer:
+
+753
+00:51:34.179 --> 00:51:51.673
+Packaged goods can't be sold above MRP (Legal Metrology rules); GST invoices have format and rounding requirements; e-commerce rules require clear price display and prohibit dark patterns such as drip pricing and false urgency (2023 guidelines).
+
+754
+00:51:51.953 --> 00:51:53.787
+Verify specifics with legal.
+
+755
+00:51:55.137 --> 00:51:56.311
+Question 18.
+
+756
+00:51:56.591 --> 00:51:58.297
+Should prices be personalised?
+
+757
+00:51:58.577 --> 00:51:59.943
+Thirty-second answer:
+
+758
+00:52:00.223 --> 00:52:10.591
+Personalised offers (coupons for segments) are common and defensible with clear rules; personalised base prices risk trust, fairness and regulatory problems.
+
+759
+00:52:10.871 --> 00:52:17.399
+If done, use non-sensitive attributes, cap differences, audit for disparate impact, and be transparent.
+
+760
+00:52:18.749 --> 00:52:19.986
+Question 19.
+
+761
+00:52:20.266 --> 00:52:24.426
+How do pricing and promotions interact with search and recommendations?
+
+762
+00:52:24.706 --> 00:52:26.071
+Thirty-second answer:
+
+763
+00:52:26.351 --> 00:52:42.138
+Search and feeds show prices and offer badges from cached price or promotion indexes; they must match checkout within tolerance; events keep them fresh; recommendations may use margin and promotions but must respect sponsored-content disclosure.
+
+764
+00:52:43.488 --> 00:52:44.597
+Question 20.
+
+765
+00:52:44.877 --> 00:52:47.480
+What metrics prove the pricing platform is healthy?
+
+766
+00:52:47.760 --> 00:52:49.125
+Thirty-second answer:
+
+767
+00:52:49.405 --> 00:53:06.728
+Quote latency and version consistency; paise reconciliation errors (zero); lines below floor or above MRP (zero); discount spend versus plan; incremental orders per campaign versus holdout; waste and markdown sell-through; mistaken-price incidents.
+
+768
+00:53:08.078 --> 00:53:08.974
+Part 9.
+
+769
+00:53:09.254 --> 00:53:10.662
+Summary and Practice.
+
+770
+00:53:11.912 --> 00:53:13.000
+Key takeaways.
+
+771
+00:53:13.280 --> 00:53:18.016
+Integer paise, largest-remainder allocation, and a stored snapshot (L1).
+
+772
+00:53:18.296 --> 00:53:24.909
+Indexed rules with explicit combination groups, floors and a deliberate choice of which offer wins (L2).
+
+773
+00:53:25.189 --> 00:53:29.413
+Pace budgets and target incrementality, measured with holdouts (L3).
+
+774
+00:53:29.693 --> 00:53:34.963
+Markdowns sized per SKU recover margin from expiring stock (L4).
+
+775
+00:53:35.243 --> 00:53:39.445
+Govern price changes: bounds, approvals, MRP, disclosure.
+
+776
+00:53:40.795 --> 00:53:42.118
+Decision cheat sheet.
+
+777
+00:53:42.398 --> 00:53:43.763
+Here is a quick table:
+
+778
+00:53:44.043 --> 00:53:45.217
+Need, and Choice.
+
+779
+00:53:45.497 --> 00:53:48.910
+Money: long paise; HALFUP per line; discount before tax.
+
+780
+00:53:49.190 --> 00:53:50.491
+Cart-level discounts:
+
+781
+00:53:50.771 --> 00:53:52.947
+Largest remainder, stored per line.
+
+782
+00:53:53.227 --> 00:53:54.209
+Offer lookup:
+
+783
+00:53:54.489 --> 00:53:56.451
+Inverted indexes, hot-swapped.
+
+784
+00:53:56.731 --> 00:53:57.734
+Combination:
+
+785
+00:53:58.014 --> 00:54:01.961
+ITEM, then CART, then PAYMENT, then SHIPPING, one per group, floors.
+
+786
+00:54:02.241 --> 00:54:03.115
+Which offer:
+
+787
+00:54:03.395 --> 00:54:07.641
+Best-for-customer or priority, decided by Finance and documented.
+
+788
+00:54:07.921 --> 00:54:08.774
+Budgets:
+
+789
+00:54:09.054 --> 00:54:11.422
+Atomic counter + pacing controller.
+
+790
+00:54:11.702 --> 00:54:12.705
+Effectiveness:
+
+791
+00:54:12.985 --> 00:54:14.777
+Holdouts, uplift targeting.
+
+792
+00:54:15.057 --> 00:54:16.038
+Perishables:
+
+793
+00:54:16.318 --> 00:54:19.305
+Per-SKU expected-revenue markdowns, bounded.
+
+794
+00:54:20.655 --> 00:54:21.785
+Exercises.
+
+795
+00:54:22.065 --> 00:54:29.809
+(B2) In L1, implement allocation by eligible lines only (a coupon for fruit) and prove the sums still hold.
+
+796
+00:54:30.089 --> 00:54:36.084
+(B3) In L2, add a buy any 3 from category, cheapest free offer and bound its plan search.
+
+797
+00:54:36.364 --> 00:54:41.655
+(B3) In L3, add the TV ad to the expected curve and re-run the pacing.
+
+798
+00:54:41.935 --> 00:54:49.615
+(B4) In L4, add a waste cost of 10 rupeesper unit to K4's objective and see how the policy changes.
+
+799
+00:54:49.895 --> 00:54:54.631
+(B4) Design the promotion rules compiler, including versioning and rollback.
+
+800
+00:54:55.981 --> 00:54:56.983
+Further reading.
+
+801
+00:54:57.263 --> 00:55:01.146
+Martin Fowler, Patterns of Enterprise Application Architecture:
+
+802
+00:55:01.426 --> 00:55:02.407
+Money pattern.
+
+803
+00:55:02.687 --> 00:55:08.127
+Radcliffe and Surry, Real-world uplift modelling with significance-based uplift trees.
+
+804
+00:55:08.407 --> 00:55:12.247
+Google, Budget pacing papers (for example, Agarwal et al.
+
+805
+00:55:12.527 --> 00:55:16.474
+Budget Pacing for Targeted Online Advertisements at LinkedIn).
+
+806
+00:55:16.754 --> 00:55:27.975
+Legal Metrology (Packaged Commodities) Rules; CCPA Guidelines for Prevention and Regulation of Dark Patterns, 2023 (VERIFY current versions).
+
+807
+00:55:29.325 --> 00:55:30.563
+Related chapters.
+
+808
+00:55:30.843 --> 00:55:34.811
+Ch 45, Payment System: ledger, refunds, settlement.
+
+809
+00:55:35.091 --> 00:55:39.549
+Ch 46, Grocery Checkout: coupon budgets, checkout saga.
+
+810
+00:55:39.829 --> 00:55:44.245
+Ch 39, Distributed Rate Limiter: coupon abuse controls.
+
+811
+00:55:44.525 --> 00:55:48.963
+Ch 43, Home Feed and Recommendations: offers in feeds.
+
+812
+00:55:50.313 --> 00:55:51.913
+That's the end of this chapter.
+
+813
+00:55:52.193 --> 00:55:58.315
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+814
+00:55:58.595 --> 00:56:00.046
+See you in the next chapter.
+

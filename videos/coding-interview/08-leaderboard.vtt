@@ -1,0 +1,530 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.353
+Leaderboard:
+
+2
+00:00:01.633 --> 00:00:03.233
+Ranks, Top-N, Neighbours.
+
+3
+00:00:03.513 --> 00:00:07.331
+Chapter 8, from the Coding Interview part of the System Design Playbook.
+
+4
+00:00:09.081 --> 00:00:09.935
+Part 1.
+
+5
+00:00:10.215 --> 00:00:11.111
+Problem.
+
+6
+00:00:12.361 --> 00:00:20.873
+Build a game leaderboard with 10,000 plus players: increment a score, get a player's rank, the top N, and the players around a given player.
+
+7
+00:00:21.153 --> 00:00:23.137
+Ties are broken deterministically.
+
+8
+00:00:23.417 --> 00:00:26.083
+These are the operations of a Redis sorted set.
+
+9
+00:00:27.433 --> 00:00:28.308
+Part 2.
+
+10
+00:00:28.588 --> 00:00:29.505
+Key idea.
+
+11
+00:00:30.755 --> 00:00:36.131
+An ordered set of (score desc, name) gives top-N and neighbours by walking from a position.
+
+12
+00:00:36.411 --> 00:00:38.459
+Rank needs how many are ahead of me?.
+
+13
+00:00:38.739 --> 00:00:45.950
+Walking the set is O(n), so keep a Fenwick (binary indexed) tree of counts per score for O(log S) prefix sums.
+
+14
+00:00:46.230 --> 00:00:49.750
+Redis does this with a skip list whose links carry span counts.
+
+15
+00:00:51.100 --> 00:00:52.444
+Here is the diagram.
+
+16
+00:00:56.294 --> 00:00:57.190
+Part 3.
+
+17
+00:00:57.470 --> 00:00:58.323
+Solution.
+
+18
+00:00:59.573 --> 00:01:02.347
+Here is the Java code, Leaderboard.java.
+
+19
+00:01:02.627 --> 00:01:06.296
+It runs to 89 lines; the full listing is in the chapter.
+
+20
+00:01:06.576 --> 00:01:13.829
+Problem: game leaderboard: update scores, get a player's rank, top-N, and players around me (Redis ZSET semantics).
+
+21
+00:01:14.109 --> 00:01:18.120
+Order: higher score first; ties - earlier player name (deterministic).
+
+22
+00:01:18.400 --> 00:01:23.925
+Fenwick tree over score buckets for O(log S) rank queries without walking the TreeSet.
+
+23
+00:01:26.775 --> 00:01:27.693
+Part 4.
+
+24
+00:01:27.973 --> 00:01:28.805
+Walkthrough.
+
+25
+00:01:30.055 --> 00:01:31.399
+Here is a quick table:
+
+26
+00:01:31.679 --> 00:01:32.745
+Code, and Why.
+
+27
+00:01:33.025 --> 00:01:38.423
+Comparator.comparingLong(Entry::score).reversed().thenComparing(Entry::player):
+
+28
+00:01:38.703 --> 00:01:41.028
+A total order, which a TreeSet needs.
+
+29
+00:01:41.308 --> 00:01:51.292
+Without the tie-break, equal scores would be treated as duplicates and dropped. ranking.remove(new Entry(player, old));... ranking.add(new Entry(player, now)):
+
+30
+00:01:51.572 --> 00:01:55.732
+To update an ordered element, remove it with its old key and re-insert it.
+
+31
+00:01:56.012 --> 00:02:02.241
+Mutating a key inside a TreeSet corrupts the set. countAtMost(MAXSCORE) - countAtMost(s):
+
+32
+00:02:02.521 --> 00:02:12.868
+Players with a strictly higher score, using two O(log S) Fenwick prefix sums. ranking.headSet(me, false).descendingSet().stream().limit(radius):
+
+33
+00:02:13.148 --> 00:02:17.159
+The neighbours above, nearest first. tailSet gives the ones below.
+
+34
+00:02:18.509 --> 00:02:21.197
+check(all.get(rank - 1).player().equals(...)):
+
+35
+00:02:21.477 --> 00:02:25.701
+The fast rank is cross-checked against the position in the fully ordered list.
+
+36
+00:02:27.051 --> 00:02:28.011
+Part 5.
+
+37
+00:02:28.291 --> 00:02:29.229
+Complexity.
+
+38
+00:02:30.479 --> 00:02:31.823
+Here is a quick table:
+
+39
+00:02:32.103 --> 00:02:34.621
+Approach, and Time, and Space. update.
+
+40
+00:02:34.901 --> 00:02:35.647
+Time:
+
+41
+00:02:35.927 --> 00:02:37.698
+O(log n + log S).
+
+42
+00:02:37.978 --> 00:02:38.831
+Space:
+
+43
+00:02:39.111 --> 00:02:40.989
+O(n + S). rank.
+
+44
+00:02:41.269 --> 00:02:42.015
+Time:
+
+45
+00:02:42.295 --> 00:02:43.917
+O(log S) + ties.
+
+46
+00:02:44.197 --> 00:02:45.967
+Space: -. top-N or around.
+
+47
+00:02:46.247 --> 00:02:46.994
+Time:
+
+48
+00:02:47.274 --> 00:02:48.725
+O(log n + N).
+
+49
+00:02:49.005 --> 00:02:49.858
+Space: -.
+
+50
+00:02:51.208 --> 00:02:52.147
+Part 6.
+
+51
+00:02:52.427 --> 00:02:53.152
+Run it.
+
+52
+00:02:54.402 --> 00:02:55.725
+Here is the shell code.
+
+53
+00:02:58.575 --> 00:03:10.564
+On screen: top 3 = Entryplayer=bob, score=99995, Entryplayer=ana, score=99990.
+
+54
+00:03:10.844 --> 00:03:35.825
+Entryplayer=p9784, score=99986. rank(bob) = 1, rank(ana) = 2. rank(cara) = 4982. around(cara)= Entryplayer=p437, score=50010, Entryplayer=p2780, score=50007.
+
+55
+00:03:36.105 --> 00:03:46.175
+Entryplayer=cara, score=50000, Entryplayer=p9050, score=49991.
+
+56
+00:03:46.455 --> 00:03:53.516
+Entryplayer=p6771, score=49982.
+
+57
+00:03:53.796 --> 00:03:54.543
+PASS.
+
+58
+00:03:57.393 --> 00:03:58.331
+Part 7.
+
+59
+00:03:58.611 --> 00:04:00.297
+Solve it with Spring Boot 4.
+
+60
+00:04:01.547 --> 00:04:06.581
+A Redis sorted set gives exactly the interview operations, each O(log n):
+
+61
+00:04:06.861 --> 00:04:12.493
+ZINCRBY (add points), ZREVRANK (your rank), ZREVRANGE (top N and the players around you).
+
+62
+00:04:13.843 --> 00:04:16.638
+The sequence diagram walks through it step by step.
+
+63
+00:04:16.918 --> 00:04:17.793
+C to L:
+
+64
+00:04:18.073 --> 00:04:20.590
+POST or scores player: ravi, points:
+
+65
+00:04:20.870 --> 00:04:21.851
+300.
+
+66
+00:04:22.131 --> 00:04:23.091
+L to R:
+
+67
+00:04:23.371 --> 00:04:26.145
+ZINCRBY lb:weekly 300 ravi.
+
+68
+00:04:26.425 --> 00:04:27.299
+C to L:
+
+69
+00:04:27.579 --> 00:04:29.073
+GET or players or zoya.
+
+70
+00:04:29.353 --> 00:04:30.313
+L to R:
+
+71
+00:04:30.593 --> 00:04:33.942
+ZREVRANK lb:weekly zoya - 5 (0-based).
+
+72
+00:04:34.222 --> 00:04:35.182
+L to R:
+
+73
+00:04:35.462 --> 00:04:38.726
+ZREVRANGE lb:weekly 3 7 WITHSCORES.
+
+74
+00:04:39.006 --> 00:04:39.966
+L to R:
+
+75
+00:04:40.246 --> 00:04:42.017
+ZCARD lb:weekly.
+
+76
+00:04:42.297 --> 00:04:43.641
+L to C: you:
+
+77
+00:04:43.921 --> 00:04:45.051
+6, neighbours:
+
+78
+00:04:45.331 --> 00:04:46.739
+4..8, players:
+
+79
+00:04:47.019 --> 00:04:47.702
+8.
+
+80
+00:04:51.552 --> 00:04:52.384
+Service.
+
+81
+00:04:52.664 --> 00:04:55.821
+Here is the Java code, LeaderboardService.java.
+
+82
+00:04:56.101 --> 00:04:59.813
+It runs to 43 lines; the full listing is in the chapter.
+
+83
+00:05:00.093 --> 00:05:04.275
+Redis sorted set = the interview's ordered set + rank index:
+
+84
+00:05:04.555 --> 00:05:08.032
+ZINCRBY, ZREVRANK, ZREVRANGE are all O(log n).
+
+85
+00:05:10.882 --> 00:05:11.757
+Controller.
+
+86
+00:05:12.037 --> 00:05:15.429
+Here is the Java code, LeaderboardController.java.
+
+87
+00:05:15.709 --> 00:05:19.421
+It runs to 34 lines; the full listing is in the chapter.
+
+88
+00:05:22.271 --> 00:05:23.615
+Run it as a service.
+
+89
+00:05:23.895 --> 00:05:29.740
+The integration test LeaderboardIT.java drives the API against a real Redis.
+
+90
+00:05:30.020 --> 00:05:32.708
+This is its transcript ( request, response):
+
+91
+00:05:34.058 --> 00:05:34.975
+On screen:
+
+92
+00:05:35.255 --> 00:05:36.983
+8 players posted scores.
+
+93
+00:05:37.263 --> 00:05:43.813
+POST or api or v1 or leaderboards or weekly or scores player:ravi,points:300.
+
+94
+00:05:44.093 --> 00:05:47.933
+200 player:ravi,score:1250.
+
+95
+00:05:48.213 --> 00:05:53.439
+GET or api or v1 or leaderboards or weekly or top?n=3.
+
+96
+00:05:53.719 --> 00:06:06.605
+200. rank:1,player:meera,score:1430,rank:2,player:arjun,score:1325,rank:3,player:ravi,score:1250.
+
+97
+00:06:06.885 --> 00:06:11.770
+GET or api or v1 or leaderboards or weekly or players or zoya.
+
+98
+00:06:12.050 --> 00:06:32.146
+200. you:rank:6,player:zoya,score:880,neighbours:rank:4,player:asha,score:1200,rank:5,player:dev,score:1010,rank:6,player:zoya,score:880,rank:7,player:isha,score:770,rank:8,player:kabir,score:610,players:8.
+
+99
+00:06:32.426 --> 00:06:37.546
+GET or api or v1 or leaderboards or weekly or players or nobody.
+
+100
+00:06:37.826 --> 00:06:50.839
+404 detail:nobody has no score on. weekly,instance:/api or v1 or leaderboards or weekly or players or nobody,status:404,title:Not.
+
+101
+00:06:51.119 --> 00:06:51.930
+Found.
+
+102
+00:06:52.210 --> 00:06:53.725
+The rest is in the chapter.
+
+103
+00:06:56.575 --> 00:06:58.665
+What changes from the interview version.
+
+104
+00:06:58.945 --> 00:07:00.289
+Here is a quick table:
+
+105
+00:07:00.569 --> 00:07:03.001
+Interview, and Production (Spring Boot 4).
+
+106
+00:07:03.281 --> 00:07:05.287
+TreeMap + Fenwick tree for ranks:
+
+107
+00:07:05.567 --> 00:07:21.503
+Redis sorted set (skip list + hash): rank queries are built in. one board: one key per board or period (lb:weekly, lb:2026-w03), with EXPIRE for old periods. ties by insertion order:
+
+108
+00:07:21.783 --> 00:07:29.271
+Redis breaks score ties lexicographically; encode score 10^k + (MAXTS - ts) for first to reach it wins.
+
+109
+00:07:30.621 --> 00:07:33.479
+Tens of millions of players fit in one sorted set.
+
+110
+00:07:33.759 --> 00:07:38.367
+Beyond that, shard by score range or region and merge the top-N per shard.
+
+111
+00:07:39.717 --> 00:07:40.592
+Part 8.
+
+112
+00:07:40.872 --> 00:07:41.981
+Common mistakes.
+
+113
+00:07:43.231 --> 00:07:49.098
+Sorting the whole list on every query (O(n log n)), which falls over at millions of players.
+
+114
+00:07:49.378 --> 00:07:53.282
+Leaving ties ambiguous, so ranks jump around between refreshes.
+
+115
+00:07:53.562 --> 00:07:56.591
+Changing a score in place inside the ordered structure.
+
+116
+00:07:56.871 --> 00:08:00.007
+A single global sorted set for 100M players.
+
+117
+00:08:00.287 --> 00:08:05.471
+Shard by region or league, and compute global top-N by merging the shards' top-Ns.
+
+118
+00:08:06.821 --> 00:08:07.717
+Part 9.
+
+119
+00:08:07.997 --> 00:08:09.341
+Follow-up questions.
+
+120
+00:08:10.591 --> 00:08:11.466
+Question.
+
+121
+00:08:11.746 --> 00:08:14.967
+How do you get the rank of a player among 500 million?
+
+122
+00:08:15.247 --> 00:08:16.613
+Thirty-second answer:
+
+123
+00:08:16.893 --> 00:08:19.645
+An exact rank needs a global ordered index.
+
+124
+00:08:19.925 --> 00:08:33.109
+Shard by score range (each shard knows its count, so rank = counts of higher shards + local rank), or use approximate ranks from a score histogram, which is often enough when you show top 3%.
+
+125
+00:08:34.459 --> 00:08:35.333
+Question.
+
+126
+00:08:35.613 --> 00:08:37.789
+Daily, weekly and all-time boards?
+
+127
+00:08:38.069 --> 00:08:39.435
+Thirty-second answer:
+
+128
+00:08:39.715 --> 00:08:47.075
+Keep separate sorted sets per period (lb:2025 to 01 to 01) with TTLs.
+
+129
+00:08:47.355 --> 00:08:53.349
+Use ZUNIONSTORE to build the weekly board from the daily ones, or update all three on each score event.
+
+130
+00:08:54.699 --> 00:08:56.299
+That's the end of this chapter.
+
+131
+00:08:56.579 --> 00:09:02.617
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+132
+00:09:02.897 --> 00:09:04.347
+See you in the next chapter.
+

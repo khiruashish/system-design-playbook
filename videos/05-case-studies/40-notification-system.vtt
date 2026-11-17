@@ -1,0 +1,3498 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:02.998
+Notification System.
+
+3
+00:00:03.278 --> 00:00:07.203
+Chapter 40, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:08.953 --> 00:00:09.913
+At a glance:
+
+5
+00:00:10.193 --> 00:00:11.367
+Chapter at a glance.
+
+6
+00:00:11.647 --> 00:00:12.649
+Reader bands:
+
+7
+00:00:12.929 --> 00:00:15.233
+B1, then B4, Prerequisites:
+
+8
+00:00:15.513 --> 00:00:20.633
+Ch 14, Ch 20, Ch 38, Ch 39, What you will build:
+
+9
+00:00:20.913 --> 00:00:23.409
+The grocery platform's notification service.
+
+10
+00:00:23.689 --> 00:00:33.076
+It carries OTPs, order updates, refunds, slot reminders, price-drop alerts and marketing across push, SMS, WhatsApp, email and in-app.
+
+11
+00:00:33.356 --> 00:00:50.188
+The chapter covers the classic interview design (fan-out, templates, preferences, queues, retries) plus what production adds: priority under campaigns, exactly-once for the customer on at-least-once plumbing, silently failing vendors, and deciding what not to send.
+
+12
+00:00:51.538 --> 00:00:53.223
+L1: priority lanes.
+
+13
+00:00:53.503 --> 00:00:59.199
+A 2.5M-SMS campaign triggered the login and order surge it then competed with.
+
+14
+00:00:59.479 --> 00:01:06.178
+With one FIFO queue, every OTP expired and order updates had a p99 wait of 82 minutes.
+
+15
+00:01:06.458 --> 00:01:17.850
+Strict priority protected OTPs but left 130,467 campaign SMS unsent at the 21:00 legal cut-off.
+
+16
+00:01:18.130 --> 00:01:22.930
+Campaign-friendly fair weights let 11.9% of OTPs expire.
+
+17
+00:01:23.210 --> 00:01:26.495
+A separate promotional route delivered everything on time.
+
+18
+00:01:27.845 --> 00:01:32.005
+L2: exactly-once for the customer, on real PostgreSQL.
+
+19
+00:01:32.285 --> 00:01:39.432
+20,000 events ran through a SKIP LOCKED job table with bus redeliveries, vendor timeouts and worker crashes.
+
+20
+00:01:39.712 --> 00:01:45.195
+With no dedupe, 1,838 customers got duplicate SMS.
+
+21
+00:01:45.475 --> 00:01:48.888
+A dedupe key at intake halved that to 884.
+
+22
+00:01:49.168 --> 00:01:52.816
+Passing an idempotency key the vendor honours took it to 0.
+
+23
+00:01:53.096 --> 00:01:54.952
+Nothing was lost in any design.
+
+24
+00:01:56.302 --> 00:01:58.307
+L3: silent vendor failure.
+
+25
+00:01:58.587 --> 00:02:06.438
+The cheapest vendor delivered only 35% of OTPs for 40 minutes while its API kept returning 200.
+
+26
+00:02:06.718 --> 00:02:08.851
+Failing over on errors never triggered:
+
+27
+00:02:09.131 --> 00:02:13.974
+3.9% of OTPs arrived within 30 s during the incident.
+
+28
+00:02:14.254 --> 00:02:21.123
+Routing on delivery-report health moved traffic 42 s after the failure began and got 90% through.
+
+29
+00:02:21.403 --> 00:02:25.649
+Adding one resend through another vendor reached 98.9%.
+
+30
+00:02:26.999 --> 00:02:28.705
+L4: what not to send.
+
+31
+00:02:28.985 --> 00:02:42.020
+For 100,000 customers over a day, sending everything everywhere cost 50,971 rupeesin SMS and gave 55% of customers more than 10 notifications.
+
+32
+00:02:42.300 --> 00:03:02.225
+Opt-outs, quiet hours, collapsing, caps, digests and push-first-then-SMS escalation cut SMS spend to 11,067. rupeesCustomers with more than 10 notifications fell to 2.7%, and ~99% of critical updates were still seen within 2 minutes.
+
+33
+00:03:02.505 --> 00:03:03.487
+Reading time:
+
+34
+00:03:03.767 --> 00:03:05.559
+110 min + code.
+
+35
+00:03:06.909 --> 00:03:07.762
+Part 1.
+
+36
+00:03:08.042 --> 00:03:09.962
+Introduction and Why It Matters.
+
+37
+00:03:11.212 --> 00:03:12.129
+A story:
+
+38
+00:03:12.409 --> 00:03:13.476
+Diwali night.
+
+39
+00:03:13.756 --> 00:03:21.223
+At 19:00 on Diwali, marketing launched a 2.5-million-SMS campaign with a big discount.
+
+40
+00:03:21.503 --> 00:03:22.377
+It worked.
+
+41
+00:03:22.657 --> 00:03:28.439
+Within minutes, hundreds of thousands of customers opened the app and asked for a login OTP.
+
+42
+00:03:28.719 --> 00:03:34.031
+The notification service had one queue, one SMS vendor account and one worker pool:
+
+43
+00:03:34.311 --> 00:03:36.465
+OTPs queued behind the campaign.
+
+44
+00:03:36.745 --> 00:03:40.244
+They arrived 40 minutes later, long after they had expired.
+
+45
+00:03:40.524 --> 00:03:42.977
+Customers who wanted to buy couldn't log in.
+
+46
+00:03:43.257 --> 00:03:44.772
+Order updates queued too.
+
+47
+00:03:45.052 --> 00:03:48.295
+Your order is out for delivery arrived after the order did.
+
+48
+00:03:49.645 --> 00:03:50.626
+Duplicates.
+
+49
+00:03:50.906 --> 00:03:57.605
+A Kafka consumer rebalance during the surge re-delivered thousands of events, and vendor timeouts caused resends.
+
+50
+00:03:57.885 --> 00:04:09.085
+Some customers got the same OTP three times; some got Your refund of 1,240 rupeesis processed twice and called support asking for the second refund.
+
+51
+00:04:09.365 --> 00:04:11.199
+The vendor silently degraded.
+
+52
+00:04:11.479 --> 00:04:14.829
+The cheapest SMS vendor's route to one operator failed.
+
+53
+00:04:15.109 --> 00:04:17.946
+Its API still returned 200 Accepted.
+
+54
+00:04:18.226 --> 00:04:21.853
+Nothing alerted until customers complained on social media.
+
+55
+00:04:22.133 --> 00:04:23.626
+The campaign missed the window.
+
+56
+00:04:23.906 --> 00:04:30.455
+The campaign's tail was still sending at 21:40, after the permitted window for promotional SMS.
+
+57
+00:04:31.805 --> 00:04:33.320
+Notification fatigue.
+
+58
+00:04:33.600 --> 00:04:40.213
+Customers who ordered got six status pushes, five campaign pushes and three price-drop alerts that evening.
+
+59
+00:04:40.493 --> 00:04:42.221
+Uninstalls rose the next day.
+
+60
+00:04:42.501 --> 00:04:57.328
+The redesigned service, built in this chapter, treats notifications as a product with obligations: some messages are urgent and cheap to lose, some critical and must arrive once, some optional and must respect consent and time windows.
+
+61
+00:04:57.608 --> 00:05:00.019
+The architecture follows from those classes.
+
+62
+00:05:01.369 --> 00:05:02.051
+Quote:
+
+63
+00:05:02.331 --> 00:05:03.995
+The thesis of this chapter.
+
+64
+00:05:04.275 --> 00:05:11.422
+A notification system is a fan-out pipeline whose hard problems are not throughput but judgement and guarantees.
+
+65
+00:05:11.702 --> 00:05:17.974
+Priority: messages differ by orders of magnitude in urgency, and the pipe is shared (L1).
+
+66
+00:05:18.254 --> 00:05:28.366
+Delivery semantics: every hop is at-least-once, so exactly-once for the customer needs idempotency keys end to end, including at the vendor (L2).
+
+67
+00:05:28.646 --> 00:05:35.857
+Truth about delivery: vendors fail silently, so route on delivery receipts, not API responses (L3).
+
+68
+00:05:36.137 --> 00:05:46.441
+Restraint: preferences, quiet hours, collapsing, caps and channel escalation decide what not to send, which is where cost and customer trust are won (L4).
+
+69
+00:05:47.791 --> 00:05:50.095
+Where this lives in the grocery platform.
+
+70
+00:05:50.375 --> 00:05:51.719
+Here is a quick table:
+
+71
+00:05:51.999 --> 00:05:55.476
+Message, and Class, and Channels, and Latency, and Guarantee.
+
+72
+00:05:55.756 --> 00:05:57.036
+Login OTP.
+
+73
+00:05:57.316 --> 00:05:58.105
+Class:
+
+74
+00:05:58.385 --> 00:05:59.217
+Urgent.
+
+75
+00:05:59.497 --> 00:06:00.351
+Channels:
+
+76
+00:06:00.631 --> 00:06:02.359
+SMS (WhatsApp fallback).
+
+77
+00:06:02.639 --> 00:06:03.556
+Latency:
+
+78
+00:06:03.836 --> 00:06:05.969
+Seconds; useless after 5 min.
+
+79
+00:06:06.249 --> 00:06:07.231
+Guarantee:
+
+80
+00:06:07.511 --> 00:06:09.708
+Arrive once; resend on request.
+
+81
+00:06:09.988 --> 00:06:12.505
+Order confirmed, then delivered, refunds.
+
+82
+00:06:12.785 --> 00:06:13.575
+Class:
+
+83
+00:06:13.855 --> 00:06:14.665
+Critical.
+
+84
+00:06:14.945 --> 00:06:15.799
+Channels:
+
+85
+00:06:16.079 --> 00:06:18.404
+Push, then SMS fallback; in-app.
+
+86
+00:06:18.684 --> 00:06:19.601
+Latency:
+
+87
+00:06:19.881 --> 00:06:20.948
+1 to 2 min.
+
+88
+00:06:21.228 --> 00:06:22.209
+Guarantee:
+
+89
+00:06:22.489 --> 00:06:24.943
+Exactly-once for the customer, no loss.
+
+90
+00:06:25.223 --> 00:06:27.313
+Slot reminder, rider arriving.
+
+91
+00:06:27.593 --> 00:06:28.383
+Class:
+
+92
+00:06:28.663 --> 00:06:29.964
+Critical or timely.
+
+93
+00:06:30.244 --> 00:06:31.097
+Channels:
+
+94
+00:06:31.377 --> 00:06:32.508
+Push, SMS.
+
+95
+00:06:32.788 --> 00:06:33.705
+Latency:
+
+96
+00:06:33.985 --> 00:06:34.796
+Minutes.
+
+97
+00:06:35.076 --> 00:06:36.057
+Guarantee:
+
+98
+00:06:36.337 --> 00:06:38.407
+At-least-once, collapse superseded.
+
+99
+00:06:38.687 --> 00:06:40.329
+Price drop, back in stock.
+
+100
+00:06:40.609 --> 00:06:41.399
+Class:
+
+101
+00:06:41.679 --> 00:06:42.767
+Informational.
+
+102
+00:06:43.047 --> 00:06:43.900
+Channels:
+
+103
+00:06:44.180 --> 00:06:46.143
+Push, in-app, email digest.
+
+104
+00:06:46.423 --> 00:06:47.340
+Latency:
+
+105
+00:06:47.620 --> 00:06:48.452
+Hours.
+
+106
+00:06:48.732 --> 00:06:49.713
+Guarantee:
+
+107
+00:06:49.993 --> 00:06:51.273
+Best effort, batched.
+
+108
+00:06:52.623 --> 00:06:53.519
+Campaigns.
+
+109
+00:06:53.799 --> 00:06:54.589
+Class:
+
+110
+00:06:54.869 --> 00:06:55.765
+Promotional.
+
+111
+00:06:56.045 --> 00:06:56.898
+Channels:
+
+112
+00:06:57.178 --> 00:07:00.805
+Push, SMS (promotional route), WhatsApp templates, email.
+
+113
+00:07:01.085 --> 00:07:02.002
+Latency:
+
+114
+00:07:02.282 --> 00:07:04.053
+Hours; legal time windows.
+
+115
+00:07:04.333 --> 00:07:05.314
+Guarantee:
+
+116
+00:07:05.594 --> 00:07:07.215
+Consent, caps, opt-out.
+
+117
+00:07:07.495 --> 00:07:09.159
+Vendor or rider alerts.
+
+118
+00:07:09.439 --> 00:07:10.229
+Class:
+
+119
+00:07:10.509 --> 00:07:11.533
+Operational.
+
+120
+00:07:11.813 --> 00:07:12.666
+Channels:
+
+121
+00:07:12.946 --> 00:07:14.418
+Push, SMS, IVR.
+
+122
+00:07:14.698 --> 00:07:15.615
+Latency:
+
+123
+00:07:15.895 --> 00:07:17.090
+Seconds to minutes.
+
+124
+00:07:17.370 --> 00:07:18.351
+Guarantee:
+
+125
+00:07:18.631 --> 00:07:19.762
+At-least-once.
+
+126
+00:07:21.112 --> 00:07:32.525
+Producers include order, payment, fulfilment, identity (OTP), marketing and the reminder scheduler (Ch 09 publishes notification.requested events).
+
+127
+00:07:32.805 --> 00:07:36.603
+Links in messages go through gro.cr (Ch 38).
+
+128
+00:07:36.883 --> 00:07:40.040
+OTP abuse controls are in Ch 39.
+
+129
+00:07:41.390 --> 00:07:42.713
+Learning objectives.
+
+130
+00:07:42.993 --> 00:07:44.891
+By the end you will be able to:
+
+131
+00:07:45.171 --> 00:07:56.030
+Design the pipeline: intake API and events, templating and localisation, preference and policy evaluation, channel queues, vendor adapters, delivery tracking.
+
+132
+00:07:56.310 --> 00:08:00.662
+Prioritise under shared capacity, and separate routes by class (L1).
+
+133
+00:08:00.942 --> 00:08:07.107
+Deliver exactly-once for the customer with dedupe keys, leases and vendor idempotency (L2).
+
+134
+00:08:07.387 --> 00:08:12.422
+Route across vendors using delivery-report health, failover and resends (L3).
+
+135
+00:08:13.772 --> 00:08:21.623
+Decide what to send with preferences, quiet hours, frequency caps, collapsing, digests and channel escalation (L4).
+
+136
+00:08:21.903 --> 00:08:24.015
+Meet India-specific obligations:
+
+137
+00:08:24.295 --> 00:08:29.863
+DLT templates and headers, promotional time windows, consent, and data minimisation.
+
+138
+00:08:31.213 --> 00:08:32.087
+Part 2.
+
+139
+00:08:32.367 --> 00:08:34.245
+Core Concepts, Beginner to Deep.
+
+140
+00:08:35.495 --> 00:08:39.569
+Intuition: a post office with express, registered and bulk mail.
+
+141
+00:08:39.849 --> 00:08:57.193
+A post office handles express parcels (OTPs: must arrive today, worthless tomorrow), registered letters (refund confirmations: must arrive, exactly once, with proof), and bulk flyers (campaigns: cheap, can wait, must respect no junk mail stickers).
+
+142
+00:08:57.473 --> 00:09:01.484
+Running them all through one counter means express waits behind flyers.
+
+143
+00:09:01.764 --> 00:09:06.628
+Sending a registered letter twice because a receipt was lost confuses the recipient.
+
+144
+00:09:06.908 --> 00:09:11.708
+And the post office must notice when one courier company quietly stops delivering.
+
+145
+00:09:13.058 --> 00:09:14.018
+Requirements.
+
+146
+00:09:14.298 --> 00:09:15.151
+Functional.
+
+147
+00:09:15.431 --> 00:09:24.754
+Accept notification requests from services (API and events), with recipient, template, variables, class, dedupe key and optional schedule.
+
+148
+00:09:25.034 --> 00:09:30.389
+Render per channel and language from versioned templates (DLT-registered for SMS).
+
+149
+00:09:30.669 --> 00:09:35.703
+Apply preferences, consent, quiet hours, caps, collapsing and channel selection.
+
+150
+00:09:35.983 --> 00:09:43.535
+Send through push (FCM or APNs), SMS (multiple vendors), WhatsApp Business, email and in-app inbox.
+
+151
+00:09:44.885 --> 00:09:49.067
+Track status per message: accepted, sent, delivered, read, failed.
+
+152
+00:09:49.347 --> 00:09:51.053
+Expose status and history.
+
+153
+00:09:51.333 --> 00:09:55.301
+Campaigns: audience segments, scheduling, throttling, reporting.
+
+154
+00:09:55.581 --> 00:09:56.691
+Non-functional.
+
+155
+00:09:56.971 --> 00:10:01.088
+OTP: p99 10 s end to end, even during campaigns.
+
+156
+00:10:01.368 --> 00:10:06.189
+Critical: no loss, no customer-visible duplicates; p99 2 min.
+
+157
+00:10:06.469 --> 00:10:13.275
+Scale: ~5M transactional notifications per day, campaigns up to ~20M recipients.
+
+158
+00:10:14.625 --> 00:10:15.691
+Availability:
+
+159
+00:10:15.971 --> 00:10:20.793
+99.95% for intake and urgent or critical sending.
+
+160
+00:10:21.073 --> 00:10:27.345
+Compliance: consent and opt-out honoured, promotional windows, DLT templates, retention limits.
+
+161
+00:10:28.695 --> 00:10:29.740
+Estimation.
+
+162
+00:10:30.020 --> 00:10:31.364
+Here is a quick table:
+
+163
+00:10:31.644 --> 00:10:33.073
+Quantity, and Estimate.
+
+164
+00:10:33.353 --> 00:10:43.487
+Transactional: ~5M per day about 60 per second average, ~200 per second evening peak (surges to more during campaigns, L1).
+
+165
+00:10:43.767 --> 00:10:50.508
+OTP: ~20 per second normal, ~150 per second during a campaign-driven login surge.
+
+166
+00:10:50.788 --> 00:10:51.684
+Campaigns:
+
+167
+00:10:51.964 --> 00:10:59.729
+2.5M SMS in 2 h at a 500 per second vendor contract about 83 min of the whole pipe.
+
+168
+00:11:00.009 --> 00:11:00.671
+Push:
+
+169
+00:11:00.951 --> 00:11:07.607
+20M campaign pushes via FCM in batches of 500 about 40k API calls.
+
+170
+00:11:07.887 --> 00:11:08.783
+Storage:
+
+171
+00:11:09.063 --> 00:11:17.489
+Message log ~1 KB each times ~30M per day about 30 GB per day; keep 90 days hot, summaries longer.
+
+172
+00:11:17.769 --> 00:11:18.921
+SMS cost:
+
+173
+00:11:19.201 --> 00:11:27.436
+0.12 rupees, 0.20 per SMS; policy choices change spend by 4 to 5x (L4).
+
+174
+00:11:28.786 --> 00:11:31.367
+The volume is not large for a modern queue.
+
+175
+00:11:31.647 --> 00:11:36.810
+What dominates the design is shared vendor capacity, per-message guarantees and cost.
+
+176
+00:11:38.160 --> 00:11:39.824
+Architecture of the pipeline.
+
+177
+00:11:40.104 --> 00:11:44.392
+Intake: an API and a Kafka topic notification.requested.
+
+178
+00:11:44.672 --> 00:11:56.064
+Each request carries a dedupe key chosen by the producer (for example, ORD-88213:OUTFORDELIVERY), a class, a template id and variables.
+
+179
+00:11:56.344 --> 00:12:01.144
+Intake validates, stores the request (unique on dedupe key) and acknowledges.
+
+180
+00:12:01.424 --> 00:12:09.275
+Policy evaluation: load the recipient's preferences, consent, quiet hours, device tokens and recent-send counters.
+
+181
+00:12:09.555 --> 00:12:16.211
+Decide channels, timing (now, held, digest) and whether this request supersedes a pending one (collapse).
+
+182
+00:12:16.491 --> 00:12:20.117
+Rendering: template times language times channel, with variables.
+
+183
+00:12:20.397 --> 00:12:24.067
+SMS templates must match the DLT-registered template.
+
+184
+00:12:25.417 --> 00:12:33.545
+Channel queues per class: separate queues or lanes for urgent, critical, informational and promotional traffic, per channel (L1).
+
+185
+00:12:33.825 --> 00:12:48.267
+Channel workers and vendor adapters: pace to each vendor's TPS (Ch 39 egress shaping), pick a vendor by health and cost (L3), send with an idempotency key (L2), and record the vendor message id.
+
+186
+00:12:48.547 --> 00:12:54.883
+Delivery tracking: vendor webhooks (DLRs), FCM responses, email events, read receipts.
+
+187
+00:12:55.163 --> 00:13:01.457
+Update message status, feed vendor health, trigger fallbacks (push not seen in 60 s, then SMS).
+
+188
+00:13:02.807 --> 00:13:08.311
+Inbox and history: in-app inbox and a customer-support view of what was sent and delivered.
+
+189
+00:13:08.591 --> 00:13:16.783
+Each stage is a separate consumer group so a slow stage doesn't block intake, and each has its own dead-letter handling (Ch 14).
+
+190
+00:13:18.133 --> 00:13:19.797
+Priority and isolation.
+
+191
+00:13:20.077 --> 00:13:38.317
+L1 simulated the Diwali evening against a 500 SMS per second vendor contract: a 2.5M-SMS campaign, which then drove OTPs from 20 per second to 150 per second and order updates from 60 per second to 200 per second.
+
+192
+00:13:39.667 --> 00:13:41.011
+Here is a quick table:
+
+193
+00:13:41.291 --> 00:13:51.168
+Strategy, and OTP p99, and OTPs expired, and Transactional p99, and Campaign unsent at 21:00.
+
+194
+00:13:51.448 --> 00:13:52.579
+One FIFO queue.
+
+195
+00:13:52.859 --> 00:13:55.483
+OTP p99: none sent in time.
+
+196
+00:13:55.763 --> 00:13:57.149
+OTPs expired:
+
+197
+00:13:57.429 --> 00:13:58.688
+100%.
+
+198
+00:13:58.968 --> 00:14:00.717
+Transactional p99:
+
+199
+00:14:00.997 --> 00:14:03.301
+4,893 s.
+
+200
+00:14:03.581 --> 00:14:06.376
+Campaign unsent at 21:00:
+
+201
+00:14:06.656 --> 00:14:07.403
+0.
+
+202
+00:14:07.683 --> 00:14:09.368
+Lanes, strict priority.
+
+203
+00:14:09.648 --> 00:14:10.971
+OTP p99:
+
+204
+00:14:11.251 --> 00:14:12.253
+0 s.
+
+205
+00:14:12.533 --> 00:14:13.920
+OTPs expired:
+
+206
+00:14:14.200 --> 00:14:15.267
+0%.
+
+207
+00:14:15.547 --> 00:14:17.296
+Transactional p99:
+
+208
+00:14:17.576 --> 00:14:18.579
+0 s.
+
+209
+00:14:18.859 --> 00:14:21.653
+Campaign unsent at 21:00:
+
+210
+00:14:21.933 --> 00:14:25.048
+130,467.
+
+211
+00:14:25.328 --> 00:14:27.867
+Lanes, weighted 20 or 30 or 50.
+
+212
+00:14:28.147 --> 00:14:29.469
+OTP p99:
+
+213
+00:14:29.749 --> 00:14:30.944
+300 s.
+
+214
+00:14:31.224 --> 00:14:32.611
+OTPs expired:
+
+215
+00:14:32.891 --> 00:14:34.405
+11.9%.
+
+216
+00:14:34.685 --> 00:14:36.435
+Transactional p99:
+
+217
+00:14:36.715 --> 00:14:38.421
+464 s.
+
+218
+00:14:38.701 --> 00:14:41.496
+Campaign unsent at 21:00:
+
+219
+00:14:41.776 --> 00:14:44.507
+85,537.
+
+220
+00:14:44.787 --> 00:14:48.520
+Priority + separate promotional route (400 per second).
+
+221
+00:14:48.800 --> 00:14:50.123
+OTP p99:
+
+222
+00:14:50.403 --> 00:14:51.405
+0 s.
+
+223
+00:14:51.685 --> 00:14:53.072
+OTPs expired:
+
+224
+00:14:53.352 --> 00:14:54.419
+0%.
+
+225
+00:14:54.699 --> 00:14:56.448
+Transactional p99:
+
+226
+00:14:56.728 --> 00:14:57.731
+0 s.
+
+227
+00:14:58.011 --> 00:15:00.805
+Campaign unsent at 21:00:
+
+228
+00:15:01.085 --> 00:15:01.832
+0.
+
+229
+00:15:03.182 --> 00:15:06.851
+Never share a FIFO queue between urgent and bulk messages.
+
+230
+00:15:07.131 --> 00:15:14.214
+Strict priority protects the urgent classes, but bulk traffic gets only what's left, so it can miss legal windows.
+
+231
+00:15:14.494 --> 00:15:20.147
+Weights tuned for the campaign starve OTPs exactly when the campaign drives logins.
+
+232
+00:15:21.497 --> 00:15:26.489
+Separate capacity, a promotional vendor account or route, removes the contention.
+
+233
+00:15:26.769 --> 00:15:34.748
+India's DLT framework already separates promotional from transactional and service messages (different headers and templates).
+
+234
+00:15:35.028 --> 00:15:42.900
+Size the promotional route so campaigns finish within the permitted window, and schedule campaigns with the surge they create in mind.
+
+235
+00:15:43.180 --> 00:15:51.265
+The same principle applies to push (separate FCM sending pools per class) and to workers (bulkheads per class, Ch 18).
+
+236
+00:15:52.615 --> 00:15:55.730
+Delivery semantics: exactly-once for the customer.
+
+237
+00:15:56.010 --> 00:16:04.565
+Every hop is at-least-once: the event bus redelivers, workers crash, and a vendor call can time out after the vendor accepted the message.
+
+238
+00:16:04.845 --> 00:16:10.690
+L2 measured the duplicates each hop causes, using a real PostgreSQL job table:
+
+239
+00:16:12.040 --> 00:16:13.384
+Here is a quick table:
+
+240
+00:16:13.664 --> 00:16:19.125
+Design, and Jobs queued (20,000 events), and Customers with duplicates, and Lost.
+
+241
+00:16:19.405 --> 00:16:20.365
+No dedupe.
+
+242
+00:16:20.645 --> 00:16:22.821
+Jobs queued (20,000 events):
+
+243
+00:16:23.101 --> 00:16:24.744
+21,018.
+
+244
+00:16:25.024 --> 00:16:26.581
+Customers with duplicates:
+
+245
+00:16:26.861 --> 00:16:31.896
+1,838 (1,950 extra SMS).
+
+246
+00:16:32.176 --> 00:16:32.923
+Lost:
+
+247
+00:16:33.203 --> 00:16:33.949
+0.
+
+248
+00:16:34.229 --> 00:16:35.893
+Unique dedupe key at intake.
+
+249
+00:16:36.173 --> 00:16:38.349
+Jobs queued (20,000 events):
+
+250
+00:16:38.629 --> 00:16:39.717
+20,000.
+
+251
+00:16:39.997 --> 00:16:41.555
+Customers with duplicates:
+
+252
+00:16:41.835 --> 00:16:44.480
+884 (926).
+
+253
+00:16:44.760 --> 00:16:45.507
+Lost:
+
+254
+00:16:45.787 --> 00:16:48.901
+0. + idempotency key honoured by the vendor.
+
+255
+00:16:49.181 --> 00:16:51.357
+Jobs queued (20,000 events):
+
+256
+00:16:51.637 --> 00:16:52.725
+20,000.
+
+257
+00:16:53.005 --> 00:16:54.563
+Customers with duplicates:
+
+258
+00:16:54.843 --> 00:16:55.589
+0.
+
+259
+00:16:55.869 --> 00:16:56.616
+Lost:
+
+260
+00:16:56.896 --> 00:16:57.643
+0.
+
+261
+00:16:58.993 --> 00:17:08.465
+Dedupe at intake: a unique constraint on the producer's dedupe key (insert... on conflict do nothing) absorbs redelivered events (Ch 20).
+
+262
+00:17:08.745 --> 00:17:13.950
+Leases, not locks: workers claim jobs with FOR UPDATE SKIP LOCKED and a short lease.
+
+263
+00:17:14.230 --> 00:17:18.198
+A crashed worker's jobs become claimable again, so nothing is lost.
+
+264
+00:17:19.548 --> 00:17:24.540
+Unknown outcomes: a timeout or a crash after sending leaves the outcome unknown.
+
+265
+00:17:24.820 --> 00:17:28.319
+Retrying risks a duplicate; not retrying risks a loss.
+
+266
+00:17:28.599 --> 00:17:39.905
+Only an idempotency key the vendor honours (a client reference the vendor dedupes on, or FCM's message id semantics, VERIFY each vendor's guarantee) closes the gap.
+
+267
+00:17:40.185 --> 00:17:42.980
+Where the vendor can't dedupe, choose per message class.
+
+268
+00:17:43.260 --> 00:18:00.327
+Refunds and payments: prefer a rare duplicate with idempotent wording (Your refund of 1,240 rupeesfor order 88213 is processed is harmless twice; You have received 1,240 rupees is not).
+
+269
+00:18:00.607 --> 00:18:03.295
+OTPs: a duplicate is fine; a loss is not.
+
+270
+00:18:04.645 --> 00:18:06.949
+Vendors, routing and delivery receipts.
+
+271
+00:18:07.229 --> 00:18:12.071
+SMS reaches phones through aggregators and operator routes you don't control.
+
+272
+00:18:12.351 --> 00:18:15.018
+Vendors fail in ways their API doesn't show:
+
+273
+00:18:15.298 --> 00:18:18.925
+200 Accepted while the route to one operator is broken.
+
+274
+00:18:19.205 --> 00:18:20.058
+L3:
+
+275
+00:18:21.408 --> 00:18:22.752
+Here is a quick table:
+
+276
+00:18:23.032 --> 00:18:29.624
+Policy, and OTPs at most 30 s overall, and During the incident, and ₹ per useful OTP.
+
+277
+00:18:29.904 --> 00:18:31.312
+Cheapest vendor only.
+
+278
+00:18:31.592 --> 00:18:33.725
+OTPs at most 30 s overall:
+
+279
+00:18:34.005 --> 00:18:35.819
+65.9%.
+
+280
+00:18:36.099 --> 00:18:37.293
+During the incident:
+
+281
+00:18:37.573 --> 00:18:40.837
+3.9%. ₹ per useful OTP:
+
+282
+00:18:41.117 --> 00:18:42.675
+0.182.
+
+283
+00:18:42.955 --> 00:18:44.811
+Fail over on API errors.
+
+284
+00:18:45.091 --> 00:18:47.224
+OTPs at most 30 s overall:
+
+285
+00:18:47.504 --> 00:18:49.317
+65.9%.
+
+286
+00:18:49.597 --> 00:18:50.792
+During the incident:
+
+287
+00:18:51.072 --> 00:18:54.336
+3.9%. ₹ per useful OTP:
+
+288
+00:18:54.616 --> 00:18:56.173
+0.182.
+
+289
+00:18:56.453 --> 00:19:02.213
+Route on DLR health (85% threshold, 60 s window, 5% probe).
+
+290
+00:19:02.493 --> 00:19:04.627
+OTPs at most 30 s overall:
+
+291
+00:19:04.907 --> 00:19:06.635
+94.6%.
+
+292
+00:19:06.915 --> 00:19:08.109
+During the incident:
+
+293
+00:19:08.389 --> 00:19:11.931
+90.0%. ₹ per useful OTP:
+
+294
+00:19:12.211 --> 00:19:13.896
+0.137.
+
+295
+00:19:14.176 --> 00:19:18.677
+DLR routing + one resend via another vendor after 20 s.
+
+296
+00:19:18.957 --> 00:19:21.091
+OTPs at most 30 s overall:
+
+297
+00:19:21.371 --> 00:19:23.141
+99.4%.
+
+298
+00:19:23.421 --> 00:19:24.616
+During the incident:
+
+299
+00:19:24.896 --> 00:19:28.480
+98.9%. ₹ per useful OTP:
+
+300
+00:19:28.760 --> 00:19:30.339
+0.139.
+
+301
+00:19:31.689 --> 00:19:34.547
+Delivery reports (DLRs) are the health signal.
+
+302
+00:19:34.827 --> 00:19:41.867
+Measure, per vendor and per operator or circle, the share of sends delivered within the deadline over a sliding window.
+
+303
+00:19:42.147 --> 00:19:46.265
+Route away when it drops, and keep a small probe share to detect recovery.
+
+304
+00:19:46.545 --> 00:19:50.150
+L3 detected the failure 42 s after it began.
+
+305
+00:19:50.430 --> 00:19:53.758
+A send can only be judged once its deadline has passed.
+
+306
+00:19:54.038 --> 00:19:58.859
+Resend via another vendor for OTPs when no DLR arrives in time.
+
+307
+00:19:59.139 --> 00:20:03.129
+It costs a few percent more SMS; a failed login costs far more.
+
+308
+00:20:03.409 --> 00:20:07.142
+Users can also tap resend or get OTP on WhatsApp.
+
+309
+00:20:08.492 --> 00:20:16.087
+Routing also optimises cost (the cheapest healthy vendor wins) and respects vendor TPS and per-operator health.
+
+310
+00:20:16.367 --> 00:20:26.969
+Push has its own failure modes: stale tokens (clean up on UNREGISTERED), OS-level throttling of background pushes, silent drops on some Android OEMs.
+
+311
+00:20:27.249 --> 00:20:31.537
+That's why critical pushes escalate to SMS if not seen (L4).
+
+312
+00:20:32.887 --> 00:20:36.301
+What to send: preferences, consent, timing, restraint.
+
+313
+00:20:36.581 --> 00:20:43.087
+L4 applied increasingly careful policies to one day of events for 100,000 customers:
+
+314
+00:20:44.437 --> 00:20:45.781
+Here is a quick table:
+
+315
+00:20:46.061 --> 00:20:53.827
+Policy, and Push, and SMS, and SMS ₹/day, and Critical seen at most 2 min, and Customers 10 per day.
+
+316
+00:20:54.107 --> 00:20:57.029
+Send everything; critical on push + SMS.
+
+317
+00:20:57.309 --> 00:20:57.971
+Push:
+
+318
+00:20:58.251 --> 00:21:01.600
+972,543.
+
+319
+00:21:01.880 --> 00:21:02.819
+SMS:
+
+320
+00:21:03.099 --> 00:21:05.851
+339,808.
+
+321
+00:21:06.131 --> 00:21:07.773
+SMS ₹/day:
+
+322
+00:21:08.053 --> 00:21:10.400
+50,971.
+
+323
+00:21:10.680 --> 00:21:12.387
+Critical seen at most 2 min:
+
+324
+00:21:12.667 --> 00:21:14.651
+99.0%.
+
+325
+00:21:14.931 --> 00:21:16.360
+Customers 10 per day:
+
+326
+00:21:16.640 --> 00:21:20.523
+54.9%. + opt-outs + quiet hours.
+
+327
+00:21:20.803 --> 00:21:21.464
+Push:
+
+328
+00:21:21.744 --> 00:21:24.368
+680,205.
+
+329
+00:21:24.648 --> 00:21:25.587
+SMS:
+
+330
+00:21:25.867 --> 00:21:29.195
+299,341.
+
+331
+00:21:29.475 --> 00:21:31.117
+SMS ₹/day:
+
+332
+00:21:31.397 --> 00:21:33.488
+44,901.
+
+333
+00:21:33.768 --> 00:21:35.475
+Critical seen at most 2 min:
+
+334
+00:21:35.755 --> 00:21:37.739
+99.0%.
+
+335
+00:21:38.019 --> 00:21:39.448
+Customers 10 per day:
+
+336
+00:21:39.728 --> 00:21:45.168
+31.3%. + collapse + marketing cap 2 per day + digest.
+
+337
+00:21:45.448 --> 00:21:46.109
+Push:
+
+338
+00:21:46.389 --> 00:21:48.459
+302,033.
+
+339
+00:21:48.739 --> 00:21:49.677
+SMS:
+
+340
+00:21:49.957 --> 00:21:53.200
+161,686.
+
+341
+00:21:53.480 --> 00:21:55.123
+SMS ₹/day:
+
+342
+00:21:55.403 --> 00:21:57.792
+24,253.
+
+343
+00:21:58.072 --> 00:21:59.779
+Critical seen at most 2 min:
+
+344
+00:22:00.059 --> 00:22:01.829
+99.4%.
+
+345
+00:22:02.109 --> 00:22:03.539
+Customers 10 per day:
+
+346
+00:22:03.819 --> 00:22:08.597
+12.6%. + push first, SMS fallback at 60 s.
+
+347
+00:22:08.877 --> 00:22:09.539
+Push:
+
+348
+00:22:09.819 --> 00:22:11.888
+302,033.
+
+349
+00:22:12.168 --> 00:22:13.107
+SMS:
+
+350
+00:22:13.387 --> 00:22:16.053
+73,783.
+
+351
+00:22:16.333 --> 00:22:17.976
+SMS ₹/day:
+
+352
+00:22:18.256 --> 00:22:20.005
+11,067.
+
+353
+00:22:20.285 --> 00:22:21.992
+Critical seen at most 2 min:
+
+354
+00:22:22.272 --> 00:22:24.043
+99.4%.
+
+355
+00:22:24.323 --> 00:22:25.752
+Customers 10 per day:
+
+356
+00:22:26.032 --> 00:22:27.483
+2.7%.
+
+357
+00:22:28.833 --> 00:22:33.419
+Consent and opt-outs are obligations, not tuning (Ch 36).
+
+358
+00:22:33.699 --> 00:22:39.310
+Store them per channel and purpose, honour them at send time, and keep an audit of consent changes.
+
+359
+00:22:39.590 --> 00:22:47.803
+Time windows: quiet hours for non-urgent messages; legal windows for promotional SMS (TRAI; VERIFY current rules).
+
+360
+00:22:48.083 --> 00:22:54.803
+Hold messages and send them when the window opens, rather than dropping them, and drop them if they're stale by then.
+
+361
+00:22:56.153 --> 00:23:01.615
+Collapse superseded updates: packed is pointless if out for delivery follows two minutes later.
+
+362
+00:23:01.895 --> 00:23:06.759
+Use a collapse key per order; push services also support collapse keys natively.
+
+363
+00:23:07.039 --> 00:23:11.199
+(L4 counts a collapsed update as seen, because the newer update carries it.).
+
+364
+00:23:11.479 --> 00:23:17.964
+Frequency caps on promotional messages per user per day and week, and digests for informational alerts.
+
+365
+00:23:18.244 --> 00:23:24.943
+Channel escalation: push first (free), then SMS only if the push isn't delivered or seen within a deadline.
+
+366
+00:23:25.223 --> 00:23:28.785
+That's cheaper than sending both, and it's what makes push dependable.
+
+367
+00:23:30.135 --> 00:23:32.930
+Templates, localisation and India's DLT.
+
+368
+00:23:33.210 --> 00:23:41.189
+Templates are versioned artefacts with an owner, per channel and language (English, Hindi, Tamil, Kannada,...), with typed variables.
+
+369
+00:23:41.469 --> 00:23:45.565
+The service renders them; producers send only ids and variables.
+
+370
+00:23:45.845 --> 00:23:58.282
+DLT (Distributed Ledger Technology registration, TRAI): commercial SMS must use a registered header (sender id) and content template, with variables in registered positions.
+
+371
+00:23:58.562 --> 00:24:01.506
+Messages that don't match are blocked by operators.
+
+372
+00:24:01.786 --> 00:24:08.997
+Keep the DLT template id with each template version, and test rendering against the registered pattern in CI.
+
+373
+00:24:10.347 --> 00:24:17.984
+WhatsApp Business templates are pre-approved by Meta for business-initiated messages outside the 24-hour service window.
+
+374
+00:24:18.264 --> 00:24:25.517
+Links in templates go through the first-party shortener (Ch 38), which also satisfies URL whitelisting.
+
+375
+00:24:25.797 --> 00:24:34.651
+Never put secrets or unnecessary personal data in messages beyond what's needed (masked order ids, no full addresses in SMS).
+
+376
+00:24:36.001 --> 00:24:37.003
+Data model.
+
+377
+00:24:37.283 --> 00:24:38.883
+Here is the SQL code.
+
+378
+00:24:39.163 --> 00:24:42.662
+It runs to 16 lines; the full listing is in the chapter.
+
+379
+00:24:45.512 --> 00:24:55.773
+At higher volume, the message log moves to a partitioned table or a wide-column store keyed by user and time, while the working queue stays small (Ch 21).
+
+380
+00:24:57.123 --> 00:24:58.297
+Campaigns at scale.
+
+381
+00:24:58.577 --> 00:25:10.011
+Audience resolution runs as a batch job over the customer store (segments, exclusions, opt-outs, caps already used today), producing a recipient list partitioned into chunks.
+
+382
+00:25:10.291 --> 00:25:18.419
+Throttled release: chunks are released at the promotional route's capacity, and stopped automatically if the platform is degraded (brownout:
+
+383
+00:25:18.699 --> 00:25:19.809
+Ch 18).
+
+384
+00:25:20.089 --> 00:25:24.569
+Surge-aware scheduling: a campaign creates logins and orders (L1).
+
+385
+00:25:24.849 --> 00:25:28.966
+Coordinate with capacity planning, pre-scale, and stagger large sends.
+
+386
+00:25:29.246 --> 00:25:32.510
+Kill switch per campaign, and a preview or test-send flow.
+
+387
+00:25:32.790 --> 00:25:37.355
+Measure outcomes (opens, clicks via the shortener, orders), not just sends.
+
+388
+00:25:38.705 --> 00:25:40.583
+Multi-region and resilience.
+
+389
+00:25:40.863 --> 00:25:48.436
+Intake in both regions; requests are idempotent by dedupe key, so a replayed request after failover is harmless.
+
+390
+00:25:48.716 --> 00:25:55.607
+Vendor adapters in both regions, with vendor TPS shared via leased global limits (Ch 39).
+
+391
+00:25:55.887 --> 00:25:57.679
+If all SMS vendors fail:
+
+392
+00:25:57.959 --> 00:26:04.124
+OTP falls back to WhatsApp or voice; critical updates to push and in-app; campaigns pause.
+
+393
+00:26:04.404 --> 00:26:11.487
+Backpressure: if channel queues grow beyond thresholds, shed informational traffic first and hold promotional traffic.
+
+394
+00:26:12.837 --> 00:26:13.967
+Interview framing.
+
+395
+00:26:14.247 --> 00:26:17.810
+Interviewers expect fan-out, queues, retries and templates.
+
+396
+00:26:18.090 --> 00:26:36.863
+Stand out by classifying messages (urgent or critical or informational or promotional) and deriving priority and guarantees from that, by explaining where duplicates come from and how the vendor idempotency key closes the gap, by routing on DLRs rather than API responses,
+
+397
+00:26:37.143 --> 00:26:43.373
+and by treating restraint (consent, caps, collapse, escalation) as a first-class part of the design.
+
+398
+00:26:44.723 --> 00:26:45.619
+Part 3.
+
+399
+00:26:45.899 --> 00:26:47.627
+Architecture and Diagrams.
+
+400
+00:26:48.877 --> 00:26:49.922
+Component view.
+
+401
+00:26:50.202 --> 00:26:51.546
+Here is the diagram.
+
+402
+00:26:55.396 --> 00:26:57.743
+Sequence: happy path, out for delivery.
+
+403
+00:26:58.023 --> 00:27:00.817
+The sequence diagram walks through it step by step.
+
+404
+00:27:01.097 --> 00:27:07.519
+F to I: notification.requested ORD-88213 OUTFORDELIVERY.
+
+405
+00:27:07.799 --> 00:27:11.212
+I to I: insert, on conflict dedupekey do nothing.
+
+406
+00:27:11.492 --> 00:27:18.511
+I to P: evaluate - critical, push token valid, collapse key ORD-88213.
+
+407
+00:27:18.791 --> 00:27:23.484
+P to W: push now, escalate to SMS if unseen in 60 s.
+
+408
+00:27:23.764 --> 00:27:24.852
+W to T:
+
+409
+00:27:25.132 --> 00:27:27.415
+FCM accepted, message id.
+
+410
+00:27:27.695 --> 00:27:29.999
+T to T: opened at 14 s.
+
+411
+00:27:33.849 --> 00:27:37.326
+Sequence: failure path, vendor timeout after acceptance.
+
+412
+00:27:37.606 --> 00:27:40.401
+The sequence diagram walks through it step by step.
+
+413
+00:27:40.681 --> 00:27:45.267
+W to DB: claim job with 300 ms lease, SKIP LOCKED.
+
+414
+00:27:45.547 --> 00:27:51.115
+W to V: send, clientref ORD-88213-REFUND.
+
+415
+00:27:51.395 --> 00:27:53.678
+V to V: accepted and delivered.
+
+416
+00:27:53.958 --> 00:27:56.475
+V to W: response lost - timeout.
+
+417
+00:27:56.755 --> 00:27:59.145
+W to DB: schedule retry.
+
+418
+00:27:59.425 --> 00:28:02.155
+W2 to DB: claim job again.
+
+419
+00:28:02.435 --> 00:28:05.230
+W2 to V: send, same clientref.
+
+420
+00:28:05.510 --> 00:28:10.310
+V to W2: duplicate reference - already sent, no second SMS.
+
+421
+00:28:10.590 --> 00:28:13.001
+W2 to DB: mark SENT.
+
+422
+00:28:16.851 --> 00:28:18.707
+State: a message's lifecycle.
+
+423
+00:28:18.987 --> 00:28:20.331
+Here is the diagram.
+
+424
+00:28:24.181 --> 00:28:25.098
+Part 4.
+
+425
+00:28:25.378 --> 00:28:26.999
+Design Document Excerpt:
+
+426
+00:28:27.279 --> 00:28:29.221
+Notification Platform v2.
+
+427
+00:28:30.471 --> 00:28:31.217
+Note:
+
+428
+00:28:31.497 --> 00:28:35.359
+Design Document (excerpt), Notification Platform v2.
+
+429
+00:28:35.639 --> 00:28:36.535
+Status:
+
+430
+00:28:36.815 --> 00:28:38.095
+Accepted, Authors:
+
+431
+00:28:38.375 --> 00:28:40.401
+Messaging platform team, Reviewers:
+
+432
+00:28:40.681 --> 00:28:44.265
+Marketing tech, Identity, Legal or compliance, SRE.
+
+433
+00:28:44.545 --> 00:28:46.401
+Context, Diwali incident:
+
+434
+00:28:46.681 --> 00:29:02.105
+OTPs behind a campaign in one FIFO queue; duplicate refund SMS; a silent vendor failure undetected for 45 min; promotional SMS after 21:00; notification fatigue and uninstalls.
+
+435
+00:29:02.385 --> 00:29:22.268
+Decision, Message classes with separate lanes and a separate promotional route; dedupe keys at intake, leased jobs, vendor idempotency keys; DLR-health vendor routing with OTP resend; a policy engine for consent, quiet hours, caps, collapse and push-first escalation; DLT-bound templates.
+
+436
+00:29:23.618 --> 00:29:48.045
+Related ADRs, ADR-260 Four message classes and per-class lanes or pools; promotional traffic on its own vendor route (L1); ADR-261 Producer-supplied dedupe keys, unique at intake; SKIP LOCKED leases; vendor client references (L2); ADR-262 DLR-health routing per vendor and operator, 85% threshold,
+
+437
+00:29:48.325 --> 00:30:20.318
+5% probe; OTP resend via alternate vendor at 20 s (L3); ADR-263 Policy engine: consent per channel and purpose, quiet hours, promo cap 2 per day, collapse keys, daily digest, push-first with 60 s SMS escalation (L4); ADR-264 Templates versioned with DLT ids, rendering tested in CI; ADR-265 Message log 90 days hot, then aggregated.
+
+438
+00:30:20.598 --> 00:30:21.558
+Requirements.
+
+439
+00:30:22.908 --> 00:30:28.305
+R1 OTP p99 10 s end to end, including during campaigns.
+
+440
+00:30:28.585 --> 00:30:34.985
+R2 Zero lost critical messages; customer-visible duplicates 0.01%.
+
+441
+00:30:35.265 --> 00:30:39.169
+R3 Detect a silent vendor degradation within 2 minutes.
+
+442
+00:30:39.449 --> 00:30:43.887
+R4 No promotional message outside consent or legal windows.
+
+443
+00:30:44.167 --> 00:30:50.311
+R5 SMS spend reduced ≥ 50% without reducing critical reach.
+
+444
+00:30:50.591 --> 00:30:51.999
+Decisions in detail.
+
+445
+00:30:53.349 --> 00:30:55.589
+Lanes (ADR-260).
+
+446
+00:30:55.869 --> 00:31:06.621
+Kafka topics per class; worker pools per class; SMS egress shaped per class with OTP strict priority; promotional route 400 SMS per second.
+
+447
+00:31:06.901 --> 00:31:22.410
+Delivery (ADR-261). notificationrequest.dedupekey unique; job leases 30 s (300 ms in the lab); max 8 attempts, then DLQ with alert; vendor client reference = message id.
+
+448
+00:31:22.690 --> 00:31:25.101
+Routing (ADR-262).
+
+449
+00:31:25.381 --> 00:31:34.597
+Health per vendor times operator from DLRs, 60 s window; cheapest healthy vendor; OTP resend if no DLR by 20 s.
+
+450
+00:31:34.877 --> 00:31:37.437
+Policy (ADR-263).
+
+451
+00:31:37.717 --> 00:31:44.821
+Preferences cached per user; counters in Redis; collapse per order; digests at 19:00 local.
+
+452
+00:31:46.171 --> 00:31:48.645
+Templates (ADR-264).
+
+453
+00:31:48.925 --> 00:31:53.939
+Template registry with DLT header or template ids, languages and owners.
+
+454
+00:31:54.219 --> 00:31:55.243
+Consequences.
+
+455
+00:31:55.523 --> 00:32:01.795
+More moving parts (policy engine, router, tracker), and dependence on vendor DLR quality.
+
+456
+00:32:02.075 --> 00:32:06.043
+Collapsing and escalation add a little latency to some messages.
+
+457
+00:32:06.323 --> 00:32:07.261
+In return:
+
+458
+00:32:07.541 --> 00:32:16.437
+OTPs that arrive during campaigns, no double refunds, fast detection of vendor failures, and less than a quarter of the SMS spend.
+
+459
+00:32:17.787 --> 00:32:18.747
+Part 5.
+
+460
+00:32:19.027 --> 00:32:21.011
+Hands-On Code, Level Ladder.
+
+461
+00:32:22.261 --> 00:32:23.029
+Info:
+
+462
+00:32:23.309 --> 00:32:24.397
+What's real here.
+
+463
+00:32:24.677 --> 00:32:27.173
+All four labs are JDK 21.
+
+464
+00:32:27.453 --> 00:32:34.941
+L2 runs against a real PostgreSQL 16 with 8 worker threads claiming jobs through FOR UPDATE SKIP LOCKED.
+
+465
+00:32:35.221 --> 00:32:42.496
+Its fault injection uses thread-local randomness, so its exact counts vary slightly between runs; the pattern doesn't.
+
+466
+00:32:42.776 --> 00:32:47.704
+L1, L3 and L4 are deterministic simulations with fixed seeds.
+
+467
+00:32:47.984 --> 00:32:53.083
+Traffic shapes, vendor behaviour, costs and push reachability are stated assumptions.
+
+468
+00:32:54.433 --> 00:33:04.865
+L2 needs PostgreSQL 16 on port 5581 (database shop) and postgresql-42.7.4.jar.
+
+469
+00:33:05.145 --> 00:33:09.262
+Run every lab with -Dstdout.encoding=UTF-8.
+
+470
+00:33:10.612 --> 00:33:13.577
+L1, Priority lanes on a shared SMS pipe.
+
+471
+00:33:13.857 --> 00:33:14.796
+Requirement:
+
+472
+00:33:15.076 --> 00:33:19.599
+Marketing sends 2.5 million SMS at 19:00.
+
+473
+00:33:19.879 --> 00:33:28.028
+OTPs must still arrive in seconds, order updates within minutes, and the campaign must finish before 21:00.
+
+474
+00:33:28.308 --> 00:33:33.684
+A second-by-second simulation of the vendor's 500 SMS per second contract.
+
+475
+00:33:33.964 --> 00:33:35.863
+The campaign drives its own surge:
+
+476
+00:33:36.143 --> 00:33:44.655
+OTPs rise from 20 per second to 150 per second and order updates from 60 per second to 200 per second.
+
+477
+00:33:46.005 --> 00:33:49.439
+Here is the Java code, PriorityLanesL1.java.
+
+478
+00:33:49.719 --> 00:33:53.986
+It runs to 124 lines; the full listing is in the chapter.
+
+479
+00:33:54.266 --> 00:34:02.799
+PriorityLanesL1.java, run with: java PriorityLanesL1.java (JDK 21, no dependencies).
+
+480
+00:34:03.079 --> 00:34:05.682
+ONE SMS PIPE, THREE KINDS OF MESSAGE.
+
+481
+00:34:05.962 --> 00:34:10.143
+The SMS vendor contract allows 500 messages per second.
+
+482
+00:34:10.423 --> 00:34:13.303
+At 19:00 marketing enqueues a.
+
+483
+00:34:13.583 --> 00:34:24.911
+2,500,000-SMS Diwali campaign; meanwhile customers keep requesting OTPs (~20 per second, useless after 5 minutes, should arrive.
+
+484
+00:34:27.761 --> 00:34:28.679
+On screen:
+
+485
+00:34:28.959 --> 00:34:31.412
+Vendor 500 SMS per second.
+
+486
+00:34:31.692 --> 00:34:52.151
+19:00 campaign of 2,500,000 SMS; OTP 20 per second, then 150 per second (19:05 to 19:35). expires 300 s;. transactional 60 per second, then 200 per second (19:10 to 20:00).
+
+487
+00:34:52.431 --> 00:35:06.724
+Window 19:00 to 21:00. strategy OTP p50 OTP p99 OTP expired txn p99 campaign unsent 21:00.
+
+488
+00:35:07.004 --> 00:35:14.023
+A) one FIFO queue none sent none sent 100.0% 4893s 0.
+
+489
+00:35:14.303 --> 00:35:22.857
+B) lanes, strict priority 0s 0s 0.0% 0s 130,467.
+
+490
+00:35:23.137 --> 00:35:34.423
+C) lanes, weighted fair 20 or 30 or 50 64s 300s 11.9% 464s 85,537.
+
+491
+00:35:34.703 --> 00:35:49.060
+D) B + separate promotional route (400 per second) 0s 0s 0.0% 0s 0. then a single queue puts OTPs behind the campaign exactly when the campaign drives. logins.
+
+492
+00:35:49.340 --> 00:35:55.612
+Strict priority. protects OTPs and order updates, but the campaign only gets what is left and.
+
+493
+00:35:55.892 --> 00:35:57.407
+The rest is in the chapter.
+
+494
+00:36:00.257 --> 00:36:01.110
+Reading it:
+
+495
+00:36:01.390 --> 00:36:06.531
+One FIFO queue: the campaign ahead of everything took ~83 minutes of the pipe.
+
+496
+00:36:06.811 --> 00:36:15.046
+Every OTP expired before it could be sent, and order updates had a p99 wait of 4,893 s.
+
+497
+00:36:15.326 --> 00:36:17.950
+The campaign finished, at the customers' expense.
+
+498
+00:36:18.230 --> 00:36:19.446
+Strict priority:
+
+499
+00:36:19.726 --> 00:36:22.265
+OTPs and order updates at 0 s.
+
+500
+00:36:22.545 --> 00:36:34.683
+But during the surge they used 350 of the 500 per second, and 130,467 campaign SMS were still unsent at 21:00.
+
+501
+00:36:34.963 --> 00:36:44.286
+Weights 20 or 30 or 50, chosen to protect the campaign, gave OTPs 100 per second against 150 per second arriving:
+
+502
+00:36:44.566 --> 00:36:49.878
+11.9% expired and the p99 hit the 300 s limit.
+
+503
+00:36:51.228 --> 00:36:58.801
+A separate 400 per second promotional route decouples them: nothing expired, and the campaign finished inside the window.
+
+504
+00:37:00.151 --> 00:37:04.247
+L2, Exactly-once for the customer, on real PostgreSQL.
+
+505
+00:37:04.527 --> 00:37:05.466
+Requirement:
+
+506
+00:37:05.746 --> 00:37:13.746
+No customer should get 'Your refund is processed' twice, and no notification may be lost, on plumbing that is at-least-once everywhere.
+
+507
+00:37:14.026 --> 00:37:21.855
+8 worker threads claim jobs from a real PostgreSQL table with FOR UPDATE SKIP LOCKED and a 300 ms lease.
+
+508
+00:37:22.135 --> 00:37:23.415
+Faults are injected:
+
+509
+00:37:23.695 --> 00:37:33.573
+5% bus redeliveries, 10% vendor 503s, 3% vendor timeouts after acceptance, and 1% worker crashes after sending.
+
+510
+00:37:33.853 --> 00:37:36.989
+The fake vendor records what each phone actually received.
+
+511
+00:37:38.339 --> 00:37:41.283
+Here is the Java code, DeliveryL2.java.
+
+512
+00:37:41.563 --> 00:37:45.872
+It runs to 161 lines; the full listing is in the chapter.
+
+513
+00:37:46.152 --> 00:38:02.493
+DeliveryL2.java, run with (PostgreSQL 16 on:5581, db shop): java -cp postgresql-42.7.4.jar -Duser.timezone=UTC DeliveryL2.java.
+
+514
+00:38:02.773 --> 00:38:05.995
+AT-LEAST-ONCE EVERYWHERE, EXACTLY-ONCE FOR THE CUSTOMER.
+
+515
+00:38:06.275 --> 00:38:10.243
+20,000 out for delivery events flow into the notification.
+
+516
+00:38:13.093 --> 00:38:14.010
+On screen:
+
+517
+00:38:14.290 --> 00:38:25.511
+20,000 notification events; 8 workers; PostgreSQL job table with SKIP LOCKED leases. design jobs queued vendor calls customers got duplicates lost.
+
+518
+00:38:25.791 --> 00:38:37.205
+A) no dedupe 21,018 24,362 20,000 1,838 (1,950 SMS) 0.
+
+519
+00:38:37.485 --> 00:38:47.831
+B) dedupe key at intake 20,000 23,235 20,000 884 (926 SMS) 0.
+
+520
+00:38:48.111 --> 00:39:03.791
+C) B + vendor idempotency key 20,000 23,219 20,000 0 (0 SMS) 0. then every hop is at-least-once, so duplicates are the default, not a bug to be. surprised by.
+
+521
+00:39:04.071 --> 00:39:15.634
+A unique dedupe key. at intake removes the bus redeliveries; the rest come from sends whose outcome we. can't know, a timeout. after the vendor accepted, a crash after the send.
+
+522
+00:39:15.914 --> 00:39:17.727
+Only an idempotency key the.
+
+523
+00:39:18.007 --> 00:39:19.629
+VENDOR honours closes that.
+
+524
+00:39:19.909 --> 00:39:21.423
+The rest is in the chapter.
+
+525
+00:39:24.273 --> 00:39:25.127
+Reading it:
+
+526
+00:39:25.407 --> 00:39:26.431
+A) No dedupe:
+
+527
+00:39:26.711 --> 00:39:36.887
+1,018 redelivered events became extra jobs, and together with timeouts and crashes 1,838 customers got duplicates.
+
+528
+00:39:37.167 --> 00:39:42.521
+B) Dedupe key at intake removed the redeliveries (exactly 20,000 jobs).
+
+529
+00:39:42.801 --> 00:39:51.655
+The 884 remaining duplicates come from sends whose outcome was unknown, timeouts after acceptance and crashes before recording.
+
+530
+00:39:51.935 --> 00:39:53.855
+C) Vendor idempotency key:
+
+531
+00:39:54.135 --> 00:39:55.372
+0 duplicates.
+
+532
+00:39:55.652 --> 00:39:58.425
+The vendor recognised the retried client reference.
+
+533
+00:39:59.775 --> 00:40:00.522
+Lost:
+
+534
+00:40:00.802 --> 00:40:02.317
+0 in every design.
+
+535
+00:40:02.597 --> 00:40:08.165
+Leases and retries guarantee at-least-once; dedupe decides whether the customer notices.
+
+536
+00:40:08.445 --> 00:40:13.138
+Counts vary slightly between runs because the fault injection is per-thread random.
+
+537
+00:40:14.488 --> 00:40:17.432
+L3, Routing around a silently failing vendor.
+
+538
+00:40:17.712 --> 00:40:18.651
+Requirement:
+
+539
+00:40:18.931 --> 00:40:27.699
+When a vendor says 'accepted' but doesn't deliver, find out in minutes and move OTP traffic, without paying the most expensive vendor all the time.
+
+540
+00:40:27.979 --> 00:40:32.587
+Two hours of OTPs at ~50 per second across three vendors.
+
+541
+00:40:32.867 --> 00:40:35.341
+The cheapest breaks silently for 40 minutes:
+
+542
+00:40:35.621 --> 00:40:40.080
+35% delivered, late, while its API still returns 200.
+
+543
+00:40:40.360 --> 00:40:43.197
+Health comes only from simulated delivery reports.
+
+544
+00:40:44.547 --> 00:40:47.939
+Here is the Java code, VendorRoutingL3.java.
+
+545
+00:40:48.219 --> 00:40:52.230
+It runs to 104 lines; the full listing is in the chapter.
+
+546
+00:40:52.510 --> 00:41:00.553
+VendorRoutingL3.java, run with: java VendorRoutingL3.java (JDK 21, no dependencies).
+
+547
+00:41:00.833 --> 00:41:02.219
+SILENT VENDOR FAILURE.
+
+548
+00:41:02.499 --> 00:41:06.510
+Three SMS vendors (cost per SMS, normal delivery rate):
+
+549
+00:41:06.790 --> 00:41:18.630
+V1 0.12 rupees97%, V2 0.15 rupees96%, V3 0.20 rupees98%.
+
+550
+00:41:18.910 --> 00:41:22.430
+For two hours OTPs are sent at ~50 per second.
+
+551
+00:41:22.710 --> 00:41:28.662
+From minute 30 to minute 70, V1's route to one large operator breaks SILENTLY: its.
+
+552
+00:41:31.512 --> 00:41:32.429
+On screen:
+
+553
+00:41:32.709 --> 00:41:50.715
+OTPs at ~50 per second for 2 h; V1 silently degrades to 35% delivery in minutes 30 to 70 (API. still returns 200). policy OTPs at most 30 s during incident SMS sent ₹ per useful OTP.
+
+554
+00:41:50.995 --> 00:42:01.811
+S1) cheapest vendor only 65.9% 3.9% 359,645 0.182.
+
+555
+00:42:02.091 --> 00:42:13.589
+S2) fail over on API errors 65.9% 3.9% 359,645 0.182.
+
+556
+00:42:13.869 --> 00:42:33.773
+S3) route on DLR health (85%, 60 s window) 94.6% 90.0% 359,651 0.137. first shift away from V1 at minute 30.7 (incident began at minute 30.0).
+
+557
+00:42:34.053 --> 00:42:57.861
+S4) S3 + resend via other vendor after 20 s 99.4% 98.9% 378,975 0.139. first shift away from V1 at minute 30.6 (incident began at minute 30.0). then the vendor's API said 'accepted' throughout; failing over on errors never. triggered.
+
+558
+00:42:58.141 --> 00:42:59.635
+Delivery reports are the.
+
+559
+00:42:59.915 --> 00:43:01.429
+The rest is in the chapter.
+
+560
+00:43:04.279 --> 00:43:05.133
+Reading it:
+
+561
+00:43:05.413 --> 00:43:11.962
+S1 and S2 are identical: the vendor never returned an error, so error-based failover never triggered.
+
+562
+00:43:12.242 --> 00:43:17.170
+During the incident, 3.9% of OTPs arrived within 30 s.
+
+563
+00:43:17.450 --> 00:43:26.517
+S3 (DLR health) shifted traffic 42 s after the failure began and kept 90% of OTPs on time during the incident.
+
+564
+00:43:26.797 --> 00:43:34.327
+It was also the cheapest per useful OTP (0.137 rupees): wasted SMS cost money too.
+
+565
+00:43:34.607 --> 00:43:43.247
+S4 (resend after 20 s via another vendor) reached 98.9% during the incident, for 5% more SMS.
+
+566
+00:43:44.597 --> 00:43:46.261
+L4, What not to send.
+
+567
+00:43:46.541 --> 00:43:47.480
+Requirement:
+
+568
+00:43:47.760 --> 00:43:54.651
+Customers should get what they need, when they can act on it, without us paying for noise or breaking consent and time rules.
+
+569
+00:43:54.931 --> 00:44:04.851
+One simulated day for 100,000 customers, order lifecycles, six campaigns, price-drop alerts, through four increasingly careful policies.
+
+570
+00:44:06.201 --> 00:44:09.657
+Here is the Java code, PolicyEngineL4.java.
+
+571
+00:44:09.937 --> 00:44:14.118
+It runs to 132 lines; the full listing is in the chapter.
+
+572
+00:44:14.398 --> 00:44:22.803
+PolicyEngineL4.java, run with: java PolicyEngineL4.java (JDK 21, no dependencies).
+
+573
+00:44:23.083 --> 00:44:25.281
+WHAT TO SEND, ON WHICH CHANNEL, AND WHEN.
+
+574
+00:44:25.561 --> 00:44:29.742
+One simulated day for 100,000 customers (fixed seed).
+
+575
+00:44:30.022 --> 00:44:38.598
+Events: order lifecycle for ~30% of customers: confirmed, picked, packed, out for delivery, arriving, delivered, several.
+
+576
+00:44:41.448 --> 00:44:42.365
+On screen:
+
+577
+00:44:42.645 --> 00:44:55.467
+One day, 100,000 customers, 1,218,912 events (218,656 critical, 600,000 promotional.
+
+578
+00:44:55.747 --> 00:45:06.563
+400,256 informational). policy push SMS SMS ₹/day critical seen quiet-hours users 10. at most.
+
+579
+00:45:06.843 --> 00:45:08.955
+2. min. promo. sends. a. day.
+
+580
+00:45:09.235 --> 00:45:25.725
+P1) send everything; critical on push + SMS 972,543 339,808 50,971 99.0% 100,000.
+
+581
+00:45:26.005 --> 00:45:27.712
+54.9%.
+
+582
+00:45:27.992 --> 00:45:29.507
+The rest is in the chapter.
+
+583
+00:45:32.357 --> 00:45:33.210
+Reading it:
+
+584
+00:45:33.490 --> 00:45:41.959
+P1 sends 1.3 million notifications a day, including 100,000 promotional messages at 22:30.
+
+585
+00:45:42.239 --> 00:45:46.079
+55% of customers get more than 10 notifications.
+
+586
+00:45:46.359 --> 00:45:54.850
+P2 (consent and quiet hours) is the legal baseline: no quiet-hours promotions, ~330k fewer sends.
+
+587
+00:45:55.130 --> 00:46:00.122
+P3 (collapse, caps, digest) roughly halves volume and SMS spend again.
+
+588
+00:46:00.402 --> 00:46:06.717
+Critical reach is unchanged: collapsed updates are counted as seen because the newer update carries them.
+
+589
+00:46:08.067 --> 00:46:26.115
+P4 (push first, SMS at 60 s if unseen) cuts SMS from 161,686 to 73,783 a day (24,253 rupees, then 11,067 rupees).
+
+590
+00:46:26.395 --> 00:46:36.720
+Critical updates are still seen within 2 minutes by 99.4% of customers, and only 2.7% of customers get more than 10 notifications.
+
+591
+00:46:38.070 --> 00:46:39.009
+Part 6.
+
+592
+00:46:39.289 --> 00:46:40.569
+Production Concerns.
+
+593
+00:46:41.819 --> 00:46:42.971
+Failure modes.
+
+594
+00:46:43.251 --> 00:46:44.595
+Here is a quick table:
+
+595
+00:46:44.875 --> 00:46:47.157
+Failure, and Symptom, and Mitigation.
+
+596
+00:46:47.437 --> 00:46:48.653
+Shared FIFO queue.
+
+597
+00:46:48.933 --> 00:46:49.744
+Symptom:
+
+598
+00:46:50.024 --> 00:46:52.904
+OTPs expire behind campaigns (L1).
+
+599
+00:46:53.184 --> 00:46:54.187
+Mitigation:
+
+600
+00:46:54.467 --> 00:46:56.835
+Class lanes, separate promotional route.
+
+601
+00:46:57.115 --> 00:46:59.461
+Duplicate events and unknown outcomes.
+
+602
+00:46:59.741 --> 00:47:00.552
+Symptom:
+
+603
+00:47:00.832 --> 00:47:03.840
+Double OTPs and refund SMS (L2).
+
+604
+00:47:04.120 --> 00:47:05.123
+Mitigation:
+
+605
+00:47:05.403 --> 00:47:09.349
+Dedupe keys, leases, vendor idempotency, idempotent wording.
+
+606
+00:47:09.629 --> 00:47:11.293
+Silent vendor degradation.
+
+607
+00:47:11.573 --> 00:47:12.384
+Symptom:
+
+608
+00:47:12.664 --> 00:47:14.861
+Accepted but undelivered (L3).
+
+609
+00:47:15.141 --> 00:47:16.144
+Mitigation:
+
+610
+00:47:16.424 --> 00:47:19.603
+DLR-health routing per operator, probes, resends.
+
+611
+00:47:19.883 --> 00:47:21.248
+Stale push tokens.
+
+612
+00:47:21.528 --> 00:47:22.339
+Symptom:
+
+613
+00:47:22.619 --> 00:47:24.112
+Pushes silently dropped.
+
+614
+00:47:24.392 --> 00:47:25.395
+Mitigation:
+
+615
+00:47:25.675 --> 00:47:28.384
+Token hygiene, escalation to SMS.
+
+616
+00:47:28.664 --> 00:47:29.773
+Campaign surge.
+
+617
+00:47:30.053 --> 00:47:30.864
+Symptom:
+
+618
+00:47:31.144 --> 00:47:33.341
+Logins and orders spike (L1).
+
+619
+00:47:33.621 --> 00:47:34.624
+Mitigation:
+
+620
+00:47:34.904 --> 00:47:37.891
+Surge-aware scheduling, pre-scaling, kill switch.
+
+621
+00:47:39.241 --> 00:47:41.161
+Consent or window violations.
+
+622
+00:47:41.441 --> 00:47:42.251
+Symptom:
+
+623
+00:47:42.531 --> 00:47:44.771
+Regulatory exposure (L4).
+
+624
+00:47:45.051 --> 00:47:46.054
+Mitigation:
+
+625
+00:47:46.334 --> 00:47:48.574
+Policy engine, hold queues, audit.
+
+626
+00:47:48.854 --> 00:47:50.753
+Template mismatch with DLT.
+
+627
+00:47:51.033 --> 00:47:51.843
+Symptom:
+
+628
+00:47:52.123 --> 00:47:53.766
+Operator blocks SMS.
+
+629
+00:47:54.046 --> 00:47:55.049
+Mitigation:
+
+630
+00:47:55.329 --> 00:47:58.337
+CI rendering tests against registered templates.
+
+631
+00:47:58.617 --> 00:48:00.131
+Notification fatigue.
+
+632
+00:48:00.411 --> 00:48:01.222
+Symptom:
+
+633
+00:48:01.502 --> 00:48:03.507
+Opt-outs, uninstalls (L4).
+
+634
+00:48:03.787 --> 00:48:04.790
+Mitigation:
+
+635
+00:48:05.070 --> 00:48:06.734
+Caps, collapse, digests.
+
+636
+00:48:08.084 --> 00:48:09.172
+Observability.
+
+637
+00:48:09.452 --> 00:48:14.103
+End-to-end latency per class (requested, then delivered), per channel and vendor.
+
+638
+00:48:14.383 --> 00:48:21.060
+DLR delivery rate per vendor times operator times circle, with thresholds that drive routing and alerts.
+
+639
+00:48:21.340 --> 00:48:24.647
+Queue depth and age per lane; OTP expiry rate.
+
+640
+00:48:24.927 --> 00:48:30.324
+Duplicate rate (same dedupe key delivered twice, from DLRs) and DLQ size.
+
+641
+00:48:30.604 --> 00:48:37.580
+Suppression reasons (opted out, capped, collapsed, quiet hours), a sudden change usually means a policy bug.
+
+642
+00:48:38.930 --> 00:48:40.359
+Spend per class per day.
+
+643
+00:48:41.709 --> 00:48:43.267
+Security and privacy.
+
+644
+00:48:43.547 --> 00:48:49.755
+Minimise content: masked identifiers, no full addresses or amounts beyond need in SMS.
+
+645
+00:48:50.035 --> 00:48:58.504
+OTP messages carry app-hash or domain-bound formats for autofill and anti-phishing (Android SMS Retriever, WebOTP).
+
+646
+00:48:58.784 --> 00:49:02.731
+Vendor webhooks authenticated (signatures, allow-listed IPs).
+
+647
+00:49:03.011 --> 00:49:09.240
+Consent records and message logs are personal data: retention and erasure (Ch 36).
+
+648
+00:49:10.590 --> 00:49:11.486
+Performance.
+
+649
+00:49:11.766 --> 00:49:21.579
+Batch push sends (FCM batch APIs), connection reuse to vendors, async I or O or virtual threads for vendor calls (Ch 19).
+
+650
+00:49:21.859 --> 00:49:26.169
+Keep the job table small: move finished messages to the log partition.
+
+651
+00:49:26.449 --> 00:49:32.401
+Policy evaluation from cached preferences and Redis counters, not per-message database reads.
+
+652
+00:49:33.751 --> 00:49:34.476
+Cost.
+
+653
+00:49:34.756 --> 00:49:42.969
+SMS dominates: routing to the cheapest healthy vendor (L3) and push-first escalation (L4) are the biggest levers.
+
+654
+00:49:43.249 --> 00:49:47.793
+WhatsApp and email have different pricing; choose channels per class and region.
+
+655
+00:49:48.073 --> 00:49:55.028
+Report spend per class and per campaign; charge back campaign sends to marketing budgets (Ch 35).
+
+656
+00:49:56.378 --> 00:49:57.317
+Part 7.
+
+657
+00:49:57.597 --> 00:49:59.303
+Anti-Patterns and Pitfalls.
+
+658
+00:50:00.553 --> 00:50:01.471
+Watch out:
+
+659
+00:50:01.751 --> 00:50:02.391
+1.
+
+660
+00:50:02.671 --> 00:50:04.356
+One queue for all messages.
+
+661
+00:50:04.636 --> 00:50:07.303
+OTPs wait behind campaigns (L1).
+
+662
+00:50:08.653 --> 00:50:09.570
+Watch out:
+
+663
+00:50:09.850 --> 00:50:10.554
+2.
+
+664
+00:50:10.834 --> 00:50:13.095
+Weights chosen by whoever shouts loudest.
+
+665
+00:50:13.375 --> 00:50:18.645
+Campaign-friendly weights starve OTPs during the surge the campaign creates (L1).
+
+666
+00:50:19.995 --> 00:50:20.912
+Watch out:
+
+667
+00:50:21.192 --> 00:50:21.939
+3.
+
+668
+00:50:22.219 --> 00:50:25.120
+Trusting at-least-once plumbing to be exactly-once.
+
+669
+00:50:25.400 --> 00:50:28.984
+Duplicates come from the bus, timeouts and crashes (L2).
+
+670
+00:50:30.334 --> 00:50:31.251
+Watch out:
+
+671
+00:50:31.531 --> 00:50:32.235
+4.
+
+672
+00:50:32.515 --> 00:50:34.009
+Dedupe only at intake.
+
+673
+00:50:34.289 --> 00:50:39.387
+Unknown send outcomes still duplicate; use vendor idempotency keys (L2).
+
+674
+00:50:40.737 --> 00:50:41.655
+Watch out:
+
+675
+00:50:41.935 --> 00:50:42.703
+5.
+
+676
+00:50:42.983 --> 00:50:44.839
+Non-idempotent message wording.
+
+677
+00:50:45.119 --> 00:50:49.769
+You received 1,240 rupees twice looks like two payments.
+
+678
+00:50:50.049 --> 00:50:51.244
+Name the reference.
+
+679
+00:50:52.594 --> 00:50:53.511
+Watch out:
+
+680
+00:50:53.791 --> 00:50:54.538
+6.
+
+681
+00:50:54.818 --> 00:50:56.674
+Health from API responses.
+
+682
+00:50:56.954 --> 00:51:00.175
+Vendors return 200 while undelivered (L3).
+
+683
+00:51:00.455 --> 00:51:01.501
+Use DLRs.
+
+684
+00:51:02.851 --> 00:51:03.768
+Watch out:
+
+685
+00:51:04.048 --> 00:51:04.795
+7.
+
+686
+00:51:05.075 --> 00:51:06.099
+Single vendor.
+
+687
+00:51:06.379 --> 00:51:09.237
+No escape during outages or silent failures.
+
+688
+00:51:10.587 --> 00:51:11.505
+Watch out:
+
+689
+00:51:11.785 --> 00:51:12.467
+8.
+
+690
+00:51:12.747 --> 00:51:14.689
+Always sending push and SMS.
+
+691
+00:51:14.969 --> 00:51:18.169
+Doubles cost and noise; escalate instead (L4).
+
+692
+00:51:19.519 --> 00:51:20.436
+Watch out:
+
+693
+00:51:20.716 --> 00:51:21.463
+9.
+
+694
+00:51:21.743 --> 00:51:24.089
+Ignoring quiet hours and legal windows.
+
+695
+00:51:24.369 --> 00:51:27.100
+Regulatory risk and irritated customers.
+
+696
+00:51:28.450 --> 00:51:29.367
+Watch out:
+
+697
+00:51:29.647 --> 00:51:30.351
+10.
+
+698
+00:51:30.631 --> 00:51:32.423
+Sending every status update.
+
+699
+00:51:32.703 --> 00:51:34.261
+Collapse superseded updates.
+
+700
+00:51:35.611 --> 00:51:36.528
+Watch out:
+
+701
+00:51:36.808 --> 00:51:37.640
+11.
+
+702
+00:51:37.920 --> 00:51:39.947
+Templates hard-coded in services.
+
+703
+00:51:40.227 --> 00:51:43.597
+Breaks DLT compliance, localisation and ownership.
+
+704
+00:51:44.947 --> 00:51:45.865
+Watch out:
+
+705
+00:51:46.145 --> 00:51:46.934
+12.
+
+706
+00:51:47.214 --> 00:51:49.838
+Campaigns without a kill switch or surge plan.
+
+707
+00:51:50.118 --> 00:51:51.974
+The campaign becomes the incident.
+
+708
+00:51:53.324 --> 00:51:54.199
+Part 8.
+
+709
+00:51:54.479 --> 00:51:55.823
+Interview Q and A.
+
+710
+00:51:57.073 --> 00:51:57.905
+Beginner.
+
+711
+00:51:58.185 --> 00:51:59.209
+Question 1.
+
+712
+00:51:59.489 --> 00:52:02.945
+Design a notification system, what are the main components?
+
+713
+00:52:03.225 --> 00:52:04.590
+Thirty-second answer:
+
+714
+00:52:04.870 --> 00:52:22.342
+An intake API or topic where services request notifications with a template id, variables, recipient, class and a dedupe key; a policy engine for preferences, consent, timing and channel choice; a renderer with versioned, localised templates; per-class,
+
+715
+00:52:22.622 --> 00:52:35.593
+per-channel queues; channel workers with vendor adapters (FCM or APNs, SMS vendors, WhatsApp, email); a delivery tracker consuming receipts; and a message log and in-app inbox.
+
+716
+00:52:36.943 --> 00:52:37.945
+Question 2.
+
+717
+00:52:38.225 --> 00:52:40.871
+Why separate queues for OTPs and marketing?
+
+718
+00:52:41.151 --> 00:52:42.516
+Thirty-second answer:
+
+719
+00:52:42.796 --> 00:52:46.529
+They differ by orders of magnitude in urgency and volume.
+
+720
+00:52:46.809 --> 00:52:52.463
+In a shared FIFO queue, OTPs wait behind millions of campaign messages and expire.
+
+721
+00:52:52.743 --> 00:53:00.252
+Separate lanes with priority (and ideally a separate promotional route) keep OTPs at seconds while campaigns drain.
+
+722
+00:53:01.602 --> 00:53:02.647
+Question 3.
+
+723
+00:53:02.927 --> 00:53:05.146
+What is a DLR and why does it matter?
+
+724
+00:53:05.426 --> 00:53:06.791
+Thirty-second answer:
+
+725
+00:53:07.071 --> 00:53:13.663
+A delivery report: the vendor's asynchronous callback saying whether an SMS reached the handset (or failed).
+
+726
+00:53:13.943 --> 00:53:17.591
+The send API only says the vendor accepted the message.
+
+727
+00:53:17.871 --> 00:53:24.357
+DLRs are the only real signal of delivery, so they drive status, retries, vendor health and routing.
+
+728
+00:53:25.707 --> 00:53:26.773
+Question 4.
+
+729
+00:53:27.053 --> 00:53:29.805
+How do you handle user preferences and opt-outs?
+
+730
+00:53:30.085 --> 00:53:31.451
+Thirty-second answer:
+
+731
+00:53:31.731 --> 00:53:46.728
+Store consent per user, channel and purpose (transactional versus promotional), with timestamps and source; evaluate at send time (not at campaign creation); honour opt-out keywords and in-app settings immediately; keep an audit trail.
+
+732
+00:53:47.008 --> 00:53:51.381
+Transactional service messages follow different rules from promotional ones.
+
+733
+00:53:52.731 --> 00:53:53.734
+Intermediate.
+
+734
+00:53:54.014 --> 00:53:55.123
+Question 5.
+
+735
+00:53:55.403 --> 00:53:58.326
+How do you avoid sending duplicate notifications?
+
+736
+00:53:58.606 --> 00:53:59.971
+Thirty-second answer:
+
+737
+00:54:00.251 --> 00:54:08.657
+Producers supply a dedupe key per logical notification; intake stores it with a unique constraint so redelivered events are dropped.
+
+738
+00:54:08.937 --> 00:54:12.243
+Workers claim jobs with leases and retry on failure.
+
+739
+00:54:12.523 --> 00:54:19.094
+For unknown outcomes (timeouts, crashes after send), pass an idempotency key the vendor dedupes on.
+
+740
+00:54:19.374 --> 00:54:24.750
+Where impossible, pick duplicate-versus-loss per class and word messages idempotently.
+
+741
+00:54:26.100 --> 00:54:27.209
+Question 6.
+
+742
+00:54:27.489 --> 00:54:30.647
+How do workers claim jobs safely from a database queue?
+
+743
+00:54:30.927 --> 00:54:32.292
+Thirty-second answer:
+
+744
+00:54:32.572 --> 00:54:33.425
+UPDATE...
+
+745
+00:54:33.705 --> 00:54:35.113
+WHERE id IN (SELECT...
+
+746
+00:54:35.393 --> 00:54:41.132
+FOR UPDATE SKIP LOCKED LIMIT n) RETURNING... setting a lease expiry and incrementing attempts.
+
+747
+00:54:41.412 --> 00:54:43.332
+Other workers skip locked rows.
+
+748
+00:54:43.612 --> 00:54:47.409
+If a worker dies, its lease expires and the job is reclaimed.
+
+749
+00:54:47.689 --> 00:54:52.660
+Finished jobs are marked done; failures get a backoff and eventually a dead-letter state.
+
+750
+00:54:54.010 --> 00:54:55.098
+Question 7.
+
+751
+00:54:55.378 --> 00:54:58.855
+Push, SMS, WhatsApp or email, how do you choose the channel?
+
+752
+00:54:59.135 --> 00:55:00.501
+Thirty-second answer:
+
+753
+00:55:00.781 --> 00:55:04.258
+By message class, user preference, reachability and cost.
+
+754
+00:55:04.538 --> 00:55:17.573
+Push is free but unreliable (tokens, OEM throttling); SMS is reliable and paid; WhatsApp is rich and cheaper for some templates but needs opt-in; email suits receipts and digests.
+
+755
+00:55:17.853 --> 00:55:23.549
+For critical messages use push first and escalate to SMS if not seen within a deadline.
+
+756
+00:55:24.899 --> 00:55:25.923
+Question 8.
+
+757
+00:55:26.203 --> 00:55:28.037
+What is notification collapsing?
+
+758
+00:55:28.317 --> 00:55:29.683
+Thirty-second answer:
+
+759
+00:55:29.963 --> 00:55:39.520
+Replacing pending or recent notifications that a newer one supersedes, packed followed by out for delivery two minutes later becomes one notification.
+
+760
+00:55:39.800 --> 00:55:47.672
+Implement with a collapse key per entity, short holding windows for fast-changing states, and the push services' native collapse keys.
+
+761
+00:55:49.022 --> 00:55:50.089
+Question 9.
+
+762
+00:55:50.369 --> 00:55:53.782
+How do you template messages for many languages and channels?
+
+763
+00:55:54.062 --> 00:55:55.427
+Thirty-second answer:
+
+764
+00:55:55.707 --> 00:56:05.371
+A template registry: id, versions, channel variants, languages, typed variables, owner, and for SMS the DLT header and template id.
+
+765
+00:56:05.651 --> 00:56:12.755
+Producers send template id + variables; the renderer chooses language from preferences and validates variables.
+
+766
+00:56:13.035 --> 00:56:15.979
+CI tests rendering against DLT patterns.
+
+767
+00:56:17.329 --> 00:56:18.097
+Senior.
+
+768
+00:56:18.377 --> 00:56:19.423
+Question 10.
+
+769
+00:56:19.703 --> 00:56:24.183
+An SMS vendor is returning 200 but messages aren't arriving.
+
+770
+00:56:24.463 --> 00:56:26.511
+How does your system detect and react?
+
+771
+00:56:26.791 --> 00:56:28.156
+Thirty-second answer:
+
+772
+00:56:28.436 --> 00:56:37.268
+Track DLR-based delivery rate per vendor (and per operator or circle) over a sliding window, judging each send after its deadline.
+
+773
+00:56:37.548 --> 00:56:49.964
+When it drops below a threshold, route to the next-best healthy vendor, keep a small probe share on the sick one to detect recovery, alert, and resend recent undelivered OTPs through another vendor.
+
+774
+00:56:51.314 --> 00:56:52.445
+Question 11.
+
+775
+00:56:52.725 --> 00:56:57.439
+How do you run a 20M-recipient campaign without hurting transactional traffic?
+
+776
+00:56:57.719 --> 00:56:59.085
+Thirty-second answer:
+
+777
+00:56:59.365 --> 00:57:16.559
+Separate promotional lane, workers and vendor route; resolve the audience in batch with opt-outs and caps; release in throttled chunks within the legal window; coordinate with capacity for the surge the campaign creates; brownout hooks to pause; kill switch; measure outcomes.
+
+778
+00:57:17.909 --> 00:57:18.997
+Question 12.
+
+779
+00:57:19.277 --> 00:57:21.624
+Exactly-once delivery, is it possible?
+
+780
+00:57:21.904 --> 00:57:23.269
+Thirty-second answer:
+
+781
+00:57:23.549 --> 00:57:28.264
+Not end to end with an external vendor unless the vendor deduplicates on your key.
+
+782
+00:57:28.544 --> 00:57:39.381
+You can make everything up to the vendor call effectively exactly-once (dedupe keys, transactional state), and with vendor idempotency the customer sees exactly one message.
+
+783
+00:57:39.661 --> 00:57:45.891
+Otherwise you choose at-least-once with idempotent content, or at-most-once and accept rare losses.
+
+784
+00:57:47.241 --> 00:57:48.521
+Question 13.
+
+785
+00:57:48.801 --> 00:57:52.257
+How would you implement quiet hours and legal time windows?
+
+786
+00:57:52.537 --> 00:57:53.902
+Thirty-second answer:
+
+787
+00:57:54.182 --> 00:58:06.662
+Evaluate at send time in the user's time zone: non-urgent messages outside the window go to a hold queue keyed by release time; at release, re-check freshness (drop if stale) and consent.
+
+788
+00:58:06.942 --> 00:58:11.977
+Promotional SMS respect regulatory windows regardless of preferences.
+
+789
+00:58:12.257 --> 00:58:15.627
+Urgent and critical messages bypass quiet hours.
+
+790
+00:58:16.977 --> 00:58:18.172
+Question 14.
+
+791
+00:58:18.452 --> 00:58:22.100
+How do you design retries and dead letters for notifications?
+
+792
+00:58:22.380 --> 00:58:23.745
+Thirty-second answer:
+
+793
+00:58:24.025 --> 00:58:46.959
+Retry transient failures (503, timeouts) with exponential backoff and jitter, bounded by a per-class deadline (OTPs are useless after 5 min, so don't retry past it); switch vendor on repeated failure; after max attempts or deadline, move to a dead-letter state with reason, alert on DLQ growth, and allow replay for critical classes.
+
+794
+00:58:48.309 --> 00:58:49.205
+Architect.
+
+795
+00:58:49.485 --> 00:58:50.679
+Question 15.
+
+796
+00:58:50.959 --> 00:58:55.397
+Design the notification platform for a national grocery app end to end.
+
+797
+00:58:55.677 --> 00:58:57.042
+Thirty-second answer:
+
+798
+00:58:57.322 --> 00:59:18.591
+Message classes with lanes and routes; intake with dedupe keys; a policy engine for consent, windows, caps, collapse and escalation; a template registry with DLT ids; channel workers with leases and vendor idempotency; multi-vendor routing on DLR health with OTP resends; a delivery tracker,
+
+799
+00:59:18.871 --> 00:59:26.935
+message log and inbox; campaigns with throttled release; observability on latency per class, DLR rates and spend.
+
+800
+00:59:28.285 --> 00:59:29.480
+Question 16.
+
+801
+00:59:29.760 --> 00:59:32.832
+Build or buy, would you use a notification SaaS?
+
+802
+00:59:33.112 --> 00:59:34.477
+Thirty-second answer:
+
+803
+00:59:34.757 --> 00:59:56.475
+Buy the channels (FCM, SMS or WhatsApp aggregators, email providers) and possibly an orchestration SaaS for marketing journeys; build or tightly control the transactional core, dedupe, priority, routing on DLRs, consent and DLT compliance, because it's on the critical path for login and orders and needs your data.
+
+804
+00:59:56.755 --> 00:59:58.547
+Keep vendor adapters pluggable.
+
+805
+00:59:59.897 --> 01:00:01.241
+Question 17.
+
+806
+01:00:01.521 --> 01:00:04.145
+How do you measure the notification system's success?
+
+807
+01:00:04.425 --> 01:00:05.790
+Thirty-second answer:
+
+808
+01:00:06.070 --> 01:00:25.547
+Per class: delivery latency and success (OTP within 30 s, critical within 2 min), duplicate and loss rates, spend per delivered useful message; for engagement: opens, clicks, conversions, opt-out and uninstall rates, notifications per user; for compliance: violations (should be zero).
+
+809
+01:00:26.897 --> 01:00:28.071
+Question 18.
+
+810
+01:00:28.351 --> 01:00:34.303
+How does the notification platform interact with the rest of the architecture during a regional outage?
+
+811
+01:00:34.583 --> 01:00:35.948
+Thirty-second answer:
+
+812
+01:00:36.228 --> 01:00:56.473
+Intake in both regions with idempotent dedupe keys; queues replicated or re-driven from the event log; vendor adapters in both regions with shared TPS via leased limits; OTP falls back across vendors and channels; promotional traffic pauses automatically; critical backlog drains first on recovery.
+
+813
+01:00:57.823 --> 01:00:59.061
+Question 19.
+
+814
+01:00:59.341 --> 01:01:02.605
+How do you govern notifications across many product teams?
+
+815
+01:01:02.885 --> 01:01:04.250
+Thirty-second answer:
+
+816
+01:01:04.530 --> 01:01:22.215
+A platform with a policy layer every team must go through: shared frequency caps and priorities per user across teams, template ownership and review, class definitions, budgets per team, dashboards for sends and opt-outs by team, and an approval path for new promotional types.
+
+817
+01:01:22.495 --> 01:01:26.506
+Teams keep autonomy over content and triggers within those guardrails.
+
+818
+01:01:27.856 --> 01:01:28.965
+Question 20.
+
+819
+01:01:29.245 --> 01:01:32.189
+What privacy and compliance obligations apply?
+
+820
+01:01:32.469 --> 01:01:33.835
+Thirty-second answer:
+
+821
+01:01:34.115 --> 01:01:53.464
+Consent per purpose and channel with audit; opt-out honoured promptly; DLT registration of headers and templates; promotional time windows; minimising personal data in message content; retention limits on message logs and erasure support; vendor contracts covering data handling and residency.
+
+822
+01:01:54.814 --> 01:01:55.710
+Part 9.
+
+823
+01:01:55.990 --> 01:01:57.398
+Summary and Practice.
+
+824
+01:01:58.648 --> 01:01:59.736
+Key takeaways.
+
+825
+01:02:00.016 --> 01:02:07.909
+Classify messages (urgent, critical, informational, promotional); priority and guarantees follow (§1.2).
+
+826
+01:02:08.189 --> 01:02:15.208
+Isolate capacity: lanes and a separate promotional route; campaigns create the surge they compete with (L1).
+
+827
+01:02:15.488 --> 01:02:21.333
+Exactly-once for the customer needs dedupe keys, leases and vendor idempotency (L2).
+
+828
+01:02:21.613 --> 01:02:27.821
+Route on DLRs, not API responses; resend OTPs through another vendor (L3).
+
+829
+01:02:29.171 --> 01:02:35.849
+Restraint is design: consent, windows, collapse, caps, digests and push-first escalation (L4).
+
+830
+01:02:36.129 --> 01:02:40.310
+Templates are governed artefacts with DLT ids and languages.
+
+831
+01:02:40.590 --> 01:02:43.406
+Measure useful delivery and fatigue, not sends.
+
+832
+01:02:44.756 --> 01:02:46.079
+Decision cheat sheet.
+
+833
+01:02:46.359 --> 01:02:47.703
+Here is a quick table:
+
+834
+01:02:47.983 --> 01:02:49.156
+Need, and Choice.
+
+835
+01:02:49.436 --> 01:02:50.097
+OTP:
+
+836
+01:02:50.377 --> 01:02:57.161
+SMS strict priority lane, DLR routing, resend via alternate vendor, WhatsApp or voice fallback.
+
+837
+01:02:57.441 --> 01:02:58.593
+Critical updates:
+
+838
+01:02:58.873 --> 01:03:03.673
+Push first, SMS at 60 s if unseen, collapse keys, dedupe keys.
+
+839
+01:03:03.953 --> 01:03:04.999
+Informational:
+
+840
+01:03:05.279 --> 01:03:07.199
+Push or in-app, daily digest.
+
+841
+01:03:07.479 --> 01:03:08.396
+Promotional:
+
+842
+01:03:08.676 --> 01:03:12.793
+Separate route, consent at send time, caps, windows, throttled release.
+
+843
+01:03:13.073 --> 01:03:13.927
+Job queue:
+
+844
+01:03:14.207 --> 01:03:18.537
+Kafka per class, or PostgreSQL SKIP LOCKED at moderate volume.
+
+845
+01:03:18.817 --> 01:03:19.777
+Duplicates:
+
+846
+01:03:20.057 --> 01:03:24.687
+Dedupe key at intake + vendor client reference + idempotent wording.
+
+847
+01:03:26.037 --> 01:03:27.167
+Exercises.
+
+848
+01:03:27.447 --> 01:03:34.295
+(B2) In L1, add a WhatsApp route for OTPs that absorbs 30% of OTPs during the surge.
+
+849
+01:03:34.575 --> 01:03:37.135
+How much capacity does that free for the campaign?
+
+850
+01:03:37.415 --> 01:03:43.389
+(B3) In L2, shorten the lease to 50 ms and add a 100 ms vendor latency.
+
+851
+01:03:43.669 --> 01:03:45.738
+What new source of duplicates appears?
+
+852
+01:03:46.018 --> 01:03:53.079
+(B3) In L3, make the failure operator-specific (40% of numbers) and compute health per operator.
+
+853
+01:03:53.359 --> 01:03:55.023
+Compare with vendor-level health.
+
+854
+01:03:55.303 --> 01:04:02.429
+(B4) In L4, add a shared cap of 6 notifications per user per day across all classes except critical.
+
+855
+01:04:02.709 --> 01:04:04.415
+What happens to marketing reach?
+
+856
+01:04:05.765 --> 01:04:16.603
+(B4) Design the schema and API for a customer-support view that shows every message sent to a customer, with delivery status, without exposing OTP values.
+
+857
+01:04:17.953 --> 01:04:18.955
+Further reading.
+
+858
+01:04:19.235 --> 01:04:24.462
+Firebase Cloud Messaging documentation (collapse keys, priorities, batch sends).
+
+859
+01:04:24.742 --> 01:04:33.403
+TRAI Telecom Commercial Communications Customer Preference Regulations (TCCCPR) and DLT, check current directions.
+
+860
+01:04:33.683 --> 01:04:38.867
+WhatsApp Business Platform documentation on template messages and conversation windows.
+
+861
+01:04:39.147 --> 01:04:44.417
+Uber and Airbnb engineering blogs on notification platforms and prioritisation.
+
+862
+01:04:45.767 --> 01:04:51.783
+Martin Kleppmann, Designing Data-Intensive Applications, end-to-end argument and idempotence.
+
+863
+01:04:53.133 --> 01:04:54.370
+Related chapters.
+
+864
+01:04:54.650 --> 01:04:59.877
+Ch 14, Messaging and Event Streaming: topics, share groups and DLQs.
+
+865
+01:05:00.157 --> 01:05:04.466
+Ch 18, Resilience Patterns: bulkheads, backoff, brownouts.
+
+866
+01:05:04.746 --> 01:05:10.314
+Ch 20, Idempotency, IDs and Distributed Locks: dedupe keys and leases.
+
+867
+01:05:10.594 --> 01:05:14.263
+Ch 38, URL Shortener: links in messages.
+
+868
+01:05:14.543 --> 01:05:17.231
+Ch 39, Distributed Rate Limiter:
+
+869
+01:05:17.511 --> 01:05:20.114
+OTP abuse and vendor egress limits.
+
+870
+01:05:20.394 --> 01:05:21.930
+Ch 41, Chat:
+
+871
+01:05:22.210 --> 01:05:25.986
+Customer, Rider Messaging: real-time messaging next door.
+
+872
+01:05:27.336 --> 01:05:28.936
+That's the end of this chapter.
+
+873
+01:05:29.216 --> 01:05:35.253
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+874
+01:05:35.533 --> 01:05:36.984
+See you in the next chapter.
+

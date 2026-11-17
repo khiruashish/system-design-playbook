@@ -1,0 +1,2594 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.737
+Level Expectations:
+
+2
+00:00:02.017 --> 00:00:03.617
+From Engineer to Principal.
+
+3
+00:00:03.897 --> 00:00:07.907
+Chapter 58, from the Interview part of the System Design Playbook.
+
+4
+00:00:09.657 --> 00:00:10.617
+At a glance:
+
+5
+00:00:10.897 --> 00:00:12.071
+Chapter at a glance.
+
+6
+00:00:12.351 --> 00:00:13.353
+Reader bands:
+
+7
+00:00:13.633 --> 00:00:15.937
+B1, then B4, Prerequisites:
+
+8
+00:00:16.217 --> 00:00:18.884
+Ch 57 (the interview framework).
+
+9
+00:00:19.164 --> 00:00:25.863
+What you will learn: what interviewers and promotion committees expect at each level, in behaviour rather than job titles.
+
+10
+00:00:26.143 --> 00:00:28.340
+The four levels map to this handbook's bands:
+
+11
+00:00:28.620 --> 00:00:31.201
+B1, Engineer, 0 to 3 years.
+
+12
+00:00:31.481 --> 00:00:34.233
+B2, Senior engineer, 3 to 7 years.
+
+13
+00:00:34.513 --> 00:00:37.351
+B3, Staff or lead, 7 to 12 years.
+
+14
+00:00:37.631 --> 00:00:40.895
+B4, Principal or architect, 12 plus years.
+
+15
+00:00:42.245 --> 00:00:45.829
+Titles vary by company (VERIFY each company's ladder).
+
+16
+00:00:46.109 --> 00:00:48.605
+The behaviours are remarkably consistent.
+
+17
+00:00:48.885 --> 00:00:56.714
+The one lab answers a single question, handle the payment gateway's webhooks, at all four levels, against real PostgreSQL.
+
+18
+00:00:56.994 --> 00:01:07.447
+5,000 payments with 13,475 deliveries, including duplicates, reordering, 178 lost events, two nodes and a restart:
+
+19
+00:01:07.727 --> 00:01:14.639
+B1, In-memory dedup, 830, 747, 755, 104.
+
+20
+00:01:14.919 --> 00:01:22.834
+B2, Database dedup in the same transaction, 0, 747, 755, 104.
+
+21
+00:01:23.114 --> 00:01:28.725
+B3, + the domain's forward-only state machine, 0, 0, 82, 82.
+
+22
+00:01:30.075 --> 00:01:35.088
+B4, + reconciliation with the gateway, 0, 0, 0, 0.
+
+23
+00:01:35.368 --> 00:01:38.355
+Each level is correct under one more kind of reality.
+
+24
+00:01:38.635 --> 00:01:39.616
+Reading time:
+
+25
+00:01:39.896 --> 00:01:41.368
+70 min + code.
+
+26
+00:01:42.718 --> 00:01:43.571
+Part 1.
+
+27
+00:01:43.851 --> 00:01:45.771
+Introduction and Why It Matters.
+
+28
+00:01:47.021 --> 00:01:50.691
+A story: the promotion packet that said senior for the third year.
+
+29
+00:01:50.971 --> 00:01:54.533
+Priya had fifteen years of experience and a strong track record.
+
+30
+00:01:54.813 --> 00:02:02.707
+Her staff-promotion packet listed the systems she built: the payment integration, the search migration, the notification platform.
+
+31
+00:02:02.987 --> 00:02:05.760
+The committee's feedback was the same for the third year:
+
+32
+00:02:06.040 --> 00:02:07.576
+Excellent senior engineer.
+
+33
+00:02:07.856 --> 00:02:09.840
+Staff impact not demonstrated.
+
+34
+00:02:10.120 --> 00:02:12.488
+Her manager eventually translated it:
+
+35
+00:02:12.768 --> 00:02:14.688
+Her packet described what she built.
+
+36
+00:02:16.038 --> 00:02:31.569
+A staff packet describes which problems she found that nobody had assigned, which decisions she drove across teams, what she chose not to build, and how the organisation's systems got better because of her (standards, reviews, mentoring, incident follow-through).
+
+37
+00:02:31.849 --> 00:02:34.238
+The same distinction appears in interviews.
+
+38
+00:02:34.518 --> 00:02:37.355
+A senior candidate designs the system correctly.
+
+39
+00:02:37.635 --> 00:02:48.835
+A staff candidate reframes the problem, argues the trade-offs, anticipates the failure modes that the organisation will actually hit, and makes the design operable and evolvable.
+
+40
+00:02:50.185 --> 00:02:54.175
+Level is not years, and it is not how many technologies you can name.
+
+41
+00:02:54.455 --> 00:03:00.193
+It is the scope and ambiguity you can handle, and the kinds of failure you design for without being asked.
+
+42
+00:03:01.543 --> 00:03:02.226
+Quote:
+
+43
+00:03:02.506 --> 00:03:04.170
+The thesis of this chapter.
+
+44
+00:03:04.450 --> 00:03:10.146
+Levels differ less in what you know than in what you anticipate and how far your influence reaches:
+
+45
+00:03:10.426 --> 00:03:11.791
+B1 makes it work.
+
+46
+00:03:12.071 --> 00:03:14.973
+B2 makes it work under concurrency and load.
+
+47
+00:03:15.253 --> 00:03:20.074
+B3 makes it correct under the domain's real failure modes, and owns the trade-offs.
+
+48
+00:03:20.354 --> 00:03:28.845
+B4 makes it correct under loss and change, across teams and years: reconciliation, evolution, operability, organisation.
+
+49
+00:03:29.125 --> 00:03:31.301
+The lab shows the ladder on one problem.
+
+50
+00:03:32.651 --> 00:03:34.208
+The levels in one table.
+
+51
+00:03:34.488 --> 00:03:35.832
+Here is a quick table:
+
+52
+00:03:36.112 --> 00:03:41.893
+Dimension, and B1 Engineer, and B2 Senior, and B3 Staff, and B4 Principal.
+
+53
+00:03:42.173 --> 00:03:42.899
+Scope.
+
+54
+00:03:43.179 --> 00:03:44.352
+B1 Engineer:
+
+55
+00:03:44.632 --> 00:03:45.933
+A task or feature.
+
+56
+00:03:46.213 --> 00:03:47.323
+B2 Senior:
+
+57
+00:03:47.603 --> 00:03:49.544
+A service or feature end to end.
+
+58
+00:03:49.824 --> 00:03:50.891
+B3 Staff:
+
+59
+00:03:51.171 --> 00:03:53.283
+A system or domain across teams.
+
+60
+00:03:53.563 --> 00:03:54.800
+B4 Principal:
+
+61
+00:03:55.080 --> 00:03:57.896
+Multiple domains, platform, company direction.
+
+62
+00:03:58.176 --> 00:03:59.157
+Ambiguity.
+
+63
+00:03:59.437 --> 00:04:00.611
+B1 Engineer:
+
+64
+00:04:00.891 --> 00:04:01.893
+Clear specs.
+
+65
+00:04:02.173 --> 00:04:03.283
+B2 Senior:
+
+66
+00:04:03.563 --> 00:04:05.824
+Some ambiguity, asks good questions.
+
+67
+00:04:06.104 --> 00:04:07.171
+B3 Staff:
+
+68
+00:04:07.451 --> 00:04:10.416
+Defines the problem; finds unassigned problems.
+
+69
+00:04:10.696 --> 00:04:11.933
+B4 Principal:
+
+70
+00:04:12.213 --> 00:04:14.091
+Sets direction where none exists.
+
+71
+00:04:14.371 --> 00:04:15.373
+Design depth.
+
+72
+00:04:15.653 --> 00:04:16.827
+B1 Engineer:
+
+73
+00:04:17.107 --> 00:04:18.323
+Correct happy path.
+
+74
+00:04:18.603 --> 00:04:19.712
+B2 Senior:
+
+75
+00:04:19.992 --> 00:04:23.149
+Concurrency, scale, API or data design.
+
+76
+00:04:23.429 --> 00:04:24.496
+B3 Staff:
+
+77
+00:04:24.776 --> 00:04:28.104
+Domain failure modes, consistency, trade-offs argued.
+
+78
+00:04:28.384 --> 00:04:29.621
+B4 Principal:
+
+79
+00:04:29.901 --> 00:04:33.336
+Loss, evolution, economics, organisational fit.
+
+80
+00:04:33.616 --> 00:04:34.747
+Failure thinking.
+
+81
+00:04:35.027 --> 00:04:36.200
+B1 Engineer:
+
+82
+00:04:36.480 --> 00:04:37.653
+Handles errors.
+
+83
+00:04:37.933 --> 00:04:39.043
+B2 Senior:
+
+84
+00:04:39.323 --> 00:04:41.669
+Retries, timeouts, idempotency.
+
+85
+00:04:41.949 --> 00:04:43.016
+B3 Staff:
+
+86
+00:04:43.296 --> 00:04:46.069
+State machines, sagas, degradation, SLOs.
+
+87
+00:04:46.349 --> 00:04:47.587
+B4 Principal:
+
+88
+00:04:47.867 --> 00:04:51.771
+Reconciliation, blast radius, DR, correlated failure.
+
+89
+00:04:53.121 --> 00:04:54.166
+Operability.
+
+90
+00:04:54.446 --> 00:04:55.619
+B1 Engineer:
+
+91
+00:04:55.899 --> 00:04:56.731
+Logs.
+
+92
+00:04:57.011 --> 00:04:58.121
+B2 Senior:
+
+93
+00:04:58.401 --> 00:04:59.595
+Metrics, alerts.
+
+94
+00:04:59.875 --> 00:05:00.942
+B3 Staff:
+
+95
+00:05:01.222 --> 00:05:03.419
+SLOs, runbooks, on-call quality.
+
+96
+00:05:03.699 --> 00:05:04.937
+B4 Principal:
+
+97
+00:05:05.217 --> 00:05:08.758
+Reliability strategy, cost per unit, platform standards.
+
+98
+00:05:09.038 --> 00:05:09.977
+Influence.
+
+99
+00:05:10.257 --> 00:05:11.430
+B1 Engineer:
+
+100
+00:05:11.710 --> 00:05:12.606
+Own work.
+
+101
+00:05:12.886 --> 00:05:13.995
+B2 Senior:
+
+102
+00:05:14.275 --> 00:05:15.854
+Own team, code reviews.
+
+103
+00:05:16.134 --> 00:05:17.201
+B3 Staff:
+
+104
+00:05:17.481 --> 00:05:20.446
+Several teams, design reviews, mentoring seniors.
+
+105
+00:05:20.726 --> 00:05:21.963
+B4 Principal:
+
+106
+00:05:22.243 --> 00:05:24.931
+Org-wide standards, strategy, hiring bar.
+
+107
+00:05:25.211 --> 00:05:26.299
+Time horizon.
+
+108
+00:05:26.579 --> 00:05:27.753
+B1 Engineer:
+
+109
+00:05:28.033 --> 00:05:29.142
+Days, weeks.
+
+110
+00:05:29.422 --> 00:05:30.531
+B2 Senior:
+
+111
+00:05:30.811 --> 00:05:31.878
+Weeks, quarter.
+
+112
+00:05:32.158 --> 00:05:33.225
+B3 Staff:
+
+113
+00:05:33.505 --> 00:05:34.507
+Quarters, year.
+
+114
+00:05:34.787 --> 00:05:36.025
+B4 Principal:
+
+115
+00:05:36.305 --> 00:05:37.115
+Years.
+
+116
+00:05:37.395 --> 00:05:38.419
+In an interview.
+
+117
+00:05:38.699 --> 00:05:39.873
+B1 Engineer:
+
+118
+00:05:40.153 --> 00:05:41.817
+Solves the prompt with guidance.
+
+119
+00:05:42.097 --> 00:05:43.206
+B2 Senior:
+
+120
+00:05:43.486 --> 00:05:46.323
+Solves it independently, one good deep dive.
+
+121
+00:05:46.603 --> 00:05:47.670
+B3 Staff:
+
+122
+00:05:47.950 --> 00:05:51.683
+Drives it, trade-offs with flip conditions, failures first-class.
+
+123
+00:05:51.963 --> 00:05:53.201
+B4 Principal:
+
+124
+00:05:53.481 --> 00:05:57.257
+Reframes it, phases it, ties it to cost, org and evolution.
+
+125
+00:05:58.607 --> 00:05:59.929
+Learning objectives.
+
+126
+00:06:00.209 --> 00:06:02.108
+By the end you will be able to:
+
+127
+00:06:02.388 --> 00:06:06.292
+Describe each level's expectations in observable behaviours.
+
+128
+00:06:06.572 --> 00:06:10.156
+Calibrate your own answers to the level you're interviewing for (the lab).
+
+129
+00:06:10.436 --> 00:06:13.081
+Recognise down-levelling signals and fix them.
+
+130
+00:06:13.361 --> 00:06:17.692
+Build evidence of staff or principal impact for interviews and promotions.
+
+131
+00:06:19.042 --> 00:06:19.917
+Part 2.
+
+132
+00:06:20.197 --> 00:06:22.074
+Core Concepts, Beginner to Deep.
+
+133
+00:06:23.324 --> 00:06:25.863
+Intuition: four drivers on the same road.
+
+134
+00:06:26.143 --> 00:06:28.383
+A learner drives safely on a clear road.
+
+135
+00:06:28.663 --> 00:06:31.777
+An experienced driver handles traffic and bad weather.
+
+136
+00:06:32.057 --> 00:06:38.457
+A professional driver knows the route's hazards (the blind curve, the flooding underpass) and plans around them.
+
+137
+00:06:38.737 --> 00:06:46.033
+A fleet manager ensures a hundred drivers are safe for years: routes, maintenance, training, incident reviews, cost.
+
+138
+00:06:46.313 --> 00:06:49.556
+Same road, different scope of what they anticipate and own.
+
+139
+00:06:50.906 --> 00:06:51.738
+B1:
+
+140
+00:06:52.018 --> 00:06:52.914
+Engineer.
+
+141
+00:06:53.194 --> 00:06:59.658
+Expectation: implements well-defined components correctly, with tests, and asks for help appropriately.
+
+142
+00:06:59.938 --> 00:07:09.303
+In a design interview (rare at this level): produces a reasonable single-service design, knows basic storage and caching, and handles the happy path.
+
+143
+00:07:09.583 --> 00:07:16.709
+In the lab: an in-memory dedup set works in a demo, and silently double-credits once there are two nodes or a restart.
+
+144
+00:07:16.989 --> 00:07:21.874
+Growth edge: think about what happens when there are two of everything, and when things restart.
+
+145
+00:07:23.224 --> 00:07:24.099
+B2:
+
+146
+00:07:24.379 --> 00:07:25.552
+Senior engineer.
+
+147
+00:07:25.832 --> 00:07:30.312
+Expectation: owns a service or feature end to end, independently.
+
+148
+00:07:30.592 --> 00:07:37.632
+It is correct under concurrency and load, well designed at the API and data level, and tested and monitored.
+
+149
+00:07:37.912 --> 00:07:47.149
+In a design interview: clarifies requirements;. estimates;. gives a clean API and data model;. produces a coherent high-level design;.
+
+150
+00:07:48.499 --> 00:07:54.259
+delivers one solid deep dive with atomic operations and idempotency;. names trade-offs.
+
+151
+00:07:54.539 --> 00:08:00.598
+In the lab: dedup in the database, in the same transaction as the effect, makes duplicates harmless.
+
+152
+00:08:00.878 --> 00:08:03.203
+It still trusts arrival order and delivery.
+
+153
+00:08:03.483 --> 00:08:10.630
+Growth edge: model the domain's state machine and its real-world failure modes, and own decisions beyond your service.
+
+154
+00:08:11.980 --> 00:08:12.876
+B3:
+
+155
+00:08:13.156 --> 00:08:14.265
+Staff engineer.
+
+156
+00:08:14.545 --> 00:08:18.108
+Expectation: owns a system or domain across teams.
+
+157
+00:08:18.388 --> 00:08:20.927
+Defines problems as well as solving them.
+
+158
+00:08:21.207 --> 00:08:25.985
+Makes and documents the decisions others build on (ADRs, design docs).
+
+159
+00:08:26.265 --> 00:08:28.164
+Raises the bar for other seniors.
+
+160
+00:08:28.444 --> 00:08:36.359
+In a design interview: drives the whole session;. chooses the deep dive where the risk is;. argues trade-offs with flip conditions;.
+
+161
+00:08:37.709 --> 00:08:46.946
+treats failure handling (state machines, sagas, degradation, SLOs) as part of the design;. discusses operability and cost unprompted.
+
+162
+00:08:47.226 --> 00:08:54.095
+In the lab: encodes the domain rule that a payment's status only moves forward, so reordered events can't corrupt it.
+
+163
+00:08:54.375 --> 00:08:56.189
+Side effects go to an outbox.
+
+164
+00:08:56.469 --> 00:08:57.962
+The remaining gap is loss.
+
+165
+00:08:58.242 --> 00:09:03.085
+Growth edge: assume every channel lies eventually, and design the correction loop.
+
+166
+00:09:03.365 --> 00:09:05.391
+Think in years and organisations.
+
+167
+00:09:06.741 --> 00:09:07.637
+B4:
+
+168
+00:09:07.917 --> 00:09:09.411
+Principal or architect.
+
+169
+00:09:09.691 --> 00:09:13.147
+Expectation: sets technical direction across domains.
+
+170
+00:09:13.427 --> 00:09:16.264
+Designs for loss, change and scale over years.
+
+171
+00:09:16.544 --> 00:09:19.979
+Aligns architecture with organisation and economics.
+
+172
+00:09:20.259 --> 00:09:22.968
+Shapes standards, the hiring bar and culture.
+
+173
+00:09:23.248 --> 00:09:36.304
+In a design interview: reframes the prompt (what's the business goal? what's the smallest thing that works?);. phases the design (now, next year, at 10 times );. designs the correction loops (reconciliation, audits);.
+
+174
+00:09:37.654 --> 00:09:44.054
+quantifies reliability and cost;. addresses migration and team structure;. knows what not to build.
+
+175
+00:09:44.334 --> 00:09:52.590
+In the lab: accepts that at-least-once channels can still lose messages, and closes the loop with reconciliation against the source of truth.
+
+176
+00:09:52.870 --> 00:09:54.598
+Every invariant reaches zero.
+
+177
+00:09:54.878 --> 00:09:56.947
+Growth edge: none that is technical.
+
+178
+00:09:57.227 --> 00:10:00.577
+It is judgement, communication, and multiplying others.
+
+179
+00:10:01.927 --> 00:10:03.612
+The same prompt at four levels.
+
+180
+00:10:03.892 --> 00:10:05.236
+Here is a quick table:
+
+181
+00:10:05.516 --> 00:10:08.823
+Prompt, and B1, and B2, and B3, and B4.
+
+182
+00:10:09.103 --> 00:10:10.383
+URL shortener.
+
+183
+00:10:10.663 --> 00:10:11.495
+B1:
+
+184
+00:10:11.775 --> 00:10:13.247
+Hash, then DB row.
+
+185
+00:10:13.527 --> 00:10:14.401
+B2:
+
+186
+00:10:14.681 --> 00:10:18.863
+ID generation, cache, 301 versus 302.
+
+187
+00:10:19.143 --> 00:10:20.039
+B3:
+
+188
+00:10:20.319 --> 00:10:23.881
+Hot keys, abuse, analytics pipeline, custom domains.
+
+189
+00:10:24.161 --> 00:10:25.057
+B4:
+
+190
+00:10:25.337 --> 00:10:29.497
+Multi-region, cost per redirect, abuse economics, product phasing.
+
+191
+00:10:29.777 --> 00:10:30.780
+Rate limiter.
+
+192
+00:10:31.060 --> 00:10:31.892
+B1:
+
+193
+00:10:32.172 --> 00:10:33.324
+Counter in memory.
+
+194
+00:10:33.604 --> 00:10:34.479
+B2:
+
+195
+00:10:34.759 --> 00:10:37.148
+Token bucket in Redis, atomic Lua.
+
+196
+00:10:37.428 --> 00:10:38.324
+B3:
+
+197
+00:10:38.604 --> 00:10:43.809
+Distributed accuracy versus cost, fail-open or closed per route, tenant fairness.
+
+198
+00:10:44.089 --> 00:10:44.985
+B4:
+
+199
+00:10:45.265 --> 00:10:49.767
+Platform policy, SLO impact, abuse strategy, org-wide adoption.
+
+200
+00:10:50.047 --> 00:10:50.943
+Checkout.
+
+201
+00:10:51.223 --> 00:10:52.055
+B1:
+
+202
+00:10:52.335 --> 00:10:54.148
+Insert order, decrement stock.
+
+203
+00:10:54.428 --> 00:10:55.303
+B2:
+
+204
+00:10:55.583 --> 00:10:57.972
+Conditional update, idempotency keys.
+
+205
+00:10:58.252 --> 00:10:59.148
+B3:
+
+206
+00:10:59.428 --> 00:11:03.225
+Saga with unknown outcomes, hot SKUs, degradation.
+
+207
+00:11:03.505 --> 00:11:04.401
+B4:
+
+208
+00:11:04.681 --> 00:11:09.012
+Reconciliation, cells, SLO composition, sale-day strategy.
+
+209
+00:11:10.362 --> 00:11:11.066
+Chat.
+
+210
+00:11:11.346 --> 00:11:12.178
+B1:
+
+211
+00:11:12.458 --> 00:11:14.058
+WebSocket + DB.
+
+212
+00:11:14.338 --> 00:11:15.213
+B2:
+
+213
+00:11:15.493 --> 00:11:17.605
+Fan-out, ordering per conversation.
+
+214
+00:11:17.885 --> 00:11:18.781
+B3:
+
+215
+00:11:19.061 --> 00:11:23.071
+Presence, offline delivery, exactly-once display, moderation.
+
+216
+00:11:23.351 --> 00:11:24.247
+B4:
+
+217
+00:11:24.527 --> 00:11:29.178
+Multi-region, privacy or compliance, cost of fan-out, product evolution.
+
+218
+00:11:29.458 --> 00:11:30.247
+Feed.
+
+219
+00:11:30.527 --> 00:11:31.359
+B1:
+
+220
+00:11:31.639 --> 00:11:32.791
+Query on read.
+
+221
+00:11:33.071 --> 00:11:33.946
+B2:
+
+222
+00:11:34.226 --> 00:11:36.125
+Fan-out on write versus read.
+
+223
+00:11:36.405 --> 00:11:37.301
+B3:
+
+224
+00:11:37.581 --> 00:11:40.503
+Ranking pipeline, freshness, celebrity problem.
+
+225
+00:11:40.783 --> 00:11:41.679
+B4:
+
+226
+00:11:41.959 --> 00:11:45.799
+Experimentation platform, ML infra, cost per impression.
+
+227
+00:11:47.149 --> 00:11:50.221
+Every column to the right includes the one to its left.
+
+228
+00:11:50.501 --> 00:11:53.915
+Senior answers aren't wrong at staff level; they're incomplete.
+
+229
+00:11:55.265 --> 00:11:56.694
+Down-levelling signals.
+
+230
+00:11:56.974 --> 00:11:58.318
+Here is a quick table:
+
+231
+00:11:58.598 --> 00:12:00.582
+Signal, and Reads as, and Fix.
+
+232
+00:12:00.862 --> 00:12:02.654
+Waits for the interviewer to drive.
+
+233
+00:12:02.934 --> 00:12:03.873
+Reads as:
+
+234
+00:12:04.153 --> 00:12:05.497
+B1 or B2.
+
+235
+00:12:05.777 --> 00:12:06.502
+Fix:
+
+236
+00:12:06.782 --> 00:12:08.787
+Propose the plan and the deep dive.
+
+237
+00:12:09.067 --> 00:12:10.625
+Components without numbers.
+
+238
+00:12:10.905 --> 00:12:11.843
+Reads as:
+
+239
+00:12:12.123 --> 00:12:12.998
+B2.
+
+240
+00:12:13.278 --> 00:12:14.003
+Fix:
+
+241
+00:12:14.283 --> 00:12:16.267
+Estimate, and let the numbers choose.
+
+242
+00:12:16.547 --> 00:12:17.721
+We'll add retries.
+
+243
+00:12:18.001 --> 00:12:18.939
+Reads as:
+
+244
+00:12:19.219 --> 00:12:20.094
+B2.
+
+245
+00:12:20.374 --> 00:12:21.099
+Fix:
+
+246
+00:12:21.379 --> 00:12:24.067
+Idempotency, unknown outcomes, sagas.
+
+247
+00:12:24.347 --> 00:12:26.651
+No state machine for stateful entities.
+
+248
+00:12:26.931 --> 00:12:27.870
+Reads as:
+
+249
+00:12:28.150 --> 00:12:29.025
+B2.
+
+250
+00:12:29.305 --> 00:12:30.030
+Fix:
+
+251
+00:12:30.310 --> 00:12:32.593
+Draw the states and allowed transitions.
+
+252
+00:12:32.873 --> 00:12:34.750
+Trade-offs stated as preferences.
+
+253
+00:12:35.030 --> 00:12:35.969
+Reads as:
+
+254
+00:12:36.249 --> 00:12:37.123
+B2.
+
+255
+00:12:37.403 --> 00:12:38.129
+Fix:
+
+256
+00:12:38.409 --> 00:12:41.609
+Requirement, then choice, then cost, then flip condition.
+
+257
+00:12:41.889 --> 00:12:43.787
+Failure handling only when asked.
+
+258
+00:12:44.067 --> 00:12:45.006
+Reads as:
+
+259
+00:12:45.286 --> 00:12:46.694
+B2 or B3.
+
+260
+00:12:46.974 --> 00:12:47.699
+Fix:
+
+261
+00:12:47.979 --> 00:12:50.497
+A failure table before the interviewer asks.
+
+262
+00:12:50.777 --> 00:12:52.505
+No operability or cost.
+
+263
+00:12:52.785 --> 00:12:53.723
+Reads as:
+
+264
+00:12:54.003 --> 00:12:54.878
+B3.
+
+265
+00:12:55.158 --> 00:12:55.883
+Fix:
+
+266
+00:12:56.163 --> 00:12:57.977
+SLOs, dashboards, unit cost.
+
+267
+00:12:58.257 --> 00:13:00.155
+Over-engineering for stated scale.
+
+268
+00:13:00.435 --> 00:13:01.374
+Reads as:
+
+269
+00:13:01.654 --> 00:13:02.294
+Any.
+
+270
+00:13:02.574 --> 00:13:03.299
+Fix:
+
+271
+00:13:03.579 --> 00:13:05.798
+Phase it: now versus at 10 times.
+
+272
+00:13:07.148 --> 00:13:09.516
+Past-system storytelling without the prompt.
+
+273
+00:13:09.796 --> 00:13:10.735
+Reads as:
+
+274
+00:13:11.015 --> 00:13:11.655
+Any.
+
+275
+00:13:11.935 --> 00:13:12.660
+Fix:
+
+276
+00:13:12.940 --> 00:13:14.284
+Design what was asked.
+
+277
+00:13:15.634 --> 00:13:17.511
+Evidence for staff or principal.
+
+278
+00:13:17.791 --> 00:13:26.965
+Interviews and promotion committees look for evidence of scope, told as situation, then your judgement, then others' actions, then measurable outcome:
+
+279
+00:13:27.245 --> 00:13:28.439
+Problems you found:
+
+280
+00:13:28.719 --> 00:13:30.575
+Nobody owned reconciliation.
+
+281
+00:13:30.855 --> 00:13:36.125
+I discovered a 0.3% silent drift and drove the fix across three teams.
+
+282
+00:13:36.405 --> 00:13:37.727
+Decisions you drove:
+
+283
+00:13:38.007 --> 00:13:43.959
+I wrote the ADR choosing the outbox over dual writes, and it became the standard for 20 services.
+
+284
+00:13:44.239 --> 00:13:45.242
+What you stopped:
+
+285
+00:13:45.522 --> 00:13:50.962
+I argued against a rewrite, and proposed a strangler migration that finished in two quarters.
+
+286
+00:13:52.312 --> 00:13:58.435
+Multiplication: design reviews, a mentoring programme, guardrails in CI, paved roads.
+
+287
+00:13:58.715 --> 00:14:05.733
+Outcomes with numbers: incidents down, latency p99 down, cost per order down, lead time down.
+
+288
+00:14:06.013 --> 00:14:09.256
+Ch 61 turns these into interview stories.
+
+289
+00:14:10.606 --> 00:14:12.206
+Calibrating your preparation.
+
+290
+00:14:12.486 --> 00:14:13.830
+Here is a quick table:
+
+291
+00:14:14.110 --> 00:14:15.774
+Target, and Prioritise.
+
+292
+00:14:16.054 --> 00:14:17.185
+B2 (senior):
+
+293
+00:14:17.465 --> 00:14:26.595
+Foundations (Ch 02 to 09), core distributed systems (Ch 10 to 20), 8 to 10 case studies, timed practice.
+
+294
+00:14:26.875 --> 00:14:28.006
+B3 (staff):
+
+295
+00:14:28.286 --> 00:14:39.294
+Plus production (Ch 21 to 30), decisions and docs (Ch 31 to 32), failure-first deep dives, trade-off drills (Ch 57 L2).
+
+296
+00:14:39.574 --> 00:14:40.961
+B4 (principal):
+
+297
+00:14:41.241 --> 00:14:51.651
+Plus architecture leadership (Ch 33 to 37), the capstone (Ch 56), evolution and economics narratives, past-system deep dives.
+
+298
+00:14:53.001 --> 00:14:54.665
+Levels differ by company.
+
+299
+00:14:54.945 --> 00:15:00.001
+Titles don't map one-to-one across companies (a senior at one can be staff at another).
+
+300
+00:15:00.281 --> 00:15:05.103
+Ask the recruiter for the ladder and the expectations for the loop (VERIFY per company).
+
+301
+00:15:05.383 --> 00:15:09.009
+Some loops weight coding more at senior and design more at staff.
+
+302
+00:15:09.289 --> 00:15:13.748
+Principal loops often add a past-system deep dive and a written exercise.
+
+303
+00:15:14.028 --> 00:15:15.884
+Down-levelling offers are common.
+
+304
+00:15:16.164 --> 00:15:20.409
+Understand the rubric gap they cite, and use this chapter's table to close it.
+
+305
+00:15:21.759 --> 00:15:22.655
+Part 3.
+
+306
+00:15:22.935 --> 00:15:24.663
+Architecture and Diagrams.
+
+307
+00:15:25.913 --> 00:15:27.983
+The level ladder as expanding scope.
+
+308
+00:15:28.263 --> 00:15:29.607
+Here is the diagram.
+
+309
+00:15:33.457 --> 00:15:35.483
+Sequence: a staff-level exchange.
+
+310
+00:15:35.763 --> 00:15:38.558
+The sequence diagram walks through it step by step.
+
+311
+00:15:38.838 --> 00:15:41.633
+I to C: design webhook handling for payments.
+
+312
+00:15:41.913 --> 00:15:47.545
+C to I: at-least-once, can arrive out of order or be lost - is the gateway the source of truth.
+
+313
+00:15:47.825 --> 00:15:50.491
+I to C: yes, it has a list API.
+
+314
+00:15:50.771 --> 00:15:54.014
+C to I: dedup in the same transaction as the effect.
+
+315
+00:15:54.294 --> 00:15:57.921
+C to I: payment state machine, forward-only transitions.
+
+316
+00:15:58.201 --> 00:16:03.513
+C to I: outbox for receipts, reconciliation job against the list API.
+
+317
+00:16:03.793 --> 00:16:11.153
+C to I: metrics - lag, dedup rate, reconciliation drift, alert if drift above 0.01 percent.
+
+318
+00:16:11.433 --> 00:16:15.507
+I to C: what if reconciliation finds thousands of mismatches.
+
+319
+00:16:15.787 --> 00:16:20.203
+C to I: stop auto-repair, page, it is a systemic bug not noise.
+
+320
+00:16:24.053 --> 00:16:26.869
+Sequence: down-levelled answer and the recovery.
+
+321
+00:16:27.149 --> 00:16:29.944
+The sequence diagram walks through it step by step.
+
+322
+00:16:30.224 --> 00:16:33.019
+I to C: design webhook handling for payments.
+
+323
+00:16:33.299 --> 00:16:36.541
+C to I: keep a set of seen event ids in memory.
+
+324
+00:16:36.821 --> 00:16:39.317
+I to C: what happens with two instances.
+
+325
+00:16:39.597 --> 00:16:43.373
+C to I: move dedup to a database table with a unique key.
+
+326
+00:16:43.653 --> 00:16:46.789
+I to C: what if CAPTURED arrives before AUTHORIZED.
+
+327
+00:16:47.069 --> 00:16:50.589
+C to I: guard transitions - status only moves forward.
+
+328
+00:16:50.869 --> 00:16:53.365
+I to C: what if an event never arrives.
+
+329
+00:16:53.645 --> 00:16:57.485
+C to I: reconcile daily against the gateway list API.
+
+330
+00:17:01.335 --> 00:17:03.874
+State: the payment's forward-only lifecycle.
+
+331
+00:17:04.154 --> 00:17:05.498
+Here is the diagram.
+
+332
+00:17:09.348 --> 00:17:10.265
+Part 4.
+
+333
+00:17:10.545 --> 00:17:12.167
+Design Document Excerpt:
+
+334
+00:17:12.447 --> 00:17:13.492
+Level Rubric.
+
+335
+00:17:14.742 --> 00:17:15.489
+Note:
+
+336
+00:17:15.769 --> 00:17:21.230
+Design Document (excerpt), Engineering Level Rubric for System Design (illustrative).
+
+337
+00:17:21.510 --> 00:17:22.406
+Status:
+
+338
+00:17:22.686 --> 00:17:27.614
+Illustrative template, Use: calibrating interview feedback and promotion packets.
+
+339
+00:17:27.894 --> 00:17:30.241
+Adapt it to your company's ladder (VERIFY).
+
+340
+00:17:30.521 --> 00:17:33.145
+Context, Interviewers disagreed on levels.
+
+341
+00:17:33.425 --> 00:17:35.515
+Feedback said strong without evidence.
+
+342
+00:17:35.795 --> 00:17:38.121
+Packets listed projects, not impact.
+
+343
+00:17:38.401 --> 00:17:41.878
+Decision, Score eight dimensions on observable behaviour.
+
+344
+00:17:42.158 --> 00:17:43.993
+Each level has anchor examples.
+
+345
+00:17:44.273 --> 00:17:47.899
+Level = the lowest level that all must-have dimensions meet.
+
+346
+00:17:48.179 --> 00:17:56.051
+Related, Ch 57 L4 rubric; Ch 61 story format; the level table in §1.2.
+
+347
+00:17:56.331 --> 00:17:57.291
+Requirements.
+
+348
+00:17:58.641 --> 00:17:59.473
+R1:
+
+349
+00:17:59.753 --> 00:18:03.913
+Every score cites evidence (a quote, a board artefact, a decision).
+
+350
+00:18:04.193 --> 00:18:05.025
+R2:
+
+351
+00:18:05.305 --> 00:18:09.700
+Levels are consistent across interviewers (calibration sessions quarterly).
+
+352
+00:18:09.980 --> 00:18:10.833
+R3:
+
+353
+00:18:11.113 --> 00:18:13.887
+Down-level decisions name the missing dimension.
+
+354
+00:18:14.167 --> 00:18:15.063
+R4:
+
+355
+00:18:15.343 --> 00:18:17.945
+Promotion packets map evidence to dimensions.
+
+356
+00:18:18.225 --> 00:18:19.100
+R5:
+
+357
+00:18:19.380 --> 00:18:22.281
+The rubric is published to candidates at a high level.
+
+358
+00:18:22.561 --> 00:18:23.969
+Decisions in detail.
+
+359
+00:18:25.319 --> 00:18:31.869
+Must-haves for B3: drives ambiguity; failure handling unprompted; trade-offs with flip conditions.
+
+360
+00:18:32.149 --> 00:18:38.250
+Must-haves for B4: also phasing or evolution, economics, organisational impact.
+
+361
+00:18:38.530 --> 00:18:43.181
+Anchors: the §2.6 table serves as calibration examples.
+
+362
+00:18:43.461 --> 00:18:44.485
+Consequences.
+
+363
+00:18:44.765 --> 00:18:48.967
+Longer feedback writing, in return for fairer, more consistent levelling.
+
+364
+00:18:50.317 --> 00:18:51.277
+Part 5.
+
+365
+00:18:51.557 --> 00:18:53.541
+Hands-On Code, Level Ladder.
+
+366
+00:18:54.791 --> 00:18:55.559
+Info:
+
+367
+00:18:55.839 --> 00:18:56.927
+What's real here.
+
+368
+00:18:57.207 --> 00:19:06.530
+One program implements all four levels against a real PostgreSQL: real transactions, unique constraints, guarded updates and an outbox.
+
+369
+00:19:06.810 --> 00:19:11.845
+It uses two concurrent consumer threads, one of which restarts by losing its memory.
+
+370
+00:19:12.125 --> 00:19:17.629
+The gateway's truth, the duplicates, the reordering and the losses are generated with a fixed seed.
+
+371
+00:19:17.909 --> 00:19:23.541
+The duplicate count for B1 varies slightly between runs, because thread interleaving differs.
+
+372
+00:19:24.891 --> 00:19:25.787
+The program:
+
+373
+00:19:27.137 --> 00:19:30.209
+Here is the Java code, WebhookLevelsL.java.
+
+374
+00:19:30.489 --> 00:19:34.393
+It runs to 180 lines; the full listing is in the chapter.
+
+375
+00:19:34.673 --> 00:19:54.086
+WebhookLevelsL.java, run with (PostgreSQL on:5581, db shop): java -Duser.timezone=UTC -cp or tmp or eslab or postgresql-42.7.4.jar WebhookLevelsL.java (JDK 21).
+
+376
+00:19:54.366 --> 00:19:56.542
+ONE QUESTION, FOUR LEVELS OF ANSWER:
+
+377
+00:19:56.822 --> 00:19:58.934
+Handle the payment gateway's webhooks.
+
+378
+00:19:59.214 --> 00:20:01.753
+5,000 payments; the gateway sends.
+
+379
+00:20:04.603 --> 00:20:05.520
+On screen:
+
+380
+00:20:05.800 --> 00:20:25.853
+5,000 payments, 13,475 webhook deliveries (25% duplicated, 15% of payments out of. order, 178 events never delivered); 2 nodes, one restart. answer effects applied status went final status money effects. twice backwards. wrong. missing.
+
+381
+00:20:26.133 --> 00:20:35.008
+B1) in-memory seen-set per node, apply status 830 747 755 104.
+
+382
+00:20:35.288 --> 00:20:44.504
+B2) dedup by event id in the same DB transaction 0 747 755 104.
+
+383
+00:20:44.784 --> 00:20:50.565
+B3) B2 + forward-only status + outbox 0 0 82 82.
+
+384
+00:20:50.845 --> 00:21:02.323
+B4) B3 + reconciliation with the gateway's list API 0 0 0 0. then every answer 'handles webhooks'; they differ in which failure modes they have.
+
+385
+00:21:02.603 --> 00:21:04.117
+The rest is in the chapter.
+
+386
+00:21:06.967 --> 00:21:09.805
+L1, The B1 answer: in-memory dedup.
+
+387
+00:21:10.085 --> 00:21:11.023
+Requirement:
+
+388
+00:21:11.303 --> 00:21:13.053
+Don't process a webhook twice.
+
+389
+00:21:13.333 --> 00:21:14.186
+Reading it:
+
+390
+00:21:14.466 --> 00:21:16.813
+It works on one node until it restarts.
+
+391
+00:21:17.093 --> 00:21:21.658
+With two nodes, and one restarting, 830 effects were applied twice.
+
+392
+00:21:21.938 --> 00:21:28.509
+It also overwrites status in arrival order, so 747 payments moved backwards at some point.
+
+393
+00:21:28.789 --> 00:21:32.821
+The 2% lost events leave 104 money effects missing.
+
+394
+00:21:34.171 --> 00:21:37.477
+L2, The B2 answer: dedup in the same transaction.
+
+395
+00:21:37.757 --> 00:21:38.696
+Requirement:
+
+396
+00:21:38.976 --> 00:21:42.283
+Duplicates must be harmless across nodes and restarts.
+
+397
+00:21:42.563 --> 00:21:43.416
+Reading it:
+
+398
+00:21:43.696 --> 00:21:50.437
+The event-id primary key, inserted in the same transaction as the effect, makes every duplicate a no-op:
+
+399
+00:21:50.717 --> 00:21:52.061
+0 double effects.
+
+400
+00:21:52.341 --> 00:21:54.048
+Ordering and loss are untouched.
+
+401
+00:21:54.328 --> 00:22:00.451
+The status still goes backwards, and final statuses are still wrong for 755 payments.
+
+402
+00:22:01.801 --> 00:22:04.958
+L3, The B3 answer: the domain's state machine.
+
+403
+00:22:05.238 --> 00:22:06.177
+Requirement:
+
+404
+00:22:06.457 --> 00:22:09.294
+A late event must never move a payment backwards.
+
+405
+00:22:09.574 --> 00:22:10.427
+Reading it:
+
+406
+00:22:10.707 --> 00:22:15.209
+The guarded UPDATE (WHERE status new) encodes AUTHORIZED CAPTURED REFUNDED:
+
+407
+00:22:15.489 --> 00:22:16.769
+0 regressions.
+
+408
+00:22:17.049 --> 00:22:19.865
+Effects go to an outbox in the same transaction.
+
+409
+00:22:20.145 --> 00:22:23.622
+A refund implies the capture happened, so its credit is owed.
+
+410
+00:22:23.902 --> 00:22:26.334
+The domain knowledge recovers some losses.
+
+411
+00:22:26.614 --> 00:22:28.385
+82 payments remain wrong.
+
+412
+00:22:28.665 --> 00:22:30.670
+Their final event never arrived.
+
+413
+00:22:32.020 --> 00:22:34.793
+L4, The B4 answer: reconciliation.
+
+414
+00:22:35.073 --> 00:22:36.012
+Requirement:
+
+415
+00:22:36.292 --> 00:22:40.068
+Our records must match the gateway's, even when messages are lost.
+
+416
+00:22:40.348 --> 00:22:41.201
+Reading it:
+
+417
+00:22:41.481 --> 00:22:49.012
+Comparing against the gateway's list API and repairing through the same forward-only path brings every invariant to 0.
+
+418
+00:22:49.292 --> 00:22:51.532
+In production, add metrics on drift.
+
+419
+00:22:51.812 --> 00:22:58.895
+A sudden jump in drift is a systemic bug, not noise, so page and stop auto-repair (Ch 45).
+
+420
+00:23:00.245 --> 00:23:01.183
+Part 6.
+
+421
+00:23:01.463 --> 00:23:03.234
+Interview and Career Concerns.
+
+422
+00:23:04.484 --> 00:23:05.636
+Failure modes.
+
+423
+00:23:05.916 --> 00:23:07.260
+Here is a quick table:
+
+424
+00:23:07.540 --> 00:23:09.396
+Failure, and Symptom, and Fix.
+
+425
+00:23:09.676 --> 00:23:11.169
+Answering at the wrong level.
+
+426
+00:23:11.449 --> 00:23:12.260
+Symptom:
+
+427
+00:23:12.540 --> 00:23:13.777
+Down-levelled offer.
+
+428
+00:23:14.057 --> 00:23:14.783
+Fix:
+
+429
+00:23:15.063 --> 00:23:18.049
+Match §1.2 behaviours to the target.
+
+430
+00:23:18.329 --> 00:23:19.481
+Depth without breadth.
+
+431
+00:23:19.761 --> 00:23:20.572
+Symptom:
+
+432
+00:23:20.852 --> 00:23:21.599
+Narrow.
+
+433
+00:23:21.879 --> 00:23:22.604
+Fix:
+
+434
+00:23:22.884 --> 00:23:24.932
+Operability, cost, evolution.
+
+435
+00:23:25.212 --> 00:23:26.449
+Breadth without depth.
+
+436
+00:23:26.729 --> 00:23:27.540
+Symptom:
+
+437
+00:23:27.820 --> 00:23:28.780
+Hand-wavy.
+
+438
+00:23:29.060 --> 00:23:29.785
+Fix:
+
+439
+00:23:30.065 --> 00:23:31.793
+One code-level deep dive.
+
+440
+00:23:32.073 --> 00:23:33.545
+Prompted fixes only.
+
+441
+00:23:33.825 --> 00:23:34.636
+Symptom:
+
+442
+00:23:34.916 --> 00:23:36.025
+Needed guidance.
+
+443
+00:23:36.305 --> 00:23:37.031
+Fix:
+
+444
+00:23:37.311 --> 00:23:40.276
+Anticipate failure modes (§3.3).
+
+445
+00:23:40.556 --> 00:23:41.644
+Project lists.
+
+446
+00:23:41.924 --> 00:23:42.735
+Symptom:
+
+447
+00:23:43.015 --> 00:23:44.145
+Impact unclear.
+
+448
+00:23:44.425 --> 00:23:45.151
+Fix:
+
+449
+00:23:45.431 --> 00:23:47.841
+Evidence format (§2.8).
+
+450
+00:23:49.191 --> 00:23:51.069
+Signals interviewers write down.
+
+451
+00:23:51.349 --> 00:23:53.226
+Asked about ordering before I did.
+
+452
+00:23:53.506 --> 00:23:54.423
+(B3).
+
+453
+00:23:54.703 --> 00:23:57.093
+Proposed reconciliation unprompted.
+
+454
+00:23:57.373 --> 00:23:58.311
+(B4).
+
+455
+00:23:58.591 --> 00:24:00.597
+Needed hints to handle duplicates.
+
+456
+00:24:00.877 --> 00:24:02.221
+(B1 or B2).
+
+457
+00:24:02.501 --> 00:24:06.085
+Great design, but no discussion of operations or cost.
+
+458
+00:24:06.365 --> 00:24:08.157
+(B2 or B3 boundary).
+
+459
+00:24:09.507 --> 00:24:10.765
+Ethics and honesty.
+
+460
+00:24:11.045 --> 00:24:12.517
+Describe your real role:
+
+461
+00:24:12.797 --> 00:24:15.059
+I led, I contributed, the team did.
+
+462
+00:24:15.339 --> 00:24:18.133
+Inflation is detectable and disqualifying.
+
+463
+00:24:18.413 --> 00:24:22.573
+It's fine to say I haven't operated X, but here's how I'd reason about it.
+
+464
+00:24:23.923 --> 00:24:25.097
+Pacing by level.
+
+465
+00:24:25.377 --> 00:24:28.811
+B2: most time in the deep dive, briefly on failures.
+
+466
+00:24:29.091 --> 00:24:36.195
+B3 or B4: a shorter high-level design, with more on failures, trade-offs, evolution and operations.
+
+467
+00:24:37.545 --> 00:24:38.804
+After a down-level.
+
+468
+00:24:39.084 --> 00:24:40.535
+Ask for the rubric gap.
+
+469
+00:24:40.815 --> 00:24:42.777
+Map it to §2.7.
+
+470
+00:24:43.057 --> 00:24:46.748
+Build evidence at work, then re-interview in 6 to 12 months.
+
+471
+00:24:48.098 --> 00:24:49.037
+Part 7.
+
+472
+00:24:49.317 --> 00:24:51.023
+Anti-Patterns and Pitfalls.
+
+473
+00:24:52.273 --> 00:24:53.191
+Watch out:
+
+474
+00:24:53.471 --> 00:24:54.111
+1.
+
+475
+00:24:54.391 --> 00:24:55.863
+Equating years with level.
+
+476
+00:24:56.143 --> 00:24:58.212
+Scope and anticipation decide it.
+
+477
+00:24:59.562 --> 00:25:00.479
+Watch out:
+
+478
+00:25:00.759 --> 00:25:01.463
+2.
+
+479
+00:25:01.743 --> 00:25:03.685
+Naming technologies as depth.
+
+480
+00:25:03.965 --> 00:25:06.119
+Depth is failure modes and invariants.
+
+481
+00:25:07.469 --> 00:25:08.387
+Watch out:
+
+482
+00:25:08.667 --> 00:25:09.413
+3.
+
+483
+00:25:09.693 --> 00:25:11.443
+Solving only the happy path.
+
+484
+00:25:11.723 --> 00:25:13.579
+That's B1 (lab row 1).
+
+485
+00:25:14.929 --> 00:25:15.846
+Watch out:
+
+486
+00:25:16.126 --> 00:25:16.830
+4.
+
+487
+00:25:17.110 --> 00:25:18.198
+Dedup in memory.
+
+488
+00:25:18.478 --> 00:25:20.825
+Two nodes and a restart break it (L1).
+
+489
+00:25:22.175 --> 00:25:23.092
+Watch out:
+
+490
+00:25:23.372 --> 00:25:24.140
+5.
+
+491
+00:25:24.420 --> 00:25:25.785
+Trusting message order.
+
+492
+00:25:26.065 --> 00:25:27.452
+Regressions (L2).
+
+493
+00:25:28.802 --> 00:25:29.719
+Watch out:
+
+494
+00:25:29.999 --> 00:25:30.746
+6.
+
+495
+00:25:31.026 --> 00:25:32.221
+Trusting delivery.
+
+496
+00:25:32.501 --> 00:25:34.314
+Loss (L3, then L4).
+
+497
+00:25:35.664 --> 00:25:36.581
+Watch out:
+
+498
+00:25:36.861 --> 00:25:37.608
+7.
+
+499
+00:25:37.888 --> 00:25:40.171
+Waiting for the interviewer to find the holes.
+
+500
+00:25:40.451 --> 00:25:43.011
+That's senior at best (§3.3).
+
+501
+00:25:44.361 --> 00:25:45.278
+Watch out:
+
+502
+00:25:45.558 --> 00:25:46.241
+8.
+
+503
+00:25:46.521 --> 00:25:48.590
+Staff answers without operability.
+
+504
+00:25:48.870 --> 00:25:49.851
+Incomplete.
+
+505
+00:25:51.201 --> 00:25:52.119
+Watch out:
+
+506
+00:25:52.399 --> 00:25:53.145
+9.
+
+507
+00:25:53.425 --> 00:25:55.239
+Principal answers without phasing.
+
+508
+00:25:55.519 --> 00:25:56.585
+Unrealistic.
+
+509
+00:25:57.935 --> 00:25:58.853
+Watch out:
+
+510
+00:25:59.133 --> 00:25:59.837
+10.
+
+511
+00:26:00.117 --> 00:26:02.250
+Promotion packets as project lists.
+
+512
+00:26:02.530 --> 00:26:03.917
+No evidence of scope.
+
+513
+00:26:05.267 --> 00:26:06.184
+Watch out:
+
+514
+00:26:06.464 --> 00:26:07.296
+11.
+
+515
+00:26:07.576 --> 00:26:08.749
+Inflating your role.
+
+516
+00:26:09.029 --> 00:26:10.139
+Integrity risk.
+
+517
+00:26:11.489 --> 00:26:12.406
+Watch out:
+
+518
+00:26:12.686 --> 00:26:13.475
+12.
+
+519
+00:26:13.755 --> 00:26:16.635
+Assuming ladders are identical across companies.
+
+520
+00:26:16.915 --> 00:26:18.110
+Calibrate per loop.
+
+521
+00:26:19.460 --> 00:26:20.335
+Part 8.
+
+522
+00:26:20.615 --> 00:26:21.959
+Interview Q and A.
+
+523
+00:26:23.209 --> 00:26:24.041
+Beginner.
+
+524
+00:26:24.321 --> 00:26:25.345
+Question 1.
+
+525
+00:26:25.625 --> 00:26:28.846
+What's expected of a junior engineer in system design?
+
+526
+00:26:29.126 --> 00:26:30.491
+Thirty-second answer:
+
+527
+00:26:30.771 --> 00:26:44.382
+A reasonable single-service design that works on the happy path, basic knowledge of databases, caching and APIs, clear communication, and willingness to take hints; growing toward concurrency and failure thinking.
+
+528
+00:26:45.732 --> 00:26:46.735
+Question 2.
+
+529
+00:26:47.015 --> 00:26:49.767
+What's the single biggest jump from junior to senior?
+
+530
+00:26:50.047 --> 00:26:51.412
+Thirty-second answer:
+
+531
+00:26:51.692 --> 00:27:02.039
+Designing for concurrency and repetition, two instances, retries, restarts, with atomic operations and idempotency, instead of assuming one clean run.
+
+532
+00:27:03.389 --> 00:27:04.434
+Question 3.
+
+533
+00:27:04.714 --> 00:27:07.402
+How do levels differ in how they ask questions?
+
+534
+00:27:07.682 --> 00:27:09.047
+Thirty-second answer:
+
+535
+00:27:09.327 --> 00:27:22.597
+Juniors ask clarifying questions about the spec; seniors ask about scale and constraints; staff ask about failure modes and hidden requirements; principals ask about the business goal and whether to build at all.
+
+536
+00:27:23.947 --> 00:27:25.013
+Question 4.
+
+537
+00:27:25.293 --> 00:27:27.832
+Does a senior need to know every technology?
+
+538
+00:27:28.112 --> 00:27:29.477
+Thirty-second answer:
+
+539
+00:27:29.757 --> 00:27:37.523
+No, they need to know categories, trade-offs and failure modes deeply enough to choose and justify, and to learn specifics quickly.
+
+540
+00:27:38.873 --> 00:27:39.875
+Intermediate.
+
+541
+00:27:40.155 --> 00:27:41.265
+Question 5.
+
+542
+00:27:41.545 --> 00:27:43.337
+What makes an answer senior-level?
+
+543
+00:27:43.617 --> 00:27:44.982
+Thirty-second answer:
+
+544
+00:27:45.262 --> 00:28:00.942
+Independent, complete, correct under concurrency and load: requirements and numbers, clean API or data model, coherent design, one deep dive with atomic operations and idempotency, trade-offs named, basic failure handling.
+
+545
+00:28:02.292 --> 00:28:03.401
+Question 6.
+
+546
+00:28:03.681 --> 00:28:06.519
+How do you demonstrate ownership in a design interview?
+
+547
+00:28:06.799 --> 00:28:08.164
+Thirty-second answer:
+
+548
+00:28:08.444 --> 00:28:18.428
+Drive the agenda, propose the deep dive, state assumptions, commit to decisions, and talk about how you'd operate and evolve the system, as if you'll be on call for it.
+
+549
+00:28:19.778 --> 00:28:20.866
+Question 7.
+
+550
+00:28:21.146 --> 00:28:23.173
+What are common down-levelling signals?
+
+551
+00:28:23.453 --> 00:28:24.818
+Thirty-second answer:
+
+552
+00:28:25.098 --> 00:28:36.405
+Waiting to be driven, no numbers, we'll add retries, no state machines, preferences instead of trade-offs, failures only when asked, no operability or cost, over-engineering.
+
+553
+00:28:37.755 --> 00:28:38.779
+Question 8.
+
+554
+00:28:39.059 --> 00:28:41.320
+How does failure thinking change with level?
+
+555
+00:28:41.600 --> 00:28:42.965
+Thirty-second answer:
+
+556
+00:28:43.245 --> 00:29:00.120
+B1 handles errors; B2 adds retries, timeouts, idempotency; B3 models domain failure modes (reordering, sagas, degradation, SLOs); B4 designs correction loops for loss and drift (reconciliation, audits) and bounds blast radius.
+
+557
+00:29:01.470 --> 00:29:02.537
+Question 9.
+
+558
+00:29:02.817 --> 00:29:05.803
+How do you prepare differently for senior versus staff loops?
+
+559
+00:29:06.083 --> 00:29:07.449
+Thirty-second answer:
+
+560
+00:29:07.729 --> 00:29:11.547
+Senior: breadth of core patterns and case studies, timed practice.
+
+561
+00:29:11.827 --> 00:29:21.918
+Staff: add failure-first deep dives, trade-off drills with flip conditions, operability or cost narratives, and past-system stories showing cross-team impact.
+
+562
+00:29:23.268 --> 00:29:24.036
+Senior.
+
+563
+00:29:24.316 --> 00:29:25.361
+Question 10.
+
+564
+00:29:25.641 --> 00:29:28.777
+What distinguishes staff from senior in a design interview?
+
+565
+00:29:29.057 --> 00:29:30.423
+Thirty-second answer:
+
+566
+00:29:30.703 --> 00:29:48.409
+Staff candidates find the real problem and its failure modes before being asked, ordering, loss, contention, degradation, argue trade-offs with flip conditions, and treat operability and cost as part of the design; seniors produce a correct design when the problem is defined.
+
+567
+00:29:49.759 --> 00:29:50.890
+Question 11.
+
+568
+00:29:51.170 --> 00:29:53.794
+How do you show cross-team influence in an interview?
+
+569
+00:29:54.074 --> 00:29:55.439
+Thirty-second answer:
+
+570
+00:29:55.719 --> 00:30:08.647
+In past-system discussions: problems you found, decisions you drove (ADRs), standards you set, people you mentored, outcomes with numbers, told as situation, your judgement, others' actions, results.
+
+571
+00:30:09.997 --> 00:30:11.085
+Question 12.
+
+572
+00:30:11.365 --> 00:30:14.245
+How should a staff candidate handle a simple prompt?
+
+573
+00:30:14.525 --> 00:30:15.891
+Thirty-second answer:
+
+574
+00:30:16.171 --> 00:30:27.520
+Solve it cleanly and quickly, then show judgement: realistic failure modes, operability, evolution at 10 times, and what you would not build, without over-engineering the base design.
+
+575
+00:30:28.870 --> 00:30:30.150
+Question 13.
+
+576
+00:30:30.430 --> 00:30:33.225
+What is 'anticipation', and how do you practise it?
+
+577
+00:30:33.505 --> 00:30:34.870
+Thirty-second answer:
+
+578
+00:30:35.150 --> 00:30:38.649
+Naming the failure modes and requirements before they're raised.
+
+579
+00:30:38.929 --> 00:30:49.382
+Practise with a checklist per component, duplicates, reordering, loss, contention, partial failure, overload, bad input, operator error, and apply it in every mock.
+
+580
+00:30:50.732 --> 00:30:51.927
+Question 14.
+
+581
+00:30:52.207 --> 00:30:54.959
+How do you present a design decision at staff level?
+
+582
+00:30:55.239 --> 00:30:56.604
+Thirty-second answer:
+
+583
+00:30:56.884 --> 00:31:05.780
+Context, options considered, the decision, its costs, the conditions that would change it, and how it will be validated, the ADR format, spoken.
+
+584
+00:31:07.130 --> 00:31:08.026
+Architect.
+
+585
+00:31:08.306 --> 00:31:09.501
+Question 15.
+
+586
+00:31:09.781 --> 00:31:11.850
+What distinguishes principal from staff?
+
+587
+00:31:12.130 --> 00:31:13.495
+Thirty-second answer:
+
+588
+00:31:13.775 --> 00:31:29.199
+Horizon and scope: designing for years of change and loss (reconciliation, migrations, evolution), across domains and organisations, with economics and people in the design; reframing problems and choosing what not to build.
+
+589
+00:31:30.549 --> 00:31:31.744
+Question 16.
+
+590
+00:31:32.024 --> 00:31:35.117
+How does a principal approach an interview prompt differently?
+
+591
+00:31:35.397 --> 00:31:36.763
+Thirty-second answer:
+
+592
+00:31:37.043 --> 00:31:53.811
+Starts with the goal and constraints, proposes a phased plan (smallest valuable version, next, at scale), designs the correction and observability loops, quantifies SLOs and cost, and addresses migration and team structure, then dives deep where risk is highest.
+
+593
+00:31:55.161 --> 00:31:56.505
+Question 17.
+
+594
+00:31:56.785 --> 00:32:01.158
+What evidence convinces a promotion committee of staff or principal impact?
+
+595
+00:32:01.438 --> 00:32:02.803
+Thirty-second answer:
+
+596
+00:32:03.083 --> 00:32:17.334
+Problems you identified unassigned, decisions others built on, standards adopted across teams, measurable organisational outcomes (incidents, latency, cost, lead time), and people you grew, with peer testimony.
+
+597
+00:32:18.684 --> 00:32:19.857
+Question 18.
+
+598
+00:32:20.137 --> 00:32:22.591
+How should interview loops calibrate levels fairly?
+
+599
+00:32:22.871 --> 00:32:24.236
+Thirty-second answer:
+
+600
+00:32:24.516 --> 00:32:35.929
+Published rubrics with behavioural anchors, evidence-based feedback, calibration sessions, level decided by must-have dimensions, and structured debriefs that separate signal from impression.
+
+601
+00:32:37.279 --> 00:32:38.517
+Question 19.
+
+602
+00:32:38.797 --> 00:32:41.143
+How do principals stay technically credible?
+
+603
+00:32:41.423 --> 00:32:42.789
+Thirty-second answer:
+
+604
+00:32:43.069 --> 00:32:52.797
+They still read code and designs, go deep on the riskiest parts, prototype, participate in incidents, and measure outcomes, breadth built on regular depth.
+
+605
+00:32:54.147 --> 00:32:55.256
+Question 20.
+
+606
+00:32:55.536 --> 00:32:57.520
+If you're down-levelled, what should you do?
+
+607
+00:32:57.800 --> 00:32:59.165
+Thirty-second answer:
+
+608
+00:32:59.445 --> 00:33:13.909
+Ask for the rubric gap, map it to behaviours (§2.7), build evidence at work (lead a cross-team design, drive a reliability loop), practise the missing signals in mocks, and re-interview after 6 to 12 months.
+
+609
+00:33:15.259 --> 00:33:16.155
+Part 9.
+
+610
+00:33:16.435 --> 00:33:17.843
+Summary and Practice.
+
+611
+00:33:19.093 --> 00:33:20.181
+Key takeaways.
+
+612
+00:33:20.461 --> 00:33:23.299
+Levels are scope and anticipation, not years.
+
+613
+00:33:23.579 --> 00:33:32.133
+B1 works; B2 works under concurrency; B3 works under domain failure modes; B4 works under loss and change (the lab).
+
+614
+00:33:32.413 --> 00:33:36.829
+Down-levelling signals are behavioural and fixable (§2.7).
+
+615
+00:33:37.109 --> 00:33:43.381
+Staff or principal evidence is problems found, decisions driven, standards set and outcomes measured.
+
+616
+00:33:43.661 --> 00:33:46.008
+Calibrate preparation to the target level.
+
+617
+00:33:47.358 --> 00:33:48.339
+Cheat sheet.
+
+618
+00:33:48.619 --> 00:33:49.963
+Here is a quick table:
+
+619
+00:33:50.243 --> 00:33:52.547
+Level, and Must show in a design interview.
+
+620
+00:33:52.827 --> 00:33:53.659
+B1:
+
+621
+00:33:53.939 --> 00:33:55.987
+Clean happy-path design, basics.
+
+622
+00:33:56.267 --> 00:33:57.142
+B2:
+
+623
+00:33:57.422 --> 00:34:03.203
+Requirements, numbers, API or data, a deep dive with atomicity and idempotency.
+
+624
+00:34:03.483 --> 00:34:04.379
+B3:
+
+625
+00:34:04.659 --> 00:34:10.462
+Unprompted failure modes, state machines, trade-offs with flip conditions, SLOs, operability.
+
+626
+00:34:10.742 --> 00:34:11.638
+B4:
+
+627
+00:34:11.918 --> 00:34:17.337
+Reframing, phasing, reconciliation and correction loops, economics, organisation.
+
+628
+00:34:18.687 --> 00:34:19.817
+Exercises.
+
+629
+00:34:20.097 --> 00:34:22.657
+(B1) Add a third consumer node to the lab.
+
+630
+00:34:22.937 --> 00:34:24.921
+How do B1's duplicates change?
+
+631
+00:34:25.201 --> 00:34:28.977
+(B2) Implement a VOIDED status in the lab's state machine.
+
+632
+00:34:29.257 --> 00:34:35.124
+(B3) Add metrics to the B3 answer: dedup rate, regressions prevented, outbox lag.
+
+633
+00:34:35.404 --> 00:34:41.057
+(B4) Design an alert for reconciliation drift, and decide what should pause auto-repair.
+
+634
+00:34:41.337 --> 00:34:46.948
+(B4) Rewrite one of your project descriptions in the §2.8 evidence format.
+
+635
+00:34:48.298 --> 00:34:49.301
+Further reading.
+
+636
+00:34:49.581 --> 00:34:51.394
+Will Larson, Staff Engineer:
+
+637
+00:34:51.674 --> 00:34:53.679
+Leadership beyond the management track.
+
+638
+00:34:53.959 --> 00:34:56.370
+Tanya Reilly, The Staff Engineer's Path.
+
+639
+00:34:56.650 --> 00:35:00.874
+Camille Fournier, The Manager's Path (for the IC or manager boundary).
+
+640
+00:35:01.154 --> 00:35:08.023
+Company engineering ladders published online (for example, several public ladders; VERIFY current versions).
+
+641
+00:35:09.373 --> 00:35:10.611
+Related chapters.
+
+642
+00:35:10.891 --> 00:35:13.493
+Ch 57, The Interview Framework.
+
+643
+00:35:13.773 --> 00:35:17.123
+Ch 45, Payment System: reconciliation.
+
+644
+00:35:17.403 --> 00:35:20.453
+Ch 37, Leading Architecture at Scale.
+
+645
+00:35:20.733 --> 00:35:23.464
+Ch 61, Behavioural and Leadership.
+
+646
+00:35:24.814 --> 00:35:26.414
+That's the end of this chapter.
+
+647
+00:35:26.694 --> 00:35:32.731
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+648
+00:35:33.011 --> 00:35:34.462
+See you in the next chapter.
+

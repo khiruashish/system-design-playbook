@@ -1,0 +1,4010 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.715
+Performance Engineering.
+
+2
+00:00:01.995 --> 00:00:06.177
+Chapter 25, from the Production part of the System Design Playbook.
+
+3
+00:00:07.927 --> 00:00:08.887
+At a glance:
+
+4
+00:00:09.167 --> 00:00:10.340
+Chapter at a glance.
+
+5
+00:00:10.620 --> 00:00:11.623
+Reader bands:
+
+6
+00:00:11.903 --> 00:00:14.185
+B2, then B4, Prerequisites:
+
+7
+00:00:14.465 --> 00:00:19.009
+Ch 09, Ch 19, Ch 24, What you will build:
+
+8
+00:00:19.289 --> 00:00:28.356
+How the grocery platform's services are made fast and kept fast, measuring tails, profiling hotspots, choosing a GC, and planning capacity.
+
+9
+00:00:28.636 --> 00:00:36.487
+Labs use real JFR recordings and real JVM garbage collectors on JDK 21 and 25.
+
+10
+00:00:36.767 --> 00:00:38.452
+L1: tail latency.
+
+11
+00:00:38.732 --> 00:00:47.372
+At fan-out 100, ~99% of requests hit at least one slow backend, a backend's rare tail becomes the request's norm.
+
+12
+00:00:47.652 --> 00:00:56.569
+On a real queue, wait time went 1 times, then 159 times from 50% to 99% utilization (the knee).
+
+13
+00:00:56.849 --> 00:01:06.279
+And coordinated omission hid a 500 ms freeze (naive p999 0 ms, corrected 460 ms).
+
+14
+00:01:07.629 --> 00:01:11.405
+L2: garbage collection, same workload across collectors.
+
+15
+00:01:11.685 --> 00:01:31.205
+Parallel's worst pause was 118 ms, G1's 55 to 69 ms; generational ZGC on JDK 25 kept the request tail at max 7.5 ms or p999 3.4 ms while allocating the most (92 GB).
+
+16
+00:01:31.485 --> 00:01:32.999
+L3: profiling.
+
+17
+00:01:33.279 --> 00:01:36.821
+A real JFR recording located a planted hotspot:
+
+18
+00:01:37.101 --> 00:01:44.119
+97% of allocation was byte from string-building, and the hot CPU frames rolled up to one method.
+
+19
+00:01:44.399 --> 00:01:50.138
+The profile-guided fix ran 175 times faster with an identical checksum.
+
+20
+00:01:50.418 --> 00:01:51.826
+L4: capacity.
+
+21
+00:01:52.106 --> 00:02:11.797
+A real contended service scaled to ~10,000 req per second then plateaued; a Universal Scalability Law fit (α about 0.05) predicted the peak (~11,000 req per second at ~69 concurrent) from a handful of load points, and Little's law sized the pool.
+
+22
+00:02:13.147 --> 00:02:14.128
+Reading time:
+
+23
+00:02:14.408 --> 00:02:16.328
+120 min + code.
+
+24
+00:02:17.678 --> 00:02:18.531
+Part 1.
+
+25
+00:02:18.811 --> 00:02:20.731
+Introduction and Why It Matters.
+
+26
+00:02:21.981 --> 00:02:24.456
+A story: the p99 that wouldn't budge.
+
+27
+00:02:24.736 --> 00:02:35.211
+The product-page team spent a sprint optimizing the catalog service, caching, query tuning, faster serialization, and the page's p99 barely moved.
+
+28
+00:02:35.491 --> 00:02:40.696
+The performance review found four separate misunderstandings, each a section of this chapter:
+
+29
+00:02:40.976 --> 00:02:42.768
+They optimized the wrong service.
+
+30
+00:02:43.048 --> 00:02:50.920
+A trace (Ch 24) showed the slow path ran through pricing, not catalog; catalog was never on the critical path.
+
+31
+00:02:51.200 --> 00:03:00.117
+And because the page fanned out to ~20 services, the tail compounded: at that fan-out, most requests hit someone's slow tail (L1).
+
+32
+00:03:00.397 --> 00:03:04.493
+Cutting catalog's median did nothing for the page's p99.
+
+33
+00:03:05.843 --> 00:03:07.763
+A GC pause was half the tail.
+
+34
+00:03:08.043 --> 00:03:18.667
+The service ran the Parallel collector with a 4 GB heap; its stop-the-world pauses reached 118 ms (L2), landing squarely in the p99.
+
+35
+00:03:18.947 --> 00:03:20.867
+Nobody had looked at GC logs.
+
+36
+00:03:21.147 --> 00:03:22.534
+Nobody had profiled.
+
+37
+00:03:22.814 --> 00:03:34.483
+When they finally took a JFR recording, one method, building a cache key by string concatenation in a loop, accounted for almost all the allocation and most of the CPU (L3).
+
+38
+00:03:34.763 --> 00:03:39.073
+A ten-minute fix gave a 175 times speedup on that method.
+
+39
+00:03:40.423 --> 00:03:42.087
+The capacity plan was a guess.
+
+40
+00:03:42.367 --> 00:03:53.524
+It handles 10k rps came from a load test that ran at fixed concurrency (so it couldn't overload the service) and measured latency wrong (coordinated omission, L1).
+
+41
+00:03:53.804 --> 00:04:02.913
+The real knee was lower, and the service was already running past 80% utilization at peak, on the steep part of the queueing curve (L1 C).
+
+42
+00:04:03.193 --> 00:04:14.159
+The rebuild was disciplined: measure the tail, trace to the critical path, profile before optimizing, read GC logs, and plan capacity with a model rather than a vibe.
+
+43
+00:04:15.509 --> 00:04:16.191
+Quote:
+
+44
+00:04:16.471 --> 00:04:18.135
+The thesis of this chapter.
+
+45
+00:04:18.415 --> 00:04:21.082
+Performance work is measurement first, always.
+
+46
+00:04:21.362 --> 00:04:27.826
+You cannot optimize what you haven't profiled, and intuition about where time goes is usually wrong (L3).
+
+47
+00:04:28.106 --> 00:04:36.298
+Measure tails, not averages (Ch 24), because at scale the tail is what users feel and what fan-out amplifies (L1).
+
+48
+00:04:36.578 --> 00:04:43.639
+Know your queueing curve, latency turns a corner near 100% utilization, so plan to run well below it.
+
+49
+00:04:43.919 --> 00:04:49.231
+And treat the GC and the JVM as tunable parts of the system, not a black box.
+
+50
+00:04:50.581 --> 00:04:52.885
+Where this lives in the grocery platform.
+
+51
+00:04:53.165 --> 00:04:54.509
+Here is a quick table:
+
+52
+00:04:54.789 --> 00:04:56.645
+Concern, and Approach, and Notes.
+
+53
+00:04:56.925 --> 00:04:58.269
+Latency SLOs.
+
+54
+00:04:58.549 --> 00:05:03.584
+Approach: p99 or p99.9 per journey (Ch 24).
+
+55
+00:05:03.864 --> 00:05:04.675
+Notes:
+
+56
+00:05:04.955 --> 00:05:07.003
+The tail is the target, not the mean.
+
+57
+00:05:07.283 --> 00:05:08.392
+Tail reduction.
+
+58
+00:05:08.672 --> 00:05:09.547
+Approach:
+
+59
+00:05:09.827 --> 00:05:13.155
+Hedged requests, timeouts, fewer serial hops, caching.
+
+60
+00:05:13.435 --> 00:05:14.245
+Notes:
+
+61
+00:05:14.525 --> 00:05:17.192
+Ch 17, Ch 18; L1.
+
+62
+00:05:17.472 --> 00:05:18.411
+GC.
+
+63
+00:05:18.691 --> 00:05:19.565
+Approach:
+
+64
+00:05:19.845 --> 00:05:28.485
+Generational ZGC (JDK 21 plus or 25) for latency-sensitive services; G1 default elsewhere.
+
+65
+00:05:28.765 --> 00:05:29.576
+Notes:
+
+66
+00:05:29.856 --> 00:05:30.688
+L2.
+
+67
+00:05:30.968 --> 00:05:31.885
+Profiling.
+
+68
+00:05:32.165 --> 00:05:33.040
+Approach:
+
+69
+00:05:33.320 --> 00:05:36.861
+Continuous JFR + async-profiler; flame graphs.
+
+70
+00:05:37.141 --> 00:05:37.952
+Notes:
+
+71
+00:05:38.232 --> 00:05:40.323
+L3; low overhead, always on.
+
+72
+00:05:40.603 --> 00:05:42.117
+JVM in containers.
+
+73
+00:05:42.397 --> 00:05:43.272
+Approach:
+
+74
+00:05:43.552 --> 00:05:49.760
+Correct CPU or memory limits, MaxRAMPercentage, availableProcessors awareness.
+
+75
+00:05:50.040 --> 00:05:51.875
+Notes: §2.8.
+
+76
+00:05:52.155 --> 00:05:53.200
+Load testing.
+
+77
+00:05:53.480 --> 00:05:54.355
+Approach:
+
+78
+00:05:54.635 --> 00:05:58.581
+Gatling or k6, open model, measured from scheduled time.
+
+79
+00:05:58.861 --> 00:05:59.672
+Notes:
+
+80
+00:05:59.952 --> 00:06:01.531
+L1 D, L4.
+
+81
+00:06:02.881 --> 00:06:04.054
+Capacity planning.
+
+82
+00:06:04.334 --> 00:06:05.209
+Approach:
+
+83
+00:06:05.489 --> 00:06:11.526
+Little's law + USL from load-test points; run at ~60 to 70% of peak.
+
+84
+00:06:11.806 --> 00:06:12.617
+Notes:
+
+85
+00:06:12.897 --> 00:06:14.390
+L4, L1 C.
+
+86
+00:06:15.740 --> 00:06:17.063
+Learning objectives.
+
+87
+00:06:17.343 --> 00:06:18.687
+Here is a quick table:
+
+88
+00:06:18.967 --> 00:06:21.164
+Band, and After this chapter you can....
+
+89
+00:06:21.444 --> 00:06:22.319
+B2:
+
+90
+00:06:22.599 --> 00:06:29.276
+Explain why tails dominate and compound, read a queueing curve, and profile a JVM with JFR.
+
+91
+00:06:29.556 --> 00:06:30.452
+B3:
+
+92
+00:06:30.732 --> 00:06:37.367
+Choose and tune a GC, avoid coordinated omission in load tests, and use Little's law for sizing.
+
+93
+00:06:37.647 --> 00:06:38.543
+B4:
+
+94
+00:06:38.823 --> 00:06:46.524
+Diagnose latency systematically, fit the USL to plan capacity, and run the JVM correctly in containers.
+
+95
+00:06:47.874 --> 00:06:48.749
+Part 2.
+
+96
+00:06:49.029 --> 00:06:50.906
+Core Concepts, Beginner to Deep.
+
+97
+00:06:52.156 --> 00:06:53.073
+Intuition.
+
+98
+00:06:53.353 --> 00:06:54.847
+The tail is the product.
+
+99
+00:06:55.127 --> 00:07:08.524
+If a page needs 20 services and each is fast 99% of the time, the page is fast only 0.99²⁰ about 82% of the time, nearly one in five requests hits someone's bad moment.
+
+100
+00:07:08.804 --> 00:07:12.196
+Speeding up the common case doesn't help; you must cut the tail.
+
+101
+00:07:12.476 --> 00:07:13.308
+(L1).
+
+102
+00:07:13.588 --> 00:07:15.337
+A busy queue is a traffic jam.
+
+103
+00:07:15.617 --> 00:07:21.825
+At 50% utilization there's slack; at 95% a small burst backs everything up.
+
+104
+00:07:22.105 --> 00:07:27.012
+Latency doesn't rise gently to a wall, it curves sharply near 100%.
+
+105
+00:07:27.292 --> 00:07:31.068
+Running efficiently at 90% is running on the cliff edge.
+
+106
+00:07:31.348 --> 00:07:32.372
+(L1 C).
+
+107
+00:07:33.722 --> 00:07:35.642
+Profiling is turning on the lights.
+
+108
+00:07:35.922 --> 00:07:40.957
+Optimizing by intuition is fixing what you think is slow; a profiler shows what is.
+
+109
+00:07:41.237 --> 00:07:45.930
+It's routinely a surprise, a logging call, a string concat, a needless copy.
+
+110
+00:07:46.210 --> 00:07:47.085
+(L3).
+
+111
+00:07:47.365 --> 00:07:49.455
+The GC is a background tax.
+
+112
+00:07:49.735 --> 00:07:56.370
+Most of the time it's invisible; occasionally it stops the world for a pause that lands in your p99.
+
+113
+00:07:56.650 --> 00:07:59.509
+Which collector you pick decides how big that pause is.
+
+114
+00:07:59.789 --> 00:08:00.621
+(L2).
+
+115
+00:08:01.971 --> 00:08:04.253
+Tail latency and why it compounds.
+
+116
+00:08:04.533 --> 00:08:13.963
+From Dean and Barroso's The Tail at Scale: in a system that fans out to many components and waits for all of them, the slowest component sets the latency.
+
+117
+00:08:14.243 --> 00:08:26.659
+If each backend is slow (say p95) 5% of the time, then across N backends the chance that at least one is slow is 1 minus 0.95ᴺ.
+
+118
+00:08:26.939 --> 00:08:27.771
+L1:
+
+119
+00:08:29.121 --> 00:08:30.465
+Here is a quick table:
+
+120
+00:08:30.745 --> 00:08:37.635
+Fan-out N, and P≥1 slow backend, and Request p50, and Request p99.
+
+121
+00:08:37.915 --> 00:08:38.555
+1.
+
+122
+00:08:38.835 --> 00:08:41.246
+P≥1 slow backend:
+
+123
+00:08:41.526 --> 00:08:42.635
+5%.
+
+124
+00:08:42.915 --> 00:08:44.217
+Request p50:
+
+125
+00:08:44.497 --> 00:08:45.521
+10 ms.
+
+126
+00:08:45.801 --> 00:08:47.294
+Request p99:
+
+127
+00:08:47.574 --> 00:08:49.153
+270 ms.
+
+128
+00:08:49.433 --> 00:08:50.201
+5.
+
+129
+00:08:50.481 --> 00:08:52.891
+P≥1 slow backend:
+
+130
+00:08:53.171 --> 00:08:54.451
+23%.
+
+131
+00:08:54.731 --> 00:08:56.033
+Request p50:
+
+132
+00:08:56.313 --> 00:08:57.529
+17 ms.
+
+133
+00:08:57.809 --> 00:08:59.302
+Request p99:
+
+134
+00:08:59.582 --> 00:09:01.075
+303 ms.
+
+135
+00:09:01.355 --> 00:09:02.145
+20.
+
+136
+00:09:02.425 --> 00:09:04.835
+P≥1 slow backend:
+
+137
+00:09:05.115 --> 00:09:06.417
+64%.
+
+138
+00:09:06.697 --> 00:09:07.998
+Request p50:
+
+139
+00:09:08.278 --> 00:09:10.049
+174 ms.
+
+140
+00:09:10.329 --> 00:09:11.822
+Request p99:
+
+141
+00:09:12.102 --> 00:09:13.595
+310 ms.
+
+142
+00:09:13.875 --> 00:09:14.814
+100.
+
+143
+00:09:15.094 --> 00:09:17.505
+P≥1 slow backend:
+
+144
+00:09:17.785 --> 00:09:19.086
+99%.
+
+145
+00:09:19.366 --> 00:09:20.667
+Request p50:
+
+146
+00:09:20.947 --> 00:09:22.547
+283 ms.
+
+147
+00:09:22.827 --> 00:09:24.321
+Request p99:
+
+148
+00:09:24.601 --> 00:09:26.243
+316 ms.
+
+149
+00:09:27.593 --> 00:09:37.129
+At fan-out 100 the request's median (283 ms) is near the single backend's p99, the rare tail has become the norm.
+
+150
+00:09:37.409 --> 00:09:38.433
+Consequences:
+
+151
+00:09:38.713 --> 00:09:42.639
+Reduce fan-out where possible (fewer, coarser calls; Ch 16).
+
+152
+00:09:42.919 --> 00:09:52.817
+Cut the tail, not the mean: timeouts, hedged or backup requests (Ch 17), and fixing the specific slow dependency (Ch 24 L3).
+
+153
+00:09:53.097 --> 00:10:08.820
+L1 B: a single-copy hedge issued only when the first call passes p95 cut fan-out-20 p99 from 310 ms to 126 ms for 5% extra load, a good trade because it's capped.
+
+154
+00:10:10.170 --> 00:10:11.770
+Queueing theory, practically.
+
+155
+00:10:12.050 --> 00:10:13.351
+A server is a queue.
+
+156
+00:10:13.631 --> 00:10:23.658
+The key result (M or M or 1): mean time waiting in the queue is S, ρ / (1 minus ρ), where S is service time and ρ is utilization.
+
+157
+00:10:23.938 --> 00:10:26.391
+As ρ, then 1, wait, then ∞.
+
+158
+00:10:26.671 --> 00:10:30.554
+L1 C, measured on a simulated queue and matching the formula:
+
+159
+00:10:31.904 --> 00:10:33.248
+Here is a quick table:
+
+160
+00:10:33.528 --> 00:10:36.877
+Utilization, and Measured wait, and versus 50%.
+
+161
+00:10:37.157 --> 00:10:38.224
+50%.
+
+162
+00:10:38.504 --> 00:10:39.528
+Measured wait:
+
+163
+00:10:39.808 --> 00:10:42.923
+5.0 ms. versus 50%:
+
+164
+00:10:43.203 --> 00:10:44.077
+1 times.
+
+165
+00:10:44.357 --> 00:10:45.403
+80%.
+
+166
+00:10:45.683 --> 00:10:46.707
+Measured wait:
+
+167
+00:10:46.987 --> 00:10:50.037
+19.4 ms. versus 50%:
+
+168
+00:10:50.317 --> 00:10:51.277
+4 times.
+
+169
+00:10:51.557 --> 00:10:52.645
+90%.
+
+170
+00:10:52.925 --> 00:10:53.949
+Measured wait:
+
+171
+00:10:54.229 --> 00:10:57.472
+47.4 ms. versus 50%:
+
+172
+00:10:57.752 --> 00:10:58.776
+9 times.
+
+173
+00:10:59.056 --> 00:11:00.421
+95%.
+
+174
+00:11:00.701 --> 00:11:01.725
+Measured wait:
+
+175
+00:11:02.005 --> 00:11:05.120
+107 ms. versus 50%:
+
+176
+00:11:05.400 --> 00:11:06.595
+21 times.
+
+177
+00:11:06.875 --> 00:11:08.176
+99%.
+
+178
+00:11:08.456 --> 00:11:09.480
+Measured wait:
+
+179
+00:11:09.760 --> 00:11:13.216
+798 ms. versus 50%:
+
+180
+00:11:13.496 --> 00:11:15.181
+159 times.
+
+181
+00:11:16.531 --> 00:11:17.513
+The lessons:
+
+182
+00:11:17.793 --> 00:11:21.014
+There's a knee around 70 to 80% utilization.
+
+183
+00:11:21.294 --> 00:11:26.798
+Below it, latency is stable; above it, small load changes cause big latency jumps.
+
+184
+00:11:27.078 --> 00:11:37.062
+Plan to run at ~60 to 70%, so a traffic spike or a lost instance (which raises everyone else's utilization) doesn't push you over the knee.
+
+185
+00:11:37.342 --> 00:11:43.955
+Variability makes it worse: bursty arrivals or variable service times (a fat tail) push the knee lower.
+
+186
+00:11:44.235 --> 00:11:52.662
+Little's law (L = λW, Ch 9) ties it together: in-flight work = arrival rate times time in system.
+
+187
+00:11:54.012 --> 00:11:54.929
+Profiling:
+
+188
+00:11:55.209 --> 00:11:57.172
+JFR and async-profiler.
+
+189
+00:11:57.452 --> 00:11:59.436
+Don't optimize without a profile.
+
+190
+00:11:59.716 --> 00:12:00.676
+The tools:
+
+191
+00:12:00.956 --> 00:12:08.252
+JDK Flight Recorder (JFR): built into the JVM, ~1% overhead, always-on-capable.
+
+192
+00:12:08.532 --> 00:12:31.551
+Records execution samples (CPU), allocation, locks, GC, I or O, and more, into a.jfr file you analyze with jfr print, JMC, or IntelliJ. async-profiler: a low-overhead sampling profiler that avoids the safepoint bias of older profilers and produces flame graphs for CPU, allocation, locks and cache misses.
+
+193
+00:12:32.901 --> 00:12:40.453
+L3 recorded a real JFR profile of a workload with a planted hotspot and analyzed it with jfr print:
+
+194
+00:12:40.733 --> 00:12:55.602
+CPU (execution samples): the hot self-time frames were Integer.getChars and ArraysSupport.mismatch, both rolling up to one method (3,139 of 3,159 samples).
+
+195
+00:12:55.882 --> 00:12:58.037
+The profiler named the method to fix.
+
+196
+00:12:58.317 --> 00:12:59.703
+Allocation samples:
+
+197
+00:12:59.983 --> 00:13:05.423
+97% were byte, the signature of building strings by concatenation in a loop.
+
+198
+00:13:06.773 --> 00:13:25.845
+The profile-guided fix (a StringBuilder plus a precomputed map instead of an O(n²) concat and a linear scan) ran 175 times faster (90,020 per second, then 15.8M per second) with an identical checksum, same behavior, vastly less work.
+
+199
+00:13:26.125 --> 00:13:41.144
+Read a profile as: self time (where the CPU actually is) versus total time (inclusive), the top allocation sites (allocation pressure drives GC, §2.5), and lock contention (Ch 19).
+
+200
+00:13:41.424 --> 00:13:45.733
+Flame graph width = time; look for wide frames you didn't expect.
+
+201
+00:13:47.083 --> 00:13:48.321
+Garbage collection.
+
+202
+00:13:48.601 --> 00:13:52.398
+The JVM's collectors trade throughput, pause time and footprint:
+
+203
+00:13:53.748 --> 00:13:55.092
+Here is a quick table:
+
+204
+00:13:55.372 --> 00:13:58.401
+Collector, and Pause behavior, and Best for, and Notes.
+
+205
+00:13:58.681 --> 00:13:59.492
+Serial.
+
+206
+00:13:59.772 --> 00:14:00.860
+Pause behavior:
+
+207
+00:14:01.140 --> 00:14:03.039
+Stop-the-world, single-threaded.
+
+208
+00:14:03.319 --> 00:14:04.172
+Best for:
+
+209
+00:14:04.452 --> 00:14:06.351
+Tiny heaps, single-core, CLIs.
+
+210
+00:14:06.631 --> 00:14:07.441
+Notes:
+
+211
+00:14:07.721 --> 00:14:08.489
+Simple.
+
+212
+00:14:08.769 --> 00:14:09.623
+Parallel.
+
+213
+00:14:09.903 --> 00:14:10.991
+Pause behavior:
+
+214
+00:14:11.271 --> 00:14:15.345
+STW, multi-threaded; highest throughput, longest pauses.
+
+215
+00:14:15.625 --> 00:14:16.479
+Best for:
+
+216
+00:14:16.759 --> 00:14:18.743
+Batch jobs where throughput latency.
+
+217
+00:14:19.023 --> 00:14:19.833
+Notes:
+
+218
+00:14:20.113 --> 00:14:20.924
+L2:
+
+219
+00:14:21.204 --> 00:14:23.401
+118 ms max pause.
+
+220
+00:14:23.681 --> 00:14:24.940
+G1 (default).
+
+221
+00:14:25.220 --> 00:14:26.308
+Pause behavior:
+
+222
+00:14:26.588 --> 00:14:31.708
+Mostly-concurrent, target pause (~200 ms default), region-based.
+
+223
+00:14:31.988 --> 00:14:32.841
+Best for:
+
+224
+00:14:33.121 --> 00:14:34.743
+General-purpose services.
+
+225
+00:14:35.023 --> 00:14:35.833
+Notes:
+
+226
+00:14:36.113 --> 00:14:36.924
+L2:
+
+227
+00:14:37.204 --> 00:14:40.105
+55 to 69 ms max pause.
+
+228
+00:14:40.385 --> 00:14:41.452
+ZGC.
+
+229
+00:14:41.732 --> 00:14:42.820
+Pause behavior:
+
+230
+00:14:43.100 --> 00:14:46.876
+Concurrent, sub-millisecond pauses, scales to TB heaps.
+
+231
+00:14:47.156 --> 00:14:48.009
+Best for:
+
+232
+00:14:48.289 --> 00:14:50.124
+Latency-sensitive services.
+
+233
+00:14:50.404 --> 00:14:51.215
+Notes:
+
+234
+00:14:51.495 --> 00:14:58.769
+L2: request max 7.5 ms; generational since JDK 21, default in 25.
+
+235
+00:15:00.119 --> 00:15:01.037
+Shenandoah.
+
+236
+00:15:01.317 --> 00:15:02.405
+Pause behavior:
+
+237
+00:15:02.685 --> 00:15:05.949
+Concurrent, low pause (OpenJDK or Red Hat).
+
+238
+00:15:06.229 --> 00:15:07.082
+Best for:
+
+239
+00:15:07.362 --> 00:15:09.005
+Same niche as ZGC.
+
+240
+00:15:09.285 --> 00:15:10.095
+Notes:
+
+241
+00:15:10.375 --> 00:15:12.039
+Alternative to ZGC.
+
+242
+00:15:13.389 --> 00:15:27.683
+L2 ran the same allocation-heavy workload (1 GB heap, ~15 s, churning a 300 MB live set) under each collector and measured both GC pauses and the resulting request latency tail:
+
+243
+00:15:29.033 --> 00:15:30.377
+Here is a quick table:
+
+244
+00:15:30.657 --> 00:15:42.177
+JDK or GC, and Requests, and Allocated, and STW total, and STW max, and req p99, and req p999, and req max.
+
+245
+00:15:42.457 --> 00:15:44.313
+JDK 21 Parallel.
+
+246
+00:15:44.593 --> 00:15:45.510
+Requests:
+
+247
+00:15:45.790 --> 00:15:48.073
+67,510.
+
+248
+00:15:48.353 --> 00:15:49.249
+Allocated:
+
+249
+00:15:49.529 --> 00:15:51.107
+70.8 GB.
+
+250
+00:15:51.387 --> 00:15:52.731
+STW total:
+
+251
+00:15:53.011 --> 00:15:54.889
+4,099 ms.
+
+252
+00:15:55.169 --> 00:15:56.513
+STW max:
+
+253
+00:15:56.793 --> 00:16:00.334
+118.4 ms. req p99:
+
+254
+00:16:00.614 --> 00:16:04.646
+0.37 ms. req p999:
+
+255
+00:16:04.926 --> 00:16:07.422
+13.8 ms. req max:
+
+256
+00:16:07.702 --> 00:16:09.707
+118.9 ms.
+
+257
+00:16:09.987 --> 00:16:11.886
+JDK 21 G1.
+
+258
+00:16:12.166 --> 00:16:13.083
+Requests:
+
+259
+00:16:13.363 --> 00:16:15.859
+72,817.
+
+260
+00:16:16.139 --> 00:16:17.035
+Allocated:
+
+261
+00:16:17.315 --> 00:16:19.086
+76.4 GB.
+
+262
+00:16:19.366 --> 00:16:20.710
+STW total:
+
+263
+00:16:20.990 --> 00:16:23.379
+3,817 ms.
+
+264
+00:16:23.659 --> 00:16:25.003
+STW max:
+
+265
+00:16:25.283 --> 00:16:28.462
+54.8 ms. req p99:
+
+266
+00:16:28.742 --> 00:16:32.603
+0.54 ms. req p999:
+
+267
+00:16:32.883 --> 00:16:35.507
+17.6 ms. req max:
+
+268
+00:16:35.787 --> 00:16:37.558
+55.9 ms.
+
+269
+00:16:37.838 --> 00:16:39.971
+JDK 21 ZGC.
+
+270
+00:16:40.251 --> 00:16:41.169
+Requests:
+
+271
+00:16:41.449 --> 00:16:43.390
+70,240.
+
+272
+00:16:43.670 --> 00:16:44.566
+Allocated:
+
+273
+00:16:44.846 --> 00:16:46.681
+73.7 GB.
+
+274
+00:16:46.961 --> 00:16:49.137
+STW total: sub-ms.
+
+275
+00:16:49.417 --> 00:16:52.937
+STW max: sub-ms. req p99:
+
+276
+00:16:53.217 --> 00:16:57.014
+0.52 ms. req p999:
+
+277
+00:16:57.294 --> 00:16:59.811
+14.3 ms. req max:
+
+278
+00:17:00.091 --> 00:17:01.777
+36.3 ms.
+
+279
+00:17:02.057 --> 00:17:03.998
+JDK 25 G1.
+
+280
+00:17:04.278 --> 00:17:05.195
+Requests:
+
+281
+00:17:05.475 --> 00:17:08.099
+65,493.
+
+282
+00:17:08.379 --> 00:17:09.275
+Allocated:
+
+283
+00:17:09.555 --> 00:17:11.369
+68.7 GB.
+
+284
+00:17:11.649 --> 00:17:12.993
+STW total:
+
+285
+00:17:13.273 --> 00:17:15.683
+4,817 ms.
+
+286
+00:17:15.963 --> 00:17:17.307
+STW max:
+
+287
+00:17:17.587 --> 00:17:20.830
+68.8 ms. req p99:
+
+288
+00:17:21.110 --> 00:17:24.993
+0.39 ms. req p999:
+
+289
+00:17:25.273 --> 00:17:27.769
+22.3 ms. req max:
+
+290
+00:17:28.049 --> 00:17:29.798
+89.0 ms.
+
+291
+00:17:30.078 --> 00:17:32.659
+JDK 25 ZGC (gen).
+
+292
+00:17:32.939 --> 00:17:33.857
+Requests:
+
+293
+00:17:34.137 --> 00:17:36.953
+87,764.
+
+294
+00:17:37.233 --> 00:17:38.129
+Allocated:
+
+295
+00:17:38.409 --> 00:17:40.435
+92.0 GB.
+
+296
+00:17:40.715 --> 00:17:42.891
+STW total: sub-ms.
+
+297
+00:17:43.171 --> 00:17:46.691
+STW max: sub-ms. req p99:
+
+298
+00:17:46.971 --> 00:17:50.833
+0.54 ms. req p999:
+
+299
+00:17:51.113 --> 00:17:53.438
+3.4 ms. req max:
+
+300
+00:17:53.718 --> 00:17:55.211
+7.5 ms.
+
+301
+00:17:56.561 --> 00:18:07.164
+\ ZGC's stop-the-world pauses are concurrent and sub-millisecond, so they don't appear as Pause... ms in the GC log; their effect is the request tail.
+
+302
+00:18:07.444 --> 00:18:08.297
+Reading it:
+
+303
+00:18:08.577 --> 00:18:27.756
+Parallel gives the classic few but long pauses (118 ms); G1 trades those for more but shorter; generational ZGC on JDK 25 both did the most work (92 GB allocated, most requests) and had the shortest tail (max 7.5 ms).
+
+304
+00:18:28.036 --> 00:18:31.364
+For a latency-SLO service, that tail is the headline.
+
+305
+00:18:31.644 --> 00:18:34.716
+For a nightly batch job, Parallel's throughput may win.
+
+306
+00:18:36.066 --> 00:18:38.071
+Allocation is the real lever:
+
+307
+00:18:38.351 --> 00:18:42.490
+GC work is proportional to allocation rate and live-set size.
+
+308
+00:18:42.770 --> 00:18:51.282
+The cheapest GC tuning is allocating less (L3's fix), and the second is sizing the heap so the collector isn't constantly busy.
+
+309
+00:18:52.632 --> 00:18:54.104
+GC tuning knobs.
+
+310
+00:18:54.384 --> 00:18:55.899
+Pick the collector for the goal:
+
+311
+00:18:56.179 --> 00:19:02.173
+ZGC or Shenandoah for latency, G1 for general, Parallel for throughput or batch.
+
+312
+00:19:02.453 --> 00:19:15.509
+Heap size (-Xms = -Xmx to avoid resizing): big enough that GC isn't constant, not so big that a pause (on STW collectors) is huge or the container OOMs.
+
+313
+00:19:15.789 --> 00:19:25.048
+G1: -XX:MaxGCPauseMillis (a target, not a guarantee); watch for humongous allocations and mixed-GC behavior.
+
+314
+00:19:26.398 --> 00:19:36.105
+Observe, don't guess: -Xlog:gc (unified logging), JFR GC events, and pause or allocation-rate dashboards (Ch 24).
+
+315
+00:19:36.385 --> 00:19:41.377
+Tune against measured pauses and allocation, never by copying flags from a blog.
+
+316
+00:19:41.657 --> 00:19:51.854
+Beware full GCs (a fallback when concurrent collection can't keep up): they're long STW pauses and signal the heap is too small or allocation too high.
+
+317
+00:19:53.204 --> 00:19:54.697
+JIT and warm-up.
+
+318
+00:19:54.977 --> 00:20:06.241
+The JVM interprets bytecode first, then the JIT (C1 then C2) compiles hot methods to native code, so the first requests are much slower than steady state.
+
+319
+00:20:06.521 --> 00:20:07.588
+Implications:
+
+320
+00:20:07.868 --> 00:20:14.567
+Warm up before measuring (every lab here warms up first), a benchmark of cold code measures the interpreter.
+
+321
+00:20:14.847 --> 00:20:28.031
+Production warm-up: send synthetic traffic before a new instance takes real load, or the first users after a deploy hit slow code (and a scale-up during a spike serves the spike on cold JITs).
+
+322
+00:20:29.381 --> 00:20:38.511
+JMH for microbenchmarks (it handles warm-up, dead-code elimination and fork isolation), hand-rolled micro-timing is usually wrong.
+
+323
+00:20:38.791 --> 00:20:49.031
+AOT or CRaC or GraalVM native image reduce warm-up for fast-start use cases (serverless), trading peak throughput or build complexity.
+
+324
+00:20:49.311 --> 00:20:53.322
+Project Leyden is bringing more AOT to mainstream JDKs.
+
+325
+00:20:54.672 --> 00:20:56.357
+The JVM in containers.
+
+326
+00:20:56.637 --> 00:21:02.056
+Containers changed JVM defaults, and getting this wrong is a common performance bug:
+
+327
+00:21:02.336 --> 00:21:11.957
+CPU: the JVM sizes GC threads, ForkJoinPool.commonPool and availableProcessors() from the container's CPU quota.
+
+328
+00:21:12.237 --> 00:21:15.544
+A wrong or unset limit gives too few or too many threads.
+
+329
+00:21:15.824 --> 00:21:27.899
+CPU limits (throttling) can cause latency spikes when the container is throttled mid-request; many teams set CPU requests but not hard limits for latency-sensitive services.
+
+330
+00:21:29.249 --> 00:21:39.787
+Memory: use -XX:MaxRAMPercentage (for example, 75%) rather than a fixed -Xmx, so the heap tracks the container's memory limit.
+
+331
+00:21:40.067 --> 00:21:56.985
+Leave headroom for non-heap memory (metaspace, thread stacks, direct buffers, code cache), the container limit must cover all JVM memory, or the kernel OOM-kills the process (exit 137), which looks like a crash, not a GC problem.
+
+332
+00:21:57.265 --> 00:22:08.913
+Modern JDKs are container-aware (since 8u191 or 10 plus), but verify: check availableProcessors() and Runtime.maxMemory() inside the container.
+
+333
+00:22:10.263 --> 00:22:11.692
+Load testing done right.
+
+334
+00:22:11.972 --> 00:22:13.679
+Open versus closed model:
+
+335
+00:22:13.959 --> 00:22:23.025
+Closed (fixed number of virtual users looping): in-flight is capped at N, so the test cannot overload the service, throughput just plateaus (L4).
+
+336
+00:22:23.305 --> 00:22:26.079
+Good for finding a per-concurrency operating point.
+
+337
+00:22:26.359 --> 00:22:34.871
+Open (fixed arrival rate, independent of responses): this is how real traffic behaves and the only way to see the overload cliff.
+
+338
+00:22:36.221 --> 00:22:39.421
+Coordinated omission: the classic load-test bug.
+
+339
+00:22:39.701 --> 00:22:49.877
+If the tool sends the next request only after the previous responds, then when the server stalls the tool stops sending, and never records the requests that would have been slow.
+
+340
+00:22:50.157 --> 00:23:01.677
+L1 D: a 500 ms freeze showed as p999 = 0 ms naively, and 460 ms when measured from the scheduled send time.
+
+341
+00:23:01.957 --> 00:23:10.533
+Fixes: measure latency from intended start time (wrk2, Gatling, k6 do this correctly), or use an open model.
+
+342
+00:23:11.883 --> 00:23:12.757
+Tools:
+
+343
+00:23:13.037 --> 00:23:20.376
+Gatling and k6 (open model, scripting), wrk2 (coordinated-omission-corrected), JMeter.
+
+344
+00:23:20.656 --> 00:23:28.315
+Test against production-like data and dependencies; a load test against a warm cache and empty tables measures nothing.
+
+345
+00:23:28.595 --> 00:23:41.011
+What to measure: throughput, latency percentiles (p50 or p99 or p99.9), error rate, and resource USE (Ch 24), and find the knee, not just one number.
+
+346
+00:23:42.361 --> 00:23:44.409
+Capacity planning and the USL.
+
+347
+00:23:44.689 --> 00:23:46.395
+Little's law (Ch 9):
+
+348
+00:23:46.675 --> 00:23:48.446
+L = λ, W.
+
+349
+00:23:48.726 --> 00:23:56.491
+To serve λ requests per second at W seconds each, you have L in flight, which sizes thread pools and connection pools.
+
+350
+00:23:56.771 --> 00:23:57.646
+L4:
+
+351
+00:23:57.926 --> 00:24:05.521
+2,000 rps times 1.1 ms about 2 in flight, so a pool of ~4 with headroom (not hundreds).
+
+352
+00:24:05.801 --> 00:24:11.731
+Amdahl's law: a serial fraction α caps speedup at 1 or α no matter how many cores.
+
+353
+00:24:13.081 --> 00:24:15.449
+Universal Scalability Law (USL):
+
+354
+00:24:15.729 --> 00:24:25.948
+X(N) = N, X₁ / (1 + α(Nminus 1) + βN(Nminus 1)), adds a coherency term β (crosstalk between workers).
+
+355
+00:24:26.228 --> 00:24:32.116
+Because of β, throughput doesn't just plateau, it can retrograde (fall) as concurrency rises.
+
+356
+00:24:32.396 --> 00:24:37.495
+L4 fit the USL to a real contended service's measured throughput curve:
+
+357
+00:24:37.775 --> 00:24:46.884
+Measured: scaled to ~10,000 req per second by N=16, then flat or slightly falling to N=256.
+
+358
+00:24:48.234 --> 00:25:06.069
+Fit: α about 0.048 (the serialized critical section), β about 0.0002 (coherency), predicting a peak of ~11,000 req per second at ~69 concurrent, beyond which throughput retrogrades.
+
+359
+00:25:06.349 --> 00:25:21.090
+The value: fit the model from a handful of load points and predict the peak, instead of testing to destruction, and it tells you why (contention versus coherency), pointing at the fix (shrink the serial section, Ch 19 or 20).
+
+360
+00:25:21.370 --> 00:25:36.431
+Capacity plan: measure the per-instance peak, run at ~60 to 70% of it (queueing knee, L1 C), size instances for peak traffic plus headroom for a lost instance and a spike, and re-measure as the workload changes.
+
+361
+00:25:37.781 --> 00:25:39.936
+A performance investigation method.
+
+362
+00:25:40.216 --> 00:25:45.933
+Start from the SLO or symptom (Ch 24): which journey, which percentile, how bad.
+
+363
+00:25:46.213 --> 00:25:52.336
+Trace to the critical path (Ch 24 L3): which service or span dominates the tail.
+
+364
+00:25:52.616 --> 00:25:56.093
+Don't optimize off the critical path (§1.1).
+
+365
+00:25:56.373 --> 00:26:04.032
+Profile that service (JFR or async-profiler, L3): find the hot method or allocation site by evidence.
+
+366
+00:26:04.312 --> 00:26:05.507
+Check the platform:
+
+367
+00:26:05.787 --> 00:26:13.659
+GC pauses (L2), CPU throttling, lock contention (Ch 19), connection-pool waits (Ch 19).
+
+368
+00:26:15.009 --> 00:26:17.035
+Fix the biggest thing, then re-measure.
+
+369
+00:26:17.315 --> 00:26:20.643
+One change at a time; performance is full of surprises.
+
+370
+00:26:20.923 --> 00:26:27.793
+Guard it: a load test in CI (open model, percentiles) and a latency SLO so regressions page.
+
+371
+00:26:29.143 --> 00:26:30.039
+Part 3.
+
+372
+00:26:30.319 --> 00:26:32.047
+Architecture and Diagrams.
+
+373
+00:26:33.297 --> 00:26:35.665
+Component view: the performance toolchain.
+
+374
+00:26:35.945 --> 00:26:37.289
+Here is the diagram.
+
+375
+00:26:41.139 --> 00:26:44.189
+Sequence: happy path, a performance investigation.
+
+376
+00:26:44.469 --> 00:26:47.264
+The sequence diagram walks through it step by step.
+
+377
+00:26:47.544 --> 00:26:50.829
+SLO to Eng: checkout p99 over budget.
+
+378
+00:26:51.109 --> 00:26:54.075
+Eng to Trace: which service is on the critical path.
+
+379
+00:26:54.355 --> 00:26:56.723
+Trace to Eng: pricing, not catalog.
+
+380
+00:26:57.003 --> 00:26:59.328
+Eng to JFR: profile pricing.
+
+381
+00:26:59.608 --> 00:27:03.512
+JFR to Eng: one method dominates CPU and allocation.
+
+382
+00:27:03.792 --> 00:27:06.331
+Eng to GC: any pauses in the tail.
+
+383
+00:27:06.611 --> 00:27:08.659
+GC to Eng: yes, or no.
+
+384
+00:27:08.939 --> 00:27:13.931
+Eng to Eng: fix hotspot or tune GC, re-measure, guard with a load test.
+
+385
+00:27:17.781 --> 00:27:21.493
+Sequence: failure path, coordinated omission hides a stall.
+
+386
+00:27:21.773 --> 00:27:24.567
+The sequence diagram walks through it step by step.
+
+387
+00:27:24.847 --> 00:27:29.370
+LT to SVC: request (waits for response before sending next).
+
+388
+00:27:29.650 --> 00:27:31.527
+SVC to LT: fast.
+
+389
+00:27:31.807 --> 00:27:35.178
+LT to LT: blocked, sends NOTHING during the freeze.
+
+390
+00:27:35.458 --> 00:27:38.765
+SVC to LT: one slow response recorded.
+
+391
+00:27:39.045 --> 00:27:45.167
+LT to LT: reports p999 about 0 ms, the stall is invisible.
+
+392
+00:27:49.017 --> 00:27:51.812
+State: throughput versus concurrency (USL).
+
+393
+00:27:52.092 --> 00:27:53.436
+Here is the diagram.
+
+394
+00:27:57.286 --> 00:27:58.203
+Part 4.
+
+395
+00:27:58.483 --> 00:28:00.105
+Design Document Excerpt:
+
+396
+00:28:00.385 --> 00:28:02.198
+Performance Engineering Practice.
+
+397
+00:28:03.448 --> 00:28:04.792
+Here is a quick table:
+
+398
+00:28:05.072 --> 00:28:06.373
+Field, and Value.
+
+399
+00:28:06.653 --> 00:28:07.997
+Author or Reviewers:
+
+400
+00:28:08.277 --> 00:28:11.008
+Performance guild or service teams, SRE.
+
+401
+00:28:11.288 --> 00:28:12.184
+Status:
+
+402
+00:28:12.464 --> 00:28:13.339
+Approved.
+
+403
+00:28:13.619 --> 00:28:14.941
+Related ADRs:
+
+404
+00:28:15.221 --> 00:28:47.065
+ADR-108 Generational ZGC for latency-sensitive services, G1 default elsewhere; ADR-109 Continuous JFR in production; ADR-110 Load tests are open-model, percentile-based, in CI; ADR-111 JVM container defaults (MaxRAMPercentage, CPU awareness); ADR-112 Capacity plans from USL + Little's law, run at at most 70% of peak.
+
+405
+00:28:48.415 --> 00:28:49.055
+1.
+
+406
+00:28:49.335 --> 00:28:50.743
+Context and Problem.
+
+407
+00:28:51.023 --> 00:29:04.399
+The §1.1 review: optimizing off the critical path, an unread 118 ms GC pause in the p99, never profiling, and a capacity number from a flawed load test.
+
+408
+00:29:04.679 --> 00:29:05.383
+2.
+
+409
+00:29:05.663 --> 00:29:07.007
+Goals or Non-Goals.
+
+410
+00:29:07.287 --> 00:29:21.453
+Goals: latency SLOs met at the tail; evidence-based optimization (profile first); GC pauses out of the p99 for latency services; capacity planned with a model; regressions caught in CI.
+
+411
+00:29:21.733 --> 00:29:29.818
+Non-goals: micro-optimizing cold paths; chasing 100% CPU efficiency at the cost of the latency knee.
+
+412
+00:29:31.168 --> 00:29:31.915
+3.
+
+413
+00:29:32.195 --> 00:29:33.155
+Requirements.
+
+414
+00:29:34.505 --> 00:29:35.849
+Here is a quick table:
+
+415
+00:29:36.129 --> 00:29:37.601
+ID, and Requirement.
+
+416
+00:29:37.881 --> 00:29:38.926
+NFR-1:
+
+417
+00:29:39.206 --> 00:29:46.801
+Latency services run a low-pause GC; no GC pause 10 ms in the p99 (JFR-checked).
+
+418
+00:29:47.081 --> 00:29:48.126
+NFR-2:
+
+419
+00:29:48.406 --> 00:29:54.657
+Continuous JFR in production (~1% overhead); profiles retrievable per incident.
+
+420
+00:29:54.937 --> 00:29:56.003
+NFR-3:
+
+421
+00:29:56.283 --> 00:30:05.137
+Load tests are open-model, report p50 or p99 or p99.9, and run in CI with a regression budget.
+
+422
+00:30:05.417 --> 00:30:06.505
+NFR-4:
+
+423
+00:30:06.785 --> 00:30:15.467
+JVMs use MaxRAMPercentage and correct CPU awareness in containers; no OOM-kills from misconfigured limits.
+
+424
+00:30:15.747 --> 00:30:16.793
+NFR-5:
+
+425
+00:30:17.073 --> 00:30:26.459
+Capacity plans state per-instance peak (from load tests or USL) and target at most 70% utilization with headroom for a lost node.
+
+426
+00:30:27.809 --> 00:30:28.513
+4.
+
+427
+00:30:28.793 --> 00:30:29.689
+Estimates.
+
+428
+00:30:31.039 --> 00:30:32.383
+Here is a quick table:
+
+429
+00:30:32.663 --> 00:30:34.583
+Item, and Method, and Result.
+
+430
+00:30:34.863 --> 00:30:36.229
+Product-page in-flight.
+
+431
+00:30:36.509 --> 00:30:37.255
+Method:
+
+432
+00:30:37.535 --> 00:30:38.474
+Little's law:
+
+433
+00:30:38.754 --> 00:30:42.914
+300 rps times 150 ms p99.
+
+434
+00:30:43.194 --> 00:30:45.370
+Result: ~45 in flight.
+
+435
+00:30:45.650 --> 00:30:47.271
+DB pool (catalog).
+
+436
+00:30:47.551 --> 00:30:48.298
+Method:
+
+437
+00:30:48.578 --> 00:30:50.967
+400 qps times 5 ms.
+
+438
+00:30:51.247 --> 00:30:53.679
+Result: ~2 busy, then pool 10.
+
+439
+00:30:53.959 --> 00:30:55.602
+Per-instance peak (pricing).
+
+440
+00:30:55.882 --> 00:30:56.629
+Method:
+
+441
+00:30:56.909 --> 00:30:59.341
+USL fit from load test (L4).
+
+442
+00:30:59.621 --> 00:31:03.674
+Result: ~11k rps; run to ~7k.
+
+443
+00:31:03.954 --> 00:31:05.533
+GC choice (pricing).
+
+444
+00:31:05.813 --> 00:31:06.559
+Method:
+
+445
+00:31:06.839 --> 00:31:10.061
+Latency SLO 300 ms p99.
+
+446
+00:31:10.341 --> 00:31:11.151
+Result:
+
+447
+00:31:11.431 --> 00:31:13.117
+Generational ZGC.
+
+448
+00:31:14.467 --> 00:31:15.235
+5.
+
+449
+00:31:15.515 --> 00:31:16.709
+Proposed design.
+
+450
+00:31:16.989 --> 00:31:32.499
+GC: generational ZGC for product-page, pricing, checkout, search; G1 for batch or settlement; heaps sized with MaxRAMPercentage=75, -Xlog:gc to the observability pipeline.
+
+451
+00:31:32.779 --> 00:31:33.696
+Profiling:
+
+452
+00:31:33.976 --> 00:31:42.829
+JFR always on with a profile settings template; async-profiler on demand for flame graphs; profiles attached to incident tickets.
+
+453
+00:31:43.109 --> 00:31:56.528
+Load testing: k6 or Gatling open-model scenarios per journey, against a production-like environment, in CI with percentile budgets; wrk2-style coordinated-omission correction.
+
+454
+00:31:57.878 --> 00:32:08.779
+Capacity: a quarterly capacity model per service (USL fit + Little's law), instances sized for peak times headroom, autoscaling targets set below the queueing knee.
+
+455
+00:32:09.059 --> 00:32:16.142
+Method: the §2.11 runbook, SLO, then trace, then profile, then platform, then fix, then guard.
+
+456
+00:32:16.422 --> 00:32:17.169
+7.
+
+457
+00:32:17.449 --> 00:32:18.963
+Alternatives considered.
+
+458
+00:32:20.313 --> 00:32:21.657
+Here is a quick table:
+
+459
+00:32:21.937 --> 00:32:24.476
+Option, and Pros, and Cons, and Verdict.
+
+460
+00:32:24.756 --> 00:32:26.057
+G1 everywhere.
+
+461
+00:32:26.337 --> 00:32:27.191
+Pros:
+
+462
+00:32:27.471 --> 00:32:28.537
+One collector.
+
+463
+00:32:28.817 --> 00:32:29.628
+Cons:
+
+464
+00:32:29.908 --> 00:32:33.641
+Pauses in the p99 for latency services (L2).
+
+465
+00:32:33.921 --> 00:32:34.732
+Verdict:
+
+466
+00:32:35.012 --> 00:32:37.295
+ZGC for latency services.
+
+467
+00:32:37.575 --> 00:32:39.089
+Optimize by intuition.
+
+468
+00:32:39.369 --> 00:32:40.223
+Pros:
+
+469
+00:32:40.503 --> 00:32:41.655
+Fast to start.
+
+470
+00:32:41.935 --> 00:32:42.745
+Cons:
+
+471
+00:32:43.025 --> 00:32:44.647
+Usually wrong (L3).
+
+472
+00:32:44.927 --> 00:32:45.737
+Verdict:
+
+473
+00:32:46.017 --> 00:32:47.127
+Profile first.
+
+474
+00:32:47.407 --> 00:32:49.284
+Closed-model load tests only.
+
+475
+00:32:49.564 --> 00:32:50.417
+Pros:
+
+476
+00:32:50.697 --> 00:32:51.465
+Simple.
+
+477
+00:32:51.745 --> 00:32:52.556
+Cons:
+
+478
+00:32:52.836 --> 00:32:57.337
+Can't see the overload cliff; coordinated omission (L1 D, L4).
+
+479
+00:32:57.617 --> 00:32:58.428
+Verdict:
+
+480
+00:32:58.708 --> 00:32:59.732
+Open model.
+
+481
+00:33:00.012 --> 00:33:01.868
+Fixed -Xmx in containers.
+
+482
+00:33:02.148 --> 00:33:03.001
+Pros:
+
+483
+00:33:03.281 --> 00:33:04.263
+Explicit.
+
+484
+00:33:04.543 --> 00:33:05.353
+Cons:
+
+485
+00:33:05.633 --> 00:33:07.532
+Drifts from limits, OOM-kills.
+
+486
+00:33:07.812 --> 00:33:08.623
+Verdict:
+
+487
+00:33:08.903 --> 00:33:10.524
+MaxRAMPercentage.
+
+488
+00:33:10.804 --> 00:33:11.935
+Guess capacity.
+
+489
+00:33:12.215 --> 00:33:13.068
+Pros:
+
+490
+00:33:13.348 --> 00:33:14.223
+No work.
+
+491
+00:33:14.503 --> 00:33:15.313
+Cons:
+
+492
+00:33:15.593 --> 00:33:17.471
+The §1.1 outage.
+
+493
+00:33:17.751 --> 00:33:18.561
+Verdict:
+
+494
+00:33:18.841 --> 00:33:20.420
+USL + Little's law.
+
+495
+00:33:21.770 --> 00:33:22.453
+8.
+
+496
+00:33:22.733 --> 00:33:23.885
+Failure modes.
+
+497
+00:33:24.165 --> 00:33:27.130
+GC pause regression, then JFR alert.
+
+498
+00:33:27.410 --> 00:33:32.658
+CPU throttling, then container metrics + no hard limits on latency services.
+
+499
+00:33:32.938 --> 00:33:35.967
+Coordinated omission, then open-model tooling.
+
+500
+00:33:36.247 --> 00:33:39.469
+Warm-up misses, then pre-warm on deploy or scale-up.
+
+501
+00:33:39.749 --> 00:33:40.453
+10.
+
+502
+00:33:40.733 --> 00:33:42.951
+Observability (Ch 24).
+
+503
+00:33:43.231 --> 00:33:55.050
+Latency percentiles per journey, GC pause and allocation-rate metrics, JFR on demand, CPU throttling, pool saturation, and load-test results tracked over time.
+
+504
+00:33:55.330 --> 00:33:56.183
+14.
+
+505
+00:33:56.463 --> 00:33:59.834
+Decision (ADR-108 to 112).
+
+506
+00:34:00.114 --> 00:34:14.599
+Low-pause GC for latency services, continuous profiling, open-model percentile load tests in CI, correct JVM container settings, and model-based capacity planning at at most 70% utilization.
+
+507
+00:34:15.949 --> 00:34:16.909
+Part 5.
+
+508
+00:34:17.189 --> 00:34:19.173
+Hands-On Code, Level Ladder.
+
+509
+00:34:20.423 --> 00:34:21.767
+Here is a quick table:
+
+510
+00:34:22.047 --> 00:34:24.735
+Level, and New requirement that forces the step.
+
+511
+00:34:25.015 --> 00:34:25.847
+L1:
+
+512
+00:34:26.127 --> 00:34:28.922
+We cut the median but p99 didn't move.
+
+513
+00:34:29.202 --> 00:34:33.042
+(tail compounding, hedging, queueing knee, coordinated omission).
+
+514
+00:34:33.322 --> 00:34:34.133
+L2:
+
+515
+00:34:34.413 --> 00:34:37.058
+Half our p99 is a GC pause.
+
+516
+00:34:37.338 --> 00:34:43.141
+(Parallel versus G1 versus ZGC on the same workload, real GC logs).
+
+517
+00:34:43.421 --> 00:34:44.274
+L3:
+
+518
+00:34:44.554 --> 00:34:45.877
+We don't know what's slow.
+
+519
+00:34:46.157 --> 00:34:50.573
+(JFR profiling to find the hotspot, then the profile-guided fix).
+
+520
+00:34:50.853 --> 00:34:51.727
+L4:
+
+521
+00:34:52.007 --> 00:34:55.335
+How much can one instance take, and how do we size the fleet?
+
+522
+00:34:55.615 --> 00:34:57.834
+(load model, USL fit, Little's law).
+
+523
+00:34:59.184 --> 00:35:01.957
+All labs run on a 2 vCPU container.
+
+524
+00:35:02.237 --> 00:35:10.984
+L2 uses real JVM GCs on JDK 21 and 25; L3 uses a real JFR recording.
+
+525
+00:35:11.264 --> 00:35:16.683
+Outputs are verbatim; lab files are in labs or ch25-performance/.
+
+526
+00:35:18.033 --> 00:35:23.430
+L1, Tail latency: compounding, hedging, the queueing knee, coordinated omission.
+
+527
+00:35:23.710 --> 00:35:24.649
+Requirement:
+
+528
+00:35:24.929 --> 00:35:28.214
+We optimized the median and p99 didn't budge.
+
+529
+00:35:28.494 --> 00:35:30.286
+Show why the tail is what matters.
+
+530
+00:35:31.636 --> 00:35:34.324
+Here is the Java code, TailL1.java.
+
+531
+00:35:34.604 --> 00:35:38.871
+It runs to 133 lines; the full listing is in the chapter.
+
+532
+00:35:39.151 --> 00:35:46.383
+TailL1.java, run with: java TailL1.java (JDK 17 plus, no dependencies).
+
+533
+00:35:46.663 --> 00:35:49.052
+Why tail latency dominates at scale.
+
+534
+00:35:49.332 --> 00:36:00.660
+A. fan-out amplification: how a service's p99 becomes a request's p50 once one. request touches N backends (Dean and Barroso, The Tail at Scale).
+
+535
+00:36:00.940 --> 00:36:02.967
+B. hedged requests as the fix.
+
+536
+00:36:03.247 --> 00:36:04.463
+C. queueing theory:
+
+537
+00:36:07.313 --> 00:36:08.230
+On screen:
+
+538
+00:36:08.510 --> 00:36:09.129
+A.
+
+539
+00:36:09.409 --> 00:36:19.713
+Fan-out amplification, one slow backend makes the whole request slow. a single backend call: p50 10 ms, p95 112 ms,
+
+540
+00:36:19.993 --> 00:37:07.133
+p99 271 ms (5% of calls are slow). request that waits for ALL of N backends p50 p95 p99. fan-out 1 10 ms 108 ms 270 ms (P≥1 slow = 5%). fan-out 5 17 ms 270 ms 303 ms (P≥1 slow = 23%). fan-out 20 174 ms 301 ms 310 ms (P≥1 slow = 64%). fan-out 100 283 ms 310 ms 316 ms (P≥1 slow = 99%). then at
+
+541
+00:37:07.413 --> 00:37:16.181
+fan-out 100, ~99% of requests hit at least one slow backend: the backend's. rare tail becomes the request's NORM.
+
+542
+00:37:16.461 --> 00:37:25.165
+This is why one slow dependency (Ch 24 L3) wrecks a fan-out page, and why you. must cut the tail, not the average.
+
+543
+00:37:25.445 --> 00:37:26.128
+B.
+
+544
+00:37:26.408 --> 00:37:32.168
+Hedging: send a 2nd request if the 1st is slow, take the first to answer (Ch 17).
+
+545
+00:37:32.448 --> 00:37:33.963
+The rest is in the chapter.
+
+546
+00:37:36.813 --> 00:37:37.666
+Reading it:
+
+547
+00:37:37.946 --> 00:37:47.866
+A, compounding: a backend slow 5% of the time becomes, across a fan-out of 100, a request slow ~99% of the time.
+
+548
+00:37:48.146 --> 00:37:51.730
+The request's median approaches the backend's p99.
+
+549
+00:37:52.010 --> 00:37:57.599
+This is why §1.1's catalog optimization didn't help the fan-out page.
+
+550
+00:37:57.879 --> 00:38:14.242
+B, hedging: a capped hedge (only when the first call exceeds p95) cut fan-out-20 p99 from 310 ms to 126 ms for 5% extra load, the tail-cutting technique from Ch 17.
+
+551
+00:38:15.592 --> 00:38:27.539
+C, the queueing knee: measured wait time tracked the M or M or 1 formula and went 1 times, then 159 times from 50% to 99% utilization.
+
+552
+00:38:27.819 --> 00:38:31.083
+There's a corner near 80%; plan to run below it.
+
+553
+00:38:31.363 --> 00:38:48.387
+D, coordinated omission: a 500 ms freeze was invisible to a naive per-call measurement (p999 about 0 ms) and obvious when measured from the scheduled send time (p999 460 ms).
+
+554
+00:38:48.667 --> 00:38:52.123
+Load tests that back off during a stall under-report the tail.
+
+555
+00:38:53.473 --> 00:38:57.803
+L2, Garbage collectors on the same workload (real GC logs).
+
+556
+00:38:58.083 --> 00:38:59.022
+Requirement:
+
+557
+00:38:59.302 --> 00:39:04.059
+Find out whether GC pauses are in our p99, and which collector to run.
+
+558
+00:39:04.339 --> 00:39:13.150
+GcWorkload.java allocates heavily while keeping a steady ~300 MB live set, and records its own request latencies.
+
+559
+00:39:13.430 --> 00:39:21.686
+It's run under each collector on JDK 21 and 25 with -Xlog:gc, and the pauses are parsed from the logs.
+
+560
+00:39:23.036 --> 00:39:31.335
+Here is the Java code, GcWorkload.java (run under different -XX:+Use...GC with -Xlog:gc).
+
+561
+00:39:31.615 --> 00:39:35.241
+It runs to 48 lines; the full listing is in the chapter.
+
+562
+00:39:35.521 --> 00:39:41.175
+GcWorkload.java, a fixed allocation-heavy workload used to compare GCs.
+
+563
+00:39:41.455 --> 00:39:58.415
+Run under different -XX:+Use...GC flags with. short-lived garbage at a high rate, the classic pattern that stresses a collector, while recording its own request. latencies so we can see GC pauses as latency, not just as GC-log lines.
+
+564
+00:40:01.265 --> 00:40:02.182
+On screen:
+
+565
+00:40:02.462 --> 00:40:11.422
+Same workload (1 GB heap, ~15 s, replacing a 300 MB live set + ~1 MB garbage per request).
+
+566
+00:40:11.702 --> 00:40:15.563
+STW = stop-the-world pause from the GC log.
+
+567
+00:40:15.843 --> 00:40:25.358
+JDK or GC reqs alloc STW total STW max req p99 req p999 req max.
+
+568
+00:40:25.638 --> 00:40:43.537
+JDK21 Parallel 67510 70.8GB 4099ms 118.4ms 0.368ms 13.785ms 118.9ms.
+
+569
+00:40:43.817 --> 00:41:02.142
+JDK21 G1 72817 76.4GB 3817ms 54.8ms 0.540ms 17.588ms 55.9ms.
+
+570
+00:41:02.422 --> 00:41:16.566
+JDK21 ZGC 70240 73.7GB sub-ms sub-ms 0.523ms 14.313ms 36.3ms.
+
+571
+00:41:16.846 --> 00:41:35.086
+JDK25 G1 65493 68.7GB 4817ms 68.8ms 0.385ms 22.298ms 89.0ms.
+
+572
+00:41:35.366 --> 00:41:50.897
+JDK25 ZGC (gen) 87764 92.0GB sub-ms sub-ms 0.542ms 3.377ms 7.5ms.
+
+573
+00:41:51.177 --> 00:42:05.427
+ZGC's stop-the-world pauses are concurrent and sub-millisecond, so they are not. logged as 'Pause... ms' at the gc level;. its effect shows in the request tail (req max), not in a STW column.
+
+574
+00:42:05.707 --> 00:42:10.337
+ZGC ran many. concurrent minor or major collections instead.
+
+575
+00:42:13.187 --> 00:42:14.040
+Reading it:
+
+576
+00:42:14.320 --> 00:42:20.720
+Parallel has the fewest, longest pauses (max 118 ms), highest throughput, worst tail.
+
+577
+00:42:20.000 --> 00:42:23.560
+Good for batch, bad for a latency SLO.
+
+578
+00:42:23.840 --> 00:42:32.032
+G1 trades those for more, shorter pauses (55 to 69 ms max), the sensible general-purpose default.
+
+579
+00:42:32.312 --> 00:42:52.899
+Generational ZGC on JDK 25 did the most work (92 GB allocated, 87,764 requests) with the shortest tail (req max 7.5 ms, p999 3.4 ms), because its pauses are concurrent and sub-millisecond.
+
+580
+00:42:53.179 --> 00:42:57.232
+For a latency-sensitive service, that request tail is the whole point.
+
+581
+00:42:58.582 --> 00:43:02.571
+The cheapest GC win is upstream: allocate less (L3).
+
+582
+00:43:02.851 --> 00:43:06.585
+GC cost scales with allocation rate and live-set size.
+
+583
+00:43:07.935 --> 00:43:11.881
+L3, Profiling with JFR: find the hotspot, then fix it.
+
+584
+00:43:12.161 --> 00:43:13.100
+Requirement:
+
+585
+00:43:13.380 --> 00:43:15.023
+Something in pricing is slow.
+
+586
+00:43:15.303 --> 00:43:17.585
+Find it by evidence, not intuition.
+
+587
+00:43:17.865 --> 00:43:28.852
+A pricing workload has two planted bugs: it builds a key by string concatenation in a loop (O(n²), heavy allocation) and does a linear scan where a map belongs.
+
+588
+00:43:29.132 --> 00:43:35.511
+A real JFR profile is recorded and analyzed with jfr print; then a fixed variant is run.
+
+589
+00:43:36.861 --> 00:43:39.805
+Here is the Java code, HotspotL3.java.
+
+590
+00:43:40.085 --> 00:43:43.647
+It runs to 70 lines; the full listing is in the chapter.
+
+591
+00:43:43.927 --> 00:43:53.058
+HotspotL3.java, run with: java -XX:+FlightRecorder -XX:StartFlightRecording=duration=...
+
+592
+00:43:53.338 --> 00:43:55.130
+HotspotL3.java.
+
+593
+00:43:55.410 --> 00:44:09.191
+A pricing workload with a deliberately planted performance bug: it builds a promo key by STRING CONCATENATION in a. loop (O(n^2), heavy char allocation) and recomputes an unindexed lookup every call.
+
+594
+00:44:09.471 --> 00:44:12.031
+JFR records CPU samples and.
+
+595
+00:44:14.881 --> 00:44:15.799
+On screen:
+
+596
+00:44:16.079 --> 00:44:16.953
+Workload:
+
+597
+00:44:17.233 --> 00:44:19.175
+3,000,000 price computations.
+
+598
+00:44:19.455 --> 00:44:25.343
+JFR profile recording (settings=profile), then. analysed with 'jfr print'.
+
+599
+00:44:25.623 --> 00:44:26.753
+SLOW baseline:
+
+600
+00:44:27.033 --> 00:44:33.711
+3,000,000 in 33,326 ms = 90,020 per second.
+
+601
+00:44:33.991 --> 00:44:35.121
+FAST (fixed):
+
+602
+00:44:35.401 --> 00:44:48.863
+3,000,000 in 190 ms = 15,789,474 per second (175x; identical checksum, so. behaviour is unchanged).
+
+603
+00:44:49.143 --> 00:44:56.076
+Top CPU by self-time (jdk.ExecutionSample, 3,159 samples):
+
+604
+00:44:56.356 --> 00:45:03.481
+1513 java.lang.Integer.getChars - building the key: turning ints into chars.
+
+605
+00:45:03.761 --> 00:45:13.383
+1492 jdk.internal.util.ArraysSupport.mismatch - String.endsWith or startsWith in the. linear promo scan.
+
+606
+00:45:13.663 --> 00:45:25.439
+111 HotspotL3.priceSlow. then both roll up to HotspotL3.priceSlow (3,139 of 3,159 samples).
+
+607
+00:45:25.719 --> 00:45:26.999
+The profiler names.
+
+608
+00:45:27.279 --> 00:45:28.793
+The rest is in the chapter.
+
+609
+00:45:31.643 --> 00:45:32.497
+Reading it:
+
+610
+00:45:32.777 --> 00:45:46.473
+The profile names the problem: the hot CPU frames (Integer.getChars, ArraysSupport.mismatch) roll up to one method, and 97% of sampled allocation is byte from the string concatenation.
+
+611
+00:45:46.753 --> 00:45:57.377
+The profile-guided fix (StringBuilder + a precomputed HashMap) ran 175 times faster with an identical checksum, same result, far less work.
+
+612
+00:45:57.657 --> 00:46:03.822
+This is the discipline: profile, read self-time and allocation, fix the widest frame, re-measure.
+
+613
+00:46:04.102 --> 00:46:08.859
+Guessing would likely have optimized the arithmetic, which the profile shows is nothing.
+
+614
+00:46:10.209 --> 00:46:13.729
+L4, Load testing, USL and capacity planning.
+
+615
+00:46:14.009 --> 00:46:14.948
+Requirement:
+
+616
+00:46:15.228 --> 00:46:20.391
+How many requests can one instance take, why does it top out, and how do we size the fleet?
+
+617
+00:46:20.671 --> 00:46:31.060
+A real contended service function (a ReentrantLock critical section + a Thread.sleep for downstream I or O) is driven by N real worker threads.
+
+618
+00:46:31.340 --> 00:46:38.145
+The program measures the throughput or latency curve, fits the Universal Scalability Law, and applies Little's law.
+
+619
+00:46:39.495 --> 00:46:42.333
+Here is the Java code, LoadL4.java.
+
+620
+00:46:42.613 --> 00:46:46.879
+It runs to 117 lines; the full listing is in the chapter.
+
+621
+00:46:47.159 --> 00:46:54.029
+LoadL4.java, run with: java LoadL4.java (JDK 21, no dependencies).
+
+622
+00:46:54.309 --> 00:47:01.498
+Load testing, capacity planning and the Universal Scalability Law, measured against a REAL contended service function.
+
+623
+00:47:01.778 --> 00:47:10.098
+(a real ReentrantLock critical section + a real Thread.sleep for downstream I or O), driven by N real worker threads.
+
+624
+00:47:12.948 --> 00:47:13.865
+On screen:
+
+625
+00:47:14.145 --> 00:47:22.913
+Service: ~0.08 ms serial (locked) + ~1 ms downstream I or O per request, on 2 cores.
+
+626
+00:47:23.193 --> 00:47:24.089
+A or B.
+
+627
+00:47:24.369 --> 00:47:25.372
+Closed model:
+
+628
+00:47:25.652 --> 00:47:29.577
+N concurrent clients, each calling in a loop for 1.5 s.
+
+629
+00:47:29.857 --> 00:47:31.969
+Throughput. and latency versus N.
+
+630
+00:47:32.249 --> 00:47:37.007
+N throughput per second p50 ms p99 ms in-flight L.
+
+631
+00:47:37.287 --> 00:47:42.108
+1 835 1.18 1.29 1.0.
+
+632
+00:47:42.388 --> 00:47:48.297
+2 1664 1.18 1.37 2.0.
+
+633
+00:47:48.577 --> 00:47:54.401
+4 3318 1.17 1.48 3.9.
+
+634
+00:47:54.681 --> 00:48:01.060
+8 6548 1.17 1.97 7.7.
+
+635
+00:48:01.340 --> 00:48:07.612
+16 10188 1.52 2.85 15.5.
+
+636
+00:48:07.892 --> 00:48:13.780
+32 10011 3.44 5.85 34.4.
+
+637
+00:48:14.060 --> 00:48:21.313
+64 9930 7.79 12.90 77.4.
+
+638
+00:48:21.593 --> 00:48:29.871
+96 9859 11.37 18.05 112.1.
+
+639
+00:48:30.151 --> 00:48:31.665
+The rest is in the chapter.
+
+640
+00:48:34.515 --> 00:48:35.369
+Reading it:
+
+641
+00:48:35.649 --> 00:48:49.003
+The curve: throughput scales nearly linearly while there's slack, then plateaus around 10,000 req per second as the lock serializes the critical sections; latency and in-flight count (Little's law) climb with N.
+
+642
+00:48:49.283 --> 00:49:10.019
+USL fit: from a handful of load points the model recovers α about 0.05 (the serialized section) and β about 0.0002 (coherency), and predicts the peak (~11,000 req per second at ~69 concurrent) beyond which throughput retrogrades.
+
+643
+00:49:10.299 --> 00:49:18.747
+That lets you predict the ceiling without testing to destruction, and it points at the fix, shrink the serial section (Ch 19 or 20).
+
+644
+00:49:20.097 --> 00:49:21.740
+Little's law sizes the pool:
+
+645
+00:49:22.020 --> 00:49:29.316
+2,000 rps times ~1.1 ms about 2 in flight, then a pool of ~4, not hundreds.
+
+646
+00:49:29.596 --> 00:49:37.297
+Closed versus open: this closed test caps in-flight at N, so it can only find operating points, never the overload cliff.
+
+647
+00:49:37.577 --> 00:49:46.751
+An open model (fixed arrival rate, measured from the scheduled time) is what reveals the cliff and avoids coordinated omission (L1 D).
+
+648
+00:49:48.101 --> 00:49:48.741
+Tip:
+
+649
+00:49:49.021 --> 00:49:55.826
+Commands and container settings (VERIFY where a tool isn't installed here). continuous JFR in production,
+
+650
+00:49:56.106 --> 00:50:27.268
+then analyse. java -XX:StartFlightRecording=maxsize=256m,maxage=6h,settings=profile,filename=app.jfr -jar app.jar. jfr print --events jdk.ExecutionSample,jdk.ObjectAllocationSample app.jfr or open in JMC or IntelliJ. async-profiler:./asprof -e cpu -d 30 -f flame.html pid flame graph.
+
+651
+00:50:27.548 --> 00:50:29.191
+GC choice + logging.
+
+652
+00:50:30.541 --> 00:50:42.615
+java -XX:+UseZGC -Xlog:gc:file=gc.log:time,uptime -XX:MaxRAMPercentage=75 -jar app.jar.
+
+653
+00:50:42.895 --> 00:50:50.469
+JVM in containers (compose or k8s): let the heap track the memory limit, verify CPU awareness.
+
+654
+00:50:50.749 --> 00:51:06.087
+JAVATOOLOPTIONS=-XX:MaxRAMPercentage=75 -XX:+UseZGC. // open-model load test (k6-style pseudocode): fixed arrival rate, not fixed VUs.
+
+655
+00:51:07.437 --> 00:51:10.424
+// scenarios: checkout: executor:
+
+656
+00:51:10.704 --> 00:51:12.325
+'constant-arrival-rate', rate:
+
+657
+00:51:12.605 --> 00:51:14.184
+2000, timeUnit:
+
+658
+00:51:14.464 --> 00:51:17.045
+'1s'. // preAllocatedVUs:
+
+659
+00:51:17.325 --> 00:51:19.117
+500, maxVUs:
+
+660
+00:51:19.397 --> 00:51:24.112
+2000 // VUs scale so latency is measured, not throttled.
+
+661
+00:51:25.462 --> 00:51:26.401
+Part 6.
+
+662
+00:51:26.681 --> 00:51:27.961
+Production Concerns.
+
+663
+00:51:29.211 --> 00:51:30.363
+Failure modes.
+
+664
+00:51:30.643 --> 00:51:31.987
+Here is a quick table:
+
+665
+00:51:32.267 --> 00:51:35.253
+Failure, and Symptom, and Cause, and Mitigation.
+
+666
+00:51:35.533 --> 00:51:37.475
+Optimizing off the critical path.
+
+667
+00:51:37.755 --> 00:51:38.565
+Symptom:
+
+668
+00:51:38.845 --> 00:51:42.664
+Effort spent, p99 unchanged (§1.1).
+
+669
+00:51:42.944 --> 00:51:43.712
+Cause:
+
+670
+00:51:43.992 --> 00:51:45.827
+No trace-based localization.
+
+671
+00:51:46.107 --> 00:51:47.109
+Mitigation:
+
+672
+00:51:47.389 --> 00:51:50.760
+Trace first (Ch 24 L3), then profile.
+
+673
+00:51:51.040 --> 00:51:53.131
+GC pause in the p99.
+
+674
+00:51:53.411 --> 00:51:54.221
+Symptom:
+
+675
+00:51:54.501 --> 00:51:56.229
+Periodic latency spikes.
+
+676
+00:51:56.509 --> 00:51:57.277
+Cause:
+
+677
+00:51:57.557 --> 00:52:00.224
+Wrong collector or undersized heap (L2).
+
+678
+00:52:00.504 --> 00:52:01.507
+Mitigation:
+
+679
+00:52:01.787 --> 00:52:05.157
+Low-pause GC, heap sizing, GC-log alerts.
+
+680
+00:52:05.437 --> 00:52:07.485
+Allocation-driven GC pressure.
+
+681
+00:52:07.765 --> 00:52:08.576
+Symptom:
+
+682
+00:52:08.856 --> 00:52:11.779
+High GC frequency, CPU in GC.
+
+683
+00:52:12.059 --> 00:52:12.827
+Cause:
+
+684
+00:52:13.107 --> 00:52:15.048
+Excess allocation (L3).
+
+685
+00:52:15.328 --> 00:52:16.331
+Mitigation:
+
+686
+00:52:16.611 --> 00:52:18.701
+Profile allocation, allocate less.
+
+687
+00:52:18.981 --> 00:52:20.411
+Coordinated omission.
+
+688
+00:52:20.691 --> 00:52:21.501
+Symptom:
+
+689
+00:52:21.781 --> 00:52:24.512
+Load test says fine, prod isn't (L1 D).
+
+690
+00:52:24.792 --> 00:52:25.560
+Cause:
+
+691
+00:52:25.840 --> 00:52:27.547
+Tool backs off during stalls.
+
+692
+00:52:27.827 --> 00:52:28.829
+Mitigation:
+
+693
+00:52:29.109 --> 00:52:32.352
+Open model or wrk2-style correction.
+
+694
+00:52:32.632 --> 00:52:33.848
+Running past the knee.
+
+695
+00:52:34.128 --> 00:52:34.939
+Symptom:
+
+696
+00:52:35.219 --> 00:52:38.013
+Latency cliff on a small spike (L1 C).
+
+697
+00:52:38.293 --> 00:52:39.061
+Cause:
+
+698
+00:52:39.341 --> 00:52:41.411
+Utilization ~80%.
+
+699
+00:52:41.691 --> 00:52:42.693
+Mitigation:
+
+700
+00:52:42.973 --> 00:52:46.045
+Plan at most 70%, autoscale below the knee.
+
+701
+00:52:47.395 --> 00:52:48.803
+CPU throttling.
+
+702
+00:52:49.083 --> 00:52:52.070
+Symptom: p99 spikes unrelated to load.
+
+703
+00:52:52.350 --> 00:52:53.118
+Cause:
+
+704
+00:52:53.398 --> 00:52:55.318
+Container CPU hard limits.
+
+705
+00:52:55.598 --> 00:52:56.601
+Mitigation:
+
+706
+00:52:56.881 --> 00:52:59.654
+Tune or remove limits for latency services.
+
+707
+00:52:59.934 --> 00:53:02.409
+OOM-kill (exit 137).
+
+708
+00:53:02.689 --> 00:53:03.499
+Symptom:
+
+709
+00:53:03.779 --> 00:53:05.209
+Crash with no exception.
+
+710
+00:53:05.489 --> 00:53:06.257
+Cause:
+
+711
+00:53:06.537 --> 00:53:08.542
+Heap + non-heap container limit.
+
+712
+00:53:08.822 --> 00:53:09.825
+Mitigation:
+
+713
+00:53:10.105 --> 00:53:13.027
+MaxRAMPercentage, headroom for off-heap.
+
+714
+00:53:13.307 --> 00:53:15.910
+Cold-JIT after deploy or scale.
+
+715
+00:53:16.190 --> 00:53:17.001
+Symptom:
+
+716
+00:53:17.281 --> 00:53:19.862
+First requests slow, spikes on scale-up.
+
+717
+00:53:20.142 --> 00:53:20.910
+Cause:
+
+718
+00:53:21.190 --> 00:53:22.107
+No warm-up.
+
+719
+00:53:22.387 --> 00:53:23.390
+Mitigation:
+
+720
+00:53:23.670 --> 00:53:26.123
+Pre-warm instances before real traffic.
+
+721
+00:53:26.403 --> 00:53:27.897
+Microbenchmark lies.
+
+722
+00:53:28.177 --> 00:53:28.987
+Symptom:
+
+723
+00:53:29.267 --> 00:53:30.953
+It's fast that isn't in prod.
+
+724
+00:53:31.233 --> 00:53:32.001
+Cause:
+
+725
+00:53:32.281 --> 00:53:34.563
+No warm-up or dead-code elimination.
+
+726
+00:53:34.843 --> 00:53:35.846
+Mitigation:
+
+727
+00:53:36.126 --> 00:53:38.707
+JMH; measure in a realistic harness.
+
+728
+00:53:40.057 --> 00:53:42.276
+Observability (Ch 24).
+
+729
+00:53:42.556 --> 00:53:47.505
+Latency percentiles per journey (never averages), with SLO burn alerts.
+
+730
+00:53:47.785 --> 00:53:55.529
+GC metrics: pause time and count, allocation rate, heap occupancy, time-in-GC; alert on pause regressions.
+
+731
+00:53:55.809 --> 00:53:57.345
+JVM or runtime:
+
+732
+00:53:57.625 --> 00:54:04.217
+CPU throttling, thread states (Ch 19), safepoint time, code-cache and metaspace usage.
+
+733
+00:54:04.497 --> 00:54:10.001
+Continuous JFR retrievable per incident; async-profiler flame graphs on demand.
+
+734
+00:54:10.281 --> 00:54:14.953
+Load-test results tracked over time so a regression is visible before release.
+
+735
+00:54:16.303 --> 00:54:17.242
+Security.
+
+736
+00:54:17.522 --> 00:54:23.367
+Profiles and heap dumps can contain secrets and PII (in-memory tokens, customer data).
+
+737
+00:54:23.647 --> 00:54:32.309
+Treat.jfr files and heap dumps as sensitive: access-controlled, redacted where possible, short retention (Ch 23).
+
+738
+00:54:32.589 --> 00:54:44.215
+Don't expose profiling or diagnostic endpoints (JMX, jcmd over a socket, actuator heapdump) unauthenticated, they leak internals and can enable DoS.
+
+739
+00:54:44.495 --> 00:54:55.930
+Performance features are DoS surfaces: an unbounded expensive query or a hedge that doubles load under stress can amplify an attack; cap and rate-limit (Ch 18).
+
+740
+00:54:57.280 --> 00:54:58.944
+Performance and tuning knobs.
+
+741
+00:54:59.224 --> 00:55:00.568
+Here is a quick table:
+
+742
+00:55:00.848 --> 00:55:02.064
+Knob, and Guidance.
+
+743
+00:55:02.344 --> 00:55:03.304
+GC:
+
+744
+00:55:03.584 --> 00:55:08.405
+ZGC or Shenandoah for latency, G1 general, Parallel batch.
+
+745
+00:55:08.685 --> 00:55:17.027
+Heap: -Xms=-Xmx or MaxRAMPercentage; big enough to avoid constant GC, within the container limit.
+
+746
+00:55:17.307 --> 00:55:18.843
+CPU (containers):
+
+747
+00:55:19.123 --> 00:55:25.032
+Correct requests; avoid hard limits for latency services; verify availableProcessors().
+
+748
+00:55:25.312 --> 00:55:26.101
+Hedging:
+
+749
+00:55:26.381 --> 00:55:31.715
+Only above p95, capped, idempotent calls (Ch 17 or 20).
+
+750
+00:55:31.995 --> 00:55:36.453
+Utilization target: at most 70% of measured peak (queueing knee).
+
+751
+00:55:36.733 --> 00:55:37.693
+Load model:
+
+752
+00:55:37.973 --> 00:55:40.832
+Open, percentile-based, production-like data.
+
+753
+00:55:41.112 --> 00:55:41.880
+Warm-up:
+
+754
+00:55:42.160 --> 00:55:45.723
+Pre-warm on deploy and scale-up; JMH for micro.
+
+755
+00:55:47.073 --> 00:55:47.798
+Cost.
+
+756
+00:55:48.078 --> 00:56:03.929
+Latency and cost trade off through utilization: running at 50% is safe but doubles instance count; running at 95% is cheap until the knee bites (L1 C). ~60 to 70% is the usual sweet spot.
+
+757
+00:56:04.209 --> 00:56:15.921
+The cheapest capacity is code that allocates and locks less (L3 gave 175 times; Ch 19 removes contention), often far cheaper than more instances.
+
+758
+00:56:16.201 --> 00:56:23.966
+Right-size the JVM: an oversized heap wastes memory you pay for; an undersized one burns CPU in GC.
+
+759
+00:56:24.246 --> 00:56:24.993
+Measure.
+
+760
+00:56:25.273 --> 00:56:35.043
+Profiling and load testing cost engineering time but prevent the expensive outages (§1.1) and the throw instances at it reflex.
+
+761
+00:56:36.393 --> 00:56:37.332
+Part 7.
+
+762
+00:56:37.612 --> 00:56:39.319
+Anti-Patterns and Pitfalls.
+
+763
+00:56:40.569 --> 00:56:41.209
+1.
+
+764
+00:56:41.489 --> 00:56:43.323
+Optimizing without profiling.
+
+765
+00:56:44.673 --> 00:56:57.004
+Here is the Java code. before: the loop must be slow, rewrite the arithmetic. after: profile first, the JFR shows it's string-building and a linear scan (L3), not the arithmetic.
+
+766
+00:56:59.854 --> 00:57:00.558
+2.
+
+767
+00:57:00.838 --> 00:57:04.273
+Averages instead of tails (Ch 24, L1).
+
+768
+00:57:04.553 --> 00:57:08.691
+A healthy average hides the p99 that fan-out amplifies.
+
+769
+00:57:08.971 --> 00:57:10.230
+Track percentiles.
+
+770
+00:57:10.510 --> 00:57:11.257
+3.
+
+771
+00:57:11.537 --> 00:57:14.929
+Optimizing off the critical path (§1.1).
+
+772
+00:57:15.209 --> 00:57:20.137
+Trace to find what actually determines the request's latency before touching code.
+
+773
+00:57:20.417 --> 00:57:21.121
+4.
+
+774
+00:57:21.401 --> 00:57:22.894
+Ignoring GC logs.
+
+775
+00:57:24.244 --> 00:57:38.900
+Here is the shell code. before: no GC visibility; a 118 ms pause sits in the p99 unnoticed (L2). after: log and watch GC; pick a low-pause collector for latency services.
+
+776
+00:57:41.750 --> 00:57:42.518
+5.
+
+777
+00:57:42.798 --> 00:57:44.675
+Fixed -Xmx in a container.
+
+778
+00:57:46.025 --> 00:57:57.929
+Here is the shell code. before: -Xmx3g in a pod whose limit later changes to 2Gi, then OOM-kill (137). after: track the limit, leave off-heap headroom.
+
+779
+00:58:00.779 --> 00:58:01.526
+6.
+
+780
+00:58:01.806 --> 00:58:05.219
+CPU hard limits on latency-sensitive services.
+
+781
+00:58:05.499 --> 00:58:10.065
+Throttling mid-request causes p99 spikes unrelated to load.
+
+782
+00:58:10.345 --> 00:58:14.675
+Prefer requests without hard caps for those services, and measure throttling.
+
+783
+00:58:14.955 --> 00:58:15.702
+7.
+
+784
+00:58:15.982 --> 00:58:20.761
+Closed-model load tests or coordinated omission (L1 D, L4).
+
+785
+00:58:22.111 --> 00:58:23.519
+On screen: before:
+
+786
+00:58:23.799 --> 00:58:29.708
+50 VUs looping send, then wait, then send; a stall stops sending, so the tail vanishes.
+
+787
+00:58:29.988 --> 00:58:41.807
+(p999 about 0). after: open model at a fixed arrival rate, latency measured from the scheduled send. time (k6 or Gatling or wrk2).
+
+788
+00:58:44.657 --> 00:58:45.339
+8.
+
+789
+00:58:45.619 --> 00:58:47.134
+Benchmarking cold code.
+
+790
+00:58:47.414 --> 00:58:51.894
+The JIT hasn't compiled hot methods yet; you're timing the interpreter.
+
+791
+00:58:52.174 --> 00:58:53.923
+Warm up, or use JMH.
+
+792
+00:58:54.203 --> 00:58:54.950
+9.
+
+793
+00:58:55.230 --> 00:58:56.595
+Hedging without a cap.
+
+794
+00:58:56.875 --> 00:59:03.403
+A retry or hedge on every request doubles downstream load and can cause the overload it was meant to avoid.
+
+795
+00:59:03.683 --> 00:59:07.907
+Hedge only above p95, capped (L1 B, Ch 18).
+
+796
+00:59:08.187 --> 00:59:08.891
+10.
+
+797
+00:59:09.171 --> 00:59:10.750
+Running hot to save money.
+
+798
+00:59:11.030 --> 00:59:16.982
+90%+ utilization looks efficient until a spike hits the queueing cliff (L1 C).
+
+799
+00:59:17.262 --> 00:59:18.435
+Plan for headroom.
+
+800
+00:59:19.785 --> 00:59:20.617
+11.
+
+801
+00:59:20.897 --> 00:59:22.455
+Premature optimization.
+
+802
+00:59:22.735 --> 00:59:30.500
+Complicating code for a path that isn't hot (the profile shows it's 0.1% of time) adds bugs for no gain.
+
+803
+00:59:30.780 --> 00:59:33.980
+Optimize what the profile and the SLO say matters.
+
+804
+00:59:34.260 --> 00:59:35.049
+12.
+
+805
+00:59:35.329 --> 00:59:39.340
+String concatenation in loops or needless allocation (L3).
+
+806
+00:59:39.620 --> 00:59:45.636
+Use StringBuilder, reuse buffers, avoid boxing in hot loops; allocation is GC pressure.
+
+807
+00:59:46.986 --> 00:59:47.861
+Part 8.
+
+808
+00:59:48.141 --> 00:59:49.485
+Interview Q and A.
+
+809
+00:59:50.735 --> 00:59:51.567
+Beginner.
+
+810
+00:59:51.847 --> 00:59:52.871
+Question 1.
+
+811
+00:59:53.151 --> 00:59:56.351
+Why measure p99, not the average latency?
+
+812
+00:59:56.631 --> 00:59:57.996
+Thirty-second answer:
+
+813
+00:59:58.276 --> 00:59:59.812
+The average hides the tail.
+
+814
+01:00:00.092 --> 01:00:19.164
+Most requests can be fast while a slice are terrible, and the average looks fine, but those slow requests are real users, and in a fan-out system they're amplified. p99 or p99.9 show what the worst-served users experience, which is what SLOs and user perception track.
+
+815
+01:00:20.514 --> 01:00:21.517
+Question 2.
+
+816
+01:00:21.797 --> 01:00:25.039
+What is a profiler and why use one before optimizing?
+
+817
+01:00:25.319 --> 01:00:26.685
+Thirty-second answer:
+
+818
+01:00:26.965 --> 01:00:37.845
+A profiler samples where the program actually spends time (CPU) and allocates memory, so you optimize by evidence instead of intuition, which is usually wrong.
+
+819
+01:00:38.125 --> 01:00:45.293
+In Java, JFR (built in, ~1% overhead) and async-profiler (flame graphs) are the standard tools.
+
+820
+01:00:46.643 --> 01:00:47.688
+Question 3.
+
+821
+01:00:47.968 --> 01:00:51.211
+What does the garbage collector do, and why do pauses matter?
+
+822
+01:00:51.491 --> 01:00:52.856
+Thirty-second answer:
+
+823
+01:00:53.136 --> 01:00:57.467
+The GC reclaims memory no longer referenced, so you don't free manually.
+
+824
+01:00:57.747 --> 01:01:07.773
+Some collectors stop the application (stop-the-world) to do part of that work; those pauses add directly to request latency and land in the p99.
+
+825
+01:01:08.053 --> 01:01:11.125
+Which collector you choose sets how long those pauses are.
+
+826
+01:01:12.475 --> 01:01:13.542
+Question 4.
+
+827
+01:01:13.822 --> 01:01:16.659
+Why does latency spike as a server gets busy?
+
+828
+01:01:16.939 --> 01:01:18.305
+Thirty-second answer:
+
+829
+01:01:18.585 --> 01:01:19.886
+A server is a queue.
+
+830
+01:01:20.166 --> 01:01:30.406
+As utilization rises, requests wait behind others, and wait time grows non-linearly, near 100% it explodes (S, ρ/(1minus ρ)).
+
+831
+01:01:30.686 --> 01:01:39.774
+So a server at 95% has far worse latency than at 70%, and a small traffic increase there causes a big latency jump.
+
+832
+01:01:41.124 --> 01:01:42.127
+Intermediate.
+
+833
+01:01:42.407 --> 01:01:43.516
+Question 5.
+
+834
+01:01:43.796 --> 01:01:47.657
+Explain tail-at-scale and how to reduce a fan-out request's tail.
+
+835
+01:01:47.937 --> 01:01:49.303
+Thirty-second answer:
+
+836
+01:01:49.583 --> 01:01:58.329
+When a request fans out to N services and waits for all, the slowest sets the latency, so the request's tail is worse than any single service's.
+
+837
+01:01:58.609 --> 01:02:10.535
+Reduce it by: fewer or coarser calls (less fan-out), tight timeouts, hedged or backup requests for the slow ones, caching, and fixing the specific slow dependency found via tracing.
+
+838
+01:02:11.885 --> 01:02:12.994
+Question 6.
+
+839
+01:02:13.274 --> 01:02:15.919
+How do you profile a JVM in production?
+
+840
+01:02:16.199 --> 01:02:17.565
+Thirty-second answer:
+
+841
+01:02:17.845 --> 01:02:30.986
+Run JDK Flight Recorder continuously (low overhead) with a profiling settings template, and pull the.jfr when you need it, analyze in JMC or IntelliJ or with jfr print.
+
+842
+01:02:31.266 --> 01:02:38.306
+For a live flame graph, attach async-profiler to the PID for CPU, allocation or lock profiling.
+
+843
+01:02:38.586 --> 01:02:42.277
+Correlate with the SLO or trace to profile the right service.
+
+844
+01:02:43.627 --> 01:02:44.715
+Question 7.
+
+845
+01:02:44.995 --> 01:02:49.389
+Which GC would you choose for a latency-sensitive service, and how do you tune it?
+
+846
+01:02:49.669 --> 01:02:51.035
+Thirty-second answer:
+
+847
+01:02:51.315 --> 01:03:03.603
+A concurrent, low-pause collector, ZGC (generational since JDK 21, default in 25) or Shenandoah, so pauses stay sub-millisecond and out of the p99.
+
+848
+01:03:03.883 --> 01:03:14.357
+Tune by sizing the heap (MaxRAMPercentage in containers) so GC isn't constant, logging GC (-Xlog:gc), and reducing allocation.
+
+849
+01:03:14.637 --> 01:03:18.136
+For batch or throughput jobs, Parallel or G1 instead.
+
+850
+01:03:19.486 --> 01:03:20.510
+Question 8.
+
+851
+01:03:20.790 --> 01:03:24.715
+What is coordinated omission and why does it matter for load testing?
+
+852
+01:03:24.995 --> 01:03:26.361
+Thirty-second answer:
+
+853
+01:03:26.641 --> 01:03:38.886
+It's a measurement bug where a load tester, waiting for each response before sending the next, stops sending during a server stall, so the requests that would have been slow are never recorded, and the tail looks fine.
+
+854
+01:03:39.166 --> 01:03:43.049
+It hides exactly the pauses you care about (GC, lock, freeze).
+
+855
+01:03:44.399 --> 01:03:45.465
+Question 9.
+
+856
+01:03:45.745 --> 01:03:49.031
+How does running the JVM in a container change things?
+
+857
+01:03:49.311 --> 01:03:50.676
+Thirty-second answer:
+
+858
+01:03:50.956 --> 01:03:59.788
+The JVM sizes the heap, GC threads and availableProcessors() from the container's limits, so wrong limits cause wrong behavior.
+
+859
+01:04:00.068 --> 01:04:11.097
+Use MaxRAMPercentage so the heap tracks the memory limit, and leave headroom for non-heap memory or the kernel OOM-kills the process (exit 137).
+
+860
+01:04:11.377 --> 01:04:15.921
+CPU hard limits can throttle mid-request and spike the p99.
+
+861
+01:04:17.271 --> 01:04:18.039
+Senior.
+
+862
+01:04:18.319 --> 01:04:19.365
+Question 10.
+
+863
+01:04:19.645 --> 01:04:23.037
+Walk through diagnosing a latency regression end to end.
+
+864
+01:04:24.387 --> 01:04:25.517
+Question 11.
+
+865
+01:04:25.797 --> 01:04:29.317
+Explain the Universal Scalability Law and what you do with it.
+
+866
+01:04:29.597 --> 01:04:30.963
+Thirty-second answer:
+
+867
+01:04:31.243 --> 01:04:47.648
+USL models throughput versus concurrency as X(N) = N, X₁ / (1 + α(Nminus 1) + βN(Nminus 1)). α is contention (a serial section, Amdahl), β is coherency (crosstalk between workers).
+
+868
+01:04:47.928 --> 01:04:51.000
+Because of β, throughput can peak and then retrograde.
+
+869
+01:04:51.280 --> 01:04:58.128
+You fit it to a few measured load points and it predicts the peak and why, so you can plan capacity and target the fix.
+
+870
+01:04:59.478 --> 01:05:00.566
+Question 12.
+
+871
+01:05:00.846 --> 01:05:04.195
+How do you use Little's law to size pools and plan capacity?
+
+872
+01:05:04.475 --> 01:05:05.841
+Thirty-second answer:
+
+873
+01:05:06.121 --> 01:05:12.115
+Little's law: in-flight = arrival rate times time in system (L = λW).
+
+874
+01:05:12.395 --> 01:05:21.121
+To serve λ requests per second at W each, you need L in flight, which sizes thread pools, connection pools and concurrency limits.
+
+875
+01:05:21.401 --> 01:05:29.187
+Combined with the queueing knee, you target ~60 to 70% utilization and size instances for peak plus headroom.
+
+876
+01:05:30.537 --> 01:05:31.817
+Question 13.
+
+877
+01:05:32.097 --> 01:05:34.956
+The service allocates a lot and GC is busy.
+
+878
+01:05:35.236 --> 01:05:36.900
+How do you reduce allocation?
+
+879
+01:05:37.180 --> 01:05:38.545
+Thirty-second answer:
+
+880
+01:05:38.825 --> 01:05:58.985
+Profile allocation (JFR ObjectAllocationSample) to find the sites, then: use StringBuilder instead of concatenation in loops, avoid autoboxing in hot paths, reuse buffers or objects (carefully), stream instead of materializing large collections, and choose primitive collections where it matters.
+
+881
+01:05:59.265 --> 01:06:02.039
+Then size the heap so GC isn't constant.
+
+882
+01:06:03.389 --> 01:06:04.583
+Question 14.
+
+883
+01:06:04.863 --> 01:06:07.061
+How do you design a trustworthy load test?
+
+884
+01:06:07.341 --> 01:06:08.706
+Thirty-second answer:
+
+885
+01:06:08.986 --> 01:06:29.146
+Open model (fixed arrival rate, VUs scale so latency is measured, not throttled), corrected for coordinated omission (measure from the scheduled send time), against production-like data and dependencies, reporting p50 or p99 or p99.9 and error rate plus resource USE.
+
+886
+01:06:29.426 --> 01:06:34.738
+Ramp to find the knee, not just one number, and run it in CI with a regression budget.
+
+887
+01:06:36.088 --> 01:06:36.984
+Architect.
+
+888
+01:06:37.264 --> 01:06:38.459
+Question 15.
+
+889
+01:06:38.739 --> 01:06:41.917
+Design the performance-engineering practice for the platform.
+
+890
+01:06:43.267 --> 01:06:44.462
+Question 16.
+
+891
+01:06:44.742 --> 01:06:49.329
+Latency versus cost versus utilization: how do you decide where to run?
+
+892
+01:06:49.609 --> 01:06:50.974
+Thirty-second answer:
+
+893
+01:06:51.254 --> 01:06:54.646
+Utilization is the dial between cost and latency.
+
+894
+01:06:54.926 --> 01:07:04.377
+Low utilization is safe but expensive (more instances); high utilization is cheap until the queueing knee, where latency explodes (L1 C).
+
+895
+01:07:04.657 --> 01:07:14.065
+Pick a target (~60 to 70% of measured peak) that keeps you off the cliff with headroom for a spike and a lost node, then autoscale around it.
+
+896
+01:07:15.415 --> 01:07:16.759
+Question 17.
+
+897
+01:07:17.039 --> 01:07:19.791
+How do you keep performance from regressing over time?
+
+898
+01:07:20.071 --> 01:07:21.436
+Thirty-second answer:
+
+899
+01:07:21.716 --> 01:07:40.041
+Make it continuous and gated: latency SLOs with burn alerts (Ch 24), an open-model load test in CI with a percentile regression budget that fails the build, continuous profiling so you can compare before or after, and GC or allocation dashboards.
+
+900
+01:07:40.321 --> 01:07:45.036
+Track per-instance capacity over releases so creeping regressions are visible.
+
+901
+01:07:46.386 --> 01:07:47.559
+Question 18.
+
+902
+01:07:47.839 --> 01:07:52.597
+When is the JVM the wrong tool, or when do you reach for native or AOT?
+
+903
+01:07:52.877 --> 01:07:54.242
+Thirty-second answer:
+
+904
+01:07:54.522 --> 01:08:02.778
+The JVM's warm-up and footprint hurt for very short-lived processes (serverless, CLIs) and tight-memory environments.
+
+905
+01:08:03.058 --> 01:08:12.679
+There, GraalVM native image or CRaC (checkpoint or restore) give fast start and low footprint, trading peak throughput and build complexity.
+
+906
+01:08:12.959 --> 01:08:20.959
+For long-running services, the JIT's peak performance usually wins, so you keep the JVM and fix warm-up with pre-warming.
+
+907
+01:08:22.309 --> 01:08:23.547
+Question 19.
+
+908
+01:08:23.827 --> 01:08:26.920
+A service is fast in staging and slow in production.
+
+909
+01:08:27.200 --> 01:08:29.077
+What's your differential diagnosis?
+
+910
+01:08:29.357 --> 01:08:30.723
+Thirty-second answer:
+
+911
+01:08:31.003 --> 01:08:48.880
+Enumerate what differs: data size (staging has small tables, then different query plans, cache hit rates), concurrency or load (queueing knee, lock contention, GC pressure only appear under real load), hardware or containers (CPU limits, noisy neighbors, throttling),
+
+912
+01:08:49.160 --> 01:08:56.221
+network or dependencies (real latency and tails, fan-out), and warm-up or JIT on fresh instances.
+
+913
+01:08:56.501 --> 01:09:03.371
+Reproduce with production-like data and an open-model load test; compare JFR and GC between the two.
+
+914
+01:09:04.721 --> 01:09:05.830
+Question 20.
+
+915
+01:09:06.110 --> 01:09:10.398
+Where does performance engineering meet the rest of the system design in this book?
+
+916
+01:09:10.678 --> 01:09:12.043
+Thirty-second answer:
+
+917
+01:09:12.323 --> 01:09:28.921
+It's the measurement layer over everything: it validates the concurrency model (Ch 19), the caching (Ch 07), the resilience limits (Ch 18), the data access (Ch 05 or 21), and the SLOs (Ch 24).
+
+918
+01:09:29.201 --> 01:09:46.118
+Tail latency ties to fan-out (Ch 16 or 17) and hedging (Ch 17); GC and allocation tie to concurrency (Ch 19); capacity ties to scalability (Ch 09) and load balancing (Ch 08).
+
+919
+01:09:47.468 --> 01:09:48.364
+Part 9.
+
+920
+01:09:48.644 --> 01:09:50.052
+Summary and Practice.
+
+921
+01:09:51.302 --> 01:09:52.390
+Key takeaways.
+
+922
+01:09:52.670 --> 01:09:55.571
+Measure the tail, not the average (Ch 24).
+
+923
+01:09:55.851 --> 01:10:00.225
+At fan-out, a backend's rare slowness becomes the request's norm (L1:
+
+924
+01:10:00.505 --> 01:10:02.937
+99% at fan-out 100).
+
+925
+01:10:03.217 --> 01:10:06.993
+Cut the tail: fewer hops, timeouts, capped hedging (L1 B:
+
+926
+01:10:07.273 --> 01:10:11.646
+310, then 126 ms for 5% load).
+
+927
+01:10:11.926 --> 01:10:16.470
+Latency turns a corner near 100% utilization (L1 C:
+
+928
+01:10:16.750 --> 01:10:19.481
+1 times, then 159 times ).
+
+929
+01:10:19.761 --> 01:10:22.235
+Plan for ~60 to 70%.
+
+930
+01:10:22.515 --> 01:10:31.027
+Profile before optimizing (L3: the fix was 175 times, and it was string-building, not the arithmetic you'd guess).
+
+931
+01:10:32.377 --> 01:10:33.977
+Pick the GC for the goal:
+
+932
+01:10:34.257 --> 01:10:37.351
+ZGC or Shenandoah for latency (L2:
+
+933
+01:10:37.631 --> 01:10:42.644
+7.5 ms tail), Parallel for batch throughput; read GC logs.
+
+934
+01:10:42.924 --> 01:10:47.575
+Allocate less, it's the cheapest GC win (L3), bigger than tuning flags.
+
+935
+01:10:47.855 --> 01:10:50.201
+Configure the JVM for containers:
+
+936
+01:10:50.481 --> 01:10:55.537
+MaxRAMPercentage, CPU awareness, watch throttling and OOM-kills.
+
+937
+01:10:55.817 --> 01:11:03.561
+Load-test with an open model, corrected for coordinated omission (L1 D, L4), on production-like data.
+
+938
+01:11:03.841 --> 01:11:11.009
+Plan capacity with Little's law and the USL (L4: predict the peak from a few points), and know why it tops out.
+
+939
+01:11:12.359 --> 01:11:13.554
+Make it a practice:
+
+940
+01:11:13.834 --> 01:11:18.741
+SLO, then trace, then profile, then platform, then fix, then guard in CI.
+
+941
+01:11:20.091 --> 01:11:21.413
+Decision cheat sheet.
+
+942
+01:11:21.693 --> 01:11:23.037
+Here is a quick table:
+
+943
+01:11:23.317 --> 01:11:24.832
+Situation, and Choice.
+
+944
+01:11:25.112 --> 01:11:26.733
+Latency-sensitive service:
+
+945
+01:11:27.013 --> 01:11:31.344
+Generational ZGC; profile; run at most 70% util.
+
+946
+01:11:31.624 --> 01:11:33.117
+Batch or throughput job:
+
+947
+01:11:33.397 --> 01:11:34.784
+Parallel or G1.
+
+948
+01:11:35.064 --> 01:11:35.939
+It's slow:
+
+949
+01:11:36.219 --> 01:11:39.163
+Trace to critical path, then JFR profile.
+
+950
+01:11:39.443 --> 01:11:41.277
+High GC or allocation:
+
+951
+01:11:41.557 --> 01:11:44.288
+Profile allocation, reduce it, then size heap.
+
+952
+01:11:44.568 --> 01:11:45.549
+Load test:
+
+953
+01:11:45.829 --> 01:11:49.477
+Open model, percentiles, CO-corrected, prod-like data.
+
+954
+01:11:49.757 --> 01:11:50.824
+Pool sizing:
+
+955
+01:11:51.104 --> 01:11:53.493
+Little's law (L = λW).
+
+956
+01:11:53.773 --> 01:11:54.947
+Capacity ceiling:
+
+957
+01:11:55.227 --> 01:11:58.107
+USL fit from load points; plan for headroom.
+
+958
+01:11:58.387 --> 01:11:59.987
+JVM in a container:
+
+959
+01:12:00.267 --> 01:12:06.795
+MaxRAMPercentage, verify CPU awareness, avoid hard CPU limits for latency.
+
+960
+01:12:08.145 --> 01:12:09.275
+Exercises.
+
+961
+01:12:09.555 --> 01:12:10.899
+Here is a quick table:
+
+962
+01:12:11.179 --> 01:12:13.035
+Band, and Exercise, and Hint.
+
+963
+01:12:13.315 --> 01:12:14.190
+B2.
+
+964
+01:12:14.470 --> 01:12:15.537
+Exercise:
+
+965
+01:12:15.817 --> 01:12:22.665
+Extend L1 A with a fan-out that waits for the fastest K of N (quorum reads); see how the tail changes.
+
+966
+01:12:22.945 --> 01:12:24.545
+Hint: order statistics.
+
+967
+01:12:24.825 --> 01:12:25.699
+B2.
+
+968
+01:12:25.979 --> 01:12:27.046
+Exercise:
+
+969
+01:12:27.326 --> 01:12:34.729
+Run L2 with a 4 GB heap and a 256 MB heap; observe pause frequency versus size.
+
+970
+01:12:35.009 --> 01:12:36.886
+Hint: allocation versus heap.
+
+971
+01:12:37.166 --> 01:12:38.041
+B3.
+
+972
+01:12:38.321 --> 01:12:39.387
+Exercise:
+
+973
+01:12:39.667 --> 01:12:47.369
+Add lock profiling to L3 (jfr print --events jdk.JavaMonitorEnter) after adding contention.
+
+974
+01:12:47.649 --> 01:12:48.331
+Hint:
+
+975
+01:12:48.611 --> 01:12:49.721
+Ch 19.
+
+976
+01:12:50.001 --> 01:12:50.875
+B3.
+
+977
+01:12:51.155 --> 01:12:52.222
+Exercise:
+
+978
+01:12:52.502 --> 01:12:59.691
+Convert L4 to an open model (fixed arrival rate) and find where latency crosses a 10 ms SLO.
+
+979
+01:12:59.971 --> 01:13:01.657
+Hint: scheduled send time.
+
+980
+01:13:01.937 --> 01:13:02.811
+B4.
+
+981
+01:13:03.091 --> 01:13:04.158
+Exercise:
+
+982
+01:13:04.438 --> 01:13:10.539
+Fit the USL to a real service's load-test data and predict the peak; compare to the measured peak.
+
+983
+01:13:10.819 --> 01:13:13.038
+Hint: least squares over α,β.
+
+984
+01:13:14.388 --> 01:13:15.263
+B4.
+
+985
+01:13:15.543 --> 01:13:16.609
+Exercise:
+
+986
+01:13:16.889 --> 01:13:23.887
+Measure warm-up: time the first 10k versus the next 10k requests; try -Xint and tiered compilation off.
+
+987
+01:13:24.167 --> 01:13:24.849
+Hint:
+
+988
+01:13:25.129 --> 01:13:26.495
+JIT stages.
+
+989
+01:13:27.845 --> 01:13:28.847
+Further reading.
+
+990
+01:13:29.127 --> 01:13:33.117
+Dean and Barroso, The Tail at Scale (CACM 2013).
+
+991
+01:13:33.397 --> 01:13:38.538
+Brendan Gregg, Systems Performance and BPF Performance Tools; the flame-graph work.
+
+992
+01:13:38.818 --> 01:13:43.277
+Neil Gunther, Guerrilla Capacity Planning (the Universal Scalability Law).
+
+993
+01:13:43.557 --> 01:13:50.490
+Gil Tene, How NOT to Measure Latency (coordinated omission); wrk2, HdrHistogram.
+
+994
+01:13:50.770 --> 01:13:56.999
+Java Performance (Scott Oaks); JDK Flight Recorder and JMC docs; async-profiler.
+
+995
+01:13:58.349 --> 01:14:00.376
+OpenJDK GC docs:
+
+996
+01:14:00.656 --> 01:14:06.885
+G1, ZGC (generational), Shenandoah; Java in a container (JVM ergonomics).
+
+997
+01:14:07.165 --> 01:14:18.835
+JMH (Java Microbenchmark Harness) documentation; Aleksey Shipilëv's JVM or benchmarking writings. k6 and Gatling docs (open-model load testing).
+
+998
+01:14:20.185 --> 01:14:21.422
+Related chapters.
+
+999
+01:14:21.702 --> 01:14:40.241
+07, Caching, 08, Load Balancing, 09, Scalability Fundamentals, 16, Microservices, 17, Inter-Service Communication, 18, Resilience Patterns, 19, Concurrency at Scale, 24, Observability, 27, Reliability and DR.
+
+1000
+01:14:41.591 --> 01:14:43.191
+That's the end of this chapter.
+
+1001
+01:14:43.471 --> 01:14:49.508
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1002
+01:14:49.788 --> 01:14:51.239
+See you in the next chapter.
+
