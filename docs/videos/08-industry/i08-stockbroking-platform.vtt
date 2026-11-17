@@ -1,0 +1,2538 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.865
+Stockbroking Platform.
+
+2
+00:00:02.145 --> 00:00:06.966
+Chapter I08, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:08.716 --> 00:00:09.676
+At a glance:
+
+4
+00:00:09.956 --> 00:00:11.129
+Chapter at a glance.
+
+5
+00:00:11.409 --> 00:00:12.220
+Sector:
+
+6
+00:00:12.500 --> 00:00:17.791
+Capital markets (India), Format: system design walkthrough (no code), Reader bands:
+
+7
+00:00:18.071 --> 00:00:20.119
+B1, then B4, Builds on:
+
+8
+00:00:20.399 --> 00:00:27.439
+Ch 55 (the exchange's matching engine), Ch 45, I03, Ch 51.
+
+9
+00:00:27.719 --> 00:00:37.703
+What you get: the design of a discount broker's platform for Indian markets, like Zerodha, Groww or Upstox, serving ~10M active clients.
+
+10
+00:00:37.983 --> 00:00:39.433
+It covers: onboarding:
+
+11
+00:00:39.713 --> 00:00:44.748
+KYC, e-sign, demat account;. money: funds in and out, margins and pledging;.
+
+12
+00:00:46.098 --> 00:01:04.210
+trading: the order management system (OMS) and pre-trade risk management (RMS), exchange connectivity, the market data ticker plant streaming prices to millions of screens, positions and P and L, GTT and alerts;. after the trade: contract notes, T+1 settlement,
+
+13
+00:01:04.490 --> 00:01:24.010
+obligations with the clearing corporation, corporate actions;. other products: mutual funds and IPO applications, trading APIs;. the algorithms: margin (SPAN-style scenarios plus exposure), P and L and tax lot matching, candle aggregation, conflation, trigger matching, surveillance;.
+
+14
+00:01:25.360 --> 00:01:37.072
+the data platform (tick store, back office, warehouse, regulatory reporting) and tech stack;. reliability for the 9:15 am market open and extreme volatility days.
+
+15
+00:01:37.352 --> 00:01:38.333
+Reading time:
+
+16
+00:01:38.613 --> 00:01:39.765
+85 min.
+
+17
+00:01:41.115 --> 00:01:41.862
+Warning:
+
+18
+00:01:42.142 --> 00:01:43.550
+Regulatory content.
+
+19
+00:01:43.830 --> 00:01:55.414
+Securities markets in India are regulated by SEBI, with rules from exchanges (NSE, BSE), clearing corporations and depositories (NSDL, CDSL).
+
+20
+00:01:55.694 --> 00:02:02.926
+Rules on margins, client funds, settlement cycles, KYC, algorithmic trading and reporting change frequently.
+
+21
+00:02:03.206 --> 00:02:06.769
+Every regulatory statement here is a summary marked VERIFY.
+
+22
+00:02:07.049 --> 00:02:13.427
+Statements about specific brokers' technology come from their public blogs or talks, and are marked VERIFY.
+
+23
+00:02:13.707 --> 00:02:16.139
+This is not investment or legal advice.
+
+24
+00:02:17.489 --> 00:02:18.343
+Part 1.
+
+25
+00:02:18.623 --> 00:02:20.159
+The System in One Page.
+
+26
+00:02:21.409 --> 00:02:22.625
+Where the broker sits.
+
+27
+00:02:22.905 --> 00:02:24.249
+Here is the diagram.
+
+28
+00:02:28.099 --> 00:02:30.061
+The broker: does not match orders.
+
+29
+00:02:30.341 --> 00:02:47.600
+The exchange does (Ch 55). checks every order against the client's funds, holdings and risk limits before sending it (pre-trade RMS). streams market data. tracks positions and money. settles obligations with the clearing corporation and depositories.
+
+30
+00:02:48.950 --> 00:02:50.038
+Main systems.
+
+31
+00:02:50.318 --> 00:02:51.662
+Here is a quick table:
+
+32
+00:02:51.942 --> 00:02:53.457
+System, and What it does.
+
+33
+00:02:53.737 --> 00:02:55.230
+Onboarding and KYC:
+
+34
+00:02:55.510 --> 00:03:01.569
+Identity, address, PAN, bank verification, e-sign, demat account opening, risk profiling.
+
+35
+00:03:01.849 --> 00:03:02.894
+Funds service:
+
+36
+00:03:03.174 --> 00:03:07.526
+Pay-in (UPI, net banking), payout requests, ledger of client money.
+
+37
+00:03:07.806 --> 00:03:08.638
+OMS:
+
+38
+00:03:08.918 --> 00:03:14.827
+Order lifecycle: validate, route, track acknowledgements, trades, modifications, cancellations.
+
+39
+00:03:15.107 --> 00:03:16.025
+RMS:
+
+40
+00:03:16.305 --> 00:03:22.150
+Pre-trade checks: margin, holdings, limits, price bands; real-time risk; auto square-off.
+
+41
+00:03:22.430 --> 00:03:23.710
+Exchange gateways:
+
+42
+00:03:23.990 --> 00:03:30.134
+Connections to exchanges' trading systems per segment (equity, F and O, currency, commodity).
+
+43
+00:03:31.484 --> 00:03:32.444
+Ticker plant:
+
+44
+00:03:32.724 --> 00:03:38.228
+Receives exchange market data, normalises it, fans it out to clients over WebSockets.
+
+45
+00:03:38.508 --> 00:03:40.001
+Positions and P and L:
+
+46
+00:03:40.281 --> 00:03:44.911
+Real-time positions, M2M (mark-to-market), holdings valuation.
+
+47
+00:03:45.191 --> 00:03:46.705
+GTT or alerts:
+
+48
+00:03:46.985 --> 00:03:49.396
+Good-till-triggered orders and price alerts.
+
+49
+00:03:49.676 --> 00:03:50.700
+Back office:
+
+50
+00:03:50.980 --> 00:03:57.743
+Contract notes, settlement obligations, client ledgers, brokerage and charges, corporate actions, tax statements.
+
+51
+00:03:58.023 --> 00:03:59.580
+Depository interface:
+
+52
+00:03:59.860 --> 00:04:06.281
+Holdings, pledges for margin, delivery instructions (for example, authorisation for selling holdings).
+
+53
+00:04:06.561 --> 00:04:08.375
+Mutual funds and IPO:
+
+54
+00:04:08.655 --> 00:04:15.311
+Orders via exchange MF platforms or RTAs; IPO applications with UPI mandates.
+
+55
+00:04:16.661 --> 00:04:17.962
+Trading APIs:
+
+56
+00:04:18.242 --> 00:04:22.466
+Programmatic access for clients and third-party apps, with rate limits.
+
+57
+00:04:22.746 --> 00:04:24.367
+Surveillance and compliance:
+
+58
+00:04:24.647 --> 00:04:27.805
+Alerts on suspicious trading, regulatory reports.
+
+59
+00:04:29.155 --> 00:04:31.309
+Scale for this design (assumptions).
+
+60
+00:04:31.589 --> 00:04:32.933
+Here is a quick table:
+
+61
+00:04:33.213 --> 00:04:34.536
+Quantity, and Value.
+
+62
+00:04:34.816 --> 00:04:35.989
+Active clients:
+
+63
+00:04:36.269 --> 00:04:39.363
+10M; 1.5M trading on a busy day.
+
+64
+00:04:39.643 --> 00:04:40.731
+Orders per day:
+
+65
+00:04:41.011 --> 00:04:43.763
+10 to 20M (F and O-heavy days higher).
+
+66
+00:04:44.043 --> 00:04:52.192
+Peak order rate: ~20 to 50k orders per second in the first minute after 9:15 am and on volatile events.
+
+67
+00:04:52.472 --> 00:04:59.064
+Instruments: ~100k tradable (equities, derivatives contracts across expiries and strikes).
+
+68
+00:04:59.344 --> 00:05:00.965
+Market data ticks received:
+
+69
+00:05:01.245 --> 00:05:04.403
+Hundreds of thousands per second at peak across segments.
+
+70
+00:05:04.683 --> 00:05:06.432
+Concurrent WebSocket clients:
+
+71
+00:05:06.712 --> 00:05:08.675
+2 to 3M at market open.
+
+72
+00:05:08.955 --> 00:05:10.917
+Subscribed instruments per client:
+
+73
+00:05:11.197 --> 00:05:14.525
+10 to 200 (watchlists, positions, option chains).
+
+74
+00:05:15.875 --> 00:05:18.585
+Estimation, the ticker is the biggest fan-out:
+
+75
+00:05:18.865 --> 00:05:23.686
+Sending every tick of every subscribed instrument to every client is impossible:
+
+76
+00:05:23.966 --> 00:05:31.518
+3M clients times 50 instruments times several ticks per second is hundreds of millions of messages per second.
+
+77
+00:05:31.798 --> 00:05:43.745
+So the ticker conflates: it sends each client at most one update per instrument per interval (for example, 1 s or 250 ms) with the latest values (§6.4).
+
+78
+00:05:44.025 --> 00:05:49.806
+Even then it is tens of millions of messages per second across a fleet of WebSocket servers.
+
+79
+00:05:50.086 --> 00:05:53.691
+That is why market data uses compact binary formats.
+
+80
+00:05:55.041 --> 00:05:55.916
+Part 2.
+
+81
+00:05:56.196 --> 00:05:57.156
+Requirements.
+
+82
+00:05:58.406 --> 00:05:59.259
+Functional.
+
+83
+00:05:59.539 --> 00:06:00.990
+Open an account online:
+
+84
+00:06:01.270 --> 00:06:12.193
+KYC, PAN verification, bank account verification, e-sign, demat account, nominee, segment activation (F and O needs income proof per rules; VERIFY).
+
+85
+00:06:12.473 --> 00:06:17.614
+Add funds instantly (UPI or net banking), withdraw to the linked bank, see the ledger.
+
+86
+00:06:17.894 --> 00:06:24.870
+Watchlists with live prices; market depth (5 levels or more); option chains; charts with historical data.
+
+87
+00:06:26.220 --> 00:06:44.183
+Place orders: market, limit, stop-loss, stop-loss market; product types (delivery or CNC, intraday or MIS, normal or NRML for F and O); after-market orders (AMO); basket orders; iceberg orders; GTT (good till triggered); modify and cancel.
+
+88
+00:06:44.463 --> 00:06:50.927
+See orders, trades, positions (intraday and overnight), holdings, P and L, margin used and available.
+
+89
+00:06:51.207 --> 00:06:53.468
+Pledge holdings for margin (collateral).
+
+90
+00:06:53.748 --> 00:06:57.908
+Mutual fund purchases and SIPs; IPO applications.
+
+91
+00:06:59.258 --> 00:07:05.871
+Contract notes, ledgers, tax P and L reports, and corporate action handling (dividends, splits, bonuses).
+
+92
+00:07:06.151 --> 00:07:13.639
+APIs for programmatic trading, with rate limits and algo rules (VERIFY SEBI's framework for retail algo trading).
+
+93
+00:07:14.989 --> 00:07:16.099
+Non-functional.
+
+94
+00:07:16.379 --> 00:07:17.723
+Here is a quick table:
+
+95
+00:07:18.003 --> 00:07:19.368
+Attribute, and Target.
+
+96
+00:07:19.648 --> 00:07:20.736
+Order latency:
+
+97
+00:07:21.016 --> 00:07:29.421
+Client tap to exchange ack in tens of ms (network-dominated); broker's internal processing a few ms p99.
+
+98
+00:07:29.701 --> 00:07:30.619
+Correctness:
+
+99
+00:07:30.899 --> 00:07:36.253
+No order accepted without margin; no double-sending; positions and funds exact.
+
+100
+00:07:36.533 --> 00:07:37.600
+Availability:
+
+101
+00:07:37.880 --> 00:07:49.315
+During market hours ≥ 99.99%; any outage during market hours is highly visible and may need to be reported to exchanges (VERIFY).
+
+102
+00:07:49.595 --> 00:07:50.597
+Market data:
+
+103
+00:07:50.877 --> 00:07:55.293
+Tick-to-screen within ~1 s for retail; depth updates consistent.
+
+104
+00:07:55.573 --> 00:07:56.320
+Scale:
+
+105
+00:07:56.600 --> 00:08:00.376
+Market open spike (orders, logins, WebSocket connects).
+
+106
+00:08:00.656 --> 00:08:01.637
+Auditability:
+
+107
+00:08:01.917 --> 00:08:09.128
+Every order, modification and risk decision logged with timestamps; records retained per regulation (VERIFY).
+
+108
+00:08:10.478 --> 00:08:11.481
+Security:
+
+109
+00:08:11.761 --> 00:08:16.027
+2FA, device binding, session management; client funds protection.
+
+110
+00:08:17.377 --> 00:08:18.273
+Part 3.
+
+111
+00:08:18.553 --> 00:08:20.068
+High-Level Architecture.
+
+112
+00:08:21.318 --> 00:08:22.662
+Here is the diagram.
+
+113
+00:08:26.512 --> 00:08:27.579
+Key decisions:
+
+114
+00:08:28.929 --> 00:08:30.273
+Here is a quick table:
+
+115
+00:08:30.553 --> 00:08:32.323
+Decision, and Choice, and Why.
+
+116
+00:08:32.603 --> 00:08:33.883
+Trading core state.
+
+117
+00:08:34.163 --> 00:08:34.995
+Choice:
+
+118
+00:08:35.275 --> 00:08:40.779
+In memory (orders, positions, margins per client), with a durable journal and snapshots.
+
+119
+00:08:41.059 --> 00:08:41.742
+Why:
+
+120
+00:08:42.022 --> 00:08:48.422
+Microsecond-to-millisecond checks; recover by replay (Ch 55 L2 determinism).
+
+121
+00:08:48.702 --> 00:08:49.619
+Partitioning.
+
+122
+00:08:49.899 --> 00:08:50.731
+Choice:
+
+123
+00:08:51.011 --> 00:08:56.793
+By client ID across RMS or OMS shards; each client's state owned by one shard.
+
+124
+00:08:57.073 --> 00:08:57.755
+Why:
+
+125
+00:08:58.035 --> 00:09:01.619
+All of a client's orders are checked against one consistent state.
+
+126
+00:09:01.899 --> 00:09:03.371
+Exchange connectivity.
+
+127
+00:09:03.651 --> 00:09:04.483
+Choice:
+
+128
+00:09:04.763 --> 00:09:08.646
+Dedicated gateways per exchange segment, with limits per connection.
+
+129
+00:09:08.926 --> 00:09:09.609
+Why:
+
+130
+00:09:09.889 --> 00:09:13.153
+Exchange rules on order rates per connection (VERIFY).
+
+131
+00:09:13.433 --> 00:09:14.435
+Market data.
+
+132
+00:09:14.715 --> 00:09:15.547
+Choice:
+
+133
+00:09:15.827 --> 00:09:17.854
+Separate ticker plant from trading core.
+
+134
+00:09:18.134 --> 00:09:18.817
+Why:
+
+135
+00:09:19.097 --> 00:09:21.465
+Very different load shapes; isolation.
+
+136
+00:09:21.745 --> 00:09:22.769
+Back office.
+
+137
+00:09:23.049 --> 00:09:23.881
+Choice:
+
+138
+00:09:24.161 --> 00:09:27.233
+Batch and event-driven, strongly consistent ledgers.
+
+139
+00:09:27.513 --> 00:09:28.195
+Why:
+
+140
+00:09:28.475 --> 00:09:29.969
+Money and regulation.
+
+141
+00:09:31.319 --> 00:09:32.236
+Deployment.
+
+142
+00:09:32.516 --> 00:09:33.348
+Choice:
+
+143
+00:09:33.628 --> 00:09:41.052
+Co-location or proximity hosting for exchange-facing parts; cloud or data centre for client-facing parts.
+
+144
+00:09:41.332 --> 00:09:42.015
+Why:
+
+145
+00:09:42.295 --> 00:09:45.687
+Latency to exchange versus elasticity for clients.
+
+146
+00:09:47.037 --> 00:09:47.954
+Part 4.
+
+147
+00:09:48.234 --> 00:09:50.111
+How It Works, Journeys End to End.
+
+148
+00:09:51.361 --> 00:09:53.260
+Journey 1: opening an account.
+
+149
+00:09:53.540 --> 00:09:58.831
+Basics: the client enters mobile and email (OTP verified) and their PAN.
+
+150
+00:09:59.111 --> 00:10:03.484
+PAN verification through the tax department's verification service.
+
+151
+00:10:03.764 --> 00:10:08.500
+KRA check: has this person already done KYC with any intermediary?
+
+152
+00:10:08.780 --> 00:10:10.465
+If so, fetch those records.
+
+153
+00:10:10.745 --> 00:10:14.244
+A CKYC lookup may also help (VERIFY current process).
+
+154
+00:10:14.524 --> 00:10:15.868
+Identity and address:
+
+155
+00:10:16.148 --> 00:10:22.249
+Aadhaar-based e-KYC or DigiLocker document fetch with consent (VERIFY permitted modes).
+
+156
+00:10:22.529 --> 00:10:28.801
+A live photo and in-person verification via video or selfie with liveness checks, as required.
+
+157
+00:10:30.151 --> 00:10:42.759
+Bank verification: a penny drop (1 rupeescredited to verify account holder name via IMPS name lookup) or reverse penny drop (the client pays 1 rupeesvia UPI from their account).
+
+158
+00:10:43.039 --> 00:10:47.775
+Profile: risk profiling questions, nominee details, segment selection.
+
+159
+00:10:48.055 --> 00:10:52.706
+F and O activation requires income proof as per current rules (VERIFY).
+
+160
+00:10:52.986 --> 00:10:58.213
+E-sign: the account opening form is signed with Aadhaar e-sign (OTP-based).
+
+161
+00:10:58.493 --> 00:11:09.309
+Demat account opened with a depository (CDSL or NSDL) via the broker's DP, and a UCC (unique client code) registered with exchanges.
+
+162
+00:11:10.659 --> 00:11:18.104
+Activation: the account is ready within hours to a day, once exchange and depository registrations complete.
+
+163
+00:11:18.384 --> 00:11:23.077
+All documents and verification results are stored encrypted, with audit trails.
+
+164
+00:11:23.357 --> 00:11:26.237
+KYC data is uploaded to the KRA.
+
+165
+00:11:27.587 --> 00:11:29.251
+Journey 2: adding funds.
+
+166
+00:11:29.531 --> 00:11:39.110
+Payment: the client pays via UPI (intent or collect) or net banking through a payment gateway, which calls back on success (Ch 45).
+
+167
+00:11:39.390 --> 00:11:48.009
+Ledger credit: the funds service credits the client ledger after verifying the payment, and only from the client's own verified bank account.
+
+168
+00:11:48.289 --> 00:11:50.955
+Third-party funds are not allowed (VERIFY).
+
+169
+00:11:51.235 --> 00:11:54.841
+Available margin in the RMS increases immediately.
+
+170
+00:11:55.121 --> 00:12:01.115
+Reconciliation: end-of-day reconciliation matches gateway settlements with ledger credits.
+
+171
+00:12:01.395 --> 00:12:02.761
+Client money protection:
+
+172
+00:12:04.111 --> 00:12:18.703
+client funds are held in designated bank accounts;. reported and segregated per exchange and clearing corporation rules;. brokers must not use client funds for other purposes (VERIFY the current segregation and upstreaming rules).
+
+173
+00:12:20.053 --> 00:12:22.890
+Journey 3: placing a buy order at market open.
+
+174
+00:12:23.170 --> 00:12:25.367
+It is 9:15:00.
+
+175
+00:12:25.647 --> 00:12:32.965
+A client places a limit buy for 100 shares of stock X at 500, rupeesproduct CNC (delivery).
+
+176
+00:12:33.245 --> 00:12:36.359
+Submit: the app sends the order to the API gateway.
+
+177
+00:12:36.639 --> 00:12:43.061
+The gateway checks: the session and 2FA session state;. rate limits;. that the request is well-formed.
+
+178
+00:12:43.341 --> 00:12:46.839
+OMS validation: instrument exists and is tradable;.
+
+179
+00:12:48.189 --> 00:13:00.861
+tick size (price in multiples of 0.05, rupeesfor example);. quantity within freeze limits;. price within the day's price band or circuit limits;. order type allowed for this segment.
+
+180
+00:13:01.141 --> 00:13:04.747
+It assigns an internal order ID and journals the order.
+
+181
+00:13:05.027 --> 00:13:08.227
+RMS pre-trade check on the client's shard, in memory:
+
+182
+00:13:09.577 --> 00:13:34.878
+required margin: for delivery equity buys, full value plus charges (50,000 rupees + estimated charges); for intraday or F and O, margin per rules (§6.1);. available margin = ledger cash + collateral value (after haircut) minus margin blocked by open orders and positions;. if sufficient, block the margin for this order;. if not, reject with a reason.
+
+183
+00:13:35.158 --> 00:13:38.891
+Route: the OMS sends the order to the exchange gateway, which:
+
+184
+00:13:40.241 --> 00:13:51.313
+sends it over the exchange's trading interface (binary protocol over leased lines);. respects per-connection message-rate limits;. distributes orders across multiple connections.
+
+185
+00:13:51.593 --> 00:13:57.439
+Exchange acknowledgement (order accepted into the book, with an exchange order ID) comes back.
+
+186
+00:13:57.719 --> 00:14:02.817
+The OMS updates the order to OPEN and pushes an update to the client over WebSocket.
+
+187
+00:14:03.097 --> 00:14:09.156
+Match: when the order matches at the exchange, trade confirmations arrive, possibly partial fills.
+
+188
+00:14:10.506 --> 00:14:13.770
+The OMS updates the filled quantity and average price.
+
+189
+00:14:14.050 --> 00:14:18.573
+The RMS converts blocked margin into used margin for the position.
+
+190
+00:14:18.853 --> 00:14:20.175
+Positions update.
+
+191
+00:14:20.455 --> 00:14:21.885
+The client sees Complete.
+
+192
+00:14:22.165 --> 00:14:25.279
+Modify or cancel requests follow the same path.
+
+193
+00:14:25.559 --> 00:14:28.226
+The RMS re-computes the blocked margin.
+
+194
+00:14:28.506 --> 00:14:40.090
+Race conditions (a cancel arriving after a fill) are resolved by the exchange's responses, and the OMS state machine handles every order of events (§5.1).
+
+195
+00:14:41.440 --> 00:15:00.256
+End of day: the trade appears in the contract note (emailed within the regulatory deadline; VERIFY), with brokerage, STT, exchange transaction charges, GST, SEBI fees and stamp duty computed by the back office;. the settlement obligation is computed (§4.5).
+
+196
+00:15:01.606 --> 00:15:04.550
+Journey 4: an options trader on expiry day.
+
+197
+00:15:04.830 --> 00:15:13.278
+Option chain: the client watches an option chain: all strikes for an index expiry, with live prices, open interest and Greeks.
+
+198
+00:15:13.558 --> 00:15:16.737
+The ticker streams the visible strikes only, conflated.
+
+199
+00:15:17.017 --> 00:15:27.107
+Greeks are computed by a pricing service from live prices, using Black-Scholes-style models with implied volatility solved numerically (§6.6).
+
+200
+00:15:27.387 --> 00:15:33.105
+Order and margin: the client buys and sells options in a basket (for example, a spread).
+
+201
+00:15:33.385 --> 00:15:36.734
+The RMS computes the margin for the combined position:
+
+202
+00:15:38.084 --> 00:15:45.252
+SPAN-style scenario margin (the worst loss across price and volatility scenarios);. plus exposure margin.
+
+203
+00:15:45.532 --> 00:15:50.652
+Hedged positions need far less margin than each leg alone (§6.1).
+
+204
+00:15:50.932 --> 00:15:56.372
+Real-time risk: as prices move, M2M losses reduce available margin.
+
+205
+00:15:56.652 --> 00:16:02.220
+If margin falls below thresholds, the RMS: sends warnings;. blocks new positions;.
+
+206
+00:16:03.570 --> 00:16:11.826
+auto square-off of intraday positions near the cut-off time, or on margin shortfall (per the broker's policy and rules; VERIFY).
+
+207
+00:16:12.106 --> 00:16:15.007
+Expiry: positions settle per exchange rules.
+
+208
+00:16:15.287 --> 00:16:19.149
+Physical settlement applies to stock options in the money (VERIFY).
+
+209
+00:16:19.429 --> 00:16:24.250
+Obligations are computed by the clearing corporation, and the back office reconciles.
+
+210
+00:16:25.600 --> 00:16:26.517
+Journey 5:
+
+211
+00:16:26.797 --> 00:16:29.357
+T+1 settlement of a delivery trade.
+
+212
+00:16:29.637 --> 00:16:31.045
+The trade is on day T.
+
+213
+00:16:31.325 --> 00:16:54.109
+Buy side: on T, the clearing corporation computes obligations per broker (net funds and securities per client and settlement type);. on T+1, the broker pays the funds obligation (from client ledgers) and receives securities in its pool account;. the securities are then transferred to the client's demat account (VERIFY the current direct-payout mechanisms).
+
+214
+00:16:55.459 --> 00:17:16.089
+Sell side (of holdings): the client authorises the sale, via an e-DIS or TPIN or mandate to the depository before selling, or through a pre-authorisation (VERIFY current mechanism);. on T+1, the securities are delivered from the client's demat account;. the funds credit the client's ledger after pay-out.
+
+215
+00:17:16.369 --> 00:17:17.307
+Failures:
+
+216
+00:17:18.657 --> 00:17:28.300
+short delivery (the seller didn't deliver) triggers an auction by the exchange, and penalties to the defaulting client;. the back office handles these exceptions.
+
+217
+00:17:28.580 --> 00:17:29.753
+Settlement cycle:
+
+218
+00:17:30.033 --> 00:17:39.079
+India moved to T+1 for equities in 2023, and has piloted optional T+0 settlement (VERIFY current status).
+
+219
+00:17:40.429 --> 00:17:41.410
+Journey 6:
+
+220
+00:17:41.690 --> 00:17:43.930
+GTT (good till triggered) order.
+
+221
+00:17:44.210 --> 00:17:55.943
+Setup: the client sets Sell 50 shares of Y if price ≥ 1,200 rupeesor at most 950 rupees (an OCO, one-cancels-other).
+
+222
+00:17:56.223 --> 00:18:04.117
+Storage: the GTT engine stores both triggers with no margin blocked (it's not yet an order), valid for up to a year.
+
+223
+00:18:04.397 --> 00:18:11.970
+Watching: on every tick of Y, the engine checks triggers efficiently with price-sorted structures (§6.5).
+
+224
+00:18:12.250 --> 00:18:23.749
+Trigger: when the last traded price crosses 1,200, rupeesthe engine creates a real order through the OMS, with RMS checks at that moment, and cancels the other leg.
+
+225
+00:18:25.099 --> 00:18:27.659
+Notification: the client is notified.
+
+226
+00:18:27.939 --> 00:18:33.379
+If the order is rejected (for example, holdings already sold), the client is told why.
+
+227
+00:18:34.729 --> 00:18:35.731
+Journey 7:
+
+228
+00:18:36.011 --> 00:18:38.550
+IPO application and mutual funds.
+
+229
+00:18:38.830 --> 00:18:54.147
+IPO: the client applies through the broker's app;. the broker submits the bid to the exchange's IPO platform with the client's UPI ID;. the client approves a UPI mandate to block funds in their bank account (ASBA);. on allotment,
+
+230
+00:18:54.427 --> 00:19:02.705
+the blocked amount is debited and shares credited to the demat account; otherwise the mandate is revoked (VERIFY flow and timelines).
+
+231
+00:19:04.055 --> 00:19:18.028
+Mutual funds: orders are placed via exchange MF platforms or directly with RTAs;. payment by UPI or mandate for SIPs;. units are credited to the demat account or held in statement form.
+
+232
+00:19:18.308 --> 00:19:22.532
+A cut-off time rule decides which day's NAV applies (VERIFY).
+
+233
+00:19:23.882 --> 00:19:24.842
+Part 5.
+
+234
+00:19:25.122 --> 00:19:26.658
+Core Subsystems in Depth.
+
+235
+00:19:27.908 --> 00:19:29.785
+OMS: the order state machine.
+
+236
+00:19:30.065 --> 00:19:31.409
+Here is the diagram.
+
+237
+00:19:35.259 --> 00:19:36.966
+Every transition is journaled.
+
+238
+00:19:37.246 --> 00:19:52.094
+Responses from the exchange can arrive in unexpected orders (a trade before the modify acknowledgement), so the state machine must accept any valid sequence and reconcile quantities from the exchange's messages, which are the truth.
+
+239
+00:19:52.374 --> 00:19:56.577
+Idempotency: client order IDs prevent duplicates from retries.
+
+240
+00:19:56.857 --> 00:19:59.779
+Exchange order IDs map to internal IDs.
+
+241
+00:20:00.059 --> 00:20:04.369
+Recovery: on OMS restart, replay the journal to rebuild state;.
+
+242
+00:20:05.719 --> 00:20:11.969
+then reconcile with the exchange's order book download for the day, catching anything missed during a disconnect.
+
+243
+00:20:13.319 --> 00:20:15.901
+RMS: pre-trade and real-time risk.
+
+244
+00:20:16.181 --> 00:20:28.959
+State per client (in memory): cash balance (ledger);. collateral (pledged holdings times price times (1 minus haircut));. margins blocked by open orders;. margins used by positions;.
+
+245
+00:20:29.239 --> 00:20:34.530
+M2M P and L;. limits (max order value, max quantity, allowed segments).
+
+246
+00:20:35.880 --> 00:20:46.376
+Pre-trade check (for every order, within microseconds): compute incremental margin;. check limits and price bands;. block the margin atomically with the order acceptance.
+
+247
+00:20:46.656 --> 00:20:57.835
+The per-client shard processes that client's events in order, like a single-threaded actor, so no race can double-spend margin (Ch 55 L3 for the risk-check model).
+
+248
+00:20:58.115 --> 00:20:59.309
+Real-time risk:
+
+249
+00:21:00.659 --> 00:21:13.993
+on every price update of instruments in a client's positions, recompute M2M and margin utilisation (incrementally, only affected clients);. thresholds trigger alerts and restrictions, then square-off.
+
+250
+00:21:14.273 --> 00:21:29.163
+Scheduled square-off: at the intraday cut-off (for example, ~3:20 pm for equity; VERIFY), open intraday positions are closed by market orders, a large burst the OMS must pace within exchange limits.
+
+251
+00:21:29.443 --> 00:21:39.022
+Peak margin compliance: margins must be collected upfront, and exchanges check intraday snapshots of margin sufficiency (VERIFY current rules).
+
+252
+00:21:39.302 --> 00:21:42.267
+This is why RMS checks everything before sending.
+
+253
+00:21:43.617 --> 00:21:45.089
+Exchange connectivity.
+
+254
+00:21:45.369 --> 00:21:51.193
+Protocol: exchanges provide trading interfaces (binary protocols) over leased lines.
+
+255
+00:21:51.473 --> 00:21:59.153
+Many brokers host servers in the exchange co-location facility or nearby for latency (VERIFY each broker's setup).
+
+256
+00:21:59.433 --> 00:22:06.153
+Limits: each connection has message-rate limits, so the gateway spreads orders across connections and queues bursts.
+
+257
+00:22:06.433 --> 00:22:09.015
+Resilience: redundant links and connections.
+
+258
+00:22:09.295 --> 00:22:14.393
+On disconnect: reconnect;. download order and trade status for reconciliation;.
+
+259
+00:22:15.743 --> 00:22:18.901
+block new orders for affected segments if necessary.
+
+260
+00:22:19.181 --> 00:22:24.322
+Drop copy (a separate feed of the broker's trades from the exchange) helps reconcile.
+
+261
+00:22:25.672 --> 00:22:26.717
+The ticker plant.
+
+262
+00:22:26.997 --> 00:22:35.808
+Feed handlers receive exchange market data: multicast or TCP broadcast feeds of trades, quotes and depth, in binary formats.
+
+263
+00:22:36.088 --> 00:22:40.717
+They handle sequence gaps (request retransmission, or use recovery feeds).
+
+264
+00:22:40.997 --> 00:22:49.019
+Normalisation to an internal format: instrument token, last traded price, volume, OHLC, depth levels, open interest.
+
+265
+00:22:49.299 --> 00:22:53.587
+State: an in-memory latest snapshot per instrument plus a short history.
+
+266
+00:22:53.867 --> 00:22:58.539
+Fan-out: clients connect over WebSockets and subscribe to instrument tokens;.
+
+267
+00:22:59.889 --> 00:23:22.801
+WebSocket servers keep a subscription map (token, then set of connections);. each server receives the ticker stream (internal pub or sub, for example, multicast in the data centre or a message bus) and sends updates to subscribed connections;. conflation (§6.4): per connection per instrument, send only the latest state at most every n ms;.
+
+268
+00:23:24.151 --> 00:23:24.940
+modes:
+
+269
+00:23:25.220 --> 00:23:29.337
+LTP (last traded price only, smallest), quote, full (with depth).
+
+270
+00:23:29.617 --> 00:23:37.745
+Zerodha's public Kite Connect API documents LTP or quote or full modes with binary packets (VERIFY).
+
+271
+00:23:38.025 --> 00:23:48.137
+Candles: a candle service aggregates ticks into 1-minute OHLCV bars in real time (§6.3), and stores them in a time-series store for charts.
+
+272
+00:23:48.417 --> 00:23:57.377
+Consumers inside the platform: the RMS (prices for M2M), the GTT or alerts engine, the option pricing service.
+
+273
+00:23:58.727 --> 00:24:00.263
+Positions and P and L.
+
+274
+00:24:00.543 --> 00:24:07.711
+Positions: from trades, net quantity and average price per instrument per product type (intraday versus overnight).
+
+275
+00:24:07.991 --> 00:24:10.317
+Realised P and L when positions close.
+
+276
+00:24:10.597 --> 00:24:13.519
+Unrealised (M2M) from live prices.
+
+277
+00:24:13.799 --> 00:24:20.562
+Holdings: from depository records plus today's delivery trades (T1 holdings before settlement completes).
+
+278
+00:24:20.842 --> 00:24:24.725
+Valued at live prices, with day change and overall P and L.
+
+279
+00:24:25.005 --> 00:24:39.277
+Tax P and L: capital gains by FIFO lot matching of buys and sells (§6.2), with short-term versus long-term classification and grandfathering rules for older holdings (VERIFY current tax rules).
+
+280
+00:24:40.627 --> 00:24:41.651
+Back office.
+
+281
+00:24:41.931 --> 00:25:05.632
+Daily batch after market close: trade files from exchanges;. reconcile with the OMS;. compute charges: brokerage, STT or CTT, exchange transaction charges, SEBI turnover fee, stamp duty, GST (VERIFY current rates);. generate contract notes (digitally signed);. post client ledger entries;. compute settlement obligations per clearing corporation file;.
+
+282
+00:25:06.982 --> 00:25:08.262
+generate reports.
+
+283
+00:25:08.542 --> 00:25:17.801
+Corporate actions: dividends credited by the depository or RTA;. splits and bonuses adjust holdings quantities and average prices;.
+
+284
+00:25:18.081 --> 00:25:24.203
+F and O contracts are adjusted by exchange rules;. historical prices are adjusted for charts.
+
+285
+00:25:24.483 --> 00:25:29.902
+Pledges: client pledge requests go to the depository for approval via OTP.
+
+286
+00:25:30.182 --> 00:25:33.211
+Approved pledges add collateral value with haircuts.
+
+287
+00:25:34.561 --> 00:25:42.839
+Running account settlement: periodic return of unused client funds to bank accounts, as required (VERIFY current frequency).
+
+288
+00:25:44.189 --> 00:25:45.490
+Trading APIs.
+
+289
+00:25:45.770 --> 00:25:51.679
+REST APIs for orders, positions, holdings and margins, plus WebSocket market data.
+
+290
+00:25:51.959 --> 00:25:55.031
+Authentication by login flow and access tokens.
+
+291
+00:25:55.311 --> 00:26:01.050
+Rate limits per API key (orders per second, requests per second), and per-day order caps.
+
+292
+00:26:01.330 --> 00:26:12.679
+Algorithmic trading by retail clients is subject to SEBI's framework for API access, algo identification and exchange approval (VERIFY current rules and timelines).
+
+293
+00:26:14.029 --> 00:26:14.968
+Part 6.
+
+294
+00:26:15.248 --> 00:26:16.208
+Algorithms.
+
+295
+00:26:17.458 --> 00:26:18.951
+Margin computation.
+
+296
+00:26:19.231 --> 00:26:23.263
+Equity delivery buy: full value plus charges (cash required).
+
+297
+00:26:23.543 --> 00:26:29.858
+Equity intraday: a VaR-based margin plus extreme loss margin, applied per exchange rules.
+
+298
+00:26:30.138 --> 00:26:33.146
+Leverage is limited by regulation (VERIFY).
+
+299
+00:26:33.426 --> 00:26:48.594
+F and O, SPAN-style: define scenarios: price moves (up and down by fractions of the price scan range) combined with volatility moves, plus extreme moves;. for each scenario, revalue each position (options by a pricing model);.
+
+300
+00:26:49.944 --> 00:26:52.291
+sum across the portfolio per underlying.
+
+301
+00:26:52.571 --> 00:27:06.117
+The scanning risk is the worst total loss across scenarios;. add calendar spread charges, subtract net option value where applicable, apply short-option minimums;. add exposure margin as a percentage of notional.
+
+302
+00:27:06.397 --> 00:27:17.555
+Exchanges publish risk parameter files (scenario arrays) daily, so brokers compute margins consistently with the clearing corporation (VERIFY the current methodology).
+
+303
+00:27:18.905 --> 00:27:26.265
+Incremental computation: for a new order, compute the margin of the portfolio with the order minus the margin without it.
+
+304
+00:27:26.545 --> 00:27:28.806
+Hedging orders can reduce margin.
+
+305
+00:27:29.086 --> 00:27:34.910
+Performance: precompute per-instrument scenario values from the risk parameter file each morning.
+
+306
+00:27:35.190 --> 00:27:38.433
+Per order, sum arrays for the affected underlying only.
+
+307
+00:27:39.783 --> 00:27:41.703
+P and L and tax lot matching.
+
+308
+00:27:41.983 --> 00:27:46.527
+FIFO matching: keep a queue of buy lots (date, quantity, price) per instrument.
+
+309
+00:27:46.807 --> 00:27:52.460
+Each sell consumes the oldest lots first, producing realised gain lines with holding period.
+
+310
+00:27:52.740 --> 00:27:59.609
+Weighted average cost for display (average buy price), while tax reports use FIFO (VERIFY tax rules).
+
+311
+00:27:59.889 --> 00:28:08.316
+Corporate actions adjust lots: a split doubles quantity and halves price, and a bonus adds zero-cost lots per rules (VERIFY).
+
+312
+00:28:08.596 --> 00:28:15.060
+Intraday versus delivery classification (speculative versus non-speculative income; VERIFY).
+
+313
+00:28:16.410 --> 00:28:17.775
+Candle aggregation.
+
+314
+00:28:18.055 --> 00:28:26.781
+Per instrument per interval: open = first trade price, high = max, low = min, close = last, volume = sum.
+
+315
+00:28:27.061 --> 00:28:29.983
+Real-time: maintain the current candle in memory.
+
+316
+00:28:30.263 --> 00:28:35.149
+When a tick crosses the interval boundary, emit the completed candle and start the next.
+
+317
+00:28:35.429 --> 00:28:41.637
+Higher intervals (5 m, 15 m, 1 h, 1 d) are aggregated from 1-minute candles.
+
+318
+00:28:41.917 --> 00:28:47.442
+Late or corrected ticks: use the exchange's official closing data for daily candles.
+
+319
+00:28:47.722 --> 00:28:54.805
+Adjustments: historical candles adjusted for splits and bonuses on the fly, or stored with adjustment factors.
+
+320
+00:28:56.155 --> 00:28:57.541
+Conflation and fan-out.
+
+321
+00:28:57.821 --> 00:29:02.024
+Per connection, per instrument: keep a dirty flag and the latest snapshot.
+
+322
+00:29:02.304 --> 00:29:07.979
+On each flush interval, send the latest snapshot of dirty instruments in one batched binary frame.
+
+323
+00:29:08.259 --> 00:29:12.675
+Result: bandwidth per client is bounded regardless of market activity.
+
+324
+00:29:12.955 --> 00:29:16.155
+Clients always see the latest value, never a stale queue.
+
+325
+00:29:16.435 --> 00:29:23.176
+Slow clients: if a socket's send buffer grows, increase that client's flush interval or drop depth updates.
+
+326
+00:29:23.456 --> 00:29:25.056
+Never block the fan-out loop.
+
+327
+00:29:25.336 --> 00:29:26.168
+Sharding:
+
+328
+00:29:26.448 --> 00:29:29.157
+WebSocket servers are sharded by connection.
+
+329
+00:29:29.437 --> 00:29:34.600
+Each receives the full tick stream (or a subset for its subscriptions) from the ticker plant.
+
+330
+00:29:35.950 --> 00:29:38.851
+Trigger matching (GTT, alerts, stop-loss).
+
+331
+00:29:39.131 --> 00:29:50.033
+Per instrument, two sorted structures: trigger when price ≥ X, sorted ascending by X;. trigger when price at most Y, sorted descending by Y.
+
+332
+00:29:50.313 --> 00:29:57.523
+On a new price p: pop all triggers with X at most p from the first, and Y ≥ p from the second.
+
+333
+00:29:57.803 --> 00:30:00.363
+That is O(k log n) for k triggered.
+
+334
+00:30:00.643 --> 00:30:03.438
+Sorted maps or heaps work, as does a skip list.
+
+335
+00:30:03.718 --> 00:30:07.195
+Gaps: if the price jumps past several triggers, all fire.
+
+336
+00:30:07.475 --> 00:30:10.057
+Ordering between them follows creation time.
+
+337
+00:30:11.407 --> 00:30:15.439
+Scale: millions of triggers across instruments, sharded by instrument.
+
+338
+00:30:15.719 --> 00:30:17.724
+The engine consumes the ticker stream.
+
+339
+00:30:18.004 --> 00:30:22.505
+Stop-loss orders placed at the exchange are triggered by the exchange itself.
+
+340
+00:30:22.785 --> 00:30:25.239
+GTT and alerts are broker-side.
+
+341
+00:30:26.589 --> 00:30:29.234
+Option pricing and implied volatility.
+
+342
+00:30:29.514 --> 00:30:37.663
+Pricing: a Black-Scholes-style model for European index options (VERIFY which options are European-style in Indian markets).
+
+343
+00:30:37.943 --> 00:30:41.634
+Greeks (delta, gamma, theta, vega) are computed analytically.
+
+344
+00:30:41.914 --> 00:30:52.175
+Implied volatility: solve price(σ) = market price for σ by Newton, Raphson (using vega), with bisection fallback when vega is tiny.
+
+345
+00:30:52.455 --> 00:30:57.191
+Performance: recompute the Greeks for visible strikes on price updates, throttled.
+
+346
+00:30:58.541 --> 00:30:59.523
+Surveillance.
+
+347
+00:30:59.803 --> 00:31:16.891
+Patterns: wash trades (same beneficial owner on both sides);. spoofing or layering (large orders placed and cancelled to move prices);. circular trading among related accounts;. unusual trading before announcements;. pump-and-dump activity in illiquid stocks.
+
+348
+00:31:18.241 --> 00:31:28.417
+Methods: rules on order-to-trade ratios and cancellation patterns, graph analysis of related accounts, and anomaly detection on volume and price impact.
+
+349
+00:31:28.697 --> 00:31:34.563
+Exchange alerts come to brokers for investigation (VERIFY broker surveillance obligations).
+
+350
+00:31:35.913 --> 00:31:38.559
+Order throttling and fairness at market open.
+
+351
+00:31:38.839 --> 00:31:45.729
+Pre-open session orders and AMOs are queued and sent in a controlled stream at the session start, within exchange limits.
+
+352
+00:31:46.009 --> 00:31:50.532
+Burst smoothing: token buckets per exchange connection (Ch 39).
+
+353
+00:31:50.812 --> 00:31:54.673
+FIFO across clients, so no client gets systematic priority.
+
+354
+00:31:56.023 --> 00:31:56.962
+Part 7.
+
+355
+00:31:57.242 --> 00:31:58.565
+Data Architecture.
+
+356
+00:31:59.815 --> 00:32:01.201
+Operational stores.
+
+357
+00:32:01.481 --> 00:32:02.825
+Here is a quick table:
+
+358
+00:32:03.105 --> 00:32:05.281
+Data, and Store (reference), and Notes.
+
+359
+00:32:05.561 --> 00:32:08.527
+Trading core state (orders, margins, positions).
+
+360
+00:32:08.807 --> 00:32:10.044
+Store (reference):
+
+361
+00:32:10.324 --> 00:32:13.844
+In-memory per shard + append-only journal + snapshots.
+
+362
+00:32:14.124 --> 00:32:14.935
+Notes:
+
+363
+00:32:15.215 --> 00:32:16.559
+Replay on restart.
+
+364
+00:32:16.839 --> 00:32:18.716
+Orders or trades (queryable).
+
+365
+00:32:18.996 --> 00:32:20.233
+Store (reference):
+
+366
+00:32:20.513 --> 00:32:23.969
+PostgreSQL (partitioned by date) fed from the journal.
+
+367
+00:32:24.249 --> 00:32:25.060
+Notes:
+
+368
+00:32:25.340 --> 00:32:27.153
+Order history, APIs.
+
+369
+00:32:27.433 --> 00:32:28.841
+Client master, KYC.
+
+370
+00:32:29.121 --> 00:32:30.359
+Store (reference):
+
+371
+00:32:30.639 --> 00:32:34.692
+PostgreSQL + encrypted object storage for documents.
+
+372
+00:32:34.972 --> 00:32:35.783
+Notes:
+
+373
+00:32:36.063 --> 00:32:37.364
+PII controls.
+
+374
+00:32:37.644 --> 00:32:38.689
+Client ledger.
+
+375
+00:32:38.969 --> 00:32:40.207
+Store (reference):
+
+376
+00:32:40.487 --> 00:32:43.239
+PostgreSQL with double-entry constraints.
+
+377
+00:32:43.519 --> 00:32:44.329
+Notes:
+
+378
+00:32:44.609 --> 00:32:46.892
+Ch 45, I03.
+
+379
+00:32:47.172 --> 00:32:48.623
+Sessions, rate limits.
+
+380
+00:32:48.903 --> 00:32:50.140
+Store (reference):
+
+381
+00:32:50.420 --> 00:32:51.188
+Redis.
+
+382
+00:32:51.468 --> 00:32:52.279
+Notes:
+
+383
+00:32:52.559 --> 00:32:53.391
+Ephemeral.
+
+384
+00:32:53.671 --> 00:32:55.249
+Latest market snapshot.
+
+385
+00:32:55.529 --> 00:32:56.767
+Store (reference):
+
+386
+00:32:57.047 --> 00:33:00.076
+In-memory in the ticker plant; Redis for services.
+
+387
+00:33:00.356 --> 00:33:01.167
+Notes:
+
+388
+00:33:01.447 --> 00:33:02.727
+Rebuilt from the feed.
+
+389
+00:33:04.077 --> 00:33:05.250
+Ticks and candles.
+
+390
+00:33:05.530 --> 00:33:06.767
+Store (reference):
+
+391
+00:33:07.047 --> 00:33:13.362
+Time-series or columnar store (ClickHouse, QuestDB, TimescaleDB or kdb+).
+
+392
+00:33:13.642 --> 00:33:14.453
+Notes:
+
+393
+00:33:14.733 --> 00:33:16.034
+Charts, analytics.
+
+394
+00:33:16.314 --> 00:33:17.829
+GTT and alerts.
+
+395
+00:33:18.109 --> 00:33:19.346
+Store (reference):
+
+396
+00:33:19.626 --> 00:33:22.783
+Durable store + in-memory index per instrument.
+
+397
+00:33:23.063 --> 00:33:23.874
+Notes:
+
+398
+00:33:24.154 --> 00:33:25.669
+Reloaded at start of day.
+
+399
+00:33:27.019 --> 00:33:29.024
+Publicly described (VERIFY):
+
+400
+00:33:29.304 --> 00:33:37.283
+Zerodha has written on its tech blog about using Go, PostgreSQL and Redis extensively, and open-sourced several tools.
+
+401
+00:33:37.563 --> 00:33:42.704
+Its Kite Connect API documentation describes the market data streaming modes.
+
+402
+00:33:44.054 --> 00:33:45.227
+Streams and batch.
+
+403
+00:33:45.507 --> 00:33:53.721
+Kafka carries order events, trades, risk events and ledger postings to the back office, surveillance, notifications and the warehouse.
+
+404
+00:33:54.001 --> 00:34:06.694
+Daily batch: exchange and clearing files (trades, obligations, margins), depository files (holdings, corporate actions), and bank statements are reconciled against internal records.
+
+405
+00:34:06.974 --> 00:34:09.257
+Discrepancies go to an exceptions queue.
+
+406
+00:34:10.607 --> 00:34:12.121
+Warehouse and analytics.
+
+407
+00:34:12.401 --> 00:34:20.380
+Facts: orders, trades, positions end of day, ledger entries, margins, logins, API calls, market data aggregates.
+
+408
+00:34:20.660 --> 00:34:28.063
+Dimensions: client (pseudonymised for analytics), instrument (with corporate action history), segment, exchange, date.
+
+409
+00:34:28.343 --> 00:34:41.335
+Uses: business metrics: active traders, turnover, revenue by segment;. risk analytics: margin utilisation distributions, square-off events;. client reports: tax P and L, statements;.
+
+410
+00:34:42.685 --> 00:34:51.858
+regulatory reporting: client fund balances, margin reporting, KYC reports (VERIFY required reports);. surveillance models.
+
+411
+00:34:52.138 --> 00:34:59.263
+Retention: records are kept for regulator-specified periods (VERIFY), and tick data is compressed and tiered.
+
+412
+00:35:00.613 --> 00:35:01.595
+Data flow.
+
+413
+00:35:01.875 --> 00:35:03.219
+Here is the diagram.
+
+414
+00:35:07.069 --> 00:35:07.943
+Part 8.
+
+415
+00:35:08.223 --> 00:35:09.909
+Tech Stack (reference choice).
+
+416
+00:35:11.159 --> 00:35:12.503
+Here is a quick table:
+
+417
+00:35:12.783 --> 00:35:14.404
+Layer, and Choice, and Why.
+
+418
+00:35:14.684 --> 00:35:16.988
+Trading core (OMS or RMS).
+
+419
+00:35:17.268 --> 00:35:18.100
+Choice:
+
+420
+00:35:18.380 --> 00:35:28.833
+Java (low-GC techniques, single-writer per shard, Aeron or Chronicle-style journaling) or C++/Rust; Go for less latency-critical parts.
+
+421
+00:35:29.113 --> 00:35:29.796
+Why:
+
+422
+00:35:30.076 --> 00:35:34.364
+Deterministic low latency (Ch 19, Ch 55).
+
+423
+00:35:34.644 --> 00:35:35.967
+Exchange gateways.
+
+424
+00:35:36.247 --> 00:35:37.079
+Choice:
+
+425
+00:35:37.359 --> 00:35:42.180
+C++/Java with exchange-certified protocol implementations.
+
+426
+00:35:42.460 --> 00:35:43.143
+Why:
+
+427
+00:35:43.423 --> 00:35:46.196
+Exchange certification requirements (VERIFY).
+
+428
+00:35:46.476 --> 00:35:48.268
+Ticker plant and WebSockets.
+
+429
+00:35:48.548 --> 00:35:49.380
+Choice:
+
+430
+00:35:49.660 --> 00:35:53.223
+Go or Rust (many connections per server); binary frames.
+
+431
+00:35:53.503 --> 00:35:54.185
+Why:
+
+432
+00:35:54.465 --> 00:35:55.724
+Fan-out efficiency.
+
+433
+00:35:56.004 --> 00:35:58.244
+APIs and back office services.
+
+434
+00:35:58.524 --> 00:35:59.356
+Choice:
+
+435
+00:35:59.636 --> 00:36:01.193
+Go or Java or Python.
+
+436
+00:36:01.473 --> 00:36:02.156
+Why:
+
+437
+00:36:02.436 --> 00:36:03.460
+Team skills.
+
+438
+00:36:03.740 --> 00:36:04.871
+Databases.
+
+439
+00:36:05.151 --> 00:36:05.983
+Choice:
+
+440
+00:36:06.263 --> 00:36:08.716
+PostgreSQL (partitioned), Redis.
+
+441
+00:36:08.996 --> 00:36:09.679
+Why:
+
+442
+00:36:09.959 --> 00:36:10.769
+Proven.
+
+443
+00:36:12.119 --> 00:36:13.122
+Time series.
+
+444
+00:36:13.402 --> 00:36:14.234
+Choice:
+
+445
+00:36:14.514 --> 00:36:17.543
+ClickHouse or QuestDB or TimescaleDB.
+
+446
+00:36:17.823 --> 00:36:18.506
+Why:
+
+447
+00:36:18.786 --> 00:36:20.130
+Fast OHLC queries.
+
+448
+00:36:20.410 --> 00:36:21.306
+Messaging.
+
+449
+00:36:21.586 --> 00:36:22.418
+Choice:
+
+450
+00:36:22.698 --> 00:36:28.053
+Kafka; low-latency internal messaging (Aeron or multicast) for the trading core.
+
+451
+00:36:28.333 --> 00:36:29.015
+Why:
+
+452
+00:36:29.295 --> 00:36:31.599
+Separate durability and latency needs.
+
+453
+00:36:31.879 --> 00:36:32.775
+Warehouse.
+
+454
+00:36:33.055 --> 00:36:33.887
+Choice:
+
+455
+00:36:34.167 --> 00:36:36.770
+ClickHouse or Trino + object storage.
+
+456
+00:36:37.050 --> 00:36:37.733
+Why:
+
+457
+00:36:38.013 --> 00:36:38.973
+Analytics.
+
+458
+00:36:39.253 --> 00:36:40.298
+Mobile or web.
+
+459
+00:36:40.578 --> 00:36:41.410
+Choice:
+
+460
+00:36:41.690 --> 00:36:45.701
+Native or React Native; web SPA with charting libraries.
+
+461
+00:36:45.981 --> 00:36:46.663
+Why:
+
+462
+00:36:46.943 --> 00:36:47.839
+Performance.
+
+463
+00:36:48.119 --> 00:36:49.165
+Infrastructure.
+
+464
+00:36:49.445 --> 00:36:50.277
+Choice:
+
+465
+00:36:50.557 --> 00:36:59.026
+Co-lo or on-prem for exchange-facing systems; cloud or DC for client-facing ones; Kubernetes for stateless services.
+
+466
+00:36:59.306 --> 00:36:59.989
+Why:
+
+467
+00:37:00.269 --> 00:37:02.039
+Latency and regulation.
+
+468
+00:37:02.319 --> 00:37:03.407
+Observability.
+
+469
+00:37:03.687 --> 00:37:04.519
+Choice:
+
+470
+00:37:04.799 --> 00:37:09.386
+Prometheus, Grafana, OpenTelemetry; latency histograms per hop.
+
+471
+00:37:09.666 --> 00:37:10.349
+Why:
+
+472
+00:37:10.629 --> 00:37:12.186
+Market-hours SLOs.
+
+473
+00:37:13.536 --> 00:37:14.432
+Part 9.
+
+474
+00:37:14.712 --> 00:37:17.315
+Security, Compliance and Client Protection.
+
+475
+00:37:18.565 --> 00:37:30.085
+Authentication: mandatory 2FA (TOTP or app-based), device binding, session expiry daily, and alerts on new logins (VERIFY exchange or SEBI requirements).
+
+476
+00:37:30.365 --> 00:37:39.069
+Client funds: segregation, daily reporting to exchanges and clearing corporations, and restrictions on use (VERIFY current rules).
+
+477
+00:37:39.349 --> 00:37:42.293
+Securities: held in clients' own demat accounts.
+
+478
+00:37:42.573 --> 00:37:49.954
+Pledges and sale authorisations go through depository mechanisms with client consent (OTP or TPIN).
+
+479
+00:37:51.304 --> 00:37:59.731
+KYC or AML: periodic KYC updates, PEP and sanctions screening, and suspicious transaction reporting (VERIFY).
+
+480
+00:38:00.011 --> 00:38:01.205
+Cybersecurity:
+
+481
+00:38:01.485 --> 00:38:10.637
+SEBI's cybersecurity and cyber-resilience framework for market intermediaries (audits, SOC, incident reporting; VERIFY the current framework).
+
+482
+00:38:10.917 --> 00:38:15.525
+Data localisation and DPDP Act for personal data (VERIFY).
+
+483
+00:38:16.875 --> 00:38:17.729
+Part 10.
+
+484
+00:38:18.009 --> 00:38:19.929
+Reliability and Operations.
+
+485
+00:38:21.179 --> 00:38:32.677
+Market-hours discipline: no deployments to trading systems during market hours, and pre-market health checks (connectivity, file loads, risk parameter files, margin calculations).
+
+486
+00:38:32.957 --> 00:38:47.400
+The 9:15 am spike: logins, WebSocket connects, pre-open and AMO order releases and first trades all at once;. pre-scale WebSocket and API fleets;. stagger AMO releases within exchange limits;.
+
+487
+00:38:48.750 --> 00:38:56.942
+cache instrument master and static data at clients (downloaded before market);. use backoff with jitter on reconnect (Ch 18).
+
+488
+00:38:57.222 --> 00:38:58.139
+Failover:
+
+489
+00:38:58.419 --> 00:39:08.062
+OMS or RMS shards have hot standbys that replay the same journal;. failover within seconds;. reconcile with the exchange after failover.
+
+490
+00:39:09.412 --> 00:39:17.753
+Exchange outage or disconnection: block new orders for that segment, show clear status, and reconcile when the connection is restored.
+
+491
+00:39:18.033 --> 00:39:28.295
+Incident reporting: brokers may need to report technical glitches to exchanges within set timelines, with root cause analysis (VERIFY the current framework).
+
+492
+00:39:28.575 --> 00:39:32.159
+Volatile days: circuit breakers at the exchange halt trading.
+
+493
+00:39:32.439 --> 00:39:38.796
+Broker systems must handle halts, price band changes and surges in square-offs and margin calls.
+
+494
+00:39:40.146 --> 00:39:41.149
+Part 11.
+
+495
+00:39:41.429 --> 00:39:42.474
+Key Trade-offs.
+
+496
+00:39:43.724 --> 00:39:45.068
+Here is a quick table:
+
+497
+00:39:45.348 --> 00:39:47.865
+Decision, and Chosen, and Accepted cost.
+
+498
+00:39:48.145 --> 00:39:49.148
+Trading core.
+
+499
+00:39:49.428 --> 00:39:50.260
+Chosen:
+
+500
+00:39:50.540 --> 00:39:53.548
+In-memory, single-writer per client shard, journaled.
+
+501
+00:39:53.828 --> 00:39:55.001
+Accepted cost:
+
+502
+00:39:55.281 --> 00:39:57.543
+Complex recovery; careful sharding.
+
+503
+00:39:57.823 --> 00:39:58.676
+Margin.
+
+504
+00:39:58.956 --> 00:39:59.788
+Chosen:
+
+505
+00:40:00.068 --> 00:40:02.436
+Scenario-based, incremental per order.
+
+506
+00:40:02.716 --> 00:40:03.889
+Accepted cost:
+
+507
+00:40:04.169 --> 00:40:06.239
+Morning precompute and complexity.
+
+508
+00:40:06.519 --> 00:40:07.521
+Market data.
+
+509
+00:40:07.801 --> 00:40:08.633
+Chosen:
+
+510
+00:40:08.913 --> 00:40:10.812
+Conflated snapshots per client.
+
+511
+00:40:11.092 --> 00:40:12.265
+Accepted cost:
+
+512
+00:40:12.545 --> 00:40:14.209
+Clients don't see every tick.
+
+513
+00:40:14.489 --> 00:40:15.385
+Settlement.
+
+514
+00:40:15.665 --> 00:40:16.497
+Chosen:
+
+515
+00:40:16.777 --> 00:40:19.380
+Batch reconciliation with exchange files.
+
+516
+00:40:19.660 --> 00:40:20.833
+Accepted cost:
+
+517
+00:40:21.113 --> 00:40:22.799
+End-of-day processing windows.
+
+518
+00:40:23.079 --> 00:40:24.039
+Location.
+
+519
+00:40:24.319 --> 00:40:25.151
+Chosen:
+
+520
+00:40:25.431 --> 00:40:29.164
+Co-location for exchange-facing, cloud for client-facing.
+
+521
+00:40:29.444 --> 00:40:30.617
+Accepted cost:
+
+522
+00:40:30.897 --> 00:40:32.391
+Two infrastructure models.
+
+523
+00:40:32.671 --> 00:40:33.695
+GTT.
+
+524
+00:40:33.975 --> 00:40:34.807
+Chosen:
+
+525
+00:40:35.087 --> 00:40:36.409
+Broker-side triggers.
+
+526
+00:40:36.689 --> 00:40:37.863
+Accepted cost:
+
+527
+00:40:38.143 --> 00:40:40.660
+Broker must run a reliable trigger engine.
+
+528
+00:40:42.010 --> 00:40:42.949
+Part 12.
+
+529
+00:40:43.229 --> 00:40:44.573
+Interview Q and A.
+
+530
+00:40:45.823 --> 00:40:46.655
+Beginner.
+
+531
+00:40:46.935 --> 00:40:47.959
+Question 1.
+
+532
+00:40:48.239 --> 00:40:51.247
+What happens when you place a stock order through a broker app?
+
+533
+00:40:51.527 --> 00:40:52.892
+Thirty-second answer:
+
+534
+00:40:53.172 --> 00:41:16.233
+The app sends it to the broker's API; the OMS validates it; the RMS checks and blocks margin; the exchange gateway sends it to the exchange; the exchange acknowledges and later matches it; trade confirmations update the order, positions and margin; the client sees updates over WebSocket; end-of-day processing generates the contract note and settlement.
+
+535
+00:41:17.583 --> 00:41:18.586
+Question 2.
+
+536
+00:41:18.866 --> 00:41:22.834
+What is margin, and why does the broker block it before sending an order?
+
+537
+00:41:23.114 --> 00:41:24.479
+Thirty-second answer:
+
+538
+00:41:24.759 --> 00:41:38.967
+Margin is the money (or collateral) required to hold a position; the broker blocks it upfront so it never sends an order the client can't cover, as required by exchange and regulatory rules on upfront margin collection.
+
+539
+00:41:40.317 --> 00:41:41.363
+Question 3.
+
+540
+00:41:41.643 --> 00:41:44.245
+How do live prices appear on millions of phones?
+
+541
+00:41:44.525 --> 00:41:45.891
+Thirty-second answer:
+
+542
+00:41:46.171 --> 00:42:00.677
+The broker receives exchange feeds, normalises them in a ticker plant, and streams updates over WebSockets to clients subscribed to each instrument, conflated so each client gets the latest value at most every fraction of a second.
+
+543
+00:42:02.027 --> 00:42:03.094
+Question 4.
+
+544
+00:42:03.374 --> 00:42:05.934
+What does T+1 settlement mean for a buyer?
+
+545
+00:42:06.214 --> 00:42:07.579
+Thirty-second answer:
+
+546
+00:42:07.859 --> 00:42:20.361
+Trades done on day T settle on the next working day: the buyer's funds go to the clearing corporation and shares arrive in the buyer's demat account on T+1 via the broker's settlement process.
+
+547
+00:42:21.711 --> 00:42:22.713
+Intermediate.
+
+548
+00:42:22.993 --> 00:42:24.103
+Question 5.
+
+549
+00:42:24.383 --> 00:42:27.199
+Design the order management system's state machine.
+
+550
+00:42:27.479 --> 00:42:28.844
+Thirty-second answer:
+
+551
+00:42:29.124 --> 00:42:50.863
+Received, then (rejected pending new), then open, then partially filled, then filled; with pending modify or cancel states; journal every transition; accept exchange messages in any valid order and trust exchange quantities; idempotent client order IDs; recover by journal replay and reconcile with the exchange's order book.
+
+552
+00:42:52.213 --> 00:42:53.322
+Question 6.
+
+553
+00:42:53.602 --> 00:42:56.823
+How do you prevent a client from spending the same margin twice?
+
+554
+00:42:57.103 --> 00:42:58.469
+Thirty-second answer:
+
+555
+00:42:58.749 --> 00:43:11.975
+Partition RMS by client so one shard owns each client's state and processes their events sequentially; block margin atomically with order acceptance; release or convert on exchange responses.
+
+556
+00:43:13.325 --> 00:43:14.413
+Question 7.
+
+557
+00:43:14.693 --> 00:43:16.741
+How are OHLC candles built for charts?
+
+558
+00:43:17.021 --> 00:43:18.387
+Thirty-second answer:
+
+559
+00:43:18.667 --> 00:43:33.984
+Aggregate ticks per instrument per interval in memory (first, max, min, last, sum of volume), emit on interval boundaries, store in a time-series database, build higher intervals from 1-minute candles, and adjust history for corporate actions.
+
+560
+00:43:35.334 --> 00:43:36.358
+Question 8.
+
+561
+00:43:36.638 --> 00:43:38.409
+How does a GTT order work?
+
+562
+00:43:38.689 --> 00:43:40.054
+Thirty-second answer:
+
+563
+00:43:40.334 --> 00:43:54.649
+The broker stores the trigger (no margin blocked), watches every tick with price-sorted trigger structures, and when the condition is met, places a real order through the OMS with RMS checks, cancelling the other leg for OCO.
+
+564
+00:43:55.999 --> 00:43:57.065
+Question 9.
+
+565
+00:43:57.345 --> 00:43:59.265
+How are funds added and protected?
+
+566
+00:43:59.545 --> 00:44:00.911
+Thirty-second answer:
+
+567
+00:44:01.191 --> 00:44:18.599
+Payment via UPI or net banking from the client's verified bank account, ledger credit after verification, immediate margin update, daily reconciliation; client funds held in designated accounts with segregation and reporting as required by regulations.
+
+568
+00:44:19.949 --> 00:44:20.717
+Senior.
+
+569
+00:44:20.997 --> 00:44:22.042
+Question 10.
+
+570
+00:44:22.322 --> 00:44:25.394
+How would you compute F and O margins in real time?
+
+571
+00:44:25.674 --> 00:44:27.039
+Thirty-second answer:
+
+572
+00:44:27.319 --> 00:44:46.797
+Load the exchange's daily risk parameter files, precompute scenario loss arrays per instrument, and for each order compute portfolio margin with and without the order, worst-case scenario loss per underlying plus spread charges, net option value adjustments and exposure margin, so hedges reduce margin.
+
+573
+00:44:48.147 --> 00:44:49.277
+Question 11.
+
+574
+00:44:49.557 --> 00:44:52.907
+Design the ticker plant for 3 million concurrent clients.
+
+575
+00:44:53.187 --> 00:44:54.552
+Thirty-second answer:
+
+576
+00:44:54.832 --> 00:45:14.224
+Feed handlers with gap recovery, normalisation to compact binary, in-memory latest snapshots, internal pub or sub to a sharded WebSocket fleet with per-connection subscription maps, per-client conflation with a flush interval, modes by detail level, slow-client handling, and pre-scaling for the market open.
+
+577
+00:45:15.574 --> 00:45:16.662
+Question 12.
+
+578
+00:45:16.942 --> 00:45:20.697
+How do you recover the OMS after a crash during market hours?
+
+579
+00:45:20.977 --> 00:45:22.342
+Thirty-second answer:
+
+580
+00:45:22.622 --> 00:45:38.601
+Hot standby replays the same journal; on failover it resumes from the last journaled state; then reconciles with the exchange's order and trade downloads to catch messages received during the gap; new orders may be paused briefly for affected segments.
+
+581
+00:45:39.951 --> 00:45:41.231
+Question 13.
+
+582
+00:45:41.511 --> 00:45:44.199
+How do you compute capital gains for tax reports?
+
+583
+00:45:44.479 --> 00:45:45.844
+Thirty-second answer:
+
+584
+00:45:46.124 --> 00:46:03.169
+Per instrument, match sells against buy lots FIFO, producing gain lines with holding periods for short- versus long-term classification, adjusting lots for splits and bonuses, applying grandfathering and current tax rules, and separating intraday (speculative) income.
+
+585
+00:46:04.519 --> 00:46:05.714
+Question 14.
+
+586
+00:46:05.994 --> 00:46:08.298
+How do you handle 9:15 am?
+
+587
+00:46:08.578 --> 00:46:09.943
+Thirty-second answer:
+
+588
+00:46:10.223 --> 00:46:26.266
+Pre-scale APIs and WebSockets, pre-download static data to clients, stagger AMO releases within exchange connection limits, shard OMS or RMS by client, use backoff with jitter for reconnects, and watch per-hop latency dashboards.
+
+589
+00:46:27.616 --> 00:46:28.512
+Architect.
+
+590
+00:46:28.792 --> 00:46:29.987
+Question 15.
+
+591
+00:46:30.267 --> 00:46:32.421
+Design a broker platform end to end.
+
+592
+00:46:32.701 --> 00:46:34.067
+Thirty-second answer:
+
+593
+00:46:34.347 --> 00:46:55.275
+Client apps and APIs behind a gateway; sharded in-memory OMS or RMS with journals; exchange gateways with rate limits and reconciliation; a ticker plant with conflated WebSocket fan-out; GTT and alerts engines on the tick stream; funds and a double-entry client ledger; a back office for contract
+
+594
+00:46:55.555 --> 00:47:05.411
+notes, obligations and corporate actions; depository integration for holdings and pledges; Kafka to warehouse, surveillance and regulatory reporting.
+
+595
+00:47:06.761 --> 00:47:07.955
+Question 16.
+
+596
+00:47:08.235 --> 00:47:11.393
+How do regulations shape the broker's architecture?
+
+597
+00:47:11.673 --> 00:47:13.038
+Thirty-second answer:
+
+598
+00:47:13.318 --> 00:47:33.777
+Upfront margin and peak-margin rules force pre-trade RMS; client fund segregation shapes the ledger and banking; T+1 and depository processes shape the back office; KYC rules shape onboarding; algo trading rules shape APIs; cybersecurity and incident reporting frameworks shape operations,
+
+599
+00:47:34.057 --> 00:47:39.134
+all changing, so rules must be configurable and audited (VERIFY current texts).
+
+600
+00:47:40.484 --> 00:47:41.828
+Question 17.
+
+601
+00:47:42.108 --> 00:47:44.433
+How would you run surveillance on client trading?
+
+602
+00:47:44.713 --> 00:47:46.079
+Thirty-second answer:
+
+603
+00:47:46.359 --> 00:48:04.385
+Stream orders and trades into a warehouse and streaming rules engine; detect wash trades, spoofing patterns (order-to-trade and cancellation ratios), circular trading via related-account graphs and pre-announcement anomalies; investigate exchange alerts; document outcomes as required.
+
+604
+00:48:05.735 --> 00:48:06.909
+Question 18.
+
+605
+00:48:07.189 --> 00:48:10.026
+What would you keep in memory, and what in databases?
+
+606
+00:48:10.306 --> 00:48:11.671
+Thirty-second answer:
+
+607
+00:48:11.951 --> 00:48:29.466
+In memory: order and risk state per client shard, latest market snapshots, trigger indexes, all journaled and rebuildable; in databases: order or trade history, ledgers, client master, documents, candles; in the warehouse: everything for analytics and reporting.
+
+608
+00:48:30.816 --> 00:48:32.053
+Question 19.
+
+609
+00:48:32.333 --> 00:48:36.408
+How do you keep a broker resilient to exchange connectivity problems?
+
+610
+00:48:36.688 --> 00:48:38.053
+Thirty-second answer:
+
+611
+00:48:38.333 --> 00:48:53.821
+Redundant links and connections, per-connection rate limits, automatic reconnect with order or trade download reconciliation, drop copy feeds, clear client status and order blocking for affected segments, and incident reporting per exchange rules.
+
+612
+00:48:55.171 --> 00:48:56.281
+Question 20.
+
+613
+00:48:56.561 --> 00:49:00.209
+Compare the broker's systems with the exchange's matching engine.
+
+614
+00:49:00.489 --> 00:49:01.854
+Thirty-second answer:
+
+615
+00:49:02.134 --> 00:49:24.385
+The exchange matches orders deterministically for all brokers with microsecond latency; the broker validates and risk-checks its own clients, routes orders, streams data to millions, tracks positions and money, and settles, both need journaled in-memory state and determinism, but the broker's hardest problems are risk, fan-out and back-office correctness.
+
+616
+00:49:25.735 --> 00:49:26.780
+Part 13.
+
+617
+00:49:27.060 --> 00:49:27.828
+Summary.
+
+618
+00:49:29.078 --> 00:49:31.766
+The broker checks, routes, streams and settles.
+
+619
+00:49:32.046 --> 00:49:33.411
+The exchange matches.
+
+620
+00:49:33.691 --> 00:49:39.259
+The trading core is in-memory, sharded by client, journaled and reconciled with the exchange.
+
+621
+00:49:39.539 --> 00:49:41.609
+Every order passes pre-trade risk.
+
+622
+00:49:41.889 --> 00:49:46.945
+The ticker plant turns exchange feeds into conflated WebSocket streams for millions.
+
+623
+00:49:47.225 --> 00:49:49.678
+Candles and triggers feed off the same stream.
+
+624
+00:49:49.958 --> 00:50:00.795
+Money and securities follow strict processes: double-entry ledgers, client fund segregation, T+1 obligations, depository pledges and authorisations.
+
+625
+00:50:01.075 --> 00:50:10.483
+Algorithms matter: scenario-based margins, FIFO tax lots, conflation, sorted trigger indexes, implied volatility, surveillance patterns.
+
+626
+00:50:11.833 --> 00:50:14.009
+Regulation is a design input.
+
+627
+00:50:14.289 --> 00:50:17.148
+Keep rules configurable and everything auditable.
+
+628
+00:50:18.498 --> 00:50:19.735
+Related chapters.
+
+629
+00:50:20.015 --> 00:50:33.413
+Ch 55, Order Matching Engine, I03, Core Banking and UPI, Ch 45, Payment System, Ch 51, Real-time Analytics, Ch 19, Concurrency in Java.
+
+630
+00:50:33.693 --> 00:50:34.887
+Next in this tab:
+
+631
+00:50:35.167 --> 00:50:38.005
+I09, Insurance Policy and Claims.
+
+632
+00:50:39.355 --> 00:50:40.955
+That's the end of this chapter.
+
+633
+00:50:41.235 --> 00:50:47.272
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+634
+00:50:47.552 --> 00:50:49.003
+See you in the next chapter.
+

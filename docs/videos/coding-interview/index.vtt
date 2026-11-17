@@ -1,0 +1,570 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.459
+Coding Interview:
+
+2
+00:00:01.739 --> 00:00:03.979
+12 System-Design Data Structures.
+
+3
+00:00:04.259 --> 00:00:07.417
+From the Coding Interview part of the System Design Playbook.
+
+4
+00:00:09.167 --> 00:00:25.359
+Senior system-design loops increasingly include a now code the core of it round: the base62 encoder behind the URL shortener, the sliding-window limiter, the Bloom filter in front of the database, the geohash behind near me, the sketch behind trending.
+
+5
+00:00:25.639 --> 00:00:28.903
+This tab has the twelve data structures that come up most.
+
+6
+00:00:29.183 --> 00:00:43.369
+Each is a runnable, self-checking Java file in coding-interview or src that asserts its own results (including the error bounds of the probabilistic structures), prints PASS, and is run by CI on every change.
+
+7
+00:00:43.649 --> 00:00:45.612
+The output on each page is real.
+
+8
+00:00:46.962 --> 00:00:58.546
+Each page connects the code to the design: where it sits in the architecture, what it costs in memory and time, and what the production version (Redis, Cassandra, Elasticsearch...) adds.
+
+9
+00:00:58.826 --> 00:01:00.959
+Each page follows the same structure:
+
+10
+00:01:01.239 --> 00:01:04.055
+Problem: the statement as an interviewer would give it.
+
+11
+00:01:04.335 --> 00:01:08.431
+Key idea: the shape of the solution before any code, with a diagram.
+
+12
+00:01:08.711 --> 00:01:15.431
+Solution: the complete, runnable code (included from the repository, so it is exactly what CI ran).
+
+13
+00:01:16.781 --> 00:01:20.259
+Walkthrough: the important lines and why they are written that way.
+
+14
+00:01:20.539 --> 00:01:23.205
+Complexity: time and space for each approach.
+
+15
+00:01:23.485 --> 00:01:25.832
+Run it: the command and its real output.
+
+16
+00:01:26.112 --> 00:01:29.120
+Common mistakes and follow-up questions with answers.
+
+17
+00:01:30.470 --> 00:01:31.323
+Part 1.
+
+18
+00:01:31.603 --> 00:01:32.627
+Problem map.
+
+19
+00:01:33.877 --> 00:01:35.221
+Here is a quick table:
+
+20
+00:01:35.501 --> 00:01:38.488
+Problem, and What it tests, and Level, and Difficulty.
+
+21
+00:01:38.768 --> 00:01:39.408
+1.
+
+22
+00:01:39.688 --> 00:01:40.563
+Problem:
+
+23
+00:01:40.843 --> 00:01:42.293
+URL Shortener Core:
+
+24
+00:01:42.573 --> 00:01:44.920
+Base62 and Id Allocation.
+
+25
+00:01:45.200 --> 00:01:46.181
+What it tests:
+
+26
+00:01:46.461 --> 00:01:52.349
+Base62 encode or decode, id allocation, custom aliases, overflow safety.
+
+27
+00:01:52.629 --> 00:01:53.376
+Level:
+
+28
+00:01:53.656 --> 00:01:54.488
+L1.
+
+29
+00:01:54.768 --> 00:01:55.472
+2.
+
+30
+00:01:55.752 --> 00:01:56.627
+Problem:
+
+31
+00:01:56.907 --> 00:02:00.021
+Sliding-Window Rate Limiter (Log versus Counter).
+
+32
+00:02:00.301 --> 00:02:01.283
+What it tests:
+
+33
+00:02:01.563 --> 00:02:05.659
+Fixed-window burst problem, sliding log, weighted sliding counter.
+
+34
+00:02:05.939 --> 00:02:06.685
+Level:
+
+35
+00:02:06.965 --> 00:02:07.797
+L2.
+
+36
+00:02:08.077 --> 00:02:08.824
+3.
+
+37
+00:02:09.104 --> 00:02:09.979
+Problem:
+
+38
+00:02:10.259 --> 00:02:11.880
+LFU Cache in O(1).
+
+39
+00:02:12.160 --> 00:02:13.141
+What it tests:
+
+40
+00:02:13.421 --> 00:02:18.072
+Frequency buckets of LinkedHashSet, minFreq tracking, scan resistance.
+
+41
+00:02:18.352 --> 00:02:19.099
+Level:
+
+42
+00:02:19.379 --> 00:02:20.232
+L3.
+
+43
+00:02:20.512 --> 00:02:21.216
+4.
+
+44
+00:02:21.496 --> 00:02:22.371
+Problem:
+
+45
+00:02:22.651 --> 00:02:23.632
+Bloom Filter:
+
+46
+00:02:23.912 --> 00:02:26.088
+Sizing and Measured False Positives.
+
+47
+00:02:26.368 --> 00:02:27.349
+What it tests:
+
+48
+00:02:27.629 --> 00:02:31.917
+BitSet, optimal m and k, double hashing, no false negatives.
+
+49
+00:02:32.197 --> 00:02:32.944
+Level:
+
+50
+00:02:33.224 --> 00:02:34.056
+L2.
+
+51
+00:02:34.336 --> 00:02:35.104
+5.
+
+52
+00:02:35.384 --> 00:02:36.259
+Problem:
+
+53
+00:02:36.539 --> 00:02:37.477
+Snowflake:
+
+54
+00:02:37.757 --> 00:02:39.485
+Distributed Unique Ids.
+
+55
+00:02:39.765 --> 00:02:40.747
+What it tests:
+
+56
+00:02:41.027 --> 00:02:44.483
+Bit layout, sequence per millisecond, clock-backwards handling.
+
+57
+00:02:44.763 --> 00:02:45.509
+Level:
+
+58
+00:02:45.789 --> 00:02:46.621
+L2.
+
+59
+00:02:47.971 --> 00:02:48.718
+6.
+
+60
+00:02:48.998 --> 00:02:49.873
+Problem:
+
+61
+00:02:50.153 --> 00:02:51.070
+Geohash:
+
+62
+00:02:51.350 --> 00:02:52.587
+Restaurants Near Me.
+
+63
+00:02:52.867 --> 00:02:53.849
+What it tests:
+
+64
+00:02:54.129 --> 00:02:57.947
+Bit interleaving, base32, neighbour cells, haversine filter.
+
+65
+00:02:58.227 --> 00:02:58.974
+Level:
+
+66
+00:02:59.254 --> 00:03:00.107
+L3.
+
+67
+00:03:00.387 --> 00:03:01.134
+7.
+
+68
+00:03:01.414 --> 00:03:02.289
+Problem:
+
+69
+00:03:02.569 --> 00:03:03.742
+Trending Top-K:
+
+70
+00:03:04.022 --> 00:03:05.515
+Count-Min Sketch + Heap.
+
+71
+00:03:05.795 --> 00:03:06.777
+What it tests:
+
+72
+00:03:07.057 --> 00:03:09.937
+Count-Min Sketch, error bounds, streaming top-K.
+
+73
+00:03:10.217 --> 00:03:10.963
+Level:
+
+74
+00:03:11.243 --> 00:03:12.097
+L3.
+
+75
+00:03:12.377 --> 00:03:13.059
+8.
+
+76
+00:03:13.339 --> 00:03:14.214
+Problem:
+
+77
+00:03:14.494 --> 00:03:15.497
+Leaderboard:
+
+78
+00:03:15.777 --> 00:03:17.377
+Ranks, Top-N, Neighbours.
+
+79
+00:03:17.657 --> 00:03:18.638
+What it tests:
+
+80
+00:03:18.918 --> 00:03:22.715
+Ordered set, Fenwick tree for ranks, Redis sorted-set semantics.
+
+81
+00:03:22.995 --> 00:03:23.742
+Level:
+
+82
+00:03:24.022 --> 00:03:24.854
+L2.
+
+83
+00:03:25.134 --> 00:03:25.881
+9.
+
+84
+00:03:26.161 --> 00:03:27.035
+Problem:
+
+85
+00:03:27.315 --> 00:03:28.382
+Autocomplete:
+
+86
+00:03:28.662 --> 00:03:30.113
+Trie with Cached Top-K.
+
+87
+00:03:30.393 --> 00:03:31.374
+What it tests:
+
+88
+00:03:31.654 --> 00:03:34.555
+Trie, top-K per node, read-optimised writes.
+
+89
+00:03:34.835 --> 00:03:35.582
+Level:
+
+90
+00:03:35.862 --> 00:03:36.694
+L2.
+
+91
+00:03:36.974 --> 00:03:37.678
+10.
+
+92
+00:03:37.958 --> 00:03:38.833
+Problem:
+
+93
+00:03:39.113 --> 00:03:40.137
+Merkle Tree:
+
+94
+00:03:40.417 --> 00:03:42.017
+Replica Anti-Entropy.
+
+95
+00:03:42.297 --> 00:03:43.278
+What it tests:
+
+96
+00:03:43.558 --> 00:03:47.931
+Hash tree over key buckets, top-down diff, O(log n) comparisons.
+
+97
+00:03:48.211 --> 00:03:48.958
+Level:
+
+98
+00:03:49.238 --> 00:03:50.091
+L3.
+
+99
+00:03:51.441 --> 00:03:52.273
+11.
+
+100
+00:03:52.553 --> 00:03:53.428
+Problem:
+
+101
+00:03:53.708 --> 00:03:55.009
+Quorum Replication:
+
+102
+00:03:55.289 --> 00:03:56.761
+R + W N.
+
+103
+00:03:57.041 --> 00:03:58.023
+What it tests:
+
+104
+00:03:58.303 --> 00:04:02.527
+Tunable consistency, versioned values, read repair, availability.
+
+105
+00:04:02.807 --> 00:04:03.553
+Level:
+
+106
+00:04:03.833 --> 00:04:04.687
+L3.
+
+107
+00:04:04.967 --> 00:04:05.756
+12.
+
+108
+00:04:06.036 --> 00:04:06.911
+Problem:
+
+109
+00:04:07.191 --> 00:04:08.428
+HyperLogLog:
+
+110
+00:04:08.708 --> 00:04:10.756
+Count Distinct in 16 KB.
+
+111
+00:04:11.036 --> 00:04:12.017
+What it tests:
+
+112
+00:04:12.297 --> 00:04:16.649
+Leading-zero ranks, harmonic mean, small-range correction, mergeable.
+
+113
+00:04:16.929 --> 00:04:17.676
+Level:
+
+114
+00:04:17.956 --> 00:04:18.809
+L3.
+
+115
+00:04:20.159 --> 00:04:20.970
+Levels:
+
+116
+00:04:21.250 --> 00:04:28.695
+L1 0 to 2 yrs, L2 2 to 5 yrs, L3 5 to 10 yrs, L4 10 plus yrs or architect.
+
+117
+00:04:30.045 --> 00:04:30.920
+Part 2.
+
+118
+00:04:31.200 --> 00:04:32.437
+Which technique fits?
+
+119
+00:04:32.717 --> 00:04:34.445
+(the interviewer's hidden question).
+
+120
+00:04:35.695 --> 00:04:37.039
+Here is the diagram.
+
+121
+00:04:40.889 --> 00:04:41.785
+Part 3.
+
+122
+00:04:42.065 --> 00:04:43.687
+How to answer a coding round.
+
+123
+00:04:44.937 --> 00:04:51.913
+Anchor it in the design: this sits in the redirect service's hot path, so the lookup must be O(1) and cacheable.
+
+124
+00:04:52.193 --> 00:04:57.185
+State the budget: memory per item, operations per second, acceptable error.
+
+125
+00:04:57.465 --> 00:05:00.899
+Probabilistic structures are chosen because of these numbers.
+
+126
+00:05:01.179 --> 00:05:03.355
+Code the core and keep the I or O out.
+
+127
+00:05:03.635 --> 00:05:07.987
+A map stands in for Redis or the DB, and the interviewer wants the algorithm.
+
+128
+00:05:08.267 --> 00:05:14.219
+Verify with numbers: measured error versus the theoretical bound, keys moved, comparisons made.
+
+129
+00:05:14.499 --> 00:05:15.950
+Each solution prints them.
+
+130
+00:05:17.300 --> 00:05:22.996
+Name the production equivalent and what it adds: persistence, sharding, replication, TTLs.
+
+131
+00:05:24.346 --> 00:05:25.263
+Part 4.
+
+132
+00:05:25.543 --> 00:05:26.866
+Run every solution.
+
+133
+00:05:28.116 --> 00:05:29.439
+Here is the shell code.
+
+134
+00:05:32.289 --> 00:05:33.249
+Part 5.
+
+135
+00:05:33.529 --> 00:05:34.510
+Then ship it:
+
+136
+00:05:34.790 --> 00:05:36.326
+Spring Boot 4 versions.
+
+137
+00:05:37.576 --> 00:06:00.744
+Every page also has a Solve it with Spring Boot 4 section: the same problem as a production service in one Spring Boot 4.1 application, with state in Redis (atomic Lua scripts, GEO, sorted sets, HyperLogLog), REST APIs with ProblemDetail errors, virtual threads, and an integration test against a real Redis whose transcript is shown on the page.
+
+138
+00:06:01.024 --> 00:06:06.656
+Start with the Spring Boot 4 overview for the stack, the interview-to-production mapping, and how to run it.
+
+139
+00:06:08.006 --> 00:06:09.329
+Here is the shell code.
+
+140
+00:06:12.179 --> 00:06:13.779
+That's the end of this chapter.
+
+141
+00:06:14.059 --> 00:06:20.096
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+142
+00:06:20.376 --> 00:06:21.827
+See you in the next chapter.
+

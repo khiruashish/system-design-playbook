@@ -1,0 +1,1610 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:03.358
+Flipkart-Style E-Commerce, How the Whole System Works.
+
+2
+00:00:03.638 --> 00:00:08.737
+Chapter I02b, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:10.487 --> 00:00:11.447
+At a glance:
+
+4
+00:00:11.727 --> 00:00:13.028
+What this page adds.
+
+5
+00:00:13.308 --> 00:00:17.169
+I02 focuses on four sale-day problems with labs.
+
+6
+00:00:17.449 --> 00:00:20.308
+This page is the system walkthrough, with no code.
+
+7
+00:00:20.588 --> 00:00:39.276
+It follows a customer and a seller through an Indian e-commerce platform: the app and edge, catalog and seller onboarding, vernacular search and discovery, recommendations and ads;. pricing, offers and loyalty, cart and checkout, payments including UPI, EMI and COD;. fraud and abuse,
+
+8
+00:00:39.556 --> 00:00:47.897
+and the order pipeline;. the logistics network: warehouses, hubs, pincode serviceability, last mile, COD cash, and returns;.
+
+9
+00:00:49.247 --> 00:00:54.261
+customer support;. the algorithms, the data platform and warehouse, and the tech stack.
+
+10
+00:00:55.611 --> 00:00:56.357
+Warning:
+
+11
+00:00:56.637 --> 00:00:58.045
+Sources and honesty.
+
+12
+00:00:58.325 --> 00:01:07.605
+Statements about Flipkart come from public sources: its engineering blog, conference talks, case studies published by technology vendors, and news.
+
+13
+00:01:07.885 --> 00:01:09.315
+They are marked VERIFY.
+
+14
+00:01:09.595 --> 00:01:15.120
+Internal details are not public, so a system like this would... describes a reference design.
+
+15
+00:01:16.470 --> 00:01:17.323
+Part 1.
+
+16
+00:01:17.603 --> 00:01:19.694
+What Makes Indian E-Commerce Different.
+
+17
+00:01:20.944 --> 00:01:22.288
+Here is a quick table:
+
+18
+00:01:22.568 --> 00:01:24.467
+Factor, and System consequence.
+
+19
+00:01:24.747 --> 00:01:27.712
+Mobile-first, many entry-level Android phones:
+
+20
+00:01:27.992 --> 00:01:38.552
+Lightweight apps and PWAs, small payloads, offline tolerance (I02 L3). ~19,000 plus pincodes with uneven courier reach:
+
+21
+00:01:38.832 --> 00:01:42.736
+Serviceability and promise computed per pincode (VERIFY count).
+
+22
+00:01:43.016 --> 00:01:44.744
+Cash on delivery still common:
+
+23
+00:01:45.024 --> 00:01:50.848
+COD risk scoring, cash reconciliation, RTO management (I02 L2).
+
+24
+00:01:51.128 --> 00:01:52.280
+Many languages:
+
+25
+00:01:52.560 --> 00:01:55.440
+Vernacular UI, transliteration, voice search.
+
+26
+00:01:55.720 --> 00:01:57.448
+Festive sale concentration:
+
+27
+00:01:57.728 --> 00:02:01.611
+Big Billion Days-style events with extreme peaks (I02).
+
+28
+00:02:01.891 --> 00:02:05.027
+UPI, bank offers, no-cost EMI, pay later:
+
+29
+00:02:05.307 --> 00:02:08.016
+Complex checkout pricing and payment routing.
+
+30
+00:02:09.366 --> 00:02:10.411
+Regulation:
+
+31
+00:02:10.691 --> 00:02:18.627
+E-commerce rules for marketplaces, FDI rules on the marketplace model, GST, payment data storage (VERIFY).
+
+32
+00:02:19.977 --> 00:02:20.852
+Part 2.
+
+33
+00:02:21.132 --> 00:02:22.519
+Architecture in Layers.
+
+34
+00:02:23.769 --> 00:02:25.113
+Here is the diagram.
+
+35
+00:02:28.963 --> 00:02:29.859
+Part 3.
+
+36
+00:02:30.139 --> 00:02:32.123
+The Customer Journey, Step by Step.
+
+37
+00:02:33.373 --> 00:02:34.375
+Opening the app.
+
+38
+00:02:34.655 --> 00:02:39.669
+App launch: a single home page API call returns a personalised layout.
+
+39
+00:02:39.949 --> 00:02:49.826
+Widgets such as banners, deals and recently viewed are chosen by a content or widget platform that marketing configures for sales without code deployments.
+
+40
+00:02:50.106 --> 00:02:52.197
+Personalisation ranks the widgets.
+
+41
+00:02:52.477 --> 00:02:53.309
+Caching:
+
+42
+00:02:53.589 --> 00:02:58.879
+Static assets and images come from the CDN in sizes appropriate to the device.
+
+43
+00:03:00.229 --> 00:03:05.904
+Personalised parts are fetched separately from cacheable parts, so most bytes are cacheable at the edge.
+
+44
+00:03:06.184 --> 00:03:15.272
+Device constraints: for low-end devices and slow networks, the app or PWA downloads less (fewer widgets, lower-resolution images).
+
+45
+00:03:15.552 --> 00:03:21.397
+Flipkart publicly launched a PWA, Flipkart Lite, in 2015 (VERIFY).
+
+46
+00:03:22.747 --> 00:03:25.222
+Searching in Hindi, Hinglish or by voice.
+
+47
+00:03:25.502 --> 00:03:31.347
+The query can be typed in English, Hindi script, Latin-script Hindi (mobail cover) or spoken.
+
+48
+00:03:31.627 --> 00:03:35.105
+Speech: voice input goes through speech recognition to text.
+
+49
+00:03:35.385 --> 00:03:39.907
+Flipkart has publicly discussed vernacular voice search (VERIFY details).
+
+50
+00:03:40.187 --> 00:03:52.326
+Query understanding: transliteration and normalisation to a common representation;. spell correction trained on Indian spelling patterns;. vernacular-to-English mapping for catalog terms;.
+
+51
+00:03:53.676 --> 00:03:59.372
+category and attribute prediction (for example, under 15000 becomes a price filter).
+
+52
+00:03:59.652 --> 00:04:09.465
+Retrieval: lexical matches from an inverted index;. semantic retrieval with multilingual embeddings;. filtered by serviceability to the user's pincode.
+
+53
+00:04:10.815 --> 00:04:18.474
+Ranking: learning-to-rank on relevance, conversion history, price competitiveness, delivery speed, ratings and seller quality.
+
+54
+00:04:18.754 --> 00:04:21.698
+Sponsored listings are blended through the ads auction.
+
+55
+00:04:23.048 --> 00:04:24.179
+The product page.
+
+56
+00:04:24.459 --> 00:04:42.912
+Components: catalog content (possibly translated);. the chosen seller's offer (a buy-box-like selection among sellers, similar to I01);. price with sale discount;. bank offers and EMI options (estimated);. exchange offers;. delivery date for the user's pincode;.
+
+57
+00:04:44.262 --> 00:04:50.193
+COD availability;. ratings and reviews;. questions and answers;. recommendations.
+
+58
+00:04:50.473 --> 00:05:01.097
+Pincode check: the serviceability service answers from precomputed tables: pincode times seller or warehouse times product size or weight class times payment type;.
+
+59
+00:05:02.447 --> 00:05:05.647
+result: can we deliver, by when, and is COD allowed.
+
+60
+00:05:06.997 --> 00:05:08.149
+Cart and checkout.
+
+61
+00:05:08.429 --> 00:05:10.967
+Cart: the cart stores items and quantities.
+
+62
+00:05:11.247 --> 00:05:13.701
+It can be merged across devices at login.
+
+63
+00:05:13.981 --> 00:05:23.047
+Checkout: address selection, with address quality checks: pincode validation, geocoding, and prompts for missing landmarks;. serviceability re-check.
+
+64
+00:05:23.327 --> 00:05:25.567
+Price computation: sale price;.
+
+65
+00:05:26.917 --> 00:05:36.667
+coupon;. bank offer once the payment instrument is known;. coins or loyalty redemption;. delivery fee rules;. taxes (GST per item and seller).
+
+66
+00:05:36.947 --> 00:05:38.077
+Payment options:
+
+67
+00:05:38.357 --> 00:05:51.605
+UPI (intent or collect), cards (tokenised), net banking, EMI (card EMI, cardless EMI or pay later), wallets and gift cards, and COD if the risk score allows (I02 L2).
+
+68
+00:05:52.955 --> 00:06:09.510
+Order placement: reservation of stock from the chosen warehouse or seller;. payment authorisation (or COD confirmation flow);. order created with the promise, the fulfilment plan and price breakdown lines (who funds each discount: seller, platform or bank).
+
+69
+00:06:10.860 --> 00:06:11.713
+Payments.
+
+70
+00:06:11.993 --> 00:06:22.105
+Routing: a payments orchestrator routes each transaction to a gateway or processor by method, bank and live success rates (Ch 45 L4).
+
+71
+00:06:22.385 --> 00:06:32.945
+UPI flows: intent (opens a UPI app) or collect (request in the UPI app), with status polling and callbacks; see I03 for the bank side.
+
+72
+00:06:33.225 --> 00:06:36.767
+EMI and pay later: eligibility checks with lenders.
+
+73
+00:06:37.047 --> 00:06:40.780
+The platform may partner with lenders for credit products (VERIFY).
+
+74
+00:06:41.060 --> 00:06:43.620
+Refunds go to the source instrument or wallet.
+
+75
+00:06:43.900 --> 00:06:48.913
+Reconciliation against gateway and bank settlement files, as in Ch 45.
+
+76
+00:06:50.263 --> 00:06:52.525
+Order management and fulfilment choice.
+
+77
+00:06:52.805 --> 00:06:59.162
+The order management system (OMS) splits the order into shipments by seller, warehouse and size class.
+
+78
+00:06:59.442 --> 00:07:07.762
+Each shipment is a state machine: created, then packed, then dispatched, then in transit, then out for delivery, then delivered or RTO.
+
+79
+00:07:08.042 --> 00:07:22.122
+Fulfilment models: platform warehouses hold seller inventory (a fulfilment-by-platform model; Flipkart's Flipkart Assured signals quality and fast delivery, VERIFY);. seller-fulfilled items are picked up from the seller.
+
+80
+00:07:23.472 --> 00:07:26.053
+Cancellation is allowed until dispatch.
+
+81
+00:07:26.333 --> 00:07:29.747
+Payment is authorised or captured according to the method.
+
+82
+00:07:31.097 --> 00:07:33.315
+Warehouses and the logistics network.
+
+83
+00:07:33.595 --> 00:07:38.331
+Warehouses (fulfilment centres): inbound from sellers, stow, pick, pack.
+
+84
+00:07:38.611 --> 00:07:42.302
+Large-appliance warehouses are separate from small-item ones.
+
+85
+00:07:42.582 --> 00:07:46.977
+Sortation is automated at big sites (VERIFY specific automation).
+
+86
+00:07:47.257 --> 00:07:55.385
+Network: fulfilment centre, then mother hubs (large sortation), then delivery hubs near pincode clusters, then delivery agents.
+
+87
+00:07:55.665 --> 00:08:03.601
+This is a hub-and-spoke network run by the in-house logistics arm (Ekart; VERIFY current structure) plus third-party couriers.
+
+88
+00:08:03.881 --> 00:08:08.211
+Line-haul: truck schedules between hubs, planned from volume forecasts.
+
+89
+00:08:08.491 --> 00:08:11.158
+Sale periods add temporary hubs and vehicles.
+
+90
+00:08:12.508 --> 00:08:25.415
+Last mile: shipments assigned to delivery agents by area;. route optimisation (VRP with time windows and capacity);. agent app with navigation, proof of delivery (OTP, photo);.
+
+91
+00:08:25.695 --> 00:08:28.447
+COD cash collection and UPI-at-door.
+
+92
+00:08:28.727 --> 00:08:31.671
+COD cash: agents deposit cash at hubs.
+
+93
+00:08:31.951 --> 00:08:34.639
+Cash is reconciled per shipment and remitted.
+
+94
+00:08:34.919 --> 00:08:39.463
+Mismatches are investigated (Ch 45 §2.7).
+
+95
+00:08:40.813 --> 00:08:44.269
+Failed deliveries: re-attempt scheduling, customer calls.
+
+96
+00:08:44.549 --> 00:08:47.855
+If it still fails, RTO back to the warehouse or seller.
+
+97
+00:08:49.205 --> 00:08:50.080
+Returns.
+
+98
+00:08:50.360 --> 00:08:56.291
+Return request: reason captured; policy checked (return, replacement, or not returnable).
+
+99
+00:08:56.571 --> 00:09:03.589
+Reverse pickup: scheduled, with doorstep quality checks for some categories (for example, matching IMEI for phones).
+
+100
+00:09:03.869 --> 00:09:08.669
+Refund: issued on pickup or on receipt, depending on the customer's trust tier.
+
+101
+00:09:08.949 --> 00:09:14.432
+Returned item: graded at the warehouse, then restocked, returned to the seller, or refurbished.
+
+102
+00:09:15.782 --> 00:09:17.019
+Customer support.
+
+103
+00:09:17.299 --> 00:09:22.249
+Self-service first: order tracking, cancellation, returns and refund status.
+
+104
+00:09:22.529 --> 00:09:28.246
+Chat: a chatbot with intent classification, handing off to agents with full order context.
+
+105
+00:09:28.526 --> 00:09:30.787
+Voice support in multiple languages.
+
+106
+00:09:31.067 --> 00:09:34.481
+Operations: support tickets link to orders and shipments.
+
+107
+00:09:34.761 --> 00:09:41.758
+Common issues are auto-resolved by rules, for example, refunding automatically when a shipment is marked lost.
+
+108
+00:09:43.108 --> 00:09:44.025
+Part 4.
+
+109
+00:09:44.305 --> 00:09:45.415
+The Seller Journey.
+
+110
+00:09:46.665 --> 00:09:47.518
+Onboarding:
+
+111
+00:09:47.798 --> 00:09:56.417
+GST and PAN verification, bank account verification, and address and pickup location (VERIFY required documents).
+
+112
+00:09:56.697 --> 00:10:11.139
+Listing: match to an existing catalog product, or create a new listing with attributes per category;. quality checks on images and content, with ML models detecting prohibited items, counterfeit indicators and poor images.
+
+113
+00:10:11.419 --> 00:10:16.987
+Inventory and pricing: sellers manage stock and prices through the portal or APIs.
+
+114
+00:10:17.267 --> 00:10:20.617
+Pricing recommendations suggest competitive prices.
+
+115
+00:10:21.967 --> 00:10:27.748
+Orders: notifications with dispatch SLAs, labels and manifests, and pickup scheduling.
+
+116
+00:10:28.028 --> 00:10:41.831
+Settlement: the platform collects payments;. it deducts commission, fees (fixed, shipping, collection) and taxes (TCS under GST, VERIFY);. it settles to the seller on a schedule, with detailed statements.
+
+117
+00:10:42.111 --> 00:10:43.796
+This needs a per-seller ledger.
+
+118
+00:10:45.146 --> 00:10:52.399
+Performance: metrics (cancellation, late dispatch, returns) affect visibility and eligibility for programmes.
+
+119
+00:10:52.679 --> 00:10:56.285
+Ads: sellers buy sponsored placements with bids and budgets.
+
+120
+00:10:57.635 --> 00:10:58.595
+Part 5.
+
+121
+00:10:58.875 --> 00:11:00.368
+Algorithms Catalog.
+
+122
+00:11:01.618 --> 00:11:02.962
+Here is a quick table:
+
+123
+00:11:03.242 --> 00:11:05.695
+Problem, and Algorithm (typical), and Where.
+
+124
+00:11:05.975 --> 00:11:08.130
+Query understanding (vernacular).
+
+125
+00:11:08.410 --> 00:11:09.839
+Algorithm (typical):
+
+126
+00:11:10.119 --> 00:11:15.943
+Transliteration models, spell correction, multilingual classifiers for category and attributes.
+
+127
+00:11:16.223 --> 00:11:16.885
+Where:
+
+128
+00:11:17.165 --> 00:11:17.933
+Search.
+
+129
+00:11:18.213 --> 00:11:19.109
+Retrieval.
+
+130
+00:11:19.389 --> 00:11:20.818
+Algorithm (typical):
+
+131
+00:11:21.098 --> 00:11:25.855
+Inverted index + multilingual embeddings with ANN (HNSW).
+
+132
+00:11:26.135 --> 00:11:26.797
+Where:
+
+133
+00:11:27.077 --> 00:11:27.845
+Search.
+
+134
+00:11:28.125 --> 00:11:28.957
+Ranking.
+
+135
+00:11:29.237 --> 00:11:30.666
+Algorithm (typical):
+
+136
+00:11:30.946 --> 00:11:34.487
+Learning-to-rank (gradient-boosted trees, then neural rankers).
+
+137
+00:11:34.767 --> 00:11:35.429
+Where:
+
+138
+00:11:35.709 --> 00:11:36.775
+Search, browse.
+
+139
+00:11:37.055 --> 00:11:38.229
+Recommendations.
+
+140
+00:11:38.509 --> 00:11:39.938
+Algorithm (typical):
+
+141
+00:11:40.218 --> 00:11:48.901
+Item-to-item co-view or co-purchase; embedding-based candidate generation (two-tower) + ranking; session-based sequence models.
+
+142
+00:11:49.181 --> 00:11:49.842
+Where:
+
+143
+00:11:50.122 --> 00:11:51.658
+Home, product pages.
+
+144
+00:11:51.938 --> 00:11:53.175
+Home page layout.
+
+145
+00:11:53.455 --> 00:11:54.885
+Algorithm (typical):
+
+146
+00:11:55.165 --> 00:11:58.258
+Widget ranking (contextual bandits or learned ranking).
+
+147
+00:11:58.538 --> 00:11:59.199
+Where:
+
+148
+00:11:59.479 --> 00:12:00.205
+Home.
+
+149
+00:12:01.555 --> 00:12:02.387
+Pricing.
+
+150
+00:12:02.667 --> 00:12:04.096
+Algorithm (typical):
+
+151
+00:12:04.376 --> 00:12:08.280
+Elasticity and competitive price models; sale pricing rules.
+
+152
+00:12:08.560 --> 00:12:09.221
+Where:
+
+153
+00:12:09.501 --> 00:12:10.333
+Pricing.
+
+154
+00:12:10.613 --> 00:12:11.872
+Bank offer budgets.
+
+155
+00:12:12.152 --> 00:12:13.581
+Algorithm (typical):
+
+156
+00:12:13.861 --> 00:12:16.677
+Budget pacing controllers (Ch 49).
+
+157
+00:12:16.957 --> 00:12:17.619
+Where:
+
+158
+00:12:17.899 --> 00:12:18.731
+Offers.
+
+159
+00:12:19.011 --> 00:12:20.291
+Demand forecasting.
+
+160
+00:12:20.571 --> 00:12:21.000
+Algorithm (typical):
+
+161
+00:12:22.280 --> 00:12:29.619
+Hierarchical time-series forecasting (category, then product, national, then region), with sale uplift features.
+
+162
+00:12:29.899 --> 00:12:30.560
+Where:
+
+163
+00:12:30.840 --> 00:12:32.333
+Inventory, capacity.
+
+164
+00:12:32.613 --> 00:12:33.723
+Serviceability.
+
+165
+00:12:34.003 --> 00:12:35.432
+Algorithm (typical):
+
+166
+00:12:35.712 --> 00:12:39.424
+Precomputed lookup tables from courier coverage and SLAs.
+
+167
+00:12:39.704 --> 00:12:40.365
+Where:
+
+168
+00:12:40.645 --> 00:12:41.499
+Promise.
+
+169
+00:12:41.779 --> 00:12:42.888
+COD risk.
+
+170
+00:12:43.168 --> 00:12:44.597
+Algorithm (typical):
+
+171
+00:12:44.877 --> 00:12:49.187
+Gradient-boosted classifiers on customer, pincode and order features.
+
+172
+00:12:49.467 --> 00:12:50.128
+Where:
+
+173
+00:12:50.408 --> 00:12:52.371
+Checkout (I02 L2).
+
+174
+00:12:52.651 --> 00:12:54.016
+Address intelligence.
+
+175
+00:12:54.296 --> 00:12:55.725
+Algorithm (typical):
+
+176
+00:12:56.005 --> 00:13:00.741
+Address parsing, normalisation and geocoding; clustering to delivery hubs.
+
+177
+00:13:01.021 --> 00:13:01.683
+Where:
+
+178
+00:13:01.963 --> 00:13:04.757
+Logistics, abuse (I02 L4).
+
+179
+00:13:06.107 --> 00:13:07.281
+Fraud and abuse.
+
+180
+00:13:07.561 --> 00:13:08.990
+Algorithm (typical):
+
+181
+00:13:09.270 --> 00:13:14.070
+Graph features across devices, payments and addresses; anomaly detection.
+
+182
+00:13:14.350 --> 00:13:15.011
+Where:
+
+183
+00:13:15.291 --> 00:13:16.017
+Risk.
+
+184
+00:13:16.297 --> 00:13:17.257
+Hub routing.
+
+185
+00:13:17.537 --> 00:13:18.966
+Algorithm (typical):
+
+186
+00:13:19.246 --> 00:13:22.083
+Network flow or shortest path with capacities.
+
+187
+00:13:22.363 --> 00:13:23.025
+Where:
+
+188
+00:13:23.305 --> 00:13:24.222
+Middle mile.
+
+189
+00:13:24.502 --> 00:13:25.803
+Last-mile routing.
+
+190
+00:13:26.083 --> 00:13:27.513
+Algorithm (typical):
+
+191
+00:13:27.793 --> 00:13:31.121
+VRP with time windows (heuristics, local search).
+
+192
+00:13:31.401 --> 00:13:32.062
+Where:
+
+193
+00:13:32.342 --> 00:13:33.579
+Delivery agents.
+
+194
+00:13:33.859 --> 00:13:35.545
+Warehouse slotting and picking.
+
+195
+00:13:35.825 --> 00:13:37.254
+Algorithm (typical):
+
+196
+00:13:37.534 --> 00:13:40.819
+Velocity-based slotting, batch picking, route heuristics.
+
+197
+00:13:41.099 --> 00:13:41.761
+Where:
+
+198
+00:13:42.041 --> 00:13:43.022
+Warehouses.
+
+199
+00:13:43.302 --> 00:13:44.390
+Deal unlocks.
+
+200
+00:13:44.670 --> 00:13:46.099
+Algorithm (typical):
+
+201
+00:13:46.379 --> 00:13:48.961
+Client time sync (I02 L1).
+
+202
+00:13:49.241 --> 00:13:49.902
+Where:
+
+203
+00:13:50.182 --> 00:13:51.206
+Sale events.
+
+204
+00:13:51.486 --> 00:13:52.361
+Support.
+
+205
+00:13:52.641 --> 00:13:54.070
+Algorithm (typical):
+
+206
+00:13:54.350 --> 00:13:57.443
+Intent classification, automated resolution rules.
+
+207
+00:13:57.723 --> 00:13:58.385
+Where:
+
+208
+00:13:58.665 --> 00:13:59.902
+Customer support.
+
+209
+00:14:01.252 --> 00:14:02.191
+Part 6.
+
+210
+00:14:02.471 --> 00:14:03.303
+5A.
+
+211
+00:14:03.583 --> 00:14:04.607
+Deep Dives.
+
+212
+00:14:05.857 --> 00:14:09.355
+5A.1 How the search index is built and kept fresh.
+
+213
+00:14:09.635 --> 00:14:19.577
+Source events: catalog changes (new listing, attribute edit), offer changes (price, stock, seller) and serviceability changes all emit events.
+
+214
+00:14:19.857 --> 00:14:25.595
+Document assembly: an indexing pipeline joins these into a search document per product.
+
+215
+00:14:25.875 --> 00:14:33.363
+It holds: title and attributes;. vernacular and transliterated variants;. category path;. best price and discount;.
+
+216
+00:14:34.713 --> 00:14:41.433
+rating;. seller-quality score;. availability by region (bitmaps or lists of serviceable warehouse clusters).
+
+217
+00:14:41.713 --> 00:14:54.705
+Two update paths: real-time partial updates for price and stock, within seconds, so sold-out items don't rank;. periodic full rebuilds (for example, nightly) for text and embedding changes.
+
+218
+00:14:56.055 --> 00:15:01.815
+Blue-green index aliases switch rebuilt indexes in without downtime (Ch 22).
+
+219
+00:15:02.095 --> 00:15:08.709
+Embeddings: product embeddings are recomputed in batch by the ML platform and pushed to the vector index.
+
+220
+00:15:08.989 --> 00:15:11.314
+Query embeddings are computed online.
+
+221
+00:15:11.594 --> 00:15:15.989
+Serving: search nodes shard the index by product and replicate each shard.
+
+222
+00:15:16.269 --> 00:15:25.165
+A query fans out to shards, merges top-K, then re-ranks with the heavier model on the top few hundred (Ch 42 for autocomplete).
+
+223
+00:15:26.515 --> 00:15:29.203
+5A.2 How recommendations are produced.
+
+224
+00:15:29.483 --> 00:15:30.976
+Candidate generation.
+
+225
+00:15:31.256 --> 00:15:47.427
+Several cheap sources each propose hundreds of items: co-view and co-buy item-to-item tables (precomputed daily);. embedding nearest neighbours of recently viewed items;. trending in the user's city;. category affinity;. continue where you left off.
+
+226
+00:15:48.777 --> 00:16:00.105
+Ranking: one model scores all candidates with user features, item features, context (time, device, language, sale day) and cross features, trained on clicks and purchases.
+
+227
+00:16:00.385 --> 00:16:16.278
+Re-ranking: business rules and diversity, such as: not five similar phones in a row;. boosting in-stock items that are fast to deliver to this pincode;. removing out-of-stock or non-serviceable items;. frequency caps for sponsored items.
+
+228
+00:16:17.628 --> 00:16:35.719
+Serving: precomputed recommendations for the home page are stored per user in a key-value store, so reading them is a single lookup;. real-time signals (the last few views in this session) re-rank at request time;. everything degrades to popular-in-category if the model service is slow.
+
+229
+00:16:35.999 --> 00:16:36.873
+Measurement:
+
+230
+00:16:37.153 --> 00:16:42.444
+A or B tests on conversion and revenue per session, and guardrails on page latency.
+
+231
+00:16:43.794 --> 00:16:47.485
+5A.3 How serviceability and the promise are computed.
+
+232
+00:16:47.765 --> 00:17:04.703
+Inputs: courier and own-logistics coverage per pincode;. hub mappings;. transit time matrices (origin hub, then destination hub, hub, then pincode);. cut-off times;. capacity per hub per day;. product constraints (weight, size, hazardous items, high value);.
+
+233
+00:17:06.053 --> 00:17:08.848
+payment constraints (COD limits per pincode).
+
+234
+00:17:09.128 --> 00:17:21.395
+Precompute: a batch job builds a table: origin warehouse cluster times destination pincode times product class, then serviceable, promise days, COD allowed, courier options.
+
+235
+00:17:21.675 --> 00:17:30.421
+It is loaded into a low-latency key-value store and refreshed several times a day, plus immediately on disruptions (hub closure, floods).
+
+236
+00:17:30.701 --> 00:17:40.941
+At request time: find warehouses holding stock for the product, look up each (warehouse, pincode, class), and choose the fastest serviceable option with capacity.
+
+237
+00:17:41.221 --> 00:17:44.656
+The result is the Delivery by Tuesday and COD flag.
+
+238
+00:17:46.006 --> 00:17:52.427
+Feedback: actual delivery times feed back into transit-time estimates, so promises reflect reality.
+
+239
+00:17:52.707 --> 00:17:55.523
+Promise accuracy is tracked per pincode and hub.
+
+240
+00:17:56.873 --> 00:17:59.881
+5A.4 Inside a warehouse (WMS).
+
+241
+00:18:00.161 --> 00:18:05.495
+Inbound: receive against the seller's advance shipping notice, with quality checks per category.
+
+242
+00:18:05.775 --> 00:18:10.489
+Put-away and slotting: fast-moving items go to locations close to packing.
+
+243
+00:18:10.769 --> 00:18:14.268
+Slotting is recomputed by sales velocity before sales.
+
+244
+00:18:14.548 --> 00:18:19.775
+Order release in waves: orders are grouped by dispatch cut-off and destination hub.
+
+245
+00:18:20.055 --> 00:18:26.241
+Picking: batch picking: one picker collects items for many orders, then they are sorted to orders (put-wall);.
+
+246
+00:18:27.591 --> 00:18:29.554
+pick paths are optimised per zone.
+
+247
+00:18:29.834 --> 00:18:34.890
+Packing: box recommendation by item dimensions; invoice and label printing.
+
+248
+00:18:35.170 --> 00:18:41.207
+Sortation: sorted by destination hub into bags or cages, then manifested per truck.
+
+249
+00:18:41.487 --> 00:18:49.594
+Sale preparation: pre-packing of hot deal items before the sale (packed and labelled once the order arrives), and extra shifts.
+
+250
+00:18:50.944 --> 00:18:53.760
+5A.5 A sale-day request, end to end.
+
+251
+00:18:54.040 --> 00:19:01.592
+Before the unlock: the user opens the deal page from the CDN, and the app syncs to server time (I02 L1).
+
+252
+00:19:01.872 --> 00:19:11.365
+Buy: the tap goes through the gateway (bot checks, rate limits) into the waiting room, which admits the user at checkout's sustainable rate (Ch 46).
+
+253
+00:19:11.645 --> 00:19:18.493
+Checkout: the deal quantity is reserved from bucketed stock;. the household limit is checked (I02 L4);.
+
+254
+00:19:19.843 --> 00:19:26.478
+the price is computed with bank offers, the offer budget reserved, the payment authorised, and the order created.
+
+255
+00:19:26.758 --> 00:19:35.590
+Events: order events flow to OMS, the warehouse release queue, notifications, and the real-time sale dashboard via stream processing.
+
+256
+00:19:35.870 --> 00:19:38.686
+Fulfilment: pre-packed items ship within hours.
+
+257
+00:19:38.966 --> 00:19:44.107
+Logistics hubs run extended shifts, and customers see live tracking from scan events.
+
+258
+00:19:45.457 --> 00:19:48.145
+5A.6 Loyalty coins and membership.
+
+259
+00:19:48.425 --> 00:19:51.945
+Coins are earned on orders and credited after the return window.
+
+260
+00:19:52.225 --> 00:19:56.236
+They are redeemable on later orders and partner offers, and expire.
+
+261
+00:19:56.516 --> 00:20:05.689
+Accounting: a ledger per customer, where earning, redemption, expiry and reversal on return are all entries (Ch 45 patterns).
+
+262
+00:20:05.969 --> 00:20:08.380
+Coin liability is tracked by finance.
+
+263
+00:20:08.660 --> 00:20:12.905
+Membership tiers unlock benefits (early sale access, free delivery).
+
+264
+00:20:13.185 --> 00:20:17.367
+Tier eligibility is computed from spend or coins over a window.
+
+265
+00:20:18.717 --> 00:20:19.655
+Part 6.
+
+266
+00:20:19.935 --> 00:20:21.621
+Data Platform and Warehouse.
+
+267
+00:20:22.871 --> 00:20:24.791
+Public milestones (VERIFY).
+
+268
+00:20:25.071 --> 00:20:36.207
+Flipkart has publicly described an in-house data platform built on the Hadoop ecosystem for batch processing and reporting, plus streaming pipelines, in engineering blog posts.
+
+269
+00:20:36.487 --> 00:20:44.935
+Flipkart announced a strategic partnership with Google Cloud (2021), which included cloud infrastructure (VERIFY scope).
+
+270
+00:20:46.285 --> 00:20:48.759
+Reference design for a platform of this kind.
+
+271
+00:20:49.039 --> 00:20:50.383
+Here is a quick table:
+
+272
+00:20:50.663 --> 00:20:53.223
+Layer, and Role, and Reference technology.
+
+273
+00:20:53.503 --> 00:20:54.613
+Event collection.
+
+274
+00:20:54.893 --> 00:20:55.618
+Role:
+
+275
+00:20:55.898 --> 00:20:57.797
+App clickstream, service events.
+
+276
+00:20:58.077 --> 00:20:59.421
+Reference technology:
+
+277
+00:20:59.701 --> 00:21:02.026
+SDK, then collectors, then Kafka.
+
+278
+00:21:02.306 --> 00:21:03.394
+Change data.
+
+279
+00:21:03.674 --> 00:21:04.399
+Role:
+
+280
+00:21:04.679 --> 00:21:06.514
+From operational databases.
+
+281
+00:21:06.794 --> 00:21:08.138
+Reference technology:
+
+282
+00:21:08.418 --> 00:21:10.573
+Debezium CDC, then Kafka.
+
+283
+00:21:10.853 --> 00:21:12.090
+Stream processing.
+
+284
+00:21:12.370 --> 00:21:13.095
+Role:
+
+285
+00:21:13.375 --> 00:21:16.703
+Real-time metrics, fraud features, sale dashboards.
+
+286
+00:21:16.983 --> 00:21:18.327
+Reference technology:
+
+287
+00:21:18.607 --> 00:21:19.695
+Apache Flink.
+
+288
+00:21:19.975 --> 00:21:21.042
+Lake storage.
+
+289
+00:21:21.322 --> 00:21:22.047
+Role:
+
+290
+00:21:22.327 --> 00:21:23.991
+Raw and curated tables.
+
+291
+00:21:24.271 --> 00:21:25.615
+Reference technology:
+
+292
+00:21:25.895 --> 00:21:28.882
+Object storage + Apache Iceberg or Hudi.
+
+293
+00:21:29.162 --> 00:21:30.357
+Batch processing.
+
+294
+00:21:30.637 --> 00:21:31.362
+Role:
+
+295
+00:21:31.642 --> 00:21:32.901
+Heavy transforms.
+
+296
+00:21:33.181 --> 00:21:34.525
+Reference technology:
+
+297
+00:21:34.805 --> 00:21:35.999
+Apache Spark.
+
+298
+00:21:37.349 --> 00:21:38.608
+Warehouse and query.
+
+299
+00:21:38.888 --> 00:21:39.613
+Role:
+
+300
+00:21:39.893 --> 00:21:41.216
+Analytics SQL.
+
+301
+00:21:41.496 --> 00:21:42.840
+Reference technology:
+
+302
+00:21:43.120 --> 00:21:49.691
+Trino or Presto, a cloud warehouse (for example, BigQuery), or ClickHouse for real-time dashboards.
+
+303
+00:21:49.971 --> 00:21:51.037
+Orchestration.
+
+304
+00:21:51.317 --> 00:21:52.043
+Role:
+
+305
+00:21:52.323 --> 00:21:53.261
+Pipelines.
+
+306
+00:21:53.541 --> 00:21:54.885
+Reference technology:
+
+307
+00:21:55.165 --> 00:21:57.555
+Airflow; dbt for SQL models.
+
+308
+00:21:57.835 --> 00:21:59.307
+Catalog and governance.
+
+309
+00:21:59.587 --> 00:22:00.312
+Role:
+
+310
+00:22:00.592 --> 00:22:02.832
+Ownership, lineage, PII tags.
+
+311
+00:22:03.112 --> 00:22:04.456
+Reference technology:
+
+312
+00:22:04.736 --> 00:22:06.763
+DataHub or OpenMetadata.
+
+313
+00:22:07.043 --> 00:22:07.768
+BI.
+
+314
+00:22:08.048 --> 00:22:08.773
+Role:
+
+315
+00:22:09.053 --> 00:22:10.013
+Dashboards.
+
+316
+00:22:10.293 --> 00:22:11.637
+Reference technology:
+
+317
+00:22:11.917 --> 00:22:13.773
+Superset, Looker or similar.
+
+318
+00:22:14.053 --> 00:22:14.800
+ML.
+
+319
+00:22:15.080 --> 00:22:15.805
+Role:
+
+320
+00:22:16.085 --> 00:22:17.813
+Features, training, serving.
+
+321
+00:22:18.093 --> 00:22:19.437
+Reference technology:
+
+322
+00:22:19.717 --> 00:22:24.389
+Feature store, Spark or PyTorch training, model serving on Kubernetes.
+
+323
+00:22:24.669 --> 00:22:25.885
+Experimentation.
+
+324
+00:22:26.165 --> 00:22:26.891
+Role:
+
+325
+00:22:27.171 --> 00:22:28.344
+A or B tests.
+
+326
+00:22:28.624 --> 00:22:29.968
+Reference technology:
+
+327
+00:22:30.248 --> 00:22:31.933
+An in-house platform on the lake.
+
+328
+00:22:33.283 --> 00:22:34.670
+Data model highlights.
+
+329
+00:22:34.950 --> 00:22:49.542
+Facts: sessions and events (views, searches, clicks);. cart events, orders and order items;. shipments with every logistics scan;. deliveries, RTOs and returns;. payments and refunds;. ad impressions and clicks;.
+
+330
+00:22:50.892 --> 00:22:52.087
+seller settlements.
+
+331
+00:22:52.367 --> 00:23:04.271
+Dimensions: customer (pseudonymised), product and category tree, seller, pincode (with city tier, state, hub), warehouse, courier, payment method and bank, date and time (with sale-event flags).
+
+332
+00:23:04.551 --> 00:23:12.807
+Key derived metrics: conversion funnel by channel and language;. search success rate by language;. promise accuracy by pincode;.
+
+333
+00:23:14.157 --> 00:23:17.314
+RTO rate by pincode, courier and payment type;.
+
+334
+00:23:17.594 --> 00:23:23.162
+COD share;. bank offer spend versus budget;. seller performance;. cost per shipment.
+
+335
+00:23:23.442 --> 00:23:29.181
+Real-time sale dashboards (seconds-level) come from stream processing, not the batch warehouse.
+
+336
+00:23:30.531 --> 00:23:31.469
+Part 7.
+
+337
+00:23:31.749 --> 00:23:32.667
+Tech Stack.
+
+338
+00:23:33.917 --> 00:23:35.261
+Here is a quick table:
+
+339
+00:23:35.541 --> 00:23:40.362
+Layer, and Publicly reported for Flipkart (VERIFY each), and Reference choice.
+
+340
+00:23:40.642 --> 00:23:41.559
+Services.
+
+341
+00:23:41.839 --> 00:23:44.783
+Publicly reported for Flipkart (VERIFY each):
+
+342
+00:23:45.063 --> 00:23:48.029
+Java-based microservices widely reported.
+
+343
+00:23:48.309 --> 00:23:49.418
+Reference choice:
+
+344
+00:23:49.698 --> 00:23:52.813
+Java 21 or Spring Boot, gRPC.
+
+345
+00:23:53.093 --> 00:23:53.967
+Front end.
+
+346
+00:23:54.247 --> 00:23:57.191
+Publicly reported for Flipkart (VERIFY each):
+
+347
+00:23:57.471 --> 00:24:02.677
+Native Android or iOS; React-based web and PWA (Flipkart Lite).
+
+348
+00:24:02.957 --> 00:24:04.066
+Reference choice:
+
+349
+00:24:04.346 --> 00:24:08.783
+Kotlin or Swift or Flutter; React or Next.js PWA.
+
+350
+00:24:09.063 --> 00:24:10.386
+Key-value and caching.
+
+351
+00:24:10.666 --> 00:24:13.610
+Publicly reported for Flipkart (VERIFY each):
+
+352
+00:24:13.890 --> 00:24:16.301
+Aerospike reported in vendor case studies.
+
+353
+00:24:16.581 --> 00:24:17.690
+Reference choice:
+
+354
+00:24:17.970 --> 00:24:20.551
+Aerospike or Redis for sessions and carts.
+
+355
+00:24:20.831 --> 00:24:21.727
+Relational.
+
+356
+00:24:22.007 --> 00:24:24.951
+Publicly reported for Flipkart (VERIFY each):
+
+357
+00:24:25.231 --> 00:24:27.237
+MySQL widely reported.
+
+358
+00:24:27.517 --> 00:24:28.626
+Reference choice:
+
+359
+00:24:28.906 --> 00:24:32.789
+MySQL or PostgreSQL, sharded (Vitess or Citus).
+
+360
+00:24:33.069 --> 00:24:34.989
+Wide-column or big tables.
+
+361
+00:24:35.269 --> 00:24:38.213
+Publicly reported for Flipkart (VERIFY each):
+
+362
+00:24:38.493 --> 00:24:41.095
+HBase reported in the Hadoop-based platform.
+
+363
+00:24:41.375 --> 00:24:42.485
+Reference choice:
+
+364
+00:24:42.765 --> 00:24:45.453
+HBase or Cassandra, or cloud equivalents.
+
+365
+00:24:46.803 --> 00:24:47.571
+Search.
+
+366
+00:24:47.851 --> 00:24:50.795
+Publicly reported for Flipkart (VERIFY each):
+
+367
+00:24:51.075 --> 00:24:54.019
+Solr or Elasticsearch-family engines reported.
+
+368
+00:24:54.299 --> 00:24:55.408
+Reference choice:
+
+369
+00:24:55.688 --> 00:24:58.525
+OpenSearch or Elasticsearch + vector search.
+
+370
+00:24:58.805 --> 00:24:59.701
+Messaging.
+
+371
+00:24:59.981 --> 00:25:02.925
+Publicly reported for Flipkart (VERIFY each):
+
+372
+00:25:03.205 --> 00:25:04.592
+Kafka widely used.
+
+373
+00:25:04.872 --> 00:25:05.981
+Reference choice:
+
+374
+00:25:06.261 --> 00:25:07.115
+Kafka.
+
+375
+00:25:07.395 --> 00:25:08.589
+Data platform.
+
+376
+00:25:08.869 --> 00:25:11.813
+Publicly reported for Flipkart (VERIFY each):
+
+377
+00:25:12.093 --> 00:25:16.381
+Hadoop ecosystem; Google Cloud partnership (2021).
+
+378
+00:25:16.661 --> 00:25:17.771
+Reference choice:
+
+379
+00:25:18.051 --> 00:25:21.571
+Iceberg or Hudi + Spark + Trino or BigQuery.
+
+380
+00:25:21.851 --> 00:25:22.896
+Infrastructure.
+
+381
+00:25:23.176 --> 00:25:26.120
+Publicly reported for Flipkart (VERIFY each):
+
+382
+00:25:26.400 --> 00:25:28.405
+Private cloud plus public cloud.
+
+383
+00:25:28.685 --> 00:25:29.795
+Reference choice:
+
+384
+00:25:30.075 --> 00:25:32.613
+Kubernetes, Terraform, Argo CD.
+
+385
+00:25:32.893 --> 00:25:33.981
+Observability.
+
+386
+00:25:34.261 --> 00:25:35.371
+Reference choice:
+
+387
+00:25:35.651 --> 00:25:39.939
+OpenTelemetry, Prometheus, Grafana, ELK or OpenSearch.
+
+388
+00:25:41.289 --> 00:25:42.163
+Part 8.
+
+389
+00:25:42.443 --> 00:25:44.619
+Reliability and Sale Operations.
+
+390
+00:25:45.869 --> 00:25:55.640
+Readiness: capacity planning, load tests at a multiple of forecast, dependency agreements, and freeze windows (I02 §2.10).
+
+391
+00:25:55.920 --> 00:26:07.056
+Isolation: sale-specific services (deal pages, waiting rooms) scaled and isolated from the everyday catalog, with feature switches to degrade non-critical widgets.
+
+392
+00:26:07.336 --> 00:26:15.784
+Logistics surge: temporary hubs, additional delivery agents, extended hours, and serviceability tightened when capacity is exceeded.
+
+393
+00:26:16.064 --> 00:26:23.275
+War room: journey dashboards, per-bank payment success, logistics backlog by hub, RTO early indicators.
+
+394
+00:26:24.625 --> 00:26:25.521
+Part 9.
+
+395
+00:26:25.801 --> 00:26:26.931
+Interview Angles.
+
+396
+00:26:28.181 --> 00:26:30.485
+B2: customer journey and services.
+
+397
+00:26:30.765 --> 00:26:35.459
+B3: serviceability, COD risk, vernacular search, logistics hubs.
+
+398
+00:26:35.739 --> 00:26:40.155
+B4: data platform, sale readiness, algorithms across the funnel.
+
+399
+00:26:40.435 --> 00:26:45.128
+The 20 interview questions for this design are in I02 §8.
+
+400
+00:26:46.478 --> 00:26:48.078
+That's the end of this chapter.
+
+401
+00:26:48.358 --> 00:26:54.395
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+402
+00:26:54.675 --> 00:26:56.126
+See you in the next chapter.
+

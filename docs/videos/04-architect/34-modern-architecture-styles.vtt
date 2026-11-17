@@ -1,0 +1,3158 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.014
+Modern Architecture Styles.
+
+2
+00:00:02.294 --> 00:00:06.369
+Chapter 34, from the Architect part of the System Design Playbook.
+
+3
+00:00:08.119 --> 00:00:09.079
+At a glance:
+
+4
+00:00:09.359 --> 00:00:10.532
+Chapter at a glance.
+
+5
+00:00:10.812 --> 00:00:11.815
+Reader bands:
+
+6
+00:00:12.095 --> 00:00:14.377
+B2, then B4, Prerequisites:
+
+7
+00:00:14.657 --> 00:00:19.948
+Ch 16, Ch 18, Ch 31, Ch 33, What you will build:
+
+8
+00:00:20.228 --> 00:00:37.124
+A working understanding of the architecture styles an architect actually chooses between, layered, hexagonal or clean, modular monolith, microservices, event-driven, serverless, micro-frontends, and cell-based, what each costs, and how to combine and evolve them.
+
+9
+00:00:37.404 --> 00:00:41.991
+Four runnable labs measure the key trade-offs, including a real cell router.
+
+10
+00:00:43.341 --> 00:00:45.517
+L1: hexagonal architecture.
+
+11
+00:00:45.797 --> 00:01:11.055
+The same checkout domain ran 2,000 checkouts behind in-memory adapters and behind real ones (a file store plus a real HTTP payment gateway): identical outcomes (1,980 paid, 20 declined), the in-memory suite ~200 to 300x faster, and a reflection-based dependency check passed the domain and caught a class that took an HttpClient.
+
+12
+00:01:11.335 --> 00:01:13.639
+L2: modules versus services.
+
+13
+00:01:13.919 --> 00:01:36.234
+Five collaborator calls cost ~11 µs in-process, ~1.1 ms as serial HTTP calls on localhost (~99x) and ~0.5 ms fanned out; with six required 99.9% deployables, expected downtime rose from 43 to 259 minutes per month.
+
+14
+00:01:37.584 --> 00:01:39.845
+L3: cells and blast radius.
+
+15
+00:01:40.125 --> 00:02:00.712
+Over 10,000 simulated years, 8 cells with 90-minute deploy waves cut lost platform-minutes from 880 to 205 per year, but latent bugs still reached 100% of customers; spacing waves 12 h apart cut it to 110 per year and the worst incident to 12.5%.
+
+16
+00:02:00.992 --> 00:02:02.933
+L4: a real cell router.
+
+17
+00:02:03.213 --> 00:02:21.091
+Moving Pune between cells under live traffic: a naive routing flip returned zero errors and silently lost 1,519 acknowledged items; a hold, copy, flip migration lost 0, holding only Pune's requests for ~13 ms.
+
+18
+00:02:21.371 --> 00:02:22.352
+Reading time:
+
+19
+00:02:22.632 --> 00:02:24.595
+120 min + code.
+
+20
+00:02:25.945 --> 00:02:26.798
+Part 1.
+
+21
+00:02:27.078 --> 00:02:28.998
+Introduction and Why It Matters.
+
+22
+00:02:30.248 --> 00:02:32.893
+A story: three architectures in three years.
+
+23
+00:02:33.173 --> 00:02:36.757
+The grocery platform has lived through every fashionable style.
+
+24
+00:02:37.037 --> 00:02:38.936
+Year 1, the layered monolith.
+
+25
+00:02:39.216 --> 00:02:43.419
+A Spring Boot application with controllers, services and repositories.
+
+26
+00:02:43.699 --> 00:02:44.808
+It shipped fast.
+
+27
+00:02:45.088 --> 00:02:57.205
+By month ten, services called each other freely, the OrderService class was 4,000 lines, business rules lived in controllers and SQL, and a change to pricing broke delivery-slot booking.
+
+28
+00:02:57.485 --> 00:03:00.515
+Tests needed a database and took 25 minutes.
+
+29
+00:03:01.865 --> 00:03:03.699
+Year 2, microservices.
+
+30
+00:03:03.979 --> 00:03:10.550
+The team split the monolith into 26 services by entity (Ch 33 §1.1).
+
+31
+00:03:10.830 --> 00:03:23.374
+Each service was small, but checkout now made nine synchronous calls, p99 latency tripled, a promotions deployment could take down checkout, and local development meant running 14 containers.
+
+32
+00:03:23.654 --> 00:03:26.491
+The monolith's coupling had become network coupling.
+
+33
+00:03:26.771 --> 00:03:28.691
+Year 3, a festival outage.
+
+34
+00:03:28.971 --> 00:03:36.843
+During a Diwali flash sale, one city's surge exhausted the shared Kafka cluster and the shared orders database connection pool.
+
+35
+00:03:37.123 --> 00:03:42.606
+Every city went down together, a customer in Chennai couldn't check out because of a sale in Pune.
+
+36
+00:03:42.886 --> 00:03:50.545
+The post-incident review asked a question no style had answered: why can one city's problem become every city's problem?
+
+37
+00:03:51.895 --> 00:03:55.905
+The re-architecture that followed didn't pick a single fashionable style.
+
+38
+00:03:56.185 --> 00:03:58.553
+It combined several, each where it paid off:
+
+39
+00:03:58.833 --> 00:04:07.431
+Hexagonal architecture inside every deployable, so the domain is testable without infrastructure and adapters are swappable (L1).
+
+40
+00:04:07.711 --> 00:04:15.433
+A modular monolith for Ordering and Catalog, where in-process calls are cheap and a transaction can span modules (L2).
+
+41
+00:04:15.713 --> 00:04:23.863
+Separate services only where a real driver existed, Inventory and Fulfilment, which need independent scaling for flash sales.
+
+42
+00:04:24.143 --> 00:04:27.471
+Events between contexts, not chains of synchronous calls.
+
+43
+00:04:28.821 --> 00:04:40.831
+Cells, independent copies of the whole stack, each serving a group of cities, so that an infrastructure failure, a bad deploy or one city's surge is confined to one cell (L3, L4).
+
+44
+00:04:42.181 --> 00:04:42.864
+Quote:
+
+45
+00:04:43.144 --> 00:04:44.808
+The thesis of this chapter.
+
+46
+00:04:45.088 --> 00:04:51.040
+An architecture style is a bundle of constraints you accept in exchange for specific qualities.
+
+47
+00:04:51.320 --> 00:05:11.075
+Layered buys simplicity and costs coupling; hexagonal buys testability and replaceable infrastructure; modular monoliths buy cheap calls and simple operations; microservices buy independent deployment and scaling at the price of network calls and distributed failure; serverless buys zero-ops
+
+48
+00:05:11.355 --> 00:05:20.784
+scaling at the price of cold starts and per-request cost; cells buy blast-radius containment at the price of duplicated infrastructure and routing.
+
+49
+00:05:21.064 --> 00:05:31.816
+There is no best style, real systems combine them, one per level (inside a deployable, across deployables, across the fleet), and evolve between them as the drivers change.
+
+50
+00:05:33.166 --> 00:05:35.470
+Where this lives in the grocery platform.
+
+51
+00:05:35.750 --> 00:05:37.115
+Here is a quick table:
+
+52
+00:05:37.395 --> 00:05:40.105
+Level, and Style chosen, and Why, and Lab.
+
+53
+00:05:40.385 --> 00:05:41.899
+Inside each deployable.
+
+54
+00:05:42.179 --> 00:05:43.310
+Style chosen:
+
+55
+00:05:43.590 --> 00:05:45.574
+Hexagonal (ports and adapters).
+
+56
+00:05:45.854 --> 00:05:46.537
+Why:
+
+57
+00:05:46.817 --> 00:05:52.257
+Test rules without infrastructure; swap Razorpay or SMS or DB adapters.
+
+58
+00:05:52.537 --> 00:05:53.219
+Lab:
+
+59
+00:05:53.499 --> 00:05:54.331
+L1.
+
+60
+00:05:54.611 --> 00:05:56.041
+Ordering + Catalog.
+
+61
+00:05:56.321 --> 00:05:57.451
+Style chosen:
+
+62
+00:05:57.731 --> 00:05:59.075
+Modular monolith.
+
+63
+00:05:59.355 --> 00:06:00.038
+Why:
+
+64
+00:06:00.318 --> 00:06:03.881
+Change together; cheap in-process calls; local transactions.
+
+65
+00:06:04.161 --> 00:06:04.843
+Lab:
+
+66
+00:06:05.123 --> 00:06:05.955
+L2.
+
+67
+00:06:06.235 --> 00:06:07.771
+Inventory, Fulfilment.
+
+68
+00:06:08.051 --> 00:06:09.182
+Style chosen:
+
+69
+00:06:09.462 --> 00:06:10.742
+Separate services.
+
+70
+00:06:11.022 --> 00:06:11.705
+Why:
+
+71
+00:06:11.985 --> 00:06:15.419
+Independent scaling for flash sales; different release cadence.
+
+72
+00:06:15.699 --> 00:06:16.382
+Lab:
+
+73
+00:06:16.662 --> 00:06:17.494
+L2.
+
+74
+00:06:17.774 --> 00:06:19.011
+Between contexts.
+
+75
+00:06:19.291 --> 00:06:20.422
+Style chosen:
+
+76
+00:06:20.702 --> 00:06:23.049
+Event-driven (outbox + Kafka).
+
+77
+00:06:23.329 --> 00:06:24.011
+Why:
+
+78
+00:06:24.291 --> 00:06:26.211
+Decoupled, no synchronous chains.
+
+79
+00:06:26.491 --> 00:06:27.174
+Lab:
+
+80
+00:06:27.454 --> 00:06:28.606
+Ch 15.
+
+81
+00:06:28.886 --> 00:06:29.654
+Fleet.
+
+82
+00:06:29.934 --> 00:06:31.065
+Style chosen:
+
+83
+00:06:31.345 --> 00:06:34.587
+8 cells by city group + a global control plane.
+
+84
+00:06:34.867 --> 00:06:35.550
+Why:
+
+85
+00:06:35.830 --> 00:06:39.201
+Contain infra failures, bad deploys, one city's surge.
+
+86
+00:06:39.481 --> 00:06:40.163
+Lab:
+
+87
+00:06:40.443 --> 00:06:41.787
+L3, L4.
+
+88
+00:06:43.137 --> 00:06:44.609
+Web or app front ends.
+
+89
+00:06:44.889 --> 00:06:46.020
+Style chosen:
+
+90
+00:06:46.300 --> 00:06:49.969
+BFF per client; micro-frontends for the seller portal.
+
+91
+00:06:50.249 --> 00:06:50.932
+Why:
+
+92
+00:06:51.212 --> 00:06:54.412
+Different client needs; independent seller-portal teams.
+
+93
+00:06:54.692 --> 00:06:56.569
+Lab: §2.9.
+
+94
+00:06:56.849 --> 00:06:58.236
+Spiky side jobs.
+
+95
+00:06:58.516 --> 00:06:59.647
+Style chosen:
+
+96
+00:06:59.927 --> 00:07:01.207
+Serverless functions.
+
+97
+00:07:01.487 --> 00:07:02.169
+Why:
+
+98
+00:07:02.449 --> 00:07:06.161
+Invoice PDFs, image resizing: bursty, stateless.
+
+99
+00:07:06.441 --> 00:07:08.383
+Lab: §2.7.
+
+100
+00:07:09.733 --> 00:07:11.055
+Learning objectives.
+
+101
+00:07:11.335 --> 00:07:13.213
+By the end you will be able to:
+
+102
+00:07:13.493 --> 00:07:18.570
+Describe each major style by the constraints it imposes and the qualities it buys.
+
+103
+00:07:18.850 --> 00:07:23.501
+Apply hexagonal architecture and enforce its dependency rule (L1).
+
+104
+00:07:23.781 --> 00:07:28.730
+Price the move from modules to services in latency and availability (L2).
+
+105
+00:07:29.010 --> 00:07:37.095
+Design a cell-based architecture, cell sizing, routing, deploy waves, control plane, and quantify blast radius (L3).
+
+106
+00:07:37.375 --> 00:07:40.362
+Migrate tenants between cells safely (L4).
+
+107
+00:07:41.712 --> 00:07:45.083
+Combine styles across levels and plan an evolution path.
+
+108
+00:07:46.433 --> 00:07:47.307
+Part 2.
+
+109
+00:07:47.587 --> 00:07:49.486
+Core Concepts, Beginner to Deep.
+
+110
+00:07:50.736 --> 00:07:53.445
+Intuition: styles are bundles of constraints.
+
+111
+00:07:53.725 --> 00:08:02.685
+An architecture style names a recurring set of structural decisions: what the building blocks are, how they may communicate, and what they may depend on.
+
+112
+00:08:02.965 --> 00:08:14.869
+REST's constraints (statelessness, uniform interface) buy scalability and cacheability; the layered style's constraint (each layer uses only the layer below) buys separation of concerns.
+
+113
+00:08:15.149 --> 00:08:17.965
+Every constraint closes some doors to open others.
+
+114
+00:08:18.245 --> 00:08:20.507
+Three consequences shape this chapter:
+
+115
+00:08:20.787 --> 00:08:27.955
+Choose by drivers, not by fashion (Ch 31): which quality attributes does this part of the system need most?
+
+116
+00:08:29.305 --> 00:08:31.161
+Styles apply at different levels.
+
+117
+00:08:31.441 --> 00:08:41.638
+Hexagonal describes the inside of a deployable; microservices describes how deployables relate; cell-based describes how copies of the whole system relate.
+
+118
+00:08:41.918 --> 00:08:45.374
+You pick one at each level, they're not alternatives to each other.
+
+119
+00:08:45.654 --> 00:08:49.345
+Styles are points on an evolution path, not permanent identities.
+
+120
+00:08:49.625 --> 00:08:59.139
+Many successful systems go layered monolith, then modular monolith, then selective services, then cells, as scale and organization demand.
+
+121
+00:09:00.489 --> 00:09:02.409
+Layered (n-tier) architecture.
+
+122
+00:09:02.689 --> 00:09:11.265
+The default: presentation, then application or service, then domain, then persistence, each layer depending only on the one below.
+
+123
+00:09:11.545 --> 00:09:15.769
+Buys: simplicity, familiarity, a clear place for each kind of code.
+
+124
+00:09:16.049 --> 00:09:33.927
+Costs: the domain depends on persistence (the arrow points down to the database), so business logic tends to be written around tables; layers become pass-throughs (sinkhole anti-pattern); nothing stops a controller from calling a repository or one service from calling every other.
+
+125
+00:09:34.207 --> 00:09:37.833
+Fits: small CRUD-heavy applications, early-stage products.
+
+126
+00:09:39.183 --> 00:09:45.455
+The critical weakness is the direction of the dependency at the bottom: the domain knows about the database.
+
+127
+00:09:45.735 --> 00:09:48.509
+Hexagonal architecture fixes exactly that.
+
+128
+00:09:49.859 --> 00:09:52.419
+Hexagonal, onion and clean architecture.
+
+129
+00:09:52.699 --> 00:10:03.451
+Alistair Cockburn's ports and adapters (hexagonal) architecture, and its close relatives Jeffrey Palermo's onion and Robert Martin's clean architecture, share one rule:
+
+130
+00:10:03.731 --> 00:10:05.352
+Dependencies point inward.
+
+131
+00:10:05.632 --> 00:10:08.299
+The domain is at the center and depends on nothing.
+
+132
+00:10:08.579 --> 00:10:11.757
+Infrastructure depends on the domain, never the reverse.
+
+133
+00:10:12.037 --> 00:10:24.752
+Ports are interfaces owned by the domain that describe what it needs (OrderRepository, PaymentPort), driven (secondary) ports, or what it offers (CheckoutUseCase), driving (primary) ports.
+
+134
+00:10:26.102 --> 00:10:40.502
+Adapters implement ports for a technology: a JPA repository, a Razorpay HTTP client, a Kafka publisher (driven adapters); a REST controller, a Kafka listener, a CLI (driving adapters).
+
+135
+00:10:40.782 --> 00:10:46.094
+Wiring (Spring configuration) connects adapters to ports at the edge of the application.
+
+136
+00:10:46.374 --> 00:10:48.401
+What it buys (L1 measures both):
+
+137
+00:10:49.751 --> 00:10:52.033
+Business rules testable at memory speed.
+
+138
+00:10:52.313 --> 00:11:05.988
+L1 ran 2,000 checkouts through in-memory adapters in ~10 to 20 ms and through a real file store + HTTP gateway in ~3 s, with identical paid or declined outcomes.
+
+139
+00:11:06.268 --> 00:11:13.863
+Most tests run against the fast wiring; each adapter gets a few contract or integration tests (Ch 29).
+
+140
+00:11:14.143 --> 00:11:15.807
+Replaceable infrastructure.
+
+141
+00:11:16.087 --> 00:11:24.001
+Moving from the file store to PostgreSQL, or from Razorpay to another gateway, is a new adapter; the domain doesn't change.
+
+142
+00:11:25.351 --> 00:11:33.757
+The rule must be enforced, or it erodes the first time someone passes an HttpClient into a domain class for convenience.
+
+143
+00:11:34.037 --> 00:11:44.917
+L1's reflection check (and ArchUnit in real projects, Ch 31 L2) is that fitness function, and L1 shows it catching exactly that shortcut.
+
+144
+00:11:46.267 --> 00:11:51.387
+Here is the Java code, Package layout for one bounded context (hexagonal).
+
+145
+00:11:54.237 --> 00:12:05.287
+Costs: more interfaces and mapping between domain objects and persistence or transport models; overkill for trivial CRUD (§2.11 of Ch 33).
+
+146
+00:12:06.637 --> 00:12:07.981
+Modular monolith.
+
+147
+00:12:08.261 --> 00:12:25.243
+A modular monolith is one deployable whose internals are divided into modules with enforced boundaries, typically one module per bounded context, that interact only through published module APIs or events, never by reaching into each other's internals or tables.
+
+148
+00:12:25.523 --> 00:12:47.539
+Buys: in-process calls (L2: ~11 µs for five calls versus ~1.1 ms over HTTP on localhost, and far more in a real network), local ACID transactions when genuinely needed, one pipeline, simple debugging, simple local development, plus most of microservices' modularity benefits.
+
+149
+00:12:48.889 --> 00:13:01.091
+Costs: one deploy unit (a bad release affects all modules, mitigate with canaries and feature flags); modules scale together; the boundaries must be enforced or it becomes a ball of mud.
+
+150
+00:13:01.371 --> 00:13:17.286
+Enforcement: module packages with public API sub-packages; ArchUnit or Spring Modulith verification in CI; one schema (or table prefix) per module with no cross-module table access; events between modules.
+
+151
+00:13:18.636 --> 00:13:25.271
+Here is the Java code, Spring Modulith verification (VERIFY: needs spring-modulith-starter-test).
+
+152
+00:13:28.121 --> 00:13:39.235
+The modular monolith is the recommended default for most teams: it preserves the option to extract a module into a service later, cheaply, because the boundary is already clean.
+
+153
+00:13:40.585 --> 00:13:42.271
+Microservices, priced.
+
+154
+00:13:42.551 --> 00:13:45.708
+Ch 16 covers microservices in depth.
+
+155
+00:13:45.988 --> 00:13:49.679
+The architectural point here is the price list, which L2 measures:
+
+156
+00:13:49.959 --> 00:14:02.801
+Latency: each module-to-service boundary turns a microsecond call into a network call, ~99x on localhost in L2, before real network, TLS, sidecars and GC.
+
+157
+00:14:03.081 --> 00:14:05.812
+Serial chains add; fan-out takes the max.
+
+158
+00:14:06.092 --> 00:14:13.303
+Tail latency: p99 was already several milliseconds on localhost; every hop contributes its own tail.
+
+159
+00:14:14.653 --> 00:14:30.802
+Availability: required synchronous dependencies multiply, six 99.9% deployables on a path give ~99.4%, that is, ~6x the downtime (43, then 259 min per month).
+
+160
+00:14:31.082 --> 00:14:36.970
+Operations: per-service pipelines, observability, on-call, versioning and contract testing.
+
+161
+00:14:38.320 --> 00:14:50.608
+What you buy with that price: independent deployment, independent scaling, fault isolation between services (if you remove synchronous coupling), technology freedom, and team autonomy at scale.
+
+162
+00:14:50.888 --> 00:15:07.784
+The decision rule: extract a service when one of those benefits is concretely needed (a module with a different scaling profile, a different release cadence, a different team), and when you do, remove required synchronous hops, use events, caches and fan-out rather than chains.
+
+163
+00:15:09.134 --> 00:15:10.862
+Event-driven architecture.
+
+164
+00:15:11.142 --> 00:15:20.507
+In an event-driven style, components communicate by publishing and reacting to events rather than calling each other (Ch 14, Ch 15).
+
+165
+00:15:20.787 --> 00:15:21.918
+Two topologies:
+
+166
+00:15:22.198 --> 00:15:27.894
+Choreography, each service reacts to events and publishes its own; no central coordinator.
+
+167
+00:15:28.174 --> 00:15:32.761
+Loosely coupled, but the end-to-end flow is implicit and harder to observe.
+
+168
+00:15:33.041 --> 00:15:40.081
+Orchestration, a coordinator (saga orchestrator, workflow engine like Temporal) tells participants what to do.
+
+169
+00:15:40.361 --> 00:15:44.307
+Explicit flow and easier error handling, but a central component.
+
+170
+00:15:45.657 --> 00:15:58.841
+Event-driven styles buy temporal decoupling (the consumer can be down), natural fan-out, and an audit trail; they cost eventual consistency, harder debugging, and schema-evolution discipline (Ch 28).
+
+171
+00:15:59.121 --> 00:16:09.319
+Most modern systems are hybrid: synchronous APIs for queries and commands that need an immediate answer, events for propagating facts between contexts.
+
+172
+00:16:10.669 --> 00:16:12.781
+Serverless or Functions-as-a-Service.
+
+173
+00:16:13.061 --> 00:16:24.069
+In serverless, you deploy functions (or containers) and the platform handles provisioning, scaling (including to zero) and patching; you pay per invocation and compute-time.
+
+174
+00:16:24.349 --> 00:16:32.434
+Buys: no servers to manage, automatic scaling for spiky loads, zero cost when idle, fast delivery for event-driven glue.
+
+175
+00:16:33.784 --> 00:16:52.643
+Costs: cold starts (hundreds of ms to seconds for JVM functions without SnapStart or native images), execution-time limits, statelessness (state goes to managed stores), vendor coupling, harder local testing, and a cost curve that grows linearly with volume with no ceiling,
+
+176
+00:16:52.923 --> 00:17:02.523
+Ch 31 L4 showed serverless cheaper at the likely volume but more expensive in expectation once demand uncertainty is modeled.
+
+177
+00:17:02.803 --> 00:17:11.187
+Fits: bursty, stateless, event-triggered work: invoice PDF generation, image resizing, webhook handling, scheduled jobs.
+
+178
+00:17:11.467 --> 00:17:16.864
+For steady high-volume Java services, containers usually win on cost and latency.
+
+179
+00:17:18.214 --> 00:17:33.553
+For Java specifically, cold starts are mitigated with GraalVM native images, AWS Lambda SnapStart or CRaC checkpointing, provisioned concurrency, or by running containers on a serverless container platform instead.
+
+180
+00:17:34.903 --> 00:17:36.460
+Cell-based architecture.
+
+181
+00:17:36.740 --> 00:17:49.284
+A cell is a complete, independent copy of the system's data plane, services, databases, caches, queues, serving a fixed subset of customers (for the grocery platform: a group of cities).
+
+182
+00:17:49.564 --> 00:17:56.540
+A thin cell router maps each request to its cell; a control plane manages cells, routing tables and deployments.
+
+183
+00:17:56.820 --> 00:18:00.809
+Cells share nothing at runtime except the router and the control plane.
+
+184
+00:18:01.089 --> 00:18:08.385
+The purpose is blast-radius containment: cells are bulkheads (Ch 18) at the level of the whole architecture.
+
+185
+00:18:08.665 --> 00:18:12.143
+L3 quantifies it over 10,000 simulated years:
+
+186
+00:18:13.493 --> 00:18:14.858
+Here is a quick table:
+
+187
+00:18:15.138 --> 00:18:19.170
+Design, and Platform-minutes lost or year, and Worst single incident.
+
+188
+00:18:19.450 --> 00:18:20.879
+One global deployment.
+
+189
+00:18:21.159 --> 00:18:22.823
+Platform-minutes lost or year:
+
+190
+00:18:23.103 --> 00:18:24.234
+880.
+
+191
+00:18:24.514 --> 00:18:25.922
+Worst single incident:
+
+192
+00:18:26.202 --> 00:18:28.037
+100% of customers.
+
+193
+00:18:28.317 --> 00:18:30.749
+8 cells, deploy waves over 90 min.
+
+194
+00:18:31.029 --> 00:18:32.693
+Platform-minutes lost or year:
+
+195
+00:18:32.973 --> 00:18:34.125
+205.
+
+196
+00:18:34.405 --> 00:18:35.813
+Worst single incident:
+
+197
+00:18:36.093 --> 00:18:38.119
+100% (latent bugs).
+
+198
+00:18:38.399 --> 00:18:41.066
+8 cells, deploy waves 12 h apart.
+
+199
+00:18:41.346 --> 00:18:43.010
+Platform-minutes lost or year:
+
+200
+00:18:43.290 --> 00:18:44.421
+110.
+
+201
+00:18:44.701 --> 00:18:46.109
+Worst single incident:
+
+202
+00:18:46.389 --> 00:18:47.903
+12.5%.
+
+203
+00:18:49.253 --> 00:18:50.981
+Two lessons hide in that table:
+
+204
+00:18:51.261 --> 00:19:01.288
+Cells confine infrastructure failures and noisy neighbors (one city's flash sale, a poison tenant) to one cell, the dominant source of the 4x improvement.
+
+205
+00:19:02.638 --> 00:19:06.713
+Cells don't help against latent bugs unless the deploy waves are slow.
+
+206
+00:19:06.993 --> 00:19:12.966
+A defect that triggers hours after deploy has already reached every cell in a 90-minute rollout.
+
+207
+00:19:13.246 --> 00:19:20.521
+Spacing waves (and per-cell feature flags) is what turns cells into protection against change as well as infrastructure.
+
+208
+00:19:20.801 --> 00:19:31.553
+(L3's latent bugs trigger 2 to 10 h after deploy, so 12 h spacing catches all of them by construction; choose real bake times from your own incident history.).
+
+209
+00:19:31.833 --> 00:19:33.454
+Design decisions for cells:
+
+210
+00:19:34.804 --> 00:19:36.553
+Partition key and cell size.
+
+211
+00:19:36.833 --> 00:19:41.484
+Choose a key with low cross-cell traffic (city group, tenant, customer ID).
+
+212
+00:19:41.764 --> 00:19:50.191
+Size cells so a cell failure is tolerable (for example, at most 15% of customers) and so the largest tenant fits in one cell.
+
+213
+00:19:50.471 --> 00:19:53.713
+Keep cells identical in shape so one runbook fits all.
+
+214
+00:19:53.993 --> 00:19:54.825
+The router.
+
+215
+00:19:55.105 --> 00:20:00.332
+Stateless, simple, highly available, with the routing table replicated to every edge.
+
+216
+00:20:00.612 --> 00:20:04.537
+It must be the most reliable component in the system because it's shared.
+
+217
+00:20:05.887 --> 00:20:07.935
+Control plane versus data plane.
+
+218
+00:20:08.215 --> 00:20:19.394
+The control plane (provisioning, routing-table updates, deployment orchestration) can be less available than the data plane; cells must keep serving if the control plane is down.
+
+219
+00:20:19.674 --> 00:20:26.479
+Deployments in waves, cell by cell, with a canary cell first and bake times sized to your latent-bug profile.
+
+220
+00:20:26.759 --> 00:20:28.082
+Cross-cell concerns.
+
+221
+00:20:28.362 --> 00:20:44.042
+National reporting (aggregate via a data platform, not live queries across cells), global uniqueness (IDs with a cell prefix, Ch 20), and customers or tenants that move between cells, which needs a migration protocol (L4).
+
+222
+00:20:45.392 --> 00:20:58.171
+Migrating a tenant between cells (L4): a naive routing flip returned no errors and silently lost every acknowledged Pune item written before the flip, because the new cell had none of Pune's data.
+
+223
+00:20:58.451 --> 00:21:08.883
+The safe protocol: hold the tenant's requests at the router (wait for in-flight ones to drain), copy the data, flip the route, release, then verify and drop the source.
+
+224
+00:21:09.163 --> 00:21:17.269
+L4's hold lasted ~13 ms for a few thousand items and didn't touch Nagpur, another city on the same source cell.
+
+225
+00:21:17.549 --> 00:21:24.781
+For large tenants, pre-copy with dual-write or CDC and pause only for the final delta (Ch 28).
+
+226
+00:21:26.131 --> 00:21:34.942
+Cells cost duplicated infrastructure (8 copies of every database and cluster), more operational tooling, and cross-cell complexity.
+
+227
+00:21:35.222 --> 00:21:43.009
+They pay off at large scale, millions of customers, many teams, strict availability targets, not for an early-stage product.
+
+228
+00:21:44.359 --> 00:21:45.916
+Front-end architecture:
+
+229
+00:21:46.196 --> 00:21:48.180
+BFF and micro-frontends.
+
+230
+00:21:48.460 --> 00:21:59.297
+Backend for Frontend (BFF): a thin backend per client type (customer app, rider app, web, partner API) that aggregates and shapes data for that client.
+
+231
+00:21:59.577 --> 00:22:05.913
+It keeps client-specific logic out of domain services and lets each client team evolve its API.
+
+232
+00:22:06.193 --> 00:22:08.220
+Keep business rules out of BFFs.
+
+233
+00:22:09.570 --> 00:22:23.735
+Micro-frontends: the front-end equivalent of microservices, a large web UI composed of independently built and deployed fragments owned by different teams (the seller portal's catalog, orders and payouts sections).
+
+234
+00:22:24.015 --> 00:22:29.007
+Composition via module federation, web components or server-side includes.
+
+235
+00:22:29.287 --> 00:22:33.362
+Costs: consistency of UX, bundle size, shared dependencies.
+
+236
+00:22:33.642 --> 00:22:39.594
+Worth it only when several teams genuinely need to deploy parts of one UI independently.
+
+237
+00:22:40.944 --> 00:22:42.587
+Data architecture styles.
+
+238
+00:22:42.867 --> 00:22:45.704
+Styles apply to data too (Ch 21):
+
+239
+00:22:45.984 --> 00:22:56.565
+Database per service or context, each context owns its data; others use APIs or events (the default with microservices and modular monoliths).
+
+240
+00:22:56.845 --> 00:23:01.773
+Lambda or Kappa, batch + streaming versus streaming-only processing pipelines.
+
+241
+00:23:02.053 --> 00:23:07.749
+Lakehouse, open table formats (Iceberg, Delta) over object storage for analytics.
+
+242
+00:23:09.099 --> 00:23:23.265
+Data mesh, domain teams own and publish data products (with contracts, SLAs and discoverability) instead of a central data team owning all pipelines; a self-serve platform and federated governance make it work.
+
+243
+00:23:23.545 --> 00:23:32.334
+Data mesh applies DDD's bounded-context thinking to analytical data; it's an organizational style as much as a technical one.
+
+244
+00:23:33.684 --> 00:23:35.561
+Combining and evolving styles.
+
+245
+00:23:35.841 --> 00:23:38.060
+Real architectures are compositions:
+
+246
+00:23:39.410 --> 00:23:40.775
+Here is a quick table:
+
+247
+00:23:41.055 --> 00:23:43.423
+Level, and Question, and Typical choice.
+
+248
+00:23:43.703 --> 00:23:44.983
+Inside a deployable.
+
+249
+00:23:45.263 --> 00:23:46.138
+Question:
+
+250
+00:23:46.418 --> 00:23:47.975
+How is code organized?
+
+251
+00:23:48.255 --> 00:23:49.386
+Typical choice:
+
+252
+00:23:49.666 --> 00:23:51.074
+Hexagonal or clean.
+
+253
+00:23:51.354 --> 00:23:52.591
+Between contexts.
+
+254
+00:23:52.871 --> 00:23:53.746
+Question:
+
+255
+00:23:54.026 --> 00:23:55.519
+How do contexts relate?
+
+256
+00:23:55.799 --> 00:23:56.930
+Typical choice:
+
+257
+00:23:57.210 --> 00:23:59.663
+Modules in a monolith, or services.
+
+258
+00:23:59.943 --> 00:24:01.223
+Between deployables.
+
+259
+00:24:01.503 --> 00:24:02.378
+Question:
+
+260
+00:24:02.658 --> 00:24:04.023
+How do they communicate?
+
+261
+00:24:04.303 --> 00:24:05.434
+Typical choice:
+
+262
+00:24:05.714 --> 00:24:08.551
+Events for facts, sync APIs for queries.
+
+263
+00:24:08.831 --> 00:24:09.962
+Across the fleet.
+
+264
+00:24:10.242 --> 00:24:11.117
+Question:
+
+265
+00:24:11.397 --> 00:24:12.890
+How is failure contained?
+
+266
+00:24:13.170 --> 00:24:14.301
+Typical choice:
+
+267
+00:24:14.581 --> 00:24:15.946
+Cells at large scale.
+
+268
+00:24:16.226 --> 00:24:17.229
+Front ends.
+
+269
+00:24:17.509 --> 00:24:18.383
+Question:
+
+270
+00:24:18.663 --> 00:24:20.199
+How do clients get data?
+
+271
+00:24:20.479 --> 00:24:21.610
+Typical choice:
+
+272
+00:24:21.890 --> 00:24:25.709
+BFF per client; micro-frontends if many UI teams.
+
+273
+00:24:27.059 --> 00:24:29.107
+A common, healthy evolution path:
+
+274
+00:24:29.387 --> 00:24:31.520
+Layered monolith, ship the product.
+
+275
+00:24:31.800 --> 00:24:40.120
+Modular monolith with hexagonal modules, as the domain grows, draw context boundaries (Ch 33) and enforce them.
+
+276
+00:24:40.400 --> 00:24:48.507
+Selective extraction, pull out the modules with real drivers (scaling, cadence, team) into services, connected by events.
+
+277
+00:24:48.787 --> 00:24:53.309
+Cells, when blast radius, not code structure, becomes the dominant risk.
+
+278
+00:24:54.659 --> 00:24:57.006
+Each step keeps the previous one's discipline.
+
+279
+00:24:57.286 --> 00:25:05.862
+Skipping step 2, going straight from a tangled monolith to microservices, produces the distributed monolith of §1.1.
+
+280
+00:25:07.212 --> 00:25:08.108
+Part 3.
+
+281
+00:25:08.388 --> 00:25:10.116
+Architecture and Diagrams.
+
+282
+00:25:11.366 --> 00:25:14.374
+Hexagonal architecture of the Ordering context.
+
+283
+00:25:14.654 --> 00:25:15.998
+Here is the diagram.
+
+284
+00:25:19.848 --> 00:25:22.643
+Cell-based deployment of the grocery platform.
+
+285
+00:25:22.923 --> 00:25:24.267
+Here is the diagram.
+
+286
+00:25:28.117 --> 00:25:31.189
+Sequence: happy path, a request routed to its cell.
+
+287
+00:25:31.469 --> 00:25:34.135
+The sequence diagram walks through it step by step.
+
+288
+00:25:34.415 --> 00:25:35.439
+App to Edge:
+
+289
+00:25:35.719 --> 00:25:39.581
+POST or checkout with JWT (city claim = pune).
+
+290
+00:25:39.861 --> 00:25:41.397
+Edge to R: forward.
+
+291
+00:25:41.677 --> 00:25:45.645
+R to R: lookup pune in replicated routing table - cell 1.
+
+292
+00:25:45.925 --> 00:25:48.079
+R to C1: forward request.
+
+293
+00:25:48.359 --> 00:25:51.559
+C1 to DB: place order (local transaction).
+
+294
+00:25:51.839 --> 00:25:53.695
+DB to C1: committed.
+
+295
+00:25:53.975 --> 00:25:55.042
+C1 to App:
+
+296
+00:25:55.322 --> 00:25:57.050
+201 order placed.
+
+297
+00:26:00.900 --> 00:26:04.399
+Sequence: failure path, one cell's surge stays in that cell.
+
+298
+00:26:04.679 --> 00:26:07.345
+The sequence diagram walks through it step by step.
+
+299
+00:26:07.625 --> 00:26:08.607
+Pune to R:
+
+300
+00:26:08.887 --> 00:26:10.743
+20x normal checkout rate.
+
+301
+00:26:11.023 --> 00:26:13.305
+R to C1: routed to cell 1.
+
+302
+00:26:13.585 --> 00:26:18.151
+C1 to C1: connection pool and Kafka saturated, errors rise.
+
+303
+00:26:18.431 --> 00:26:20.521
+Chennai to R: normal checkout.
+
+304
+00:26:20.801 --> 00:26:23.063
+R to C8: routed to cell 8.
+
+305
+00:26:23.343 --> 00:26:24.559
+C8 to Chennai:
+
+306
+00:26:24.839 --> 00:26:26.481
+201 - unaffected.
+
+307
+00:26:30.331 --> 00:26:33.766
+State: a city moving between cells (L4 protocol).
+
+308
+00:26:34.046 --> 00:26:35.390
+Here is the diagram.
+
+309
+00:26:39.240 --> 00:26:40.157
+Part 4.
+
+310
+00:26:40.437 --> 00:26:42.059
+Design Document Excerpt:
+
+311
+00:26:42.339 --> 00:26:44.173
+Grocery Target Architecture.
+
+312
+00:26:45.423 --> 00:26:46.170
+Note:
+
+313
+00:26:46.450 --> 00:26:51.293
+Design Document (excerpt), Target Architecture Styles v2.0.
+
+314
+00:26:51.573 --> 00:26:52.469
+Status:
+
+315
+00:26:52.749 --> 00:26:54.029
+Accepted, Authors:
+
+316
+00:26:54.309 --> 00:26:56.143
+Principal engineers, Reviewers:
+
+317
+00:26:56.423 --> 00:26:59.538
+SRE, all tech leads, finance (cost of cells).
+
+318
+00:26:59.818 --> 00:27:13.194
+Context, A layered monolith that tangled, then 26 entity services with 9-hop checkout calls, then a festival outage in which one city's surge took every city down through shared Kafka and DB pools.
+
+319
+00:27:13.474 --> 00:27:33.399
+Decision, Combine styles by level: hexagonal inside deployables; modular monolith for Ordering + Catalog; services for Inventory and Fulfilment; events between contexts; 8 cells by city group with a global router and control plane; BFF per client; serverless for bursty side jobs.
+
+320
+00:27:34.749 --> 00:27:54.248
+Related ADRs, ADR-200 Hexagonal package structure + ArchUnit dependency rule (L1); ADR-201 Ordering + Catalog modular monolith with Spring Modulith verification; ADR-202 Extract only with a named driver (scaling, cadence,
+
+321
+00:27:54.528 --> 00:28:19.488
+team) (L2); ADR-203 No required synchronous chains longer than 2 hops on checkout; ADR-204 Cells by city group, at most 15% of customers per cell (L3); ADR-205 Deploy waves: canary cell, 12 h spacing for high-risk changes, per-cell flags (L3); ADR-206 Tenant move protocol: hold, copy, flip, verify,
+
+322
+00:28:19.768 --> 00:28:28.643
+drop, CDC pre-copy for large cities (L4); ADR-207 Serverless for invoice PDFs and image processing.
+
+323
+00:28:28.923 --> 00:28:29.883
+Requirements.
+
+324
+00:28:31.233 --> 00:28:33.003
+R1, Blast radius.
+
+325
+00:28:33.283 --> 00:28:39.150
+No single infrastructure failure or city surge may affect more than 15% of customers.
+
+326
+00:28:39.430 --> 00:28:48.347
+R2, Checkout latency. p99 300 ms at festival peak; at most 2 required synchronous hops on the checkout path.
+
+327
+00:28:48.627 --> 00:28:50.249
+R3, Testability.
+
+328
+00:28:50.529 --> 00:28:56.075
+Business rules testable without infrastructure; the full domain suite runs in under a minute.
+
+329
+00:28:56.355 --> 00:28:57.763
+R4, Safe change.
+
+330
+00:28:58.043 --> 00:29:02.011
+A bad deploy that triggers within 12 hours affects at most one cell.
+
+331
+00:29:03.361 --> 00:29:05.175
+R5, Safe rebalancing.
+
+332
+00:29:05.455 --> 00:29:08.868
+Moving a city between cells loses no acknowledged write.
+
+333
+00:29:09.148 --> 00:29:10.556
+Decisions in detail.
+
+334
+00:29:10.836 --> 00:29:13.524
+Inside deployables (ADR-200).
+
+335
+00:29:13.804 --> 00:29:22.060
+Domain or application or adapter packages; ArchUnit rules fail the build on infrastructure types in the domain (L1).
+
+336
+00:29:22.340 --> 00:29:26.031
+Modules first (ADR-201 or 202).
+
+337
+00:29:26.311 --> 00:29:32.284
+Ordering and Catalog stay together; Inventory and Fulfilment extracted for flash-sale scaling.
+
+338
+00:29:32.564 --> 00:29:38.409
+Every extraction ADR names its driver and the latency or availability cost (L2).
+
+339
+00:29:39.759 --> 00:29:41.850
+Cells (ADR-204).
+
+340
+00:29:42.130 --> 00:29:52.605
+8 cells; router with replicated table at every edge; control plane may be down without affecting the data plane; national reporting via CDC into the lakehouse.
+
+341
+00:29:52.885 --> 00:29:55.210
+Deploys (ADR-205).
+
+342
+00:29:55.490 --> 00:30:03.853
+Canary cell first; normal changes roll within a day; high-risk changes 12 h per wave; kill-switch flags per cell (L3).
+
+343
+00:30:04.133 --> 00:30:06.650
+City moves (ADR-206).
+
+344
+00:30:06.930 --> 00:30:16.743
+Hold, copy, flip, verify, drop; cities over 1M carts pre-copied via CDC so the hold covers only the final delta (L4).
+
+345
+00:30:18.093 --> 00:30:19.117
+Consequences.
+
+346
+00:30:19.397 --> 00:30:31.707
+Roughly 1.6x infrastructure cost for cells (duplicated DBs, Kafka, caches), a router and control plane to build and operate, and slower rollouts for risky changes.
+
+347
+00:30:31.987 --> 00:30:39.837
+In return, the festival scenario becomes a one-cell incident, and checkout no longer depends on nine services being up.
+
+348
+00:30:41.187 --> 00:30:42.147
+Part 5.
+
+349
+00:30:42.427 --> 00:30:44.411
+Hands-On Code, Level Ladder.
+
+350
+00:30:45.661 --> 00:30:46.429
+Info:
+
+351
+00:30:46.709 --> 00:30:47.797
+What's real here.
+
+352
+00:30:48.077 --> 00:30:52.771
+All four labs are JDK 21 programs with no dependencies.
+
+353
+00:30:53.051 --> 00:31:13.296
+L1 and L2 start real HTTP servers (the JDK's HttpServer) and call them with the real HttpClient; L4 builds a real cell router that proxies HTTP to three real cells and migrates a city under live concurrent traffic, verifying every acknowledged write.
+
+354
+00:31:13.576 --> 00:31:17.587
+L3 is a Monte Carlo model with explicit, stated assumptions.
+
+355
+00:31:17.867 --> 00:31:25.312
+Timings in L1 or L2 or L4 vary from run to run; the ratios and the correctness results are stable.
+
+356
+00:31:25.592 --> 00:31:36.621
+Run HTTP labs with -Dsun.net.httpserver.nodelay=true (otherwise Nagle or delayed-ACK adds ~40 ms per request).
+
+357
+00:31:37.971 --> 00:31:42.409
+L1, Hexagonal architecture: one domain, two sets of adapters.
+
+358
+00:31:42.689 --> 00:31:43.627
+Requirement:
+
+359
+00:31:43.907 --> 00:31:48.281
+Our tests need a database and a payment sandbox and take 25 minutes.
+
+360
+00:31:48.561 --> 00:31:52.699
+Make the business rules testable without infrastructure, and keep them that way.
+
+361
+00:31:52.979 --> 00:31:57.246
+The checkout domain owns two ports, OrderRepository and PaymentPort.
+
+362
+00:31:57.526 --> 00:32:10.646
+It's wired once with in-memory fakes and once with real adapters, an append-only file store and an HTTP client calling a real local payment server, and the same 2,000 checkouts run through both.
+
+363
+00:32:10.926 --> 00:32:19.203
+A reflection-based dependency check (ArchUnit-style) scans the domain types, and a deliberately leaky class proves the check bites.
+
+364
+00:32:20.553 --> 00:32:23.647
+Here is the Java code, HexagonalL1.java.
+
+365
+00:32:23.927 --> 00:32:27.873
+It runs to 206 lines; the full listing is in the chapter.
+
+366
+00:32:28.153 --> 00:32:39.716
+HexagonalL1.java, run with: java -Dsun.net.httpserver.nodelay=true HexagonalL1.java (JDK 21, no dependencies).
+
+367
+00:32:39.996 --> 00:32:42.684
+HEXAGONAL ARCHITECTURE (ports and adapters).
+
+368
+00:32:42.964 --> 00:32:52.372
+The domain defines PORTS, interfaces for what it needs (store orders, take. payment), and knows nothing about HTTP, files or SQL.
+
+369
+00:32:52.652 --> 00:32:55.937
+ADAPTERS implement those ports for a specific technology.
+
+370
+00:32:56.217 --> 00:32:57.071
+We wire.
+
+371
+00:32:59.921 --> 00:33:00.838
+On screen:
+
+372
+00:33:01.118 --> 00:33:10.697
+Hexagonal architecture: one checkout domain, two sets of adapters, the same 2,000. checkouts. wiring paid declined orders saved time.
+
+373
+00:33:10.977 --> 00:33:18.891
+TEST: in-memory repository + fake payment adapter 1,980 20 2,000 11 ms.
+
+374
+00:33:19.171 --> 00:33:30.393
+REAL: file repository + HTTP payment adapter 1,980 20 2,000 3,000 ms. then identical business outcomes:
+
+375
+00:33:30.673 --> 00:33:34.150
+YES; real wiring is 273x slower.
+
+376
+00:33:34.430 --> 00:33:45.801
+Dependency rule check over 7 domain types (no java.net or java.io or java.nio /. java.sql): domain references no infrastructure type.
+
+377
+00:33:46.081 --> 00:33:53.057
+Same check against a LeakyCheckoutService that takes an HttpClient (the shortcut. someone will try):
+
+378
+00:33:53.337 --> 00:33:54.851
+The rest is in the chapter.
+
+379
+00:33:57.701 --> 00:33:58.555
+Reading it:
+
+380
+00:33:58.835 --> 00:34:09.523
+Identical business outcomes (1,980 paid, 20 declined, 2,000 saved) through both wirings, because the domain only knows its ports.
+
+381
+00:34:09.803 --> 00:34:21.536
+The real wiring is a few hundred times slower, which is why most tests should run against the fast wiring, with a handful of contract or integration tests per adapter (Ch 29).
+
+382
+00:34:21.816 --> 00:34:31.736
+The dependency check passes for the 7 domain types and fails LeakyCheckoutService, which takes a java.net.http.HttpClient.
+
+383
+00:34:32.016 --> 00:34:35.984
+Without that check, the rule erodes one convenient shortcut at a time.
+
+384
+00:34:37.334 --> 00:34:40.683
+In a real codebase, the same check is an ArchUnit rule:
+
+385
+00:34:42.033 --> 00:34:44.081
+Here is the Java code, VERIFY:
+
+386
+00:34:44.361 --> 00:34:47.732
+ArchUnit rule for the hexagonal dependency direction.
+
+387
+00:34:50.582 --> 00:34:54.635
+L2, What a module boundary costs when it becomes a network boundary.
+
+388
+00:34:54.915 --> 00:34:55.854
+Requirement:
+
+389
+00:34:56.134 --> 00:35:01.915
+Should Pricing, Inventory and Promotions stay modules in our monolith or become services?
+
+390
+00:35:02.195 --> 00:35:03.390
+Put numbers on it.
+
+391
+00:35:03.670 --> 00:35:14.571
+The same five collaborator functions are called in-process, as five serial HTTP calls to five real HTTP services, and as five parallel calls.
+
+392
+00:35:14.851 --> 00:35:20.206
+Responses are verified identical; 3,000 measured runs each after warm-up.
+
+393
+00:35:20.486 --> 00:35:24.689
+Then the availability arithmetic for required synchronous dependencies.
+
+394
+00:35:26.039 --> 00:35:28.791
+Here is the Java code, HopsL2.java.
+
+395
+00:35:29.071 --> 00:35:33.316
+It runs to 139 lines; the full listing is in the chapter.
+
+396
+00:35:33.596 --> 00:35:43.815
+HopsL2.java, run with: java -Dsun.net.httpserver.nodelay=true HopsL2.java (JDK 21, no dependencies).
+
+397
+00:35:44.095 --> 00:35:51.007
+MODULAR MONOLITH versus MICROSERVICES: what a module boundary costs when it becomes a network boundary.
+
+398
+00:35:51.287 --> 00:35:57.239
+A checkout needs five. collaborators (catalog, pricing, inventory, promotions, orders).
+
+399
+00:35:57.519 --> 00:36:00.463
+The SAME collaborator logic is called three ways:
+
+400
+00:36:03.313 --> 00:36:04.230
+On screen:
+
+401
+00:36:04.510 --> 00:36:07.347
+One checkout = 5 collaborator calls.
+
+402
+00:36:07.627 --> 00:36:11.041
+Same logic, same responses (verified identical).
+
+403
+00:36:11.321 --> 00:36:47.603
+3,000 measured runs each, localhost. deployment p50 p99 p50 versus modules. modular monolith (in-process calls) 11.2 µs 30.7 µs 1x. microservices, 5 serial HTTP calls 1107.2 µs 7825.5 µs 99x. microservices, 5 parallel HTTP calls 484.1 µs 4500.1 µs 43x.
+
+404
+00:36:47.883 --> 00:36:57.291
+Availability if every deployable is 99.9% and all are required on the checkout. path: modular monolith (1 deployable):
+
+405
+00:36:57.571 --> 00:37:05.165
+99.900%, then 43 min per month down. microservices (6 deployables):
+
+406
+00:37:05.445 --> 00:37:10.736
+99.401%, then 259 min per month down.
+
+407
+00:37:11.016 --> 00:37:12.531
+The rest is in the chapter.
+
+408
+00:37:15.381 --> 00:37:29.205
+Reading it: ~11 µs in-process versus ~1.1 ms serial HTTP (~99x), on localhost, the best case: no real network, no TLS, no service mesh.
+
+409
+00:37:29.485 --> 00:37:31.021
+Fan-out roughly halves it.
+
+410
+00:37:31.301 --> 00:37:34.565
+Absolute numbers vary per run; the ratio is stable.
+
+411
+00:37:34.845 --> 00:37:39.965
+In absolute terms ~1 ms is small against a 300 ms budget.
+
+412
+00:37:40.245 --> 00:37:57.013
+What bites is the tail (p99 already in milliseconds before any real network or GC) and availability: six required 99.9% deployables expect 259 minutes per month of downtime versus 43 for one.
+
+413
+00:37:58.363 --> 00:38:12.037
+The decision rule follows: keep modules in-process unless a concrete driver (scaling, cadence, ownership) justifies the price, and when you extract, remove required synchronous hops rather than chaining them.
+
+414
+00:38:13.387 --> 00:38:15.691
+L3, Cells and blast radius.
+
+415
+00:38:15.971 --> 00:38:16.910
+Requirement:
+
+416
+00:38:17.190 --> 00:38:19.878
+A flash sale in one city took every city down.
+
+417
+00:38:20.158 --> 00:38:22.889
+Would cells have helped, and with what deploy policy?
+
+418
+00:38:23.169 --> 00:38:35.243
+A Monte Carlo over 10,000 simulated years of incidents: bad deploys (30% of them latent, triggering 2 to 10 hours later), infrastructure failures, and one-city overloads.
+
+419
+00:38:35.523 --> 00:38:42.798
+One global deployment is compared with 8 cells using fast (90-minute) and slow (12-hour-spaced) deploy waves.
+
+420
+00:38:44.148 --> 00:38:46.943
+Here is the Java code, CellsL3.java.
+
+421
+00:38:47.223 --> 00:38:51.361
+It runs to 113 lines; the full listing is in the chapter.
+
+422
+00:38:51.641 --> 00:38:58.575
+CellsL3.java, run with: java CellsL3.java (JDK 21, no dependencies).
+
+423
+00:38:58.855 --> 00:39:02.204
+CELL-BASED ARCHITECTURE: containing the blast radius.
+
+424
+00:39:02.484 --> 00:39:14.729
+The platform either runs as ONE global deployment (every city. shares the same services, databases, caches and brokers) or as 8 CELLS, complete, independent copies of the stack.
+
+425
+00:39:17.579 --> 00:39:18.497
+On screen:
+
+426
+00:39:18.777 --> 00:39:23.598
+Blast radius: one global deployment versus 8 cells with wave deploys.
+
+427
+00:39:23.878 --> 00:39:41.990
+10,000 simulated. years each. architecture platform-min lost p95 year effective avail. worst incident. one global deployment 880 min 967 min 99.8325% 100.0%.
+
+428
+00:39:42.270 --> 00:39:52.062
+8 cells, waves over 90 min 205 min 280 min 99.9611% 100.0%.
+
+429
+00:39:52.342 --> 00:40:02.070
+8 cells, waves over 36 h 110 min 121 min 99.9791% 12.5%.
+
+430
+00:40:02.350 --> 00:40:12.035
+8 cells, waves over 90 min: latent bugs had reached all 8 cells in 100% of cases;. mean share hit 100.0%.
+
+431
+00:40:12.315 --> 00:40:21.915
+8 cells, waves over 36 h: latent bugs had reached all 8 cells in 0% of cases; mean. share hit 12.5%.
+
+432
+00:40:22.195 --> 00:40:23.710
+The rest is in the chapter.
+
+433
+00:40:26.560 --> 00:40:27.413
+Reading it:
+
+434
+00:40:27.693 --> 00:40:42.584
+Cells cut expected impact ~4x (880, then 205 platform-minutes per year) because infrastructure failures and one city's surge, the §1.1 festival outage, are confined to one cell.
+
+435
+00:40:42.864 --> 00:40:51.952
+Fast waves don't contain latent bugs: every latent bug had reached all 8 cells when it triggered, so the worst incident is still 100%.
+
+436
+00:40:53.302 --> 00:40:57.121
+12-hour waves turn latent bugs into one-cell incidents too:
+
+437
+00:40:57.401 --> 00:41:02.627
+110 platform-minutes per year and a worst incident of 12.5%.
+
+438
+00:41:02.907 --> 00:41:17.542
+That's partly by construction, the model's latent bugs trigger within 10 hours, so real bake times must come from your own incident data; the structural lesson (wave spacing must exceed bug-manifestation time) holds regardless.
+
+439
+00:41:17.822 --> 00:41:28.233
+The cost side isn't in this model: duplicated infrastructure, router, control plane, slower delivery for risky changes. §4's design doc prices it.
+
+440
+00:41:29.583 --> 00:41:33.316
+L4, A real cell router, and moving a city between cells.
+
+441
+00:41:33.596 --> 00:41:34.535
+Requirement:
+
+442
+00:41:34.815 --> 00:41:35.967
+Cell 1 is hot.
+
+443
+00:41:36.247 --> 00:41:41.772
+Move Pune to cell 3 during business hours without losing a single acknowledged cart item.
+
+444
+00:41:42.052 --> 00:41:49.455
+Three cells are real HTTP servers with their own stores; a router maps city, then cell and proxies requests.
+
+445
+00:41:49.735 --> 00:41:54.172
+Four Pune clients and two Nagpur clients add cart items continuously.
+
+446
+00:41:54.452 --> 00:42:03.305
+After 1.5 s, Pune moves from cell 1 to cell 3, naively (flip the route) and properly (hold, copy, flip, release, drop).
+
+447
+00:42:03.585 --> 00:42:06.807
+Every acknowledged item is then read back through the router.
+
+448
+00:42:07.087 --> 00:42:10.329
+A silent warm-up run precedes the two reported runs.
+
+449
+00:42:11.679 --> 00:42:14.901
+Here is the Java code, CellRouterL4.java.
+
+450
+00:42:15.181 --> 00:42:19.426
+It runs to 248 lines; the full listing is in the chapter.
+
+451
+00:42:19.706 --> 00:42:31.311
+CellRouterL4.java, run with: java -Dsun.net.httpserver.nodelay=true CellRouterL4.java (JDK 21, no dependencies).
+
+452
+00:42:31.591 --> 00:42:35.751
+A REAL CELL ROUTER, and moving a city between cells under live traffic.
+
+453
+00:42:36.031 --> 00:42:43.775
+Three cells are separate HTTP servers, each with. its own cart store (no shared database, that's the point of cells).
+
+454
+00:42:44.055 --> 00:42:47.319
+A thin routing layer maps city, then cell and proxies.
+
+455
+00:42:50.169 --> 00:42:51.087
+On screen:
+
+456
+00:42:51.367 --> 00:42:54.332
+Cell router over 3 real HTTP cells.
+
+457
+00:42:54.612 --> 00:42:57.599
+Pune + Nagpur on cell-1, Delhi on cell-2.
+
+458
+00:42:57.879 --> 00:42:59.073
+4 Pune +.
+
+459
+00:42:59.353 --> 00:43:05.327
+2 Nagpur clients add items for 3 s;. at 1.5 s Pune is moved to cell-3.
+
+460
+00:43:05.607 --> 00:43:09.063
+Then every acknowledged item is read back through. the router.
+
+461
+00:43:09.343 --> 00:43:21.161
+NAIVE ok 4,961 failed 0 acked items 4,961 MISSING 1,519 no hold worst. latency:
+
+462
+00:43:21.441 --> 00:43:24.044
+Pune 20 ms Nagpur 18 ms.
+
+463
+00:43:24.324 --> 00:43:32.089
+Pune items acknowledged before the move: ~1,515 Pune data left orphaned on. cell-1:
+
+464
+00:43:32.369 --> 00:43:33.095
+YES.
+
+465
+00:43:33.375 --> 00:43:44.959
+PROPER ok 7,264 failed 0 acked items 7,264 MISSING 0 Pune held 13 ms worst. latency:
+
+466
+00:43:45.239 --> 00:43:48.225
+Pune 21 ms Nagpur 16 ms.
+
+467
+00:43:48.505 --> 00:43:56.953
+Pune items acknowledged before the move: ~2,321 Pune data left orphaned on. cell-1: no.
+
+468
+00:43:57.233 --> 00:43:58.748
+The rest is in the chapter.
+
+469
+00:44:01.598 --> 00:44:02.451
+Reading it:
+
+470
+00:44:02.731 --> 00:44:18.795
+The naive flip returns zero errors, and 1,519 acknowledged items are gone, matching the ~1,515 Pune items acknowledged before the move (the snapshot is taken an instant before the flip).
+
+471
+00:44:19.075 --> 00:44:23.171
+Cell 3 has none of Pune's history; cell 1 still holds it, orphaned.
+
+472
+00:44:23.451 --> 00:44:25.307
+Nothing in the error rate tells you.
+
+473
+00:44:25.587 --> 00:44:27.294
+The proper move loses nothing.
+
+474
+00:44:27.574 --> 00:44:38.902
+The router's per-city read or write lock holds only Pune's requests while in-flight ones drain, the data is copied, and the route flips; Nagpur, on the same source cell, is never held.
+
+475
+00:44:39.182 --> 00:44:44.515
+The hold lasted ~13 ms here because Pune's data is a few thousand items.
+
+476
+00:44:45.865 --> 00:44:47.849
+The hold grows with the tenant's data.
+
+477
+00:44:48.129 --> 00:45:02.999
+For large cities, pre-copy with dual-write or CDC (Ch 28) so the hold covers only the final delta, verify counts or checksums before dropping the source, and replicate the routing table to every edge router.
+
+478
+00:45:04.349 --> 00:45:05.287
+Part 6.
+
+479
+00:45:05.567 --> 00:45:06.847
+Production Concerns.
+
+480
+00:45:08.097 --> 00:45:09.612
+Failure modes by style.
+
+481
+00:45:09.892 --> 00:45:11.257
+Here is a quick table:
+
+482
+00:45:11.537 --> 00:45:14.417
+Style, and Characteristic failure, and Mitigation.
+
+483
+00:45:14.697 --> 00:45:15.871
+Layered monolith.
+
+484
+00:45:16.151 --> 00:45:17.516
+Characteristic failure:
+
+485
+00:45:17.796 --> 00:45:22.681
+Tangled layers, rules in controllers or SQL, slow DB-bound tests.
+
+486
+00:45:22.961 --> 00:45:23.964
+Mitigation:
+
+487
+00:45:24.244 --> 00:45:27.956
+Hexagonal modules; enforce the dependency rule (L1).
+
+488
+00:45:28.236 --> 00:45:29.196
+Hexagonal.
+
+489
+00:45:29.476 --> 00:45:30.841
+Characteristic failure:
+
+490
+00:45:31.121 --> 00:45:34.641
+Rule erodes via just this once infrastructure imports.
+
+491
+00:45:34.921 --> 00:45:35.924
+Mitigation:
+
+492
+00:45:36.204 --> 00:45:39.233
+ArchUnit or fitness functions in CI (L1).
+
+493
+00:45:39.513 --> 00:45:40.857
+Modular monolith.
+
+494
+00:45:41.137 --> 00:45:42.503
+Characteristic failure:
+
+495
+00:45:42.783 --> 00:45:46.004
+Modules reach into each other's internals or tables.
+
+496
+00:45:46.284 --> 00:45:47.287
+Mitigation:
+
+497
+00:45:47.567 --> 00:45:50.895
+Spring Modulith verification; schema per module.
+
+498
+00:45:51.175 --> 00:45:52.455
+Microservices.
+
+499
+00:45:52.735 --> 00:45:54.100
+Characteristic failure:
+
+500
+00:45:54.380 --> 00:45:58.476
+Synchronous chains: latency and availability multiply (L2).
+
+501
+00:45:58.756 --> 00:45:59.759
+Mitigation:
+
+502
+00:46:00.039 --> 00:46:03.388
+Events, fan-out, caching; extract only with a driver.
+
+503
+00:46:03.668 --> 00:46:04.692
+Event-driven.
+
+504
+00:46:04.972 --> 00:46:06.337
+Characteristic failure:
+
+505
+00:46:06.617 --> 00:46:09.391
+Lost events, invisible flows, schema breaks.
+
+506
+00:46:09.671 --> 00:46:10.673
+Mitigation:
+
+507
+00:46:10.953 --> 00:46:14.367
+Outbox, tracing across async hops, schema registry.
+
+508
+00:46:15.717 --> 00:46:16.613
+Serverless.
+
+509
+00:46:16.893 --> 00:46:18.258
+Characteristic failure:
+
+510
+00:46:18.538 --> 00:46:21.055
+Cold starts, runaway cost, time limits.
+
+511
+00:46:21.335 --> 00:46:22.338
+Mitigation:
+
+512
+00:46:22.618 --> 00:46:27.098
+SnapStart or native images, cost alerts, containers for steady load.
+
+513
+00:46:27.378 --> 00:46:28.167
+Cells.
+
+514
+00:46:28.447 --> 00:46:29.813
+Characteristic failure:
+
+515
+00:46:30.093 --> 00:46:34.167
+Latent bug reaches every cell; router is a single point of failure.
+
+516
+00:46:34.447 --> 00:46:35.450
+Mitigation:
+
+517
+00:46:35.730 --> 00:46:41.021
+Slow waves + per-cell flags (L3); simple, replicated, well-tested router.
+
+518
+00:46:41.301 --> 00:46:42.261
+Cell moves.
+
+519
+00:46:42.541 --> 00:46:43.906
+Characteristic failure:
+
+520
+00:46:44.186 --> 00:46:47.002
+Naive flip loses data silently (L4).
+
+521
+00:46:47.282 --> 00:46:48.285
+Mitigation:
+
+522
+00:46:48.565 --> 00:46:52.319
+Hold, copy, flip, verify, drop; CDC pre-copy.
+
+523
+00:46:53.669 --> 00:46:54.757
+Observability.
+
+524
+00:46:55.037 --> 00:47:07.795
+Tag every metric, log and trace with the cell ID (and context or module) so per-cell SLOs, dashboards and alerts exist; a global average hides a dead cell (Ch 24).
+
+525
+00:47:08.075 --> 00:47:13.792
+Deploy-wave dashboards compare the newly deployed cell against the others (canary analysis).
+
+526
+00:47:14.072 --> 00:47:22.563
+For modular monoliths, per-module metrics (latency, errors, DB time) keep the modules visible even though they share a process.
+
+527
+00:47:22.843 --> 00:47:31.717
+For event-driven flows, distributed tracing across async hops (propagate trace context in event headers) makes choreography observable.
+
+528
+00:47:33.067 --> 00:47:34.006
+Security.
+
+529
+00:47:34.286 --> 00:47:46.211
+Hexagonal adapters are natural trust boundaries: validate and authenticate in driving adapters; keep secrets in driven adapters' configuration, never in the domain (Ch 23).
+
+530
+00:47:46.491 --> 00:47:54.043
+Cells limit breach blast radius as well as outage blast radius when credentials, keys and databases are per cell.
+
+531
+00:47:54.323 --> 00:48:03.411
+The cell router and control plane are high-value targets: least privilege, audited routing-table changes, and a signed, versioned routing table.
+
+532
+00:48:03.691 --> 00:48:10.113
+BFFs must not become a bypass: authorization decisions stay in the owning service or context.
+
+533
+00:48:11.463 --> 00:48:12.828
+Performance and tuning.
+
+534
+00:48:13.108 --> 00:48:24.137
+Count required synchronous hops on critical paths and budget their latency (Ch 31 L3); L2 shows each hop's cost before any real network is involved.
+
+535
+00:48:24.417 --> 00:48:34.316
+In modular monoliths, watch for module-level contention on shared pools (DB connections, thread pools), give heavy modules their own bulkhead pools.
+
+536
+00:48:34.596 --> 00:48:43.599
+Cell sizing trades blast radius against efficiency: smaller cells mean smaller incidents but more fixed overhead and more cross-cell moves.
+
+537
+00:48:44.949 --> 00:48:51.711
+Serverless: measure cold-start frequency and duration; provision concurrency for latency-sensitive paths.
+
+538
+00:48:53.061 --> 00:48:53.787
+Cost.
+
+539
+00:48:54.067 --> 00:48:59.891
+Hexagonal and modular monoliths are nearly free in infrastructure; their cost is discipline.
+
+540
+00:49:00.171 --> 00:49:06.848
+Microservices add per-service fixed costs (compute baseline, pipelines, observability, on-call).
+
+541
+00:49:07.128 --> 00:49:18.435
+Cells multiply the fixed infrastructure (every database, cluster and cache per cell), the grocery estimate was ~1.6x, and require a router and control plane.
+
+542
+00:49:18.715 --> 00:49:27.376
+Justify them with the value of avoided platform-wide incidents (L3's 880, then 110 platform-minutes per year).
+
+543
+00:49:28.726 --> 00:49:36.790
+Serverless is cheapest for spiky, low-duty-cycle work and most expensive for steady high volume (Ch 31 L4).
+
+544
+00:49:38.140 --> 00:49:39.079
+Part 7.
+
+545
+00:49:39.359 --> 00:49:41.065
+Anti-Patterns and Pitfalls.
+
+546
+00:49:42.315 --> 00:49:43.233
+Watch out:
+
+547
+00:49:43.513 --> 00:49:44.153
+1.
+
+548
+00:49:44.433 --> 00:49:46.353
+Choosing one style for everything.
+
+549
+00:49:46.633 --> 00:49:48.510
+We are a microservices company.
+
+550
+00:49:48.790 --> 00:49:53.782
+Styles apply per level and per context; combine them (§2.11).
+
+551
+00:49:55.132 --> 00:49:56.049
+Watch out:
+
+552
+00:49:56.329 --> 00:49:57.033
+2.
+
+553
+00:49:57.313 --> 00:49:58.849
+The distributed monolith.
+
+554
+00:49:59.129 --> 00:50:03.929
+Services that must be deployed together and call each other synchronously in chains.
+
+555
+00:50:04.209 --> 00:50:08.028
+All the costs of microservices (L2), none of the benefits.
+
+556
+00:50:09.378 --> 00:50:10.295
+Watch out:
+
+557
+00:50:10.575 --> 00:50:11.322
+3.
+
+558
+00:50:11.602 --> 00:50:13.394
+Skipping the modular monolith.
+
+559
+00:50:13.674 --> 00:50:19.285
+Going from a tangled monolith straight to services turns in-process coupling into network coupling.
+
+560
+00:50:19.565 --> 00:50:20.909
+Modularize first.
+
+561
+00:50:22.259 --> 00:50:23.176
+Watch out:
+
+562
+00:50:23.456 --> 00:50:24.160
+4.
+
+563
+00:50:24.440 --> 00:50:25.976
+Hexagonal in name only.
+
+564
+00:50:26.256 --> 00:50:32.763
+Packages called domain that import JPA entities, HttpClient or Spring annotations.
+
+565
+00:50:33.043 --> 00:50:35.965
+Enforce the dependency rule in CI (L1).
+
+566
+00:50:37.315 --> 00:50:38.233
+Watch out:
+
+567
+00:50:38.513 --> 00:50:39.281
+5.
+
+568
+00:50:39.561 --> 00:50:41.395
+Ports that mirror the technology.
+
+569
+00:50:41.675 --> 00:50:49.014
+A PaymentPort with postJson(url, body) isn't a port; it's an HTTP client with an interface.
+
+570
+00:50:49.294 --> 00:50:52.771
+Ports speak the domain's language (charge(customer, amount)).
+
+571
+00:50:54.121 --> 00:50:55.039
+Watch out:
+
+572
+00:50:55.319 --> 00:50:56.065
+6.
+
+573
+00:50:56.345 --> 00:50:58.052
+Long synchronous call chains.
+
+574
+00:50:58.332 --> 00:51:03.431
+Nine required hops on checkout multiply latency and unavailability (L2).
+
+575
+00:51:03.711 --> 00:51:05.673
+Fan out, cache, or use events.
+
+576
+00:51:07.023 --> 00:51:07.941
+Watch out:
+
+577
+00:51:08.221 --> 00:51:08.967
+7.
+
+578
+00:51:09.247 --> 00:51:12.917
+Serverless for steady, latency-sensitive Java services.
+
+579
+00:51:13.197 --> 00:51:18.701
+Cold starts and per-request pricing hurt exactly where steady containers are cheap and fast.
+
+580
+00:51:20.051 --> 00:51:20.968
+Watch out:
+
+581
+00:51:21.248 --> 00:51:21.931
+8.
+
+582
+00:51:22.211 --> 00:51:23.917
+Cells with shared dependencies.
+
+583
+00:51:24.197 --> 00:51:34.523
+A cell that still shares a global database, Kafka cluster or cache isn't a cell, §1.1's festival outage came through exactly those shared pools.
+
+584
+00:51:35.873 --> 00:51:36.790
+Watch out:
+
+585
+00:51:37.070 --> 00:51:37.817
+9.
+
+586
+00:51:38.097 --> 00:51:39.995
+Fast deploy waves across cells.
+
+587
+00:51:40.275 --> 00:51:45.587
+Rolling to all cells in 90 minutes gives no protection from latent bugs (L3).
+
+588
+00:51:45.867 --> 00:51:48.790
+Bake times must match how long bugs take to show up.
+
+589
+00:51:50.140 --> 00:51:51.057
+Watch out:
+
+590
+00:51:51.337 --> 00:51:52.041
+10.
+
+591
+00:51:52.321 --> 00:51:54.284
+Naive tenant moves between cells.
+
+592
+00:51:54.564 --> 00:52:01.391
+Flipping the routing entry without moving data returns no errors and loses data silently (L4).
+
+593
+00:52:02.741 --> 00:52:03.658
+Watch out:
+
+594
+00:52:03.938 --> 00:52:04.770
+11.
+
+595
+00:52:05.050 --> 00:52:06.138
+A smart router.
+
+596
+00:52:06.418 --> 00:52:13.629
+Business logic, per-request database lookups or complex state in the cell router makes the one shared component fragile.
+
+597
+00:52:13.909 --> 00:52:15.658
+Keep it dumb and replicated.
+
+598
+00:52:17.008 --> 00:52:17.925
+Watch out:
+
+599
+00:52:18.205 --> 00:52:18.995
+12.
+
+600
+00:52:19.275 --> 00:52:20.363
+Cells too early.
+
+601
+00:52:20.643 --> 00:52:27.277
+Cells for a 20-engineer product with one region multiply cost and tooling for a risk you don't yet have.
+
+602
+00:52:28.627 --> 00:52:29.502
+Part 8.
+
+603
+00:52:29.782 --> 00:52:31.126
+Interview Q and A.
+
+604
+00:52:32.376 --> 00:52:33.208
+Beginner.
+
+605
+00:52:33.488 --> 00:52:34.512
+Question 1.
+
+606
+00:52:34.792 --> 00:52:38.013
+What is hexagonal (ports and adapters) architecture?
+
+607
+00:52:38.293 --> 00:52:39.659
+Thirty-second answer:
+
+608
+00:52:39.939 --> 00:52:51.907
+A way of structuring an application so the domain is at the center and depends on nothing; it defines ports, interfaces for what it needs (store orders, charge payments) and what it offers (use cases).
+
+609
+00:52:52.187 --> 00:53:00.635
+Adapters implement those ports for specific technologies (JPA, Razorpay HTTP, REST controllers, Kafka listeners).
+
+610
+00:53:00.915 --> 00:53:09.640
+Dependencies point inward, so the business logic can be tested without infrastructure and technologies can be swapped by writing new adapters.
+
+611
+00:53:10.990 --> 00:53:11.993
+Question 2.
+
+612
+00:53:12.273 --> 00:53:13.958
+What is a modular monolith?
+
+613
+00:53:14.238 --> 00:53:15.603
+Thirty-second answer:
+
+614
+00:53:15.883 --> 00:53:31.179
+A single deployable application divided internally into modules with enforced boundaries, typically one per bounded context, that communicate only through published module APIs or events, never through each other's internals or tables.
+
+615
+00:53:31.459 --> 00:53:39.033
+It gives most of the modularity benefits of microservices with in-process calls, local transactions and one pipeline.
+
+616
+00:53:40.383 --> 00:53:41.428
+Question 3.
+
+617
+00:53:41.708 --> 00:53:44.012
+What is serverless and when is it a good fit?
+
+618
+00:53:44.292 --> 00:53:45.657
+Thirty-second answer:
+
+619
+00:53:45.937 --> 00:53:55.580
+You deploy functions or containers and the platform handles servers, scaling (including to zero) and patching; you pay per invocation and compute time.
+
+620
+00:53:55.860 --> 00:54:02.900
+It fits bursty, stateless, event-triggered work, invoice PDFs, image resizing, webhooks, scheduled jobs.
+
+621
+00:54:03.180 --> 00:54:11.351
+It fits poorly for steady high-volume, latency-sensitive services because of cold starts, time limits and linear per-request cost.
+
+622
+00:54:12.701 --> 00:54:13.767
+Question 4.
+
+623
+00:54:14.047 --> 00:54:15.967
+What is a cell-based architecture?
+
+624
+00:54:16.247 --> 00:54:17.613
+Thirty-second answer:
+
+625
+00:54:17.893 --> 00:54:30.757
+Running several complete, independent copies of the system's data plane, services, databases, queues, each serving a fixed subset of customers (for example, a group of cities), behind a thin router.
+
+626
+00:54:31.037 --> 00:54:40.551
+Cells share nothing at runtime, so an infrastructure failure, a bad deploy or one tenant's surge affects only one cell's customers instead of everyone.
+
+627
+00:54:41.901 --> 00:54:42.904
+Intermediate.
+
+628
+00:54:43.184 --> 00:54:44.293
+Question 5.
+
+629
+00:54:44.573 --> 00:54:48.413
+Layered versus hexagonal architecture, what's the actual difference?
+
+630
+00:54:48.693 --> 00:54:50.059
+Thirty-second answer:
+
+631
+00:54:50.339 --> 00:54:52.920
+The direction of the dependency at the bottom.
+
+632
+00:54:53.200 --> 00:55:01.499
+In layered architecture the domain or service layer depends on the persistence layer, so business logic is shaped around the database.
+
+633
+00:55:01.779 --> 00:55:08.456
+In hexagonal architecture the domain defines the persistence port and infrastructure depends on the domain.
+
+634
+00:55:08.736 --> 00:55:13.835
+That inversion makes the domain testable without a database and technology-independent.
+
+635
+00:55:15.185 --> 00:55:16.294
+Question 6.
+
+636
+00:55:16.574 --> 00:55:20.563
+What does converting a module into a microservice actually cost?
+
+637
+00:55:20.843 --> 00:55:22.209
+Thirty-second answer:
+
+638
+00:55:22.489 --> 00:55:43.481
+Latency (a microsecond call becomes a network call; serial calls add up), tail latency (each hop adds its own p99), availability (required synchronous dependencies multiply unavailability), operations (pipelines, observability, on-call, versioning, contract tests), and the loss of local transactions.
+
+639
+00:55:43.761 --> 00:55:49.819
+You pay it to get independent deployment, independent scaling, team autonomy and fault isolation.
+
+640
+00:55:51.169 --> 00:55:52.257
+Question 7.
+
+641
+00:55:52.537 --> 00:55:56.548
+Choreography versus orchestration in event-driven systems?
+
+642
+00:55:56.828 --> 00:55:58.193
+Thirty-second answer:
+
+643
+00:55:58.473 --> 00:56:09.695
+In choreography each service reacts to events and emits its own, with no central coordinator, loosely coupled but the overall flow is implicit and harder to follow and debug.
+
+644
+00:56:09.975 --> 00:56:22.967
+In orchestration a coordinator (saga orchestrator, workflow engine) explicitly tells participants what to do, the flow is visible and error handling is centralized, at the cost of a central component.
+
+645
+00:56:24.317 --> 00:56:25.341
+Question 8.
+
+646
+00:56:25.621 --> 00:56:28.714
+What is a BFF and when would you use micro-frontends?
+
+647
+00:56:28.994 --> 00:56:30.359
+Thirty-second answer:
+
+648
+00:56:30.639 --> 00:56:40.837
+A Backend for Frontend is a thin backend per client type that aggregates and shapes data for that client, keeping client-specific logic out of domain services.
+
+649
+00:56:41.117 --> 00:56:48.669
+Micro-frontends split a large web UI into independently built and deployed pieces owned by different teams.
+
+650
+00:56:48.949 --> 00:56:58.015
+Use a BFF when clients have different needs; use micro-frontends only when several teams must deploy parts of one UI independently.
+
+651
+00:56:59.365 --> 00:57:00.432
+Question 9.
+
+652
+00:57:00.712 --> 00:57:03.827
+How do you enforce architecture style rules in code?
+
+653
+00:57:04.107 --> 00:57:05.472
+Thirty-second answer:
+
+654
+00:57:05.752 --> 00:57:07.544
+With fitness functions in CI:
+
+655
+00:57:07.824 --> 00:57:24.400
+ArchUnit rules for layering and domain depends on nothing; Spring Modulith verification for module boundaries; dependency checks for cycles; per-module database schemas or grants so modules can't read each other's tables; and contract tests between services.
+
+656
+00:57:24.680 --> 00:57:26.323
+Rules that aren't checked erode.
+
+657
+00:57:27.673 --> 00:57:28.441
+Senior.
+
+658
+00:57:28.721 --> 00:57:29.766
+Question 10.
+
+659
+00:57:30.046 --> 00:57:32.841
+How do you decide cell size and the partition key?
+
+660
+00:57:33.121 --> 00:57:34.486
+Thirty-second answer:
+
+661
+00:57:34.766 --> 00:57:42.681
+Choose a key that keeps nearly all traffic within one cell, tenant, city group or customer ID, so cross-cell calls are rare.
+
+662
+00:57:42.961 --> 00:57:55.142
+Size cells so losing one is tolerable (for example, at most 15% of customers), so the largest tenant fits in one cell with headroom, and so the number of cells is operationally manageable.
+
+663
+00:57:55.422 --> 00:57:57.193
+Keep cells identical in shape.
+
+664
+00:57:58.543 --> 00:57:59.673
+Question 11.
+
+665
+00:57:59.953 --> 00:58:04.476
+Why didn't cells protect against latent bugs in L3, and how do you fix that?
+
+666
+00:58:04.756 --> 00:58:06.121
+Thirty-second answer:
+
+667
+00:58:06.401 --> 00:58:17.068
+Because a latent bug only triggers hours after deploy, and a 90-minute rollout has already put it into every cell by then, so the worst incident is still 100%.
+
+668
+00:58:17.348 --> 00:58:32.175
+The fixes: space deploy waves by longer than typical latent-bug trigger times (at least for risky changes), use per-cell feature flags so behavior can be switched off where it misbehaves, and bake in the canary cell before continuing.
+
+669
+00:58:33.525 --> 00:58:34.613
+Question 12.
+
+670
+00:58:34.893 --> 00:58:37.261
+How do you move a tenant between cells safely?
+
+671
+00:58:37.541 --> 00:58:38.906
+Thirty-second answer:
+
+672
+00:58:39.186 --> 00:58:52.306
+Hold the tenant's requests at the router and let in-flight ones drain; copy its data from the source cell to the target; flip the routing entry; release the hold; verify counts or checksums; then drop the source data.
+
+673
+00:58:52.586 --> 00:58:58.687
+For large tenants, pre-copy with dual-write or CDC so the hold covers only the final delta.
+
+674
+00:59:00.037 --> 00:59:01.317
+Question 13.
+
+675
+00:59:01.597 --> 00:59:04.989
+What belongs in a cell's control plane versus data plane?
+
+676
+00:59:05.269 --> 00:59:06.635
+Thirty-second answer:
+
+677
+00:59:06.915 --> 00:59:11.821
+The data plane serves customer requests: the router and everything inside cells.
+
+678
+00:59:12.101 --> 00:59:20.869
+The control plane manages them: cell provisioning, the routing table source of truth, deploy-wave orchestration, tenant moves, capacity.
+
+679
+00:59:21.149 --> 00:59:30.515
+The data plane must keep working if the control plane is down, cells serve with the last good routing table, so the control plane can be simpler and less available.
+
+680
+00:59:31.865 --> 00:59:33.059
+Question 14.
+
+681
+00:59:33.339 --> 00:59:35.067
+When is serverless the wrong choice?
+
+682
+00:59:35.347 --> 00:59:36.713
+Thirty-second answer:
+
+683
+00:59:36.993 --> 00:59:53.867
+For steady, high-volume, latency-sensitive services (cold starts and per-request pricing hurt), long-running or stateful work (time limits, statelessness), workloads needing specialized runtimes or tuning, and teams that need strong local reproducibility.
+
+684
+00:59:54.147 --> 01:00:01.422
+For Java, heavy frameworks worsen cold starts unless you use SnapStart or CRaC or native images.
+
+685
+01:00:02.772 --> 01:00:03.668
+Architect.
+
+686
+01:00:03.948 --> 01:00:05.143
+Question 15.
+
+687
+01:00:05.423 --> 01:00:09.476
+Design the architecture-style mix for a large grocery platform.
+
+688
+01:00:09.756 --> 01:00:11.121
+Thirty-second answer:
+
+689
+01:00:11.401 --> 01:00:24.991
+Per level: hexagonal inside every deployable; bounded contexts as modules in a modular monolith where they change together (Ordering, Catalog), extracted into services where there's a driver (Inventory,
+
+690
+01:00:25.271 --> 01:00:40.247
+Fulfilment for flash-sale scaling); events between contexts; BFF per client; serverless for bursty side jobs; and, at large scale, cells by city group with a replicated router and a separate control plane, deployed in waves.
+
+691
+01:00:41.597 --> 01:00:42.791
+Question 16.
+
+692
+01:00:43.071 --> 01:00:45.653
+How would you evolve a tangled layered monolith?
+
+693
+01:00:45.933 --> 01:00:47.298
+Thirty-second answer:
+
+694
+01:00:47.578 --> 01:00:49.519
+Don't jump to microservices.
+
+695
+01:00:49.799 --> 01:00:59.975
+First draw bounded contexts (Ch 33) and restructure into a modular monolith with hexagonal modules, enforcing boundaries with fitness functions.
+
+696
+01:01:00.255 --> 01:01:05.525
+Then extract only the modules with real drivers, using the strangler pattern and events.
+
+697
+01:01:05.805 --> 01:01:09.047
+Add cells when blast radius becomes the dominant risk.
+
+698
+01:01:10.397 --> 01:01:11.741
+Question 17.
+
+699
+01:01:12.021 --> 01:01:16.971
+How do you handle cross-cell requirements like national reporting and global uniqueness?
+
+700
+01:01:17.251 --> 01:01:18.616
+Thirty-second answer:
+
+701
+01:01:18.896 --> 01:01:20.688
+Avoid live cross-cell calls.
+
+702
+01:01:20.968 --> 01:01:28.072
+For reporting, stream each cell's changes (CDC or events) into a central analytics store and query there.
+
+703
+01:01:28.352 --> 01:01:35.264
+For uniqueness, use IDs that embed the cell (or globally unique IDs like UUIDv7 or Snowflake).
+
+704
+01:01:35.544 --> 01:01:43.096
+For globally shared data (catalog, pricing rules), replicate read-only copies into each cell from a global source.
+
+705
+01:01:43.376 --> 01:01:46.704
+Customers who move cities need a tenant-move protocol.
+
+706
+01:01:48.054 --> 01:01:49.227
+Question 18.
+
+707
+01:01:49.507 --> 01:01:52.665
+Microservices versus cells, aren't they the same thing?
+
+708
+01:01:52.945 --> 01:01:54.310
+Thirty-second answer:
+
+709
+01:01:54.590 --> 01:01:56.979
+No, they partition along different axes.
+
+710
+01:01:57.259 --> 01:02:07.819
+Microservices split the system by function (ordering, inventory), so each service serves all customers; a service failure affects everyone who needs that function.
+
+711
+01:02:08.099 --> 01:02:15.651
+Cells split by customer or tenant, each cell running every function; a cell failure affects only that cell's customers.
+
+712
+01:02:15.931 --> 01:02:19.259
+They combine: each cell can contain several services.
+
+713
+01:02:20.609 --> 01:02:21.847
+Question 19.
+
+714
+01:02:22.127 --> 01:02:24.324
+How do you justify cells to finance?
+
+715
+01:02:24.604 --> 01:02:25.969
+Thirty-second answer:
+
+716
+01:02:26.249 --> 01:02:27.615
+Quantify both sides.
+
+717
+01:02:27.895 --> 01:02:37.644
+Cost: duplicated infrastructure per cell (~1.6x for the grocery platform), router and control-plane engineering, operational tooling.
+
+718
+01:02:37.924 --> 01:02:42.404
+Benefit: expected reduction in platform-wide outage minutes (L3:
+
+719
+01:02:42.684 --> 01:02:58.641
+880, then 110 per year), times the cost of an outage minute (lost orders, refunds, reputation), plus the tail risk, worst incident 100%, then 12.5%, which matters most during festival peaks.
+
+720
+01:02:59.991 --> 01:03:01.101
+Question 20.
+
+721
+01:03:01.381 --> 01:03:06.117
+What distinguishes a principal engineer's answer to 'what architecture should we use?'.
+
+722
+01:03:06.397 --> 01:03:07.762
+Thirty-second answer:
+
+723
+01:03:08.042 --> 01:03:09.919
+It depends, and here's on what.
+
+724
+01:03:10.199 --> 01:03:27.159
+They identify the drivers per part of the system, choose a style per level, quantify the costs of each boundary (latency, availability, operations, infrastructure), name the evolution path and the triggers for each next step, and make sure every style's rules are enforced.
+
+725
+01:03:27.439 --> 01:03:29.445
+They also say what they'd not do yet.
+
+726
+01:03:30.795 --> 01:03:31.691
+Part 9.
+
+727
+01:03:31.971 --> 01:03:33.379
+Summary and Practice.
+
+728
+01:03:34.629 --> 01:03:35.717
+Key takeaways.
+
+729
+01:03:35.997 --> 01:03:46.151
+Styles are bundles of constraints that buy specific qualities; choose per level and per context, not per company (§2.1, §2.11).
+
+730
+01:03:46.431 --> 01:03:53.962
+Hexagonal architecture inverts the dependency so the domain owns its ports; enforce the rule in CI (L1).
+
+731
+01:03:54.242 --> 01:04:03.074
+The modular monolith is the default: cheap calls, simple ops, and cheap later extraction if boundaries are enforced (§2.4).
+
+732
+01:04:03.354 --> 01:04:11.461
+Microservices have a measurable price, latency, tail, availability, operations, pay it only for a named driver (L2).
+
+733
+01:04:12.811 --> 01:04:21.323
+Events decouple contexts; choose choreography or orchestration by how much visibility the flow needs (§2.6).
+
+734
+01:04:21.603 --> 01:04:28.259
+Serverless fits bursty, stateless work, not steady latency-sensitive services (§2.7).
+
+735
+01:04:28.539 --> 01:04:36.901
+Cells contain blast radius for infrastructure failures and noisy neighbors, and for bad deploys only with slow enough waves (L3).
+
+736
+01:04:37.181 --> 01:04:42.771
+Tenant moves between cells need a protocol; naive flips lose data silently (L4).
+
+737
+01:04:44.121 --> 01:04:52.121
+Evolve: layered, then modular (hexagonal), then selective services, then cells, each step keeping the previous one's discipline.
+
+738
+01:04:53.471 --> 01:04:54.793
+Decision cheat sheet.
+
+739
+01:04:55.073 --> 01:04:56.439
+Here is a quick table:
+
+740
+01:04:56.719 --> 01:04:57.807
+Need, and Style.
+
+741
+01:04:58.087 --> 01:05:01.009
+Testable business rules, swappable infrastructure:
+
+742
+01:05:01.289 --> 01:05:03.337
+Hexagonal inside the deployable.
+
+743
+01:05:03.617 --> 01:05:06.881
+Several contexts that change together, one team or a few:
+
+744
+01:05:07.161 --> 01:05:08.505
+Modular monolith.
+
+745
+01:05:08.785 --> 01:05:12.391
+A context with a different scaling profile, cadence or owner:
+
+746
+01:05:12.671 --> 01:05:15.103
+Extract to a service; connect with events.
+
+747
+01:05:15.383 --> 01:05:17.687
+Multi-step process with compensation:
+
+748
+01:05:17.967 --> 01:05:20.441
+Orchestrated saga or workflow engine.
+
+749
+01:05:20.721 --> 01:05:22.791
+Fan-out of facts to many consumers:
+
+750
+01:05:23.071 --> 01:05:24.649
+Events (choreography).
+
+751
+01:05:24.929 --> 01:05:26.892
+Bursty, stateless side jobs:
+
+752
+01:05:27.172 --> 01:05:28.452
+Serverless functions.
+
+753
+01:05:28.732 --> 01:05:30.033
+Different client needs:
+
+754
+01:05:30.313 --> 01:05:31.700
+BFF per client.
+
+755
+01:05:31.980 --> 01:05:33.751
+Many teams on one web UI:
+
+756
+01:05:34.031 --> 01:05:35.268
+Micro-frontends.
+
+757
+01:05:36.618 --> 01:05:40.949
+Contain infra failures, noisy tenants, bad deploys at large scale:
+
+758
+01:05:41.229 --> 01:05:44.301
+Cells + router + control plane + slow waves.
+
+759
+01:05:45.651 --> 01:05:46.781
+Exercises.
+
+760
+01:05:47.061 --> 01:05:53.781
+(B2) Add a NotificationPort to L1 with an SMS adapter (HTTP) and an in-memory fake.
+
+761
+01:05:54.061 --> 01:05:56.280
+Extend the reflection check to include it.
+
+762
+01:05:56.560 --> 01:05:58.971
+What does the fast suite now cover that it didn't?
+
+763
+01:05:59.251 --> 01:06:08.616
+(B3) In L2, add a 1 ms artificial network delay per hop and a 1% chance of a 200 ms GC pause on each service.
+
+764
+01:06:08.896 --> 01:06:13.248
+How do p50 and p99 change for serial versus fan-out?
+
+765
+01:06:13.528 --> 01:06:20.717
+(B3) In L3, add a bad config push incident type that deploys to all cells at once (bypassing waves).
+
+766
+01:06:20.997 --> 01:06:23.301
+How much of the cells' benefit does it erase?
+
+767
+01:06:23.581 --> 01:06:25.843
+What does that tell you about config pipelines?
+
+768
+01:06:27.193 --> 01:06:37.347
+(B4) Extend L4 with a CDC-style pre-copy: stream writes to the target cell while still serving from the source, then hold only for the final delta.
+
+769
+01:06:37.627 --> 01:06:41.617
+Compare hold durations for a city with 100x more data.
+
+770
+01:06:41.897 --> 01:06:52.905
+(B4) Write the ADR for introducing cells to your own system: drivers, partition key, cell size, router design, wave policy, cost estimate and revisit trigger.
+
+771
+01:06:54.255 --> 01:06:55.257
+Further reading.
+
+772
+01:06:55.537 --> 01:07:01.916
+Alistair Cockburn, Hexagonal Architecture (original article) and Hexagonal Architecture Explained.
+
+773
+01:07:02.196 --> 01:07:03.199
+Robert C.
+
+774
+01:07:03.479 --> 01:07:05.292
+Martin, Clean Architecture.
+
+775
+01:07:05.572 --> 01:07:11.588
+Mark Richards and Neal Ford, Fundamentals of Software Architecture, style catalogue with ratings.
+
+776
+01:07:11.868 --> 01:07:14.407
+Spring Modulith reference documentation.
+
+777
+01:07:14.687 --> 01:07:23.540
+AWS Well-Architected, Reducing the Scope of Impact with Cell-Based Architecture; Slack and DoorDash engineering posts on cells.
+
+778
+01:07:24.890 --> 01:07:27.685
+Sam Newman, Monolith to Microservices.
+
+779
+01:07:27.965 --> 01:07:29.757
+Zhamak Dehghani, Data Mesh.
+
+780
+01:07:31.107 --> 01:07:32.344
+Related chapters.
+
+781
+01:07:32.624 --> 01:07:38.107
+Ch 15, EDA, CQRS and Event Sourcing: event-driven style details.
+
+782
+01:07:38.387 --> 01:07:44.083
+Ch 16, Microservices Architecture: service decomposition and operations.
+
+783
+01:07:44.363 --> 01:07:50.123
+Ch 18, Resilience Patterns: bulkheads, cells are bulkheads at architecture scale.
+
+784
+01:07:50.403 --> 01:07:55.715
+Ch 26, Deployment and Infrastructure: canaries and progressive delivery.
+
+785
+01:07:55.995 --> 01:08:01.328
+Ch 31, Architecture Decision Making: choosing between styles with evidence.
+
+786
+01:08:02.678 --> 01:08:08.929
+Ch 33, Domain-Driven Design: bounded contexts as module and service boundaries.
+
+787
+01:08:10.279 --> 01:08:11.879
+That's the end of this chapter.
+
+788
+01:08:12.159 --> 01:08:18.281
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+789
+01:08:18.561 --> 01:08:20.012
+See you in the next chapter.
+

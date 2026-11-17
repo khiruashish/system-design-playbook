@@ -1,0 +1,2470 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.825
+Insurance Policy and Claims Platform.
+
+2
+00:00:03.105 --> 00:00:08.075
+Chapter I09, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:09.825 --> 00:00:10.785
+At a glance:
+
+4
+00:00:11.065 --> 00:00:12.239
+Chapter at a glance.
+
+5
+00:00:12.519 --> 00:00:13.329
+Sector:
+
+6
+00:00:13.609 --> 00:00:18.537
+Insurance (India), Format: system design walkthrough (no code), Reader bands:
+
+7
+00:00:18.817 --> 00:00:20.865
+B1, then B4, Builds on:
+
+8
+00:00:21.145 --> 00:00:27.247
+I04 (cashless hospital claims), Ch 45, Ch 13, Ch 21.
+
+9
+00:00:27.527 --> 00:00:36.145
+What you get: the design of a digital insurer selling health, motor and term life policies through its app, agents, banks and aggregators.
+
+10
+00:00:36.425 --> 00:00:47.860
+It covers: the product and rating engine (how a premium is calculated), quotes, underwriting, policy issuance;. endorsements (mid-term changes), renewals, premium collection;.
+
+11
+00:00:49.210 --> 00:01:04.037
+claims: first notice of loss, health cashless and reimbursement, motor surveys with photos, life claims, fraud detection, settlement;. reinsurance, actuarial reserving, finance and regulatory reporting;. the algorithms:
+
+12
+00:01:04.317 --> 00:01:21.106
+GLM pricing, rules engines, underwriting scores, telematics, image-based damage assessment, fraud networks, claims triage, chain-ladder reserves, lapse prediction;. the data platform and tech stack, with India specifics (IRDAI, NHCX, Bima Sugam).
+
+13
+00:01:21.386 --> 00:01:22.367
+Reading time:
+
+14
+00:01:22.647 --> 00:01:23.543
+80 min.
+
+15
+00:01:24.893 --> 00:01:25.640
+Warning:
+
+16
+00:01:25.920 --> 00:01:27.328
+Regulatory content.
+
+17
+00:01:27.608 --> 00:01:30.467
+Insurance in India is regulated by IRDAI.
+
+18
+00:01:30.747 --> 00:01:41.819
+Product approval, policyholder protection (free-look periods, claim timelines, grievance redressal), distribution rules, solvency and reporting requirements change over time.
+
+19
+00:01:42.099 --> 00:01:45.725
+Every regulatory statement here is a summary marked VERIFY.
+
+20
+00:01:46.005 --> 00:01:50.848
+Commercial core systems are mentioned as common market options, not endorsements.
+
+21
+00:01:51.128 --> 00:01:55.373
+Pricing and reserving methods must be owned by qualified actuaries.
+
+22
+00:01:56.723 --> 00:01:57.577
+Part 1.
+
+23
+00:01:57.857 --> 00:01:59.393
+The System in One Page.
+
+24
+00:02:00.643 --> 00:02:01.965
+How an insurer works.
+
+25
+00:02:02.245 --> 00:02:05.680
+An insurer collects premiums now and pays claims later.
+
+26
+00:02:05.960 --> 00:02:07.112
+Its software must:
+
+27
+00:02:07.392 --> 00:02:12.725
+Price each risk correctly: too cheap loses money, too expensive loses customers.
+
+28
+00:02:13.005 --> 00:02:19.619
+Issue and administer policies exactly as the contract says, for years (life policies for decades).
+
+29
+00:02:19.899 --> 00:02:22.907
+Pay valid claims fast, and detect invalid ones.
+
+30
+00:02:23.187 --> 00:02:28.605
+Hold enough reserves for claims not yet reported, and share large risks with reinsurers.
+
+31
+00:02:29.955 --> 00:02:33.646
+Prove all of this to the regulator, auditors and policyholders.
+
+32
+00:02:34.996 --> 00:02:36.084
+Main systems.
+
+33
+00:02:36.364 --> 00:02:37.729
+Here is a quick table:
+
+34
+00:02:38.009 --> 00:02:39.524
+System, and What it does.
+
+35
+00:02:39.804 --> 00:02:41.191
+Product configurator:
+
+36
+00:02:41.471 --> 00:02:47.316
+Defines products: coverages, options, eligibility, rating factors, rules, documents.
+
+37
+00:02:47.596 --> 00:02:48.684
+Rating engine:
+
+38
+00:02:48.964 --> 00:02:52.057
+Computes premium from risk factors and product rules.
+
+39
+00:02:52.337 --> 00:02:53.383
+Distribution:
+
+40
+00:02:53.663 --> 00:02:58.356
+App or web, agents, brokers, banks (bancassurance), aggregators; commissions.
+
+41
+00:02:58.636 --> 00:02:59.959
+Quote and underwriting:
+
+42
+00:03:00.239 --> 00:03:06.212
+Collects risk data, applies rules and scores, decides accept or load or decline or refer.
+
+43
+00:03:06.492 --> 00:03:08.711
+Policy administration (PAS):
+
+44
+00:03:08.991 --> 00:03:14.665
+Issuance, policy documents, endorsements, renewals, cancellations, lapses and revivals.
+
+45
+00:03:16.015 --> 00:03:17.381
+Billing and collections:
+
+46
+00:03:17.661 --> 00:03:22.973
+Premium payments, instalments, mandates (NACH or UPI AutoPay), grace periods.
+
+47
+00:03:23.253 --> 00:03:24.447
+Claims management:
+
+48
+00:03:24.727 --> 00:03:29.634
+Intake, validation, investigation, assessment, approval, payment, recovery.
+
+49
+00:03:29.914 --> 00:03:31.642
+Health TPA or cashless:
+
+50
+00:03:31.922 --> 00:03:36.231
+Hospital pre-authorisation, network hospitals, tariffs, bill auditing.
+
+51
+00:03:36.511 --> 00:03:38.282
+Motor surveys and garages:
+
+52
+00:03:38.562 --> 00:03:43.703
+Surveyor assignment, photo or video inspection, garage network, repair estimates.
+
+53
+00:03:43.983 --> 00:03:45.285
+Fraud and SIU:
+
+54
+00:03:45.565 --> 00:03:50.834
+Fraud scoring, network analysis, the special investigations unit's case management.
+
+55
+00:03:51.114 --> 00:03:52.202
+Reinsurance:
+
+56
+00:03:52.482 --> 00:03:55.042
+Treaties, cessions, recoveries, bordereaux.
+
+57
+00:03:56.392 --> 00:03:57.928
+Actuarial and finance:
+
+58
+00:03:58.208 --> 00:04:03.115
+Reserves (IBNR), experience analysis, financial and regulatory reporting.
+
+59
+00:04:03.395 --> 00:04:04.568
+Customer service:
+
+60
+00:04:04.848 --> 00:04:07.472
+Contact centre, grievances, self-service.
+
+61
+00:04:07.752 --> 00:04:09.629
+Documents and communications:
+
+62
+00:04:09.909 --> 00:04:13.003
+Policy wordings, schedules, letters, e-policies.
+
+63
+00:04:13.283 --> 00:04:14.456
+Data platform:
+
+64
+00:04:14.736 --> 00:04:17.275
+Warehouse, actuarial data marts, ML.
+
+65
+00:04:18.625 --> 00:04:20.779
+Scale for this design (assumptions).
+
+66
+00:04:21.059 --> 00:04:22.425
+Here is a quick table:
+
+67
+00:04:22.705 --> 00:04:24.027
+Quantity, and Value.
+
+68
+00:04:24.307 --> 00:04:25.587
+Policies in force:
+
+69
+00:04:25.867 --> 00:04:30.774
+8M (health 3M, motor 4.5M, life 0.5M).
+
+70
+00:04:31.054 --> 00:04:32.398
+New policies per day:
+
+71
+00:04:32.678 --> 00:04:36.369
+20k; quotes per day 1M (aggregators generate many).
+
+72
+00:04:36.649 --> 00:04:39.038
+Renewals per day: ~15k.
+
+73
+00:04:39.318 --> 00:04:46.678
+Claims per day: ~8k (health cashless dominate), with seasonal and catastrophe spikes (floods, epidemics).
+
+74
+00:04:46.958 --> 00:04:52.483
+Documents: ~50M documents per year (proposals, bills, photos, reports).
+
+75
+00:04:53.833 --> 00:04:55.220
+Estimation highlights:
+
+76
+00:04:55.500 --> 00:04:59.788
+Quotes dwarf policies (50:1), especially from aggregators.
+
+77
+00:05:00.068 --> 00:05:02.628
+The rating engine must be fast and cacheable.
+
+78
+00:05:02.908 --> 00:05:05.980
+Quote storage has short retention unless converted.
+
+79
+00:05:06.260 --> 00:05:08.159
+Claims are the operational heart.
+
+80
+00:05:08.439 --> 00:05:12.791
+Each claim involves documents, people and payments over days or weeks.
+
+81
+00:05:13.071 --> 00:05:16.015
+That makes it a workflow problem more than a throughput one.
+
+82
+00:05:17.365 --> 00:05:24.426
+Catastrophes create sudden claim volumes: motor and home claims after a flood can reach ten times normal in a week.
+
+83
+00:05:24.706 --> 00:05:28.034
+They need surge operations and simplified processes.
+
+84
+00:05:29.384 --> 00:05:30.259
+Part 2.
+
+85
+00:05:30.539 --> 00:05:31.499
+Requirements.
+
+86
+00:05:32.749 --> 00:05:33.602
+Functional.
+
+87
+00:05:33.882 --> 00:05:41.391
+Launch new products and variants quickly by configuration, after regulatory approval (VERIFY the file-and-use process).
+
+88
+00:05:41.671 --> 00:05:44.509
+Quote in under a second for aggregators and the app.
+
+89
+00:05:44.789 --> 00:05:47.157
+Buy online with e-KYC and payment.
+
+90
+00:05:47.437 --> 00:05:49.698
+Receive the policy document instantly.
+
+91
+00:05:49.978 --> 00:05:59.407
+Underwrite automatically where possible (straight-through), refer complex cases to human underwriters, request medical tests for life and health when needed.
+
+92
+00:05:59.687 --> 00:06:06.855
+Handle mid-term changes (add a family member, change a vehicle, change a nominee) with pro-rata premium adjustments.
+
+93
+00:06:08.205 --> 00:06:12.941
+Renewals with reminders, auto-debit, and no-claim bonus or discount rules.
+
+94
+00:06:13.221 --> 00:06:17.189
+Life policies: premium due, grace periods, lapse, revival.
+
+95
+00:06:17.469 --> 00:06:30.227
+Claims: health cashless (hospital-initiated pre-auth) and reimbursement (customer uploads bills);. motor own-damage and third party, with surveys;. life death claims with nominee verification.
+
+96
+00:06:30.507 --> 00:06:32.661
+All with status tracking and timelines.
+
+97
+00:06:34.011 --> 00:06:36.827
+Fraud detection and investigation workflows.
+
+98
+00:06:37.107 --> 00:06:41.737
+Reinsurance cessions and recoveries; reserves; regulatory returns.
+
+99
+00:06:42.017 --> 00:06:45.921
+Grievances and ombudsman escalations (VERIFY processes).
+
+100
+00:06:47.271 --> 00:06:48.380
+Non-functional.
+
+101
+00:06:48.660 --> 00:06:50.025
+Here is a quick table:
+
+102
+00:06:50.305 --> 00:06:51.671
+Attribute, and Target.
+
+103
+00:06:51.951 --> 00:06:59.503
+Quote latency: p95 500 ms including external lookups (vehicle registry, KYC checks).
+
+104
+00:06:59.783 --> 00:07:00.700
+Correctness:
+
+105
+00:07:00.980 --> 00:07:06.783
+Premiums, endorsements and claim payments exactly per contract terms; every change versioned.
+
+106
+00:07:07.063 --> 00:07:08.044
+Auditability:
+
+107
+00:07:08.324 --> 00:07:12.761
+Full history of every policy and claim decision with who or what or why.
+
+108
+00:07:13.041 --> 00:07:14.023
+Longevity:
+
+109
+00:07:14.303 --> 00:07:18.441
+Policies administered for decades; product versions preserved forever.
+
+110
+00:07:18.721 --> 00:07:19.788
+Availability:
+
+111
+00:07:20.068 --> 00:07:29.604
+Sales channels and cashless approvals ≥ 99.9%; hospital pre-auth within regulatory timelines (VERIFY).
+
+112
+00:07:29.884 --> 00:07:30.801
+Privacy:
+
+113
+00:07:31.081 --> 00:07:36.863
+Health and personal data protected; consent-based data use (DPDP Act; VERIFY).
+
+114
+00:07:38.213 --> 00:07:39.109
+Part 3.
+
+115
+00:07:39.389 --> 00:07:40.925
+High-Level Architecture.
+
+116
+00:07:42.175 --> 00:07:43.519
+Here is the diagram.
+
+117
+00:07:47.369 --> 00:07:48.435
+Key decisions:
+
+118
+00:07:49.785 --> 00:07:51.151
+Here is a quick table:
+
+119
+00:07:51.431 --> 00:07:53.201
+Decision, and Choice, and Why.
+
+120
+00:07:53.481 --> 00:07:55.188
+Products as configuration.
+
+121
+00:07:55.468 --> 00:07:56.300
+Choice:
+
+122
+00:07:56.580 --> 00:08:06.351
+A product configurator with versioned product definitions (coverages, rules, rate tables) interpreted by the rating, underwriting and policy engines.
+
+123
+00:08:06.631 --> 00:08:07.313
+Why:
+
+124
+00:08:07.593 --> 00:08:12.500
+New products without code changes; old versions preserved for in-force policies.
+
+125
+00:08:12.780 --> 00:08:14.124
+Policy data model.
+
+126
+00:08:14.404 --> 00:08:15.236
+Choice:
+
+127
+00:08:15.516 --> 00:08:21.489
+Bitemporal: effective dates (when a change applies in the contract) and recorded dates (when we learned it).
+
+128
+00:08:21.769 --> 00:08:22.452
+Why:
+
+129
+00:08:22.732 --> 00:08:25.697
+Back-dated endorsements, audits, what did we know when.
+
+130
+00:08:25.977 --> 00:08:26.788
+Claims.
+
+131
+00:08:27.068 --> 00:08:27.900
+Choice:
+
+132
+00:08:28.180 --> 00:08:31.657
+Workflow engine with human tasks, SLAs and rules.
+
+133
+00:08:31.937 --> 00:08:32.620
+Why:
+
+134
+00:08:32.900 --> 00:08:36.335
+Long-running, multi-party processes (Ch 50).
+
+135
+00:08:37.685 --> 00:08:38.922
+Buy versus build.
+
+136
+00:08:39.202 --> 00:08:40.034
+Choice:
+
+137
+00:08:40.314 --> 00:08:48.869
+Many insurers buy a core suite (policy or billing or claims) and build digital channels, rating services, fraud and data around it.
+
+138
+00:08:49.149 --> 00:08:49.831
+Why:
+
+139
+00:08:50.111 --> 00:08:54.677
+Mature domain, regulatory features; differentiation is at the edges.
+
+140
+00:08:54.957 --> 00:08:55.959
+Integration.
+
+141
+00:08:56.239 --> 00:08:57.071
+Choice:
+
+142
+00:08:57.351 --> 00:09:03.645
+APIs for partners, events internally, file exchanges where industry partners require them.
+
+143
+00:09:03.925 --> 00:09:04.607
+Why:
+
+144
+00:09:04.887 --> 00:09:06.125
+Real-world mix.
+
+145
+00:09:07.475 --> 00:09:08.392
+Part 4.
+
+146
+00:09:08.672 --> 00:09:10.549
+How It Works, Journeys End to End.
+
+147
+00:09:11.799 --> 00:09:14.871
+Journey 1: buying motor insurance on an aggregator.
+
+148
+00:09:15.151 --> 00:09:23.322
+Quote request: the customer enters their vehicle registration number on an aggregator site, which calls the insurer's quote API.
+
+149
+00:09:23.602 --> 00:09:40.818
+Enrichment: the insurer fetches vehicle details (make, model, variant, fuel, registration date) from a vehicle registry integration (VERIFY data-access arrangements);. checks previous insurance and claims history through industry data where available (VERIFY);.
+
+150
+00:09:42.168 --> 00:09:46.797
+looks up the insured declared value (IDV) from depreciation schedules.
+
+151
+00:09:47.077 --> 00:09:54.395
+Rating (§6.1): base premium from rate tables by vehicle class, zone and age, then adjustments:
+
+152
+00:09:54.675 --> 00:10:06.643
+No Claim Bonus carried from the previous policy (VERIFY current NCB slabs);. add-ons (zero depreciation, engine protection, roadside assistance);. voluntary deductible;.
+
+153
+00:10:07.993 --> 00:10:13.859
+the insurer's pricing model loading or discount within filed ranges;. taxes (GST).
+
+154
+00:10:14.139 --> 00:10:17.510
+Third-party premium is set by the regulator (VERIFY).
+
+155
+00:10:17.790 --> 00:10:23.934
+Response: the quote returns within hundreds of milliseconds with a quote ID valid for a short time.
+
+156
+00:10:24.214 --> 00:10:27.158
+Aggregators may show 20 insurers side by side.
+
+157
+00:10:27.438 --> 00:10:29.849
+Purchase: the customer selects and pays.
+
+158
+00:10:30.129 --> 00:10:36.507
+KYC is mandatory for all policies now (VERIFY), done with CKYC lookup or e-KYC.
+
+159
+00:10:37.857 --> 00:10:46.092
+Break-in cases (expired policy) need a self-inspection: the customer records a guided video or photos of the car in the app.
+
+160
+00:10:46.372 --> 00:10:52.644
+An image model checks for damage and fraud (§6.5), and a human reviews exceptions.
+
+161
+00:10:52.924 --> 00:10:59.729
+Issuance: underwriting rules pass;. the policy is created in PAS;. the premium is recorded in billing;.
+
+162
+00:11:01.079 --> 00:11:08.973
+commission is accrued for the aggregator;. the policy document is generated (schedule plus wordings) and emailed instantly.
+
+163
+00:11:09.253 --> 00:11:19.791
+Downstream: the policy is reported to industry and regulatory repositories as required (VERIFY), and becomes a reinsurance cession if a treaty covers it.
+
+164
+00:11:21.141 --> 00:11:24.107
+Journey 2: buying a family health policy in the app.
+
+165
+00:11:24.387 --> 00:11:30.381
+Proposal: the customer adds members (ages, pre-existing conditions, lifestyle questions).
+
+166
+00:11:30.661 --> 00:11:47.216
+Underwriting rules: accept at standard rates (young, no conditions);. accept with loading or a waiting period for declared conditions;. refer to medical underwriting (tele-medical interview or medical tests at partner labs);. decline outside appetite.
+
+167
+00:11:48.566 --> 00:11:52.299
+A score (§6.3) orders referrals by risk.
+
+168
+00:11:52.579 --> 00:11:58.830
+Pricing: premium by age band per member, sum insured, zone (city tier), deductibles, add-ons.
+
+169
+00:11:59.110 --> 00:12:01.350
+The family floater discount is applied.
+
+170
+00:12:01.630 --> 00:12:07.817
+Payment and mandate: annual payment, or instalments via NACH or UPI AutoPay mandates.
+
+171
+00:12:08.097 --> 00:12:12.619
+Issuance: the policy with waiting periods recorded per member and condition.
+
+172
+00:12:12.899 --> 00:12:16.014
+A health card is issued (digital) for cashless use.
+
+173
+00:12:17.364 --> 00:12:26.409
+Free-look period: the customer can cancel within a set number of days for a refund minus proportionate costs (VERIFY the current period and rules).
+
+174
+00:12:26.689 --> 00:12:29.633
+The PAS supports this as a special cancellation.
+
+175
+00:12:30.983 --> 00:12:33.394
+Journey 3: a cashless hospital claim.
+
+176
+00:12:33.674 --> 00:12:38.389
+Admission and pre-auth request: the patient is admitted to a network hospital.
+
+177
+00:12:38.669 --> 00:12:47.287
+The hospital's insurance desk sends a pre-authorisation request with the diagnosis, planned treatment, estimated cost and doctor notes.
+
+178
+00:12:47.567 --> 00:13:00.239
+It arrives via the insurer's TPA portal or API or the National Health Claims Exchange (NHCX, FHIR-based; VERIFY adoption) (I04 §4.4).
+
+179
+00:13:00.519 --> 00:13:07.538
+Coverage checks (automated first): policy in force;. member covered;. waiting periods passed for this condition;.
+
+180
+00:13:08.888 --> 00:13:19.683
+sum insured available (after previous claims);. sub-limits (room rent caps, disease-specific limits);. exclusions;. hospital in network with an agreed package tariff.
+
+181
+00:13:19.963 --> 00:13:27.365
+Medical adjudication: rules auto-approve standard packages (for example, cataract surgery at the agreed tariff);.
+
+182
+00:13:28.715 --> 00:13:37.590
+otherwise a medical officer reviews: are the treatment and length of stay appropriate for the diagnosis? queries go back to the hospital as tasks.
+
+183
+00:13:37.870 --> 00:13:42.393
+Approval: within the regulatory timeline for pre-auth decisions (VERIFY).
+
+184
+00:13:42.673 --> 00:13:46.747
+An approved amount is issued, with enhancements if the stay extends.
+
+185
+00:13:47.027 --> 00:13:52.531
+Discharge: the hospital submits the final bill with itemisation and discharge summary;.
+
+186
+00:13:53.881 --> 00:14:11.673
+bill audit (§6.7) checks items against the tariff, flags non-payables (consumables excluded by policy) and applies co-pay and deductibles;. final approval is issued, again within timelines (VERIFY);. the patient pays the non-payables and leaves.
+
+187
+00:14:11.953 --> 00:14:17.841
+Settlement: the insurer pays the hospital via bank transfer in batches, reconciled per claim.
+
+188
+00:14:18.121 --> 00:14:28.809
+Accounting: the claim updates the sum insured utilisation, the no-claim bonus status for renewal, reserves (§6.8) and reinsurance recoveries.
+
+189
+00:14:30.159 --> 00:14:32.442
+Journey 4: a motor accident claim.
+
+190
+00:14:32.722 --> 00:14:41.085
+FNOL (first notice of loss): in the app, the customer records the accident location, photos and description, and chooses a garage.
+
+191
+00:14:41.365 --> 00:14:56.319
+Triage: small, simple claims with clear photos go to AI-assisted assessment: damage detection and estimate by part (§6.5), within a threshold;. larger or suspicious claims get a surveyor (licensed,
+
+192
+00:14:56.599 --> 00:15:09.485
+per regulation; VERIFY thresholds for mandatory surveys);. third-party injury claims follow legal processes (motor accident claims tribunals) and are handled separately, with long durations.
+
+193
+00:15:10.835 --> 00:15:30.547
+Survey: the surveyor inspects, virtually or in person, and records findings in the surveyor app;. the garage submits a repair estimate;. the system compares the estimate to part price catalogues and labour norms;. depreciation is applied per part material, unless a zero-depreciation add-on applies.
+
+194
+00:15:31.897 --> 00:15:34.009
+Approval: the repair is authorised.
+
+195
+00:15:34.289 --> 00:15:37.126
+After repair, a re-inspection (photos) is done.
+
+196
+00:15:37.406 --> 00:15:42.825
+The insurer pays the garage directly (cashless garage), or reimburses the customer.
+
+197
+00:15:43.105 --> 00:15:54.838
+Fraud checks throughout (§6.6): inconsistent photos, previously claimed damage (image similarity against past claims), staged accident patterns, linked parties.
+
+198
+00:15:55.118 --> 00:16:03.694
+Recovery: salvage for total losses (the vehicle is sold via auction);. subrogation against a third party's insurer where applicable.
+
+199
+00:16:05.044 --> 00:16:07.540
+Journey 5: a life insurance death claim.
+
+200
+00:16:07.820 --> 00:16:18.188
+Intimation: the nominee intimates the claim via the app, branch or call centre, with the death certificate, policy details, and their own KYC and bank details.
+
+201
+00:16:18.468 --> 00:16:24.377
+Validation: policy in force at the date of death, no lapse, and nominee identity verified.
+
+202
+00:16:24.657 --> 00:16:37.052
+Early claims (for example, within the first few years) may be investigated for non-disclosure, within legal limits on contestability (VERIFY Section 45 of the Insurance Act as amended).
+
+203
+00:16:38.402 --> 00:16:47.575
+Decision and payment: payment to the nominee's verified account within regulatory timelines, with interest for delays where required (VERIFY).
+
+204
+00:16:47.855 --> 00:16:50.970
+Reinsurance recovery for amounts above retention.
+
+205
+00:16:52.320 --> 00:16:54.261
+Journey 6: renewal and lapse.
+
+206
+00:16:54.541 --> 00:16:59.917
+Reminders: renewal notices go out before expiry by email, SMS and app.
+
+207
+00:17:00.197 --> 00:17:08.197
+For motor and health, the renewal premium is recalculated (age band change, NCB, claims experience, rate revisions).
+
+208
+00:17:08.477 --> 00:17:15.411
+Auto-renewal: where a mandate exists, the premium is debited after the pre-debit notification (VERIFY rules).
+
+209
+00:17:15.691 --> 00:17:21.557
+Grace periods: during the grace period, cover continuity rules apply per product (VERIFY).
+
+210
+00:17:21.837 --> 00:17:24.803
+Health: continuity preserves waiting-period credit.
+
+211
+00:17:26.153 --> 00:17:29.779
+Life: unpaid premiums lead to lapse after the grace period.
+
+212
+00:17:30.059 --> 00:17:35.819
+Revival is possible within a window, with arrears plus interest and possibly fresh underwriting.
+
+213
+00:17:36.099 --> 00:17:41.369
+Lapse prediction (§6.9) triggers targeted outreach before due dates.
+
+214
+00:17:42.719 --> 00:17:43.679
+Part 5.
+
+215
+00:17:43.959 --> 00:17:45.495
+Core Subsystems in Depth.
+
+216
+00:17:46.745 --> 00:17:48.153
+Product configurator.
+
+217
+00:17:48.433 --> 00:18:00.870
+A product definition includes: coverages and benefits;. options and add-ons;. eligibility rules;. rating factors and rate tables;. underwriting rules;. policy wording templates;.
+
+218
+00:18:02.220 --> 00:18:09.452
+claims rules (waiting periods, sub-limits, exclusions, co-pays);. commission rules;. regulatory identifiers.
+
+219
+00:18:09.732 --> 00:18:11.396
+Versioned with effective dates.
+
+220
+00:18:11.676 --> 00:18:17.628
+A policy is always administered under the product version it was sold on, or renewed into, per rules.
+
+221
+00:18:17.908 --> 00:18:24.991
+Output: a machine-readable product model interpreted by the rating engine, the underwriting engine, PAS and claims.
+
+222
+00:18:25.271 --> 00:18:30.881
+One definition, many consumers, which avoids inconsistencies between quoting and claims.
+
+223
+00:18:32.231 --> 00:18:41.639
+Testing: every product version has test cases (premium examples filed with the regulator, claims examples) run automatically before release.
+
+224
+00:18:42.989 --> 00:18:44.077
+Rating engine.
+
+225
+00:18:44.357 --> 00:18:45.616
+Stateless and fast.
+
+226
+00:18:45.896 --> 00:18:48.328
+Input: risk data + product version.
+
+227
+00:18:48.608 --> 00:18:52.853
+Output: premium breakdown (per coverage, loadings, discounts, taxes).
+
+228
+00:18:53.133 --> 00:18:55.203
+Rate tables are loaded in memory.
+
+229
+00:18:55.483 --> 00:19:00.816
+Pricing models (§6.1) are served as tables or model artefacts.
+
+230
+00:19:01.096 --> 00:19:04.957
+Aggregator traffic: very high quote volumes with low conversion.
+
+231
+00:19:05.237 --> 00:19:12.043
+Cache quotes by risk signature (vehicle variant + zone + age + NCB + add-ons) for minutes.
+
+232
+00:19:12.323 --> 00:19:13.795
+Rate-limit per partner.
+
+233
+00:19:14.075 --> 00:19:20.325
+Explainability: every quote stores its factor contributions, for disputes and regulatory review.
+
+234
+00:19:21.675 --> 00:19:24.470
+Policy administration with bitemporal data.
+
+235
+00:19:24.750 --> 00:19:35.886
+Policy versions: each change (endorsement) creates a new version with an effective date range (when the change applies in the contract) and a transaction time (when it was recorded).
+
+236
+00:19:36.166 --> 00:19:45.403
+Back-dated changes (for example, a vehicle change effective last week) produce premium adjustments computed pro-rata for the affected period.
+
+237
+00:19:45.683 --> 00:19:54.131
+Queries: what cover applied on the accident date? uses effective time;. what did we know when we approved that claim? uses transaction time.
+
+238
+00:19:55.481 --> 00:19:58.895
+Documents: endorsement schedules generated per version.
+
+239
+00:19:59.175 --> 00:20:02.972
+Cancellations: pro-rata or short-period scales per rules.
+
+240
+00:20:03.252 --> 00:20:05.193
+Refund computation and payment.
+
+241
+00:20:06.543 --> 00:20:07.887
+Billing and collections.
+
+242
+00:20:08.167 --> 00:20:18.727
+Payment modes: single premium, instalments (monthly or quarterly), mandates (NACH, UPI AutoPay; VERIFY limits and pre-debit rules), card, net banking.
+
+243
+00:20:19.007 --> 00:20:25.706
+Premium allocation: premium receivable accounts per policy; unallocated receipts handled by rules.
+
+244
+00:20:25.986 --> 00:20:32.834
+Dunning: failed debits, then retry, then notify, then grace period, then lapse or cancellation per product.
+
+245
+00:20:33.114 --> 00:20:38.639
+Integration with finance: premium income recognition, GST, commission payable.
+
+246
+00:20:39.989 --> 00:20:41.227
+Claims management.
+
+247
+00:20:41.507 --> 00:20:55.928
+A claim is a case with a workflow: intake (FNOL);. coverage verification;. triage (complexity, fraud score, value);. assignment (automation, adjuster, surveyor, medical officer);. investigation;. assessment;.
+
+248
+00:20:57.278 --> 00:21:06.473
+approval (authority limits by role and amount);. payment;. recovery (reinsurance, salvage, subrogation);. closure, and reopen if needed.
+
+249
+00:21:06.753 --> 00:21:08.438
+Human tasks with SLAs.
+
+250
+00:21:08.718 --> 00:21:11.449
+Authority matrices (who can approve how much).
+
+251
+00:21:11.729 --> 00:21:14.246
+Maker-checker for payments above thresholds.
+
+252
+00:21:15.596 --> 00:21:22.465
+Reserves per claim: an initial reserve at intimation (by triage model), updated as information arrives.
+
+253
+00:21:22.745 --> 00:21:25.455
+These case reserves feed actuarial reserving.
+
+254
+00:21:25.735 --> 00:21:38.748
+Straight-through processing (STP): simple claims (low value, clear coverage, low fraud score) auto-approve and pay within minutes, for example, small OPD health claims or windshield replacement.
+
+255
+00:21:39.028 --> 00:21:46.047
+Communication: status updates to customers and hospitals, and document requests as tasks visible in the app.
+
+256
+00:21:47.397 --> 00:21:48.463
+Reinsurance.
+
+257
+00:21:48.743 --> 00:22:04.167
+Treaties: quota share: a fixed percentage of every policy ceded;. surplus: amounts above the retention ceded, per policy;. excess of loss: the reinsurer pays losses above a threshold per event or per risk;. catastrophe covers.
+
+258
+00:22:04.447 --> 00:22:09.567
+Cessions: computed per policy (at issuance and endorsement), with cession premiums.
+
+259
+00:22:10.917 --> 00:22:16.229
+Recoveries: computed per claim or per event (catastrophes aggregate many claims).
+
+260
+00:22:16.509 --> 00:22:19.987
+Bordereaux (listings) are sent to reinsurers periodically.
+
+261
+00:22:20.267 --> 00:22:22.763
+Reinsurance accounting is reconciled.
+
+262
+00:22:23.043 --> 00:22:29.933
+Facultative reinsurance for individual large risks outside treaties (a workflow with reinsurer quotes).
+
+263
+00:22:31.283 --> 00:22:32.478
+Fraud management.
+
+264
+00:22:32.758 --> 00:22:38.945
+Scoring at key points: policy issuance (application fraud), claim intimation, and before payment.
+
+265
+00:22:39.225 --> 00:22:49.593
+Rules: claims soon after inception;. high-value claims just below approval thresholds;. repeated claimants;. hospitals or garages with outlier patterns.
+
+266
+00:22:49.873 --> 00:22:54.609
+Models: supervised (from past confirmed fraud) plus anomaly detection.
+
+267
+00:22:55.959 --> 00:23:05.559
+Network analysis (§6.6): links between claimants, garages, hospitals, doctors, phones, bank accounts and addresses reveal rings.
+
+268
+00:23:05.839 --> 00:23:12.153
+SIU case management: investigation tasks, evidence, outcomes that feed back as labels.
+
+269
+00:23:12.433 --> 00:23:20.199
+Industry sharing: fraud repositories and claims history databases shared across insurers, where regulated (VERIFY).
+
+270
+00:23:21.549 --> 00:23:22.487
+Part 6.
+
+271
+00:23:22.767 --> 00:23:23.727
+Algorithms.
+
+272
+00:23:24.977 --> 00:23:27.217
+Pricing with generalised linear models.
+
+273
+00:23:27.497 --> 00:23:43.241
+Frequency times severity: model claim frequency (claims per policy-year) with a Poisson GLM (log link);. model claim severity (cost per claim) with a Gamma GLM (log link);. pure premium = frequency times severity.
+
+274
+00:23:43.521 --> 00:23:51.415
+With log links, factors multiply: premium = base times factor(age) times factor(zone) times factor(vehicle)...
+
+275
+00:23:51.695 --> 00:23:54.553
+Tweedie GLMs model pure premium directly.
+
+276
+00:23:55.903 --> 00:24:05.951
+Credibility and smoothing: sparse cells are smoothed, for example, a rare vehicle model gets credibility-weighted factors between its own experience and its group's.
+
+277
+00:24:06.231 --> 00:24:10.989
+Gradient-boosted models capture interactions but must be explainable and filed.
+
+278
+00:24:11.269 --> 00:24:21.658
+Many insurers use GBMs to find interactions, then encode them in GLM-style tables for filing and transparency (VERIFY local product filing rules).
+
+279
+00:24:21.938 --> 00:24:30.322
+Final premium: pure premium + expense loadings + profit margin + commissions + taxes, within approved rate ranges.
+
+280
+00:24:31.672 --> 00:24:32.845
+Rules engines.
+
+281
+00:24:33.125 --> 00:24:42.405
+Underwriting, eligibility and claims coverage rules are expressed declaratively: if age 55 and sum insured 50 lakh then refer.
+
+282
+00:24:42.685 --> 00:24:51.923
+Engines: the Rete algorithm (for example, Drools) evaluates many rules efficiently by sharing conditions and incrementally matching facts.
+
+283
+00:24:52.203 --> 00:24:54.613
+Decision tables are for business users.
+
+284
+00:24:54.893 --> 00:25:02.339
+Governance: versioned rule sets tied to product versions, test suites, and audit of which rules fired for each decision.
+
+285
+00:25:03.689 --> 00:25:04.969
+Underwriting scoring.
+
+286
+00:25:05.249 --> 00:25:18.113
+A risk score from applicant data (age, BMI, declared conditions, occupation, income-to-cover ratio), external data (bureau-based signals where permitted; VERIFY), and medical test results.
+
+287
+00:25:18.393 --> 00:25:25.369
+Decisions: thresholds map the score to bands (accept, loading, referral, decline), with rules as guard rails.
+
+288
+00:25:25.649 --> 00:25:29.809
+Accelerated underwriting: lower-risk applicants skip medical tests.
+
+289
+00:25:30.089 --> 00:25:36.169
+The model must control mortality or morbidity slippage, monitored against actual claims experience.
+
+290
+00:25:37.519 --> 00:25:43.833
+Fairness: exclude prohibited factors; monitor outcomes across groups (VERIFY applicable rules).
+
+291
+00:25:45.183 --> 00:25:47.743
+Telematics (usage-based motor insurance).
+
+292
+00:25:48.023 --> 00:25:57.687
+Data: trips from a phone app or device: distance, time of day, speeding relative to road limits, harsh braking and acceleration, phone use while driving.
+
+293
+00:25:57.967 --> 00:26:03.002
+Driving score: event rates per 100 km weighted by severity and exposure.
+
+294
+00:26:03.282 --> 00:26:09.234
+Premium discounts are tied to the score (VERIFY regulatory framework for pay-as-you-drive products).
+
+295
+00:26:09.514 --> 00:26:21.098
+Pipeline: sensor streams, then trip segmentation, then map matching (I05 §6.5), then event detection, then aggregation per policy period.
+
+296
+00:26:22.448 --> 00:26:24.197
+Image-based damage assessment.
+
+297
+00:26:24.477 --> 00:26:27.229
+Guided capture ensures angles and coverage.
+
+298
+00:26:27.509 --> 00:26:31.755
+Photo metadata checks: time, location, device consistency.
+
+299
+00:26:32.035 --> 00:26:43.235
+Computer vision models: part detection (bumper, door, headlamp);. damage detection and classification (scratch, dent, crack);. severity, then repair versus replace decisions.
+
+300
+00:26:43.515 --> 00:26:48.635
+Estimate: parts price catalogue + labour norms + paint, then estimated cost.
+
+301
+00:26:48.915 --> 00:26:51.816
+The confidence decides auto-approve or survey.
+
+302
+00:26:53.166 --> 00:27:04.878
+Fraud: perceptual hashing against past claim photos (reused images; I07 §6.8);. edited image detection;. odometer and plate consistency.
+
+303
+00:27:06.228 --> 00:27:07.337
+Fraud networks.
+
+304
+00:27:07.617 --> 00:27:18.071
+Graph: nodes = policyholders, claims, vehicles, garages, hospitals, doctors, phones, emails, bank accounts, addresses; edges = relationships.
+
+305
+00:27:18.351 --> 00:27:31.855
+Detection: connected components and community detection find rings;. centrality finds hubs (a garage linked to many suspicious claims);. graph features (degree, shared attributes) feed supervised models.
+
+306
+00:27:32.135 --> 00:27:39.687
+Entity resolution first: the same person with different spellings or phones (I04 §6.1 patterns).
+
+307
+00:27:41.037 --> 00:27:42.850
+Claims triage and bill auditing.
+
+308
+00:27:43.130 --> 00:27:48.463
+Triage model: predicts complexity, expected cost and fraud risk at intimation.
+
+309
+00:27:48.743 --> 00:27:55.122
+It routes to STP, a junior or senior adjuster, or the SIU, and sets the initial reserve.
+
+310
+00:27:55.402 --> 00:28:13.045
+Health bill audit: map bill items to standard codes;. compare with the package tariff and reasonable-cost benchmarks for the diagnosis and city;. flag non-payable consumables per regulatory lists (VERIFY), duplicate charges, and room-rent proportionate deductions.
+
+311
+00:28:14.395 --> 00:28:19.003
+Length-of-stay benchmarks per diagnosis flag outliers for medical review.
+
+312
+00:28:20.353 --> 00:28:22.913
+Reserving (IBNR) with the chain-ladder method.
+
+313
+00:28:23.193 --> 00:28:30.233
+The problem: at any date, some claims have happened but aren't reported yet (IBNR), and reported claims will still develop.
+
+314
+00:28:30.513 --> 00:28:32.689
+Reserves must cover the ultimate cost.
+
+315
+00:28:32.969 --> 00:28:51.571
+Chain ladder: arrange paid (or incurred) claims in a triangle: rows = accident period, columns = development period;. compute age-to-age development factors as the ratio of cumulative claims between consecutive development periods, weighted across accident periods;.
+
+316
+00:28:52.921 --> 00:28:59.343
+multiply the latest diagonal by the remaining factors to project ultimate claims per accident period;.
+
+317
+00:28:59.623 --> 00:29:02.119
+IBNR = ultimate minus reported.
+
+318
+00:29:02.399 --> 00:29:03.273
+Variants:
+
+319
+00:29:03.553 --> 00:29:12.215
+Bornhuetter, Ferguson (blending expected loss ratio for immature periods), Mack's method for uncertainty, stochastic bootstraps.
+
+320
+00:29:12.495 --> 00:29:20.132
+Systems role: the data platform produces clean triangles by product, line and period, reconciled with finance.
+
+321
+00:29:20.412 --> 00:29:22.503
+Actuaries run and sign off models.
+
+322
+00:29:23.853 --> 00:29:25.517
+Lapse and renewal prediction.
+
+323
+00:29:25.797 --> 00:29:33.413
+Model: classifier on payment history, tenure, channel, premium change at renewal, engagement and claims experience.
+
+324
+00:29:33.693 --> 00:29:37.703
+Use: targeted reminders, agent follow-ups, offering instalments.
+
+325
+00:29:37.983 --> 00:29:39.839
+Measured by uplift experiments.
+
+326
+00:29:41.189 --> 00:29:42.128
+Part 7.
+
+327
+00:29:42.408 --> 00:29:43.731
+Data Architecture.
+
+328
+00:29:44.981 --> 00:29:46.367
+Operational stores.
+
+329
+00:29:46.647 --> 00:29:48.013
+Here is a quick table:
+
+330
+00:29:48.293 --> 00:29:50.469
+Data, and Store (reference), and Notes.
+
+331
+00:29:50.749 --> 00:29:53.437
+Product definitions, rules, rate tables.
+
+332
+00:29:53.717 --> 00:29:54.954
+Store (reference):
+
+333
+00:29:55.234 --> 00:29:58.690
+Versioned configuration store (Git-backed + database).
+
+334
+00:29:58.970 --> 00:29:59.781
+Notes:
+
+335
+00:30:00.061 --> 00:30:01.554
+Released as artefacts.
+
+336
+00:30:01.834 --> 00:30:03.349
+Policies (bitemporal).
+
+337
+00:30:03.629 --> 00:30:04.866
+Store (reference):
+
+338
+00:30:05.146 --> 00:30:07.749
+PostgreSQL or core suite database.
+
+339
+00:30:08.029 --> 00:30:08.839
+Notes:
+
+340
+00:30:09.119 --> 00:30:11.594
+Versions with effective and transaction time.
+
+341
+00:30:11.874 --> 00:30:13.218
+Claims and workflows.
+
+342
+00:30:13.498 --> 00:30:14.735
+Store (reference):
+
+343
+00:30:15.015 --> 00:30:17.810
+Workflow engine store + PostgreSQL.
+
+344
+00:30:18.090 --> 00:30:18.901
+Notes:
+
+345
+00:30:19.181 --> 00:30:20.930
+Tasks, SLAs, audit.
+
+346
+00:30:21.210 --> 00:30:22.469
+Billing and ledgers.
+
+347
+00:30:22.749 --> 00:30:23.986
+Store (reference):
+
+348
+00:30:24.266 --> 00:30:25.930
+Relational with double-entry.
+
+349
+00:30:26.210 --> 00:30:27.021
+Notes:
+
+350
+00:30:27.301 --> 00:30:28.602
+Ch 45.
+
+351
+00:30:28.882 --> 00:30:29.821
+Documents.
+
+352
+00:30:30.101 --> 00:30:31.338
+Store (reference):
+
+353
+00:30:31.618 --> 00:30:34.285
+Object storage + DMS metadata.
+
+354
+00:30:34.565 --> 00:30:35.375
+Notes:
+
+355
+00:30:35.655 --> 00:30:37.959
+Encrypted; retention per regulation.
+
+356
+00:30:38.239 --> 00:30:39.007
+Quotes.
+
+357
+00:30:39.287 --> 00:30:40.525
+Store (reference):
+
+358
+00:30:40.805 --> 00:30:44.282
+KV with TTL + warehouse copy for analytics.
+
+359
+00:30:44.562 --> 00:30:45.373
+Notes:
+
+360
+00:30:45.653 --> 00:30:47.615
+High volume, low conversion.
+
+361
+00:30:48.965 --> 00:30:49.968
+Fraud graph.
+
+362
+00:30:50.248 --> 00:30:51.485
+Store (reference):
+
+363
+00:30:51.765 --> 00:30:54.453
+Graph database or graph tables in the warehouse.
+
+364
+00:30:54.733 --> 00:30:55.544
+Notes:
+
+365
+00:30:55.824 --> 00:30:57.659
+Updated daily and on events.
+
+366
+00:30:59.009 --> 00:31:00.950
+Warehouse and actuarial data.
+
+367
+00:31:01.230 --> 00:31:07.459
+CDC or events from PAS, billing, claims and reinsurance, then lakehouse, then warehouse.
+
+368
+00:31:07.739 --> 00:31:23.014
+Core subject areas: policy or exposure: earned exposure per policy per period;. premium: written and earned;. claims: transactions, payments, reserves by date;. reinsurance: ceded premium, recoveries;. commissions;.
+
+369
+00:31:24.364 --> 00:31:25.196
+customer.
+
+370
+00:31:25.476 --> 00:31:33.007
+Actuarial marts: exposure and claims per accident period and development period (triangles), per product and line.
+
+371
+00:31:33.287 --> 00:31:39.751
+Experience studies (loss ratios by factor, mortality and morbidity experience versus expected).
+
+372
+00:31:40.031 --> 00:31:56.073
+Finance and regulatory reporting: premium, claims, reserves, solvency calculations, and regulatory returns in prescribed formats (VERIFY IRDAI reporting and Ind AS 117 or IFRS 17 adoption status).
+
+373
+00:31:57.423 --> 00:32:10.522
+IFRS 17-style accounting (if adopted) needs grouping of contracts, cash flow projections and a contractual service margin, a significant data and calculation engine in its own right (VERIFY).
+
+374
+00:32:11.872 --> 00:32:13.003
+ML platform.
+
+375
+00:32:13.283 --> 00:32:22.904
+Models: pricing support, underwriting scores, lapse, claims triage, fraud, image damage, bill audit anomalies, catastrophe exposure analysis.
+
+376
+00:32:23.184 --> 00:32:37.200
+Governance: model risk management (validation, documentation);. explainability for decisions affecting customers;. monitoring for drift (for example, inflation changes severity);. human override paths.
+
+377
+00:32:38.550 --> 00:32:39.531
+Data flow.
+
+378
+00:32:39.811 --> 00:32:41.155
+Here is the diagram.
+
+379
+00:32:45.005 --> 00:32:45.880
+Part 8.
+
+380
+00:32:46.160 --> 00:32:47.845
+Tech Stack (reference choice).
+
+381
+00:32:49.095 --> 00:32:50.461
+Here is a quick table:
+
+382
+00:32:50.741 --> 00:32:52.405
+Layer, and Choice, and Notes.
+
+383
+00:32:52.685 --> 00:32:54.797
+Core policy or billing or claims.
+
+384
+00:32:55.077 --> 00:32:55.909
+Choice:
+
+385
+00:32:56.189 --> 00:33:02.503
+Commercial suite (for example, Guidewire, Duck Creek, or Indian vendors) or built on Java or Spring.
+
+386
+00:33:02.783 --> 00:33:03.594
+Notes:
+
+387
+00:33:03.874 --> 00:33:06.562
+Many insurers buy; digital layers are built.
+
+388
+00:33:06.842 --> 00:33:08.314
+Rating and underwriting.
+
+389
+00:33:08.594 --> 00:33:09.426
+Choice:
+
+390
+00:33:09.706 --> 00:33:13.781
+Java or Kotlin services; Drools for rules; model serving.
+
+391
+00:33:14.061 --> 00:33:14.871
+Notes:
+
+392
+00:33:15.151 --> 00:33:16.474
+Fast, explainable.
+
+393
+00:33:16.754 --> 00:33:17.671
+Workflows.
+
+394
+00:33:17.951 --> 00:33:18.783
+Choice:
+
+395
+00:33:19.063 --> 00:33:22.349
+Camunda or Temporal (BPMN for human tasks).
+
+396
+00:33:22.629 --> 00:33:23.439
+Notes:
+
+397
+00:33:23.719 --> 00:33:25.746
+Claims and underwriting referrals.
+
+398
+00:33:26.026 --> 00:33:27.029
+APIs.
+
+399
+00:33:27.309 --> 00:33:28.141
+Choice:
+
+400
+00:33:28.421 --> 00:33:31.493
+Spring Boot, API gateway with partner management.
+
+401
+00:33:31.773 --> 00:33:32.583
+Notes:
+
+402
+00:33:32.863 --> 00:33:34.079
+Aggregator scale.
+
+403
+00:33:34.359 --> 00:33:35.490
+Databases.
+
+404
+00:33:35.770 --> 00:33:36.602
+Choice:
+
+405
+00:33:36.882 --> 00:33:39.399
+PostgreSQL; Redis for quote cache.
+
+406
+00:33:39.679 --> 00:33:40.490
+Notes:
+
+407
+00:33:40.770 --> 00:33:41.581
+Proven.
+
+408
+00:33:41.861 --> 00:33:42.799
+Documents.
+
+409
+00:33:43.079 --> 00:33:43.911
+Choice:
+
+410
+00:33:44.191 --> 00:33:48.181
+Object storage + DMS; templating for policy documents.
+
+411
+00:33:48.461 --> 00:33:49.271
+Notes:
+
+412
+00:33:49.551 --> 00:33:50.661
+Long retention.
+
+413
+00:33:52.011 --> 00:33:52.907
+Messaging.
+
+414
+00:33:53.187 --> 00:33:54.019
+Choice:
+
+415
+00:33:54.299 --> 00:33:56.283
+Kafka + Debezium CDC.
+
+416
+00:33:56.563 --> 00:33:57.373
+Notes:
+
+417
+00:33:57.653 --> 00:33:59.296
+Events to data platform.
+
+418
+00:33:59.576 --> 00:34:00.984
+Lakehouse or warehouse.
+
+419
+00:34:01.264 --> 00:34:02.096
+Choice:
+
+420
+00:34:02.376 --> 00:34:06.941
+Iceberg + Spark + Trino, or a cloud warehouse (in-country per rules).
+
+421
+00:34:07.221 --> 00:34:08.032
+Notes:
+
+422
+00:34:08.312 --> 00:34:09.635
+Actuarial marts.
+
+423
+00:34:09.915 --> 00:34:10.640
+BI.
+
+424
+00:34:10.920 --> 00:34:11.752
+Choice:
+
+425
+00:34:12.032 --> 00:34:13.675
+Superset or Power BI.
+
+426
+00:34:13.955 --> 00:34:14.765
+Notes:
+
+427
+00:34:15.045 --> 00:34:16.752
+Finance and ops dashboards.
+
+428
+00:34:17.032 --> 00:34:17.779
+ML.
+
+429
+00:34:18.059 --> 00:34:18.891
+Choice:
+
+430
+00:34:19.171 --> 00:34:23.672
+Python (scikit-learn, XGBoost, PyTorch for images), MLflow.
+
+431
+00:34:23.952 --> 00:34:24.763
+Notes:
+
+432
+00:34:25.043 --> 00:34:26.195
+Model governance.
+
+433
+00:34:26.475 --> 00:34:27.179
+Graph.
+
+434
+00:34:27.459 --> 00:34:28.291
+Choice:
+
+435
+00:34:28.571 --> 00:34:31.408
+Neo4j or graph features in the warehouse.
+
+436
+00:34:31.688 --> 00:34:32.499
+Notes:
+
+437
+00:34:32.779 --> 00:34:33.824
+Fraud rings.
+
+438
+00:34:35.174 --> 00:34:35.921
+Mobile.
+
+439
+00:34:36.201 --> 00:34:37.033
+Choice:
+
+440
+00:34:37.313 --> 00:34:41.366
+Native or cross-platform app with guided photo or video capture.
+
+441
+00:34:41.646 --> 00:34:42.457
+Notes:
+
+442
+00:34:42.737 --> 00:34:44.422
+Self-inspection, FNOL.
+
+443
+00:34:44.702 --> 00:34:45.641
+Platform.
+
+444
+00:34:45.921 --> 00:34:46.753
+Choice:
+
+445
+00:34:47.033 --> 00:34:49.571
+Kubernetes, Terraform, Argo CD.
+
+446
+00:34:49.851 --> 00:34:50.662
+Notes:
+
+447
+00:34:50.942 --> 00:34:51.795
+Standard.
+
+448
+00:34:53.145 --> 00:34:54.041
+Part 9.
+
+449
+00:34:54.321 --> 00:34:56.561
+Security, Privacy and Compliance.
+
+450
+00:34:57.811 --> 00:35:04.425
+Health data: strict access by role and claim assignment, and audit (I04 §10 patterns).
+
+451
+00:35:04.705 --> 00:35:06.177
+Consent for data use.
+
+452
+00:35:06.457 --> 00:35:09.209
+DPDP Act obligations (VERIFY).
+
+453
+00:35:09.489 --> 00:35:10.513
+KYC or AML:
+
+454
+00:35:10.793 --> 00:35:20.009
+KYC for all policies, sanctions and PEP screening, suspicious transaction reporting for large premiums or refunds (VERIFY).
+
+455
+00:35:20.289 --> 00:35:24.790
+Policyholder protection: free-look;. claim decision and payment timelines;.
+
+456
+00:35:26.140 --> 00:35:34.865
+grievance redressal with escalation to the Bima Bharosa system and ombudsman;. disclosure of rejection reasons (VERIFY current rules).
+
+457
+00:35:35.145 --> 00:35:42.356
+Distribution compliance: commission and expense limits, disclosure by intermediaries, aggregator rules (VERIFY).
+
+458
+00:35:42.636 --> 00:35:43.937
+Industry platforms:
+
+459
+00:35:44.217 --> 00:35:53.583
+Bima Sugam, an IRDAI-backed insurance marketplace platform in development, and insurance repositories for e-policies (VERIFY current status).
+
+460
+00:35:53.863 --> 00:35:55.057
+Cybersecurity:
+
+461
+00:35:55.337 --> 00:35:58.943
+IRDAI information and cyber security guidelines (VERIFY).
+
+462
+00:36:00.293 --> 00:36:01.146
+Part 10.
+
+463
+00:36:01.426 --> 00:36:03.346
+Reliability and Operations.
+
+464
+00:36:04.596 --> 00:36:09.929
+Channel availability: quote and buy APIs are horizontally scaled and stateless.
+
+465
+00:36:10.209 --> 00:36:13.025
+Aggregator traffic is rate-limited per partner.
+
+466
+00:36:13.305 --> 00:36:14.521
+Rating is cached.
+
+467
+00:36:14.801 --> 00:36:17.937
+Cashless approvals must work 24 times 7.
+
+468
+00:36:18.217 --> 00:36:22.228
+The TPA and medical officer workflow needs on-call coverage.
+
+469
+00:36:22.508 --> 00:36:25.153
+System outages delay patient discharges.
+
+470
+00:36:25.433 --> 00:36:37.423
+Catastrophe mode: after floods or cyclones, activate simplified claims processes: self-survey with photos;. relaxed documentation per regulator advisories (VERIFY);.
+
+471
+00:36:38.773 --> 00:36:45.855
+surge surveyor allocation;. dedicated dashboards;. reserve estimates per event for reinsurance notification.
+
+472
+00:36:46.135 --> 00:36:55.927
+Month-end and year-end: closing processes (earned premium, reserves, reinsurance accounting) run as scheduled pipelines with reconciliation checks.
+
+473
+00:36:56.207 --> 00:37:01.882
+Data quality: exposure and claims data errors directly distort pricing and reserves.
+
+474
+00:37:02.162 --> 00:37:06.301
+Build validation rules into pipelines and reconcile with finance.
+
+475
+00:37:07.651 --> 00:37:08.653
+Part 11.
+
+476
+00:37:08.933 --> 00:37:09.957
+Key Trade-offs.
+
+477
+00:37:11.207 --> 00:37:12.573
+Here is a quick table:
+
+478
+00:37:12.853 --> 00:37:15.370
+Decision, and Chosen, and Accepted cost.
+
+479
+00:37:15.650 --> 00:37:16.695
+Core systems.
+
+480
+00:37:16.975 --> 00:37:17.807
+Chosen:
+
+481
+00:37:18.087 --> 00:37:19.943
+Buy a suite, build the edges.
+
+482
+00:37:20.223 --> 00:37:21.397
+Accepted cost:
+
+483
+00:37:21.677 --> 00:37:23.895
+Vendor constraints; integration work.
+
+484
+00:37:24.175 --> 00:37:25.455
+Product definition.
+
+485
+00:37:25.735 --> 00:37:26.567
+Chosen:
+
+486
+00:37:26.847 --> 00:37:28.789
+Configuration-driven, versioned.
+
+487
+00:37:29.069 --> 00:37:30.242
+Accepted cost:
+
+488
+00:37:30.522 --> 00:37:32.101
+Configurator complexity.
+
+489
+00:37:32.381 --> 00:37:33.469
+Policy data.
+
+490
+00:37:33.749 --> 00:37:34.581
+Chosen:
+
+491
+00:37:34.861 --> 00:37:35.799
+Bitemporal.
+
+492
+00:37:36.079 --> 00:37:37.253
+Accepted cost:
+
+493
+00:37:37.533 --> 00:37:39.133
+Harder queries and storage.
+
+494
+00:37:39.413 --> 00:37:40.223
+Claims.
+
+495
+00:37:40.503 --> 00:37:41.335
+Chosen:
+
+496
+00:37:41.615 --> 00:37:44.517
+Workflows with STP for simple cases.
+
+497
+00:37:44.797 --> 00:37:45.970
+Accepted cost:
+
+498
+00:37:46.250 --> 00:37:48.106
+Model risk in auto-approvals.
+
+499
+00:37:48.386 --> 00:37:49.218
+Pricing.
+
+500
+00:37:49.498 --> 00:37:50.330
+Chosen:
+
+501
+00:37:50.610 --> 00:37:53.127
+GLM tables (with ML insights).
+
+502
+00:37:53.407 --> 00:37:54.581
+Accepted cost:
+
+503
+00:37:54.861 --> 00:37:56.589
+Less flexible than pure ML.
+
+504
+00:37:56.869 --> 00:37:57.679
+Fraud.
+
+505
+00:37:57.959 --> 00:37:58.791
+Chosen:
+
+506
+00:37:59.071 --> 00:38:01.781
+Rules + models + graphs + SIU.
+
+507
+00:38:02.061 --> 00:38:03.234
+Accepted cost:
+
+508
+00:38:03.514 --> 00:38:06.074
+Investigation cost; false positives.
+
+509
+00:38:06.354 --> 00:38:07.186
+Reserving.
+
+510
+00:38:07.466 --> 00:38:08.298
+Chosen:
+
+511
+00:38:08.578 --> 00:38:10.946
+Actuarial models on clean triangles.
+
+512
+00:38:11.226 --> 00:38:12.399
+Accepted cost:
+
+513
+00:38:12.679 --> 00:38:14.215
+Data engineering effort.
+
+514
+00:38:15.565 --> 00:38:16.504
+Part 12.
+
+515
+00:38:16.784 --> 00:38:18.128
+Interview Q and A.
+
+516
+00:38:19.378 --> 00:38:20.210
+Beginner.
+
+517
+00:38:20.490 --> 00:38:21.514
+Question 1.
+
+518
+00:38:21.794 --> 00:38:24.311
+What are the core systems of an insurance company?
+
+519
+00:38:24.591 --> 00:38:25.957
+Thirty-second answer:
+
+520
+00:38:26.237 --> 00:38:44.690
+Product configuration and rating, distribution channels, underwriting, policy administration (issuance, endorsements, renewals), billing and collections, claims management, fraud, reinsurance, actuarial and finance, customer service, and a data platform for reporting and pricing.
+
+521
+00:38:46.040 --> 00:38:47.043
+Question 2.
+
+522
+00:38:47.323 --> 00:38:50.011
+How is a motor insurance premium calculated?
+
+523
+00:38:50.291 --> 00:38:51.656
+Thirty-second answer:
+
+524
+00:38:51.936 --> 00:39:06.016
+From vehicle details (class, age, value), zone, the insured declared value, no-claim bonus, add-ons and deductibles through rate tables and model-based loadings, plus the regulated third-party premium and taxes.
+
+525
+00:39:07.366 --> 00:39:08.411
+Question 3.
+
+526
+00:39:08.691 --> 00:39:10.974
+What happens in a cashless hospital claim?
+
+527
+00:39:11.254 --> 00:39:12.619
+Thirty-second answer:
+
+528
+00:39:12.899 --> 00:39:31.929
+The hospital requests pre-authorisation; the insurer checks policy coverage, waiting periods, limits and network tariffs; a medical officer reviews if needed; an approved amount is issued; at discharge the final bill is audited; the insurer pays the hospital and the patient pays non-payables.
+
+529
+00:39:33.279 --> 00:39:34.345
+Question 4.
+
+530
+00:39:34.625 --> 00:39:35.905
+What is an endorsement?
+
+531
+00:39:36.185 --> 00:39:37.551
+Thirty-second answer:
+
+532
+00:39:37.831 --> 00:39:49.052
+A mid-term change to a policy, adding a member, changing a vehicle or address, creating a new policy version with an effective date and, often, a pro-rata premium adjustment.
+
+533
+00:39:50.402 --> 00:39:51.405
+Intermediate.
+
+534
+00:39:51.685 --> 00:39:52.794
+Question 5.
+
+535
+00:39:53.074 --> 00:39:55.826
+Why use a bitemporal data model for policies?
+
+536
+00:39:56.106 --> 00:39:57.471
+Thirty-second answer:
+
+537
+00:39:57.751 --> 00:40:13.815
+Changes can apply from a past or future date (effective time) and are recorded at a different time (transaction time); claims need what cover applied on the loss date and audits need what did we know when we decided, both require keeping both timelines.
+
+538
+00:40:15.165 --> 00:40:16.275
+Question 6.
+
+539
+00:40:16.555 --> 00:40:18.944
+How do you launch new insurance products quickly?
+
+540
+00:40:19.224 --> 00:40:20.589
+Thirty-second answer:
+
+541
+00:40:20.869 --> 00:40:38.043
+A product configurator with versioned definitions (coverages, rules, rate tables, wordings, claims rules) consumed by rating, underwriting, policy and claims engines, with automated test cases per version, code changes only for genuinely new behaviour.
+
+542
+00:40:39.393 --> 00:40:40.481
+Question 7.
+
+543
+00:40:40.761 --> 00:40:43.129
+How would you handle aggregator quote traffic?
+
+544
+00:40:43.409 --> 00:40:44.774
+Thirty-second answer:
+
+545
+00:40:45.054 --> 00:40:59.006
+Stateless, horizontally scaled rating with in-memory tables, caching by risk signature, per-partner rate limits and quotas, fast external lookups with fallbacks, short quote retention, and monitoring conversion per partner.
+
+546
+00:41:00.356 --> 00:41:01.380
+Question 8.
+
+547
+00:41:01.660 --> 00:41:03.388
+How do claims workflows work?
+
+548
+00:41:03.668 --> 00:41:05.033
+Thirty-second answer:
+
+549
+00:41:05.313 --> 00:41:22.081
+A case moves through intake, coverage checks, triage, assignment, investigation, assessment, authority-based approval, payment and recovery, with human tasks, SLAs, reserves updated along the way, and straight-through processing for simple low-risk claims.
+
+550
+00:41:23.431 --> 00:41:24.498
+Question 9.
+
+551
+00:41:24.778 --> 00:41:27.722
+What is reinsurance and how does the system support it?
+
+552
+00:41:28.002 --> 00:41:29.367
+Thirty-second answer:
+
+553
+00:41:29.647 --> 00:41:46.757
+Insurers transfer part of their risk to reinsurers via treaties (quota share, surplus, excess of loss, catastrophe) or facultative deals; the system computes cessions per policy, recoveries per claim or event, and produces bordereaux and reinsurance accounting.
+
+554
+00:41:48.107 --> 00:41:48.875
+Senior.
+
+555
+00:41:49.155 --> 00:41:50.200
+Question 10.
+
+556
+00:41:50.480 --> 00:41:52.827
+How would you price motor insurance with data?
+
+557
+00:41:53.107 --> 00:41:54.472
+Thirty-second answer:
+
+558
+00:41:54.752 --> 00:42:14.571
+Frequency (Poisson GLM) times severity (Gamma GLM) with log links giving multiplicative factors, credibility smoothing for sparse cells, ML to discover interactions then encoded in explainable tables, plus expense and profit loadings, within filed ranges, and monitor actual versus expected.
+
+559
+00:42:15.921 --> 00:42:17.051
+Question 11.
+
+560
+00:42:17.331 --> 00:42:19.486
+How do you detect insurance fraud rings?
+
+561
+00:42:19.766 --> 00:42:21.131
+Thirty-second answer:
+
+562
+00:42:21.411 --> 00:42:38.307
+Entity resolution across people, vehicles, providers, phones, bank accounts and addresses; build a graph; find communities and hubs; combine graph features with rules and supervised models; route high scores to the SIU; feed outcomes back as labels.
+
+563
+00:42:39.657 --> 00:42:40.745
+Question 12.
+
+564
+00:42:41.025 --> 00:42:43.713
+How would AI-assisted motor claims work safely?
+
+565
+00:42:43.993 --> 00:42:45.359
+Thirty-second answer:
+
+566
+00:42:45.639 --> 00:43:03.772
+Guided photo capture, metadata checks, part and damage detection models producing a repair estimate from parts catalogues and labour norms, confidence thresholds for auto-approval of small claims, surveys for the rest, and image-reuse and editing detection, with human override and monitoring.
+
+567
+00:43:05.122 --> 00:43:06.402
+Question 13.
+
+568
+00:43:06.682 --> 00:43:10.693
+How do you compute IBNR reserves, and what does the data platform provide?
+
+569
+00:43:10.973 --> 00:43:12.338
+Thirty-second answer:
+
+570
+00:43:12.618 --> 00:43:30.495
+Actuaries use development triangles (accident versus development period) and methods like chain ladder or Bornhuetter, Ferguson to project ultimate claims; IBNR is ultimate minus reported; the data platform must produce clean, reconciled triangles per product and period.
+
+571
+00:43:31.845 --> 00:43:33.040
+Question 14.
+
+572
+00:43:33.320 --> 00:43:35.752
+How do you audit hospital bills automatically?
+
+573
+00:43:36.032 --> 00:43:37.397
+Thirty-second answer:
+
+574
+00:43:37.677 --> 00:43:54.893
+Map items to standard codes, compare against package tariffs and cost benchmarks by diagnosis and city, apply policy rules (room-rent limits, co-pays, non-payables lists), flag duplicates and length-of-stay outliers, and route exceptions to medical officers.
+
+575
+00:43:56.243 --> 00:43:57.139
+Architect.
+
+576
+00:43:57.419 --> 00:43:58.614
+Question 15.
+
+577
+00:43:58.894 --> 00:44:01.646
+Design a digital insurer's platform end to end.
+
+578
+00:44:01.926 --> 00:44:03.291
+Thirty-second answer:
+
+579
+00:44:03.571 --> 00:44:23.838
+Channel APIs for app, agents and aggregators; product configurator driving rating, underwriting, policy and claims engines; bitemporal policy administration; billing with mandates; claims workflows with STP, fraud scoring and SIU; reinsurance; Kafka to a lakehouse with actuarial marts,
+
+580
+00:44:24.118 --> 00:44:30.646
+finance and regulatory reporting; ML for pricing, underwriting, triage, fraud and images.
+
+581
+00:44:31.996 --> 00:44:33.191
+Question 16.
+
+582
+00:44:33.471 --> 00:44:35.540
+Buy an insurance core suite or build?
+
+583
+00:44:35.820 --> 00:44:37.185
+Thirty-second answer:
+
+584
+00:44:37.465 --> 00:44:47.471
+Buy the heavily regulated, mature core when a suite fits; build the differentiating edges; insist on APIs, events and data access to avoid lock-in.
+
+585
+00:44:48.821 --> 00:44:50.165
+Question 17.
+
+586
+00:44:50.445 --> 00:44:54.605
+How would you migrate millions of in-force policies from a legacy system?
+
+587
+00:44:54.885 --> 00:44:56.250
+Thirty-second answer:
+
+588
+00:44:56.530 --> 00:45:12.743
+Map product versions and rules carefully, migrate by product or cohort with parallel runs comparing premiums, renewals and claims calculations, reconcile financials, keep legacy read-only for history, and plan cut-over around renewal cycles.
+
+589
+00:45:14.093 --> 00:45:15.267
+Question 18.
+
+590
+00:45:15.547 --> 00:45:18.277
+How do you prepare systems for a catastrophe event?
+
+591
+00:45:18.557 --> 00:45:19.923
+Thirty-second answer:
+
+592
+00:45:20.203 --> 00:45:36.224
+Catastrophe mode with simplified self-survey flows, surge assignment of surveyors, event tagging of claims, per-event reserves and reinsurance notifications, capacity for claim intake and document uploads, and dashboards for regulators and management.
+
+593
+00:45:37.574 --> 00:45:38.811
+Question 19.
+
+594
+00:45:39.091 --> 00:45:42.441
+How do regulations shape insurance systems in India?
+
+595
+00:45:42.721 --> 00:45:44.086
+Thirty-second answer:
+
+596
+00:45:44.366 --> 00:46:06.979
+Product approvals and filed rates constrain pricing; policyholder protection sets free-look, claim and grievance timelines; KYC for all policies; distribution and commission rules; data protection; solvency and reporting (and accounting standards) requirements, so rules and timelines must be configurable and auditable (VERIFY current texts).
+
+597
+00:46:08.329 --> 00:46:09.439
+Question 20.
+
+598
+00:46:09.719 --> 00:46:14.220
+What makes insurance data platforms harder than typical analytics platforms?
+
+599
+00:46:14.500 --> 00:46:15.865
+Thirty-second answer:
+
+600
+00:46:16.145 --> 00:46:32.401
+Long-lived contracts with bitemporal history, earned versus written measures, development over years, reconciliation with finance, actuarial triangles, regulatory formats, and model governance, errors directly change prices, reserves and solvency.
+
+601
+00:46:33.751 --> 00:46:34.797
+Part 13.
+
+602
+00:46:35.077 --> 00:46:35.845
+Summary.
+
+603
+00:46:37.095 --> 00:46:42.940
+An insurer prices risk, administers contracts for years, pays claims and holds reserves.
+
+604
+00:46:43.220 --> 00:46:46.484
+Each is a distinct system with its own correctness needs.
+
+605
+00:46:46.764 --> 00:46:53.079
+Configuration-driven products and a bitemporal policy model make changes safe over long lifetimes.
+
+606
+00:46:53.359 --> 00:47:01.444
+Claims are workflows: straight-through for simple cases, human expertise for the rest, fraud scoring and network analysis throughout.
+
+607
+00:47:01.724 --> 00:47:02.705
+Algorithms:
+
+608
+00:47:02.985 --> 00:47:12.223
+GLM pricing, rules engines, underwriting scores, telematics, computer vision for damage, fraud graphs, bill audits, chain-ladder reserving.
+
+609
+00:47:13.573 --> 00:47:17.925
+The data platform serves pricing, reserving, finance and regulators.
+
+610
+00:47:18.205 --> 00:47:20.722
+Data quality errors cost money directly.
+
+611
+00:47:22.072 --> 00:47:23.309
+Related chapters.
+
+612
+00:47:23.589 --> 00:47:34.960
+I04, Hospital EHR, Ch 45, Payments, Ch 13, Distributed Transactions, Ch 21, Data at Scale, Ch 36, Compliance.
+
+613
+00:47:35.240 --> 00:47:36.435
+Next in this tab:
+
+614
+00:47:36.715 --> 00:47:38.955
+I10, Travel and Railway Ticketing.
+
+615
+00:47:40.305 --> 00:47:41.905
+That's the end of this chapter.
+
+616
+00:47:42.185 --> 00:47:48.307
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+617
+00:47:48.587 --> 00:47:50.038
+See you in the next chapter.
+

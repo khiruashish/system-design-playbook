@@ -1,0 +1,3154 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.099
+Schema and Data Evolution.
+
+2
+00:00:02.379 --> 00:00:06.475
+Chapter 28, from the Production part of the System Design Playbook.
+
+3
+00:00:08.225 --> 00:00:09.185
+At a glance:
+
+4
+00:00:09.465 --> 00:00:10.639
+Chapter at a glance.
+
+5
+00:00:10.919 --> 00:00:11.921
+Reader bands:
+
+6
+00:00:12.201 --> 00:00:14.484
+B2, then B4, Prerequisites:
+
+7
+00:00:14.764 --> 00:00:20.545
+Ch 05, Ch 13, Ch 14, Ch 26, What you will build:
+
+8
+00:00:20.825 --> 00:00:31.513
+How the grocery platform changes its database schemas, its message formats and its APIs without downtime and without a flag-day where everything must upgrade at once.
+
+9
+00:00:31.793 --> 00:00:41.756
+Every lab runs against real PostgreSQL 16 or real protoc 28.3 and measures the blocking, the compatibility and the bloat directly.
+
+10
+00:00:43.106 --> 00:00:45.005
+L1: which DDL blocks.
+
+11
+00:00:45.285 --> 00:01:06.831
+On a 2,000,000-row table under live traffic, a volatile-default ADD COLUMN, a NOT NULL validation, and a plain CREATE INDEX each stalled live queries for the full duration of a table-scan (up to the 8 s locktimeout); a constant-default add was metadata-only (14 ms) and CREATE INDEX CONCURRENTLY never blocked writes.
+
+12
+00:01:07.111 --> 00:01:09.095
+L2: expand or contract.
+
+13
+00:01:09.375 --> 00:01:26.229
+A column rename + retype (totalpaise bigint, then amountrupees numeric) ran through six phases, expand, dual-write, batched backfill, validate, read-new, contract, with a writer and a reader hitting the table the whole time and zero errors, zero mismatches.
+
+14
+00:01:27.579 --> 00:01:30.011
+L3: message schema compatibility.
+
+15
+00:01:30.291 --> 00:01:40.061
+Real protoc encode or decode showed adding fields is forward- and backward-compatible, while reusing a field number with a new type causes silent data loss.
+
+16
+00:01:40.341 --> 00:01:49.045
+A descriptor-based checker replicated a schema registry's BACKWARD or FORWARD or FULL verdicts: it accepted v2, rejected v3.
+
+17
+00:01:49.325 --> 00:01:51.395
+L4: large-table backfill.
+
+18
+00:01:51.675 --> 00:02:06.331
+Backfilling 3,000,000 rows with one big UPDATE blocked a concurrent writer until the 8 s locktimeout fired; the batched form (25k rows or commit) capped that wait at ~100 ms for the same end result.
+
+19
+00:02:06.611 --> 00:02:07.592
+Reading time:
+
+20
+00:02:07.872 --> 00:02:09.792
+120 min + code.
+
+21
+00:02:11.142 --> 00:02:11.995
+Part 1.
+
+22
+00:02:12.275 --> 00:02:14.195
+Introduction and Why It Matters.
+
+23
+00:02:15.445 --> 00:02:18.176
+A story: the migration that took the store down.
+
+24
+00:02:18.456 --> 00:02:26.221
+The team needed to change orders.total from an integer number of paise to a decimal number of rupees, and rename it to amount.
+
+25
+00:02:26.501 --> 00:02:32.411
+A junior engineer wrote the obvious migration and ran it during a Tuesday afternoon deploy:
+
+26
+00:02:33.761 --> 00:02:35.361
+Here is the SQL code.
+
+27
+00:02:38.211 --> 00:02:39.853
+Three things went wrong at once:
+
+28
+00:02:40.133 --> 00:02:47.003
+The ALTER TYPE rewrote the whole table, 40 million rows, holding an ACCESS EXCLUSIVE lock the entire time.
+
+29
+00:02:47.283 --> 00:02:50.035
+Every read and write on orders queued behind it.
+
+30
+00:02:50.315 --> 00:02:51.573
+Checkout timed out.
+
+31
+00:02:51.853 --> 00:02:54.371
+The store was effectively down for nine minutes.
+
+32
+00:02:55.721 --> 00:02:59.369
+The rename broke every running instance of the old code instantly.
+
+33
+00:02:59.649 --> 00:03:09.761
+The deploy was a rolling one, so for the first two minutes half the fleet was still running the version that did SELECT total FROM orders, which now errored with column does not exist.
+
+34
+00:03:10.041 --> 00:03:14.350
+Even the pods that hadn't been updated yet started throwing 500s.
+
+35
+00:03:14.630 --> 00:03:16.465
+The order-events topic broke too.
+
+36
+00:03:16.745 --> 00:03:28.521
+The OrderPlaced event carried totalpaise; a downstream analytics consumer that hadn't been redeployed suddenly saw a renamed field and started dropping every message to its dead-letter queue.
+
+37
+00:03:29.871 --> 00:03:37.401
+The rollback was worse than the deploy: reversing the ALTER TYPE meant another full-table rewrite and another nine-minute lock.
+
+38
+00:03:37.681 --> 00:03:40.647
+The postmortem's conclusion was not be more careful.
+
+39
+00:03:40.927 --> 00:03:43.295
+It was that the shape of the migration was wrong.
+
+40
+00:03:43.575 --> 00:03:55.116
+A schema change on a live system is not one atomic step, it is a sequence of individually safe, backward-compatible steps that let old and new code coexist while the fleet rolls.
+
+41
+00:03:55.396 --> 00:04:00.089
+You never rename in place; you add, dual-write, backfill, switch reads, then drop.
+
+42
+00:04:00.369 --> 00:04:05.084
+You never rewrite a 40-million-row table under a lock when you can do it in batches.
+
+43
+00:04:05.364 --> 00:04:14.772
+And a field on a message bus is a contract with consumers you don't control the deploy timing of, so you evolve it under compatibility rules, not by editing it.
+
+44
+00:04:16.122 --> 00:04:18.426
+Where this lives in the grocery platform.
+
+45
+00:04:18.706 --> 00:04:20.050
+Here is a quick table:
+
+46
+00:04:20.330 --> 00:04:22.186
+Concern, and Approach, and Notes.
+
+47
+00:04:22.466 --> 00:04:23.746
+Online DDL.
+
+48
+00:04:24.026 --> 00:04:24.901
+Approach:
+
+49
+00:04:25.181 --> 00:04:30.493
+Prefer metadata-only ops; CREATE INDEX CONCURRENTLY; NOT VALID + VALIDATE.
+
+50
+00:04:30.773 --> 00:04:31.583
+Notes:
+
+51
+00:04:31.863 --> 00:04:32.695
+L1.
+
+52
+00:04:32.975 --> 00:04:34.042
+Column change.
+
+53
+00:04:34.322 --> 00:04:35.197
+Approach:
+
+54
+00:04:35.477 --> 00:04:41.621
+Expand or contract (parallel change): add, then dual-write, then backfill, then read-new, then drop.
+
+55
+00:04:41.901 --> 00:04:42.711
+Notes:
+
+56
+00:04:42.991 --> 00:04:43.823
+L2.
+
+57
+00:04:44.103 --> 00:04:45.021
+Backfills.
+
+58
+00:04:45.301 --> 00:04:46.175
+Approach:
+
+59
+00:04:46.455 --> 00:04:50.210
+Batched by key range, committed per batch; never one big UPDATE.
+
+60
+00:04:50.490 --> 00:04:51.301
+Notes:
+
+61
+00:04:51.581 --> 00:04:52.455
+L4.
+
+62
+00:04:52.735 --> 00:04:53.866
+Message schemas.
+
+63
+00:04:54.146 --> 00:04:55.021
+Approach:
+
+64
+00:04:55.301 --> 00:04:59.738
+Protobuf on the event bus, evolved under registry compatibility modes.
+
+65
+00:05:00.018 --> 00:05:00.829
+Notes:
+
+66
+00:05:01.109 --> 00:05:02.794
+L3, Ch 14.
+
+67
+00:05:03.074 --> 00:05:04.375
+API versioning.
+
+68
+00:05:04.655 --> 00:05:05.530
+Approach:
+
+69
+00:05:05.810 --> 00:05:11.122
+Additive changes in place; /v2 only for true breaks; sunset with headers.
+
+70
+00:05:11.402 --> 00:05:13.301
+Notes: §2.9.
+
+71
+00:05:14.651 --> 00:05:16.187
+Store-to-store migration.
+
+72
+00:05:16.467 --> 00:05:17.341
+Approach:
+
+73
+00:05:17.621 --> 00:05:23.403
+Dual-write + backfill + reconcile + read-switch (same shape as expand or contract).
+
+74
+00:05:23.683 --> 00:05:25.837
+Notes: §2.10.
+
+75
+00:05:26.117 --> 00:05:27.333
+Migration tooling.
+
+76
+00:05:27.613 --> 00:05:28.488
+Approach:
+
+77
+00:05:28.768 --> 00:05:34.037
+Versioned, forward-only migrations (Flyway or Liquibase) in the deploy pipeline.
+
+78
+00:05:34.317 --> 00:05:36.856
+Notes: §6, Ch 26.
+
+79
+00:05:38.206 --> 00:05:39.529
+Learning objectives.
+
+80
+00:05:39.809 --> 00:05:41.707
+By the end you will be able to:
+
+81
+00:05:41.987 --> 00:05:48.793
+Predict which DDL statements block live traffic and which are safe, and rewrite the dangerous ones (L1).
+
+82
+00:05:49.073 --> 00:05:56.603
+Run a zero-downtime column change using the expand or contract pattern with dual-write and a batched backfill (L2).
+
+83
+00:05:56.883 --> 00:06:08.702
+Evolve a message or event schema so producers and consumers upgrade independently, and know exactly which changes are safe under backward or forward or full compatibility (L3).
+
+84
+00:06:08.982 --> 00:06:12.801
+Backfill a huge table without locking it or bloating it (L4).
+
+85
+00:06:14.151 --> 00:06:19.697
+Version an HTTP API and migrate data between stores without a flag-day.
+
+86
+00:06:21.047 --> 00:06:21.922
+Part 2.
+
+87
+00:06:22.202 --> 00:06:24.079
+Core Concepts, Beginner to Deep.
+
+88
+00:06:25.329 --> 00:06:26.247
+Intuition.
+
+89
+00:06:26.527 --> 00:06:30.409
+Two facts make schema change hard, and everything else follows from them:
+
+90
+00:06:30.689 --> 00:06:31.905
+The data is live.
+
+91
+00:06:32.185 --> 00:06:36.025
+The table has millions of rows and is being read and written right now.
+
+92
+00:06:36.305 --> 00:06:40.743
+A change that locks it, or rewrites it, is an outage for as long as it runs.
+
+93
+00:06:41.023 --> 00:06:42.217
+The code is rolling.
+
+94
+00:06:42.497 --> 00:06:50.796
+During a deploy, and during a rollback, old code and new code run at the same time, against the same schema and the same messages.
+
+95
+00:06:51.076 --> 00:06:54.468
+Any change that only one of them understands breaks the other.
+
+96
+00:06:55.818 --> 00:07:02.901
+So the golden rule is: every intermediate state must be compatible with both the old and the new version of the code.
+
+97
+00:07:03.181 --> 00:07:11.714
+You get there by making changes additive and reversible first, and destructive only at the very end, once nothing depends on the old shape.
+
+98
+00:07:11.994 --> 00:07:19.717
+This single idea, expand, then contract, reappears for columns, for messages, for APIs, and for whole datastores.
+
+99
+00:07:21.067 --> 00:07:22.965
+The two compatibility directions.
+
+100
+00:07:23.245 --> 00:07:28.195
+Every evolution question reduces to two directions, and it is worth being precise:
+
+101
+00:07:28.475 --> 00:07:33.957
+Backward compatible: new code or a new reader can process data written by the old schema.
+
+102
+00:07:34.237 --> 00:07:35.923
+(You can deploy the reader first.).
+
+103
+00:07:36.203 --> 00:07:41.664
+Forward compatible: old code or an old reader can process data written by the new schema.
+
+104
+00:07:41.944 --> 00:07:43.672
+(You can deploy the writer first.).
+
+105
+00:07:43.952 --> 00:07:45.616
+Full compatible: both.
+
+106
+00:07:46.966 --> 00:07:52.235
+Why both matter: in a rolling deploy you cannot control which pod handles which request.
+
+107
+00:07:52.515 --> 00:08:00.281
+If a new-code pod writes a row (or a message) and an old-code pod reads it a millisecond later, you need forward compatibility.
+
+108
+00:08:00.561 --> 00:08:05.851
+If an old-code pod wrote it and a new-code pod reads it, you need backward compatibility.
+
+109
+00:08:06.131 --> 00:08:15.987
+During the overlap window you need both, that is, full compatibility, which is exactly what additive changes give you and what renames or retypes destroy.
+
+110
+00:08:16.267 --> 00:08:18.721
+L3 measures this on real protobuf.
+
+111
+00:08:20.071 --> 00:08:21.671
+What actually locks a table.
+
+112
+00:08:21.951 --> 00:08:23.572
+Not all DDL is equal.
+
+113
+00:08:23.852 --> 00:08:28.353
+On PostgreSQL (other engines differ in detail, same principles):
+
+114
+00:08:29.703 --> 00:08:31.047
+Here is a quick table:
+
+115
+00:08:31.327 --> 00:08:33.247
+Operation, and Lock, and Cost.
+
+116
+00:08:33.527 --> 00:08:35.895
+ADD COLUMN nullable or constant default.
+
+117
+00:08:36.175 --> 00:08:36.879
+Lock:
+
+118
+00:08:37.159 --> 00:08:39.591
+ACCESS EXCLUSIVE but metadata-only.
+
+119
+00:08:39.871 --> 00:08:42.815
+Cost: microseconds (PG 11 plus).
+
+120
+00:08:43.095 --> 00:08:45.101
+ADD COLUMN with a volatile default.
+
+121
+00:08:45.381 --> 00:08:46.085
+Lock:
+
+122
+00:08:46.365 --> 00:08:48.989
+ACCESS EXCLUSIVE + full table rewrite.
+
+123
+00:08:49.269 --> 00:08:51.701
+Cost: scans + rewrites every row.
+
+124
+00:08:51.981 --> 00:08:53.666
+ALTER COLUMN TYPE (most).
+
+125
+00:08:53.946 --> 00:08:54.650
+Lock:
+
+126
+00:08:54.930 --> 00:08:56.935
+ACCESS EXCLUSIVE + rewrite.
+
+127
+00:08:57.215 --> 00:08:59.647
+Cost: scans + rewrites every row.
+
+128
+00:08:59.927 --> 00:09:01.335
+SET NOT NULL (naive).
+
+129
+00:09:01.615 --> 00:09:02.319
+Lock:
+
+130
+00:09:02.599 --> 00:09:05.437
+ACCESS EXCLUSIVE + full scan to validate.
+
+131
+00:09:05.717 --> 00:09:07.445
+Cost: scans every row.
+
+132
+00:09:07.725 --> 00:09:08.877
+ADD CONSTRAINT...
+
+133
+00:09:09.157 --> 00:09:09.861
+CHECK.
+
+134
+00:09:10.141 --> 00:09:10.845
+Lock:
+
+135
+00:09:11.125 --> 00:09:13.002
+ACCESS EXCLUSIVE + scan.
+
+136
+00:09:13.282 --> 00:09:15.010
+Cost: scans every row.
+
+137
+00:09:16.360 --> 00:09:17.512
+ADD CONSTRAINT...
+
+138
+00:09:17.792 --> 00:09:18.496
+CHECK...
+
+139
+00:09:18.776 --> 00:09:19.651
+NOT VALID.
+
+140
+00:09:19.931 --> 00:09:22.725
+Lock: brief ACCESS EXCLUSIVE (metadata).
+
+141
+00:09:23.005 --> 00:09:24.136
+Cost: no scan.
+
+142
+00:09:24.416 --> 00:09:25.760
+VALIDATE CONSTRAINT.
+
+143
+00:09:26.040 --> 00:09:26.744
+Lock:
+
+144
+00:09:27.024 --> 00:09:28.453
+SHARE UPDATE EXCLUSIVE.
+
+145
+00:09:28.733 --> 00:09:31.272
+Cost: scans, but does not block writes.
+
+146
+00:09:31.552 --> 00:09:32.683
+CREATE INDEX.
+
+147
+00:09:32.963 --> 00:09:33.667
+Lock:
+
+148
+00:09:33.947 --> 00:09:35.184
+SHARE (blocks writes).
+
+149
+00:09:35.464 --> 00:09:37.768
+Cost: builds the index while writes wait.
+
+150
+00:09:38.048 --> 00:09:39.605
+CREATE INDEX CONCURRENTLY.
+
+151
+00:09:39.885 --> 00:09:40.589
+Lock:
+
+152
+00:09:40.869 --> 00:09:42.299
+SHARE UPDATE EXCLUSIVE.
+
+153
+00:09:42.579 --> 00:09:45.096
+Cost: slower build, does not block writes.
+
+154
+00:09:46.446 --> 00:09:58.115
+The pattern: the dangerous operations take a strong lock (ACCESS EXCLUSIVE or SHARE) and hold it for the duration of a full-table operation, so live queries stall for seconds.
+
+155
+00:09:58.395 --> 00:10:06.630
+The safe forms either touch only catalog metadata (instant) or take a weaker lock that lets writes through (CONCURRENTLY, VALIDATE).
+
+156
+00:10:06.910 --> 00:10:09.193
+L1 measures each of these directly.
+
+157
+00:10:10.543 --> 00:10:11.289
+Warning:
+
+158
+00:10:11.569 --> 00:10:13.937
+Always set a lock timeout for migrations.
+
+159
+00:10:14.217 --> 00:10:19.465
+Run migrations with SET locktimeout = '3s' (and often statementtimeout).
+
+160
+00:10:19.745 --> 00:10:36.492
+If the migration can't get its lock quickly, because a long transaction is holding it, you want it to fail fast and retry, not to queue an ACCESS EXCLUSIVE lock that then blocks every new query behind it (a lock queue pileup that turns a fast DDL into an outage).
+
+161
+00:10:36.772 --> 00:10:44.260
+L1 runs with locktimeout = 8s, which is why its stalled queries error out at 8 s instead of hanging forever.
+
+162
+00:10:45.610 --> 00:10:48.255
+Expand or contract (the parallel change).
+
+163
+00:10:48.535 --> 00:10:54.466
+The canonical safe way to change a column's name, type, or representation, in six phases:
+
+164
+00:10:54.746 --> 00:11:00.399
+Expand, add the new column (nullable, no volatile default, then metadata-only, no lock).
+
+165
+00:11:00.679 --> 00:11:04.626
+Dual-write, deploy code that writes both the old and the new column.
+
+166
+00:11:04.906 --> 00:11:09.898
+Old code still writes only the old one; both are always consistent for new rows.
+
+167
+00:11:10.178 --> 00:11:18.690
+Backfill, copy the old value into the new column for historical rows, in batches (L4), skipping rows the dual-write already filled.
+
+168
+00:11:20.040 --> 00:11:28.317
+Validate, now every row has a value; add the NOT NULL or CHECK invariant using NOT VALID + VALIDATE so you don't block writes.
+
+169
+00:11:28.597 --> 00:11:31.456
+Read-new, deploy code that reads the new column.
+
+170
+00:11:31.736 --> 00:11:35.427
+Keep dual-writing so a rollback to the previous version still works.
+
+171
+00:11:35.707 --> 00:11:45.008
+Contract, once no deployed code reads or writes the old column, drop it (the only destructive step, done last, easily its own migration).
+
+172
+00:11:45.288 --> 00:11:53.843
+Each phase is independently deployable and each is backward+forward compatible with the one before it, so a rollback at any point is safe.
+
+173
+00:11:54.123 --> 00:11:58.603
+L2 runs all six against real PostgreSQL with live traffic.
+
+174
+00:11:59.953 --> 00:12:01.318
+Backfills without tears.
+
+175
+00:12:01.598 --> 00:12:04.350
+A backfill sets a value on many existing rows.
+
+176
+00:12:04.630 --> 00:12:14.529
+The naive UPDATE t SET c =... with no bound touches every row in one transaction, which: holds row locks on everything it has touched until commit,
+
+177
+00:12:14.809 --> 00:12:32.729
+concurrent writers to those rows block;. writes one enormous WAL record and creates one huge batch of dead tuples that autovacuum cannot reclaim until the transaction ends (table + index bloat);. if it fails at 90%, the whole thing rolls back and you start over.
+
+178
+00:12:34.079 --> 00:12:41.481
+The production form is batched: loop over the primary-key range in chunks (for example, 25k rows), UPDATE...
+
+179
+00:12:41.761 --> 00:12:45.772
+WHERE id BETWEEN lo AND hi AND not yet done, and commit each batch.
+
+180
+00:12:46.052 --> 00:12:53.668
+Locks last milliseconds, writers slip between batches, autovacuum keeps up, and a failure only loses the current batch.
+
+181
+00:12:53.948 --> 00:13:03.036
+Drive batches off an indexed key range, never LIMIT or OFFSET (which re-scans from the start each time, turning O(n) into O(n²)).
+
+182
+00:13:03.316 --> 00:13:10.548
+L4 measures the difference: same total time, but 8,000 ms of blocking versus ~100 ms.
+
+183
+00:13:11.898 --> 00:13:13.989
+Message and event schema versioning.
+
+184
+00:13:14.269 --> 00:13:16.637
+A row in your own database you can migrate.
+
+185
+00:13:16.917 --> 00:13:28.479
+A message on a bus (Ch 14) is a contract with consumers you don't own and can't redeploy on your schedule, and with events already persisted in the log that you will re-read months later.
+
+186
+00:13:28.759 --> 00:13:40.471
+So message schemas evolve under strict rules, enforced by a schema registry (Confluent Schema Registry, Apicurio, Buf) that rejects an incompatible schema at publish time.
+
+187
+00:13:40.751 --> 00:13:43.354
+Serialization formats and how they evolve:
+
+188
+00:13:44.704 --> 00:13:53.856
+Protobuf, fields keyed by number; unknown fields are skipped by old readers (forward-compatible) and default in new readers (backward-compatible).
+
+189
+00:13:54.136 --> 00:13:57.272
+Safe: add fields, rename (number is the identity).
+
+190
+00:13:57.552 --> 00:14:01.499
+Unsafe: reuse a number, change a type, change a field's semantics.
+
+191
+00:14:01.779 --> 00:14:04.915
+Reserve retired numbers so nobody reuses them.
+
+192
+00:14:05.195 --> 00:14:11.000
+Avro, reader and writer schemas are both used; fields need defaults to be removable or addable compatibly.
+
+193
+00:14:12.280 --> 00:14:16.248
+The registry stores writer schemas and resolves against the reader's.
+
+194
+00:14:17.598 --> 00:14:28.115
+Thrift or JSON Schema, similar additive rules; JSON is self-describing but has no enforced compatibility unless you add a registry or validator.
+
+195
+00:14:28.395 --> 00:14:32.278
+Compatibility modes a registry enforces (Confluent's names):
+
+196
+00:14:33.628 --> 00:14:34.972
+Here is a quick table:
+
+197
+00:14:35.252 --> 00:14:37.620
+Mode, and Guarantee, and Deploy order.
+
+198
+00:14:37.900 --> 00:14:38.732
+BACKWARD.
+
+199
+00:14:39.012 --> 00:14:41.423
+Guarantee: new schema reads old data.
+
+200
+00:14:41.703 --> 00:14:43.751
+Deploy order: consumers first.
+
+201
+00:14:44.031 --> 00:14:44.863
+FORWARD.
+
+202
+00:14:45.143 --> 00:14:47.617
+Guarantee: old schema reads new data.
+
+203
+00:14:47.897 --> 00:14:49.839
+Deploy order: producers first.
+
+204
+00:14:50.119 --> 00:14:50.801
+FULL.
+
+205
+00:14:51.081 --> 00:14:52.383
+Guarantee: both.
+
+206
+00:14:52.663 --> 00:14:54.135
+Deploy order: either.
+
+207
+00:14:54.415 --> 00:14:55.097
+NONE.
+
+208
+00:14:55.377 --> 00:14:56.913
+Guarantee: no checks.
+
+209
+00:14:57.193 --> 00:14:59.071
+Deploy order: you're on your own.
+
+210
+00:15:00.421 --> 00:15:05.583
+L3 builds a real descriptor-based checker that produces exactly these verdicts.
+
+211
+00:15:06.933 --> 00:15:09.429
+Blue-green and versioned schema migrations.
+
+212
+00:15:09.709 --> 00:15:11.907
+Versioned, forward-only migrations.
+
+213
+00:15:12.187 --> 00:15:22.533
+Tools like Flyway and Liquibase apply numbered migration files once each, tracked in a schemahistory table, as part of the deploy pipeline (Ch 26).
+
+214
+00:15:22.813 --> 00:15:34.184
+Migrations are forward-only: you don't write down scripts for production (a rollback is a new forward migration), because down-migrations are rarely tested and often destructive.
+
+215
+00:15:34.464 --> 00:15:35.979
+Migrate before deploy.
+
+216
+00:15:36.259 --> 00:15:45.432
+Run the (backward-compatible) migration as a separate pipeline step before the new code rolls out, so the schema is ready when the first new pod starts.
+
+217
+00:15:45.712 --> 00:15:50.939
+Because expand-phase migrations are additive, the still-running old code is unaffected.
+
+218
+00:15:52.289 --> 00:15:53.633
+Blue-green + schema.
+
+219
+00:15:53.913 --> 00:16:07.502
+Blue-green (Ch 26) swaps whole environments, but blue and green usually share one database, so the schema must be compatible with both colors at once, which is exactly expand or contract again.
+
+220
+00:16:07.782 --> 00:16:13.329
+A separate database per color needs replication between them and is rare for stateful data.
+
+221
+00:16:14.679 --> 00:16:15.980
+API versioning.
+
+222
+00:16:16.260 --> 00:16:25.391
+The same compatibility thinking applies at the HTTP edge, where clients (mobile apps, partners) upgrade on their own schedule, sometimes never:
+
+223
+00:16:25.671 --> 00:16:33.564
+Additive, in place: adding an optional request field or a new response field is backward-compatible; do it without a new version.
+
+224
+00:16:33.844 --> 00:16:38.025
+Clients ignore unknown response fields (be lenient in what you accept).
+
+225
+00:16:38.305 --> 00:16:45.111
+New version only for true breaks: removing or renaming a field, changing a type, or changing semantics.
+
+226
+00:16:45.391 --> 00:16:50.319
+Expose or v2, run it alongside or v1, and migrate clients over.
+
+227
+00:16:51.669 --> 00:16:52.842
+Versioning styles:
+
+228
+00:16:53.122 --> 00:17:07.714
+URI (/v2 or orders), visible, cache-friendly, most common; header or media-type (Accept: application or vnd.shop.v2 plusjson), cleaner URLs, harder to test; query param, discouraged.
+
+229
+00:17:07.994 --> 00:17:17.594
+Sunset gracefully: announce, emit a Deprecation and Sunset header on or v1 responses, monitor who's still calling it, and only then retire.
+
+230
+00:17:17.874 --> 00:17:19.389
+See Ch 04.
+
+231
+00:17:20.739 --> 00:17:22.701
+Data migration between stores.
+
+232
+00:17:22.981 --> 00:17:39.387
+Moving a dataset from one store to another (Postgres, then a new sharded cluster, or a table, then a search index, or a monolith DB, then a service's own DB during a strangler migration, Ch 16) is expand or contract at the system scale:
+
+233
+00:17:39.667 --> 00:17:48.989
+Dual-write to old and new stores (via the app, or via CDC or outbox so you don't rely on a distributed transaction, Ch 13).
+
+234
+00:17:49.269 --> 00:17:51.616
+Backfill history into the new store (batched).
+
+235
+00:17:51.896 --> 00:18:02.477
+Reconcile, continuously compare old versus new (row counts, checksums, sampled diffs) until they match; fix the dual-write bugs the reconciliation finds.
+
+236
+00:18:03.827 --> 00:18:09.609
+Read-switch, move reads to the new store behind a flag, canary it, keep the old store as a fallback.
+
+237
+00:18:09.889 --> 00:18:13.622
+Decommission the old store once reads have been stable on the new one.
+
+238
+00:18:13.902 --> 00:18:20.643
+The reconciliation step is the one teams skip and regret: dual-write bugs are silent until you compare.
+
+239
+00:18:21.993 --> 00:18:23.999
+Backward-compatible by construction.
+
+240
+00:18:24.279 --> 00:18:29.164
+The most senior habit is to design changes so the unsafe step never exists:
+
+241
+00:18:29.444 --> 00:18:32.601
+Never rename, add the new name, migrate, drop the old.
+
+242
+00:18:32.881 --> 00:18:36.231
+(In-place rename has no compatible intermediate state.).
+
+243
+00:18:36.511 --> 00:18:41.609
+Never change a type in place, add a new column of the new type (expand or contract).
+
+244
+00:18:41.889 --> 00:18:46.561
+Never reuse a message field number or enum value, reserve retired ones.
+
+245
+00:18:46.841 --> 00:18:52.537
+Make columns nullable or give them constant defaults so ADD COLUMN stays metadata-only.
+
+246
+00:18:53.887 --> 00:18:57.237
+Add invariants in two steps (NOT VALID then VALIDATE).
+
+247
+00:18:57.517 --> 00:19:04.514
+Treat every externally-visible shape (table used by other services, message, API) as append-only.
+
+248
+00:19:05.864 --> 00:19:06.760
+Part 3.
+
+249
+00:19:07.040 --> 00:19:08.768
+Architecture and Diagrams.
+
+250
+00:19:10.018 --> 00:19:13.303
+Component view: how a schema change flows through the system.
+
+251
+00:19:13.583 --> 00:19:14.927
+Here is the diagram.
+
+252
+00:19:18.777 --> 00:19:23.769
+Sequence: happy path, a zero-downtime column change (expand or contract).
+
+253
+00:19:24.049 --> 00:19:26.844
+The sequence diagram walks through it step by step.
+
+254
+00:19:27.124 --> 00:19:28.233
+Ops to DB:
+
+255
+00:19:28.513 --> 00:19:31.820
+EXPAND - add nullable amountrupees (metadata-only).
+
+256
+00:19:32.100 --> 00:19:35.215
+Ops to New: deploy DUAL-WRITE (writes both columns).
+
+257
+00:19:35.495 --> 00:19:36.604
+Ops to DB:
+
+258
+00:19:36.884 --> 00:19:39.060
+BACKFILL historical rows in batches.
+
+259
+00:19:39.340 --> 00:19:43.607
+Ops to DB: add CHECK NOT VALID then VALIDATE (no write block).
+
+260
+00:19:43.887 --> 00:19:48.687
+Ops to New: deploy READ-NEW (reads amountrupees, still dual-writes).
+
+261
+00:19:48.967 --> 00:19:50.076
+Ops to DB:
+
+262
+00:19:50.356 --> 00:19:53.769
+CONTRACT - drop totalpaise (only after nothing uses it).
+
+263
+00:19:54.049 --> 00:19:57.484
+New to Ops: migration complete, zero errors throughout.
+
+264
+00:20:01.334 --> 00:20:04.299
+Sequence: failure path, the naive in-place change.
+
+265
+00:20:04.579 --> 00:20:07.374
+The sequence diagram walks through it step by step.
+
+266
+00:20:07.654 --> 00:20:08.763
+Ops to DB:
+
+267
+00:20:09.043 --> 00:20:12.990
+ALTER TABLE RENAME + ALTER TYPE (rewrites 40M rows).
+
+268
+00:20:13.270 --> 00:20:14.379
+Old to DB:
+
+269
+00:20:14.659 --> 00:20:16.217
+SELECT total FROM orders.
+
+270
+00:20:16.497 --> 00:20:17.670
+DB to Old:
+
+271
+00:20:17.950 --> 00:20:19.678
+ERROR column does not exist.
+
+272
+00:20:19.958 --> 00:20:21.089
+Ops to Cons:
+
+273
+00:20:21.369 --> 00:20:23.971
+OrderPlaced now has amount, not totalpaise.
+
+274
+00:20:24.251 --> 00:20:27.707
+Cons to Cons: field missing - message to dead-letter queue.
+
+275
+00:20:31.557 --> 00:20:34.949
+State: a column through the expand or contract lifecycle.
+
+276
+00:20:35.229 --> 00:20:36.573
+Here is the diagram.
+
+277
+00:20:40.423 --> 00:20:41.341
+Part 4.
+
+278
+00:20:41.621 --> 00:20:43.242
+Design Document Excerpt:
+
+279
+00:20:43.522 --> 00:20:46.210
+Grocery Schema and Data Evolution Standard.
+
+280
+00:20:47.460 --> 00:20:48.207
+Note:
+
+281
+00:20:48.487 --> 00:20:53.735
+Design Document (excerpt), Schema and Data Evolution Standard v1.2.
+
+282
+00:20:54.015 --> 00:20:54.911
+Status:
+
+283
+00:20:55.191 --> 00:20:56.471
+Accepted, Authors:
+
+284
+00:20:56.751 --> 00:20:58.543
+Platform Data Guild, Reviewers:
+
+285
+00:20:58.823 --> 00:21:01.233
+DBA, SRE, Service leads.
+
+286
+00:21:01.513 --> 00:21:15.295
+Context, 26 services, several sharing databases; a 40M-row orders table; a Kafka event bus with independently-deployed consumers; mobile + partner API clients that upgrade slowly.
+
+287
+00:21:15.575 --> 00:21:18.369
+A past in-place ALTER caused a 9-minute outage.
+
+288
+00:21:18.649 --> 00:21:28.591
+Decision, All schema, message, and API changes MUST be expand or contract and MUST keep every intermediate state backward- and forward-compatible.
+
+289
+00:21:28.871 --> 00:21:32.988
+Destructive steps are separate, last, and gated on usage telemetry.
+
+290
+00:21:34.338 --> 00:22:03.601
+Related ADRs, ADR-140 Online-DDL rules (metadata-only or CONCURRENTLY or NOT VALID+VALIDATE); ADR-141 Expand or contract for all column changes; ADR-142 Batched backfills only; ADR-143 Protobuf on the bus under FULL compatibility in a registry; ADR-144 API additive-first, /vN only for breaks,
+
+291
+00:22:03.881 --> 00:22:16.339
+Sunset headers; ADR-145 Store-to-store migration via dual-write+reconcile; ADR-146 Forward-only versioned migrations in the pipeline.
+
+292
+00:22:16.619 --> 00:22:17.579
+Requirements.
+
+293
+00:22:17.859 --> 00:22:19.289
+R1, No outage.
+
+294
+00:22:19.569 --> 00:22:26.331
+No migration may hold ACCESS EXCLUSIVE on a large table for more than the locktimeout (3 s in prod).
+
+295
+00:22:26.611 --> 00:22:28.809
+Table rewrites under lock are forbidden.
+
+296
+00:22:30.159 --> 00:22:31.567
+R2, Rolling-safe.
+
+297
+00:22:31.847 --> 00:22:40.572
+Every migration must be compatible with the currently-deployed code AND the code being rolled out (both directions), so a rollback at any step is safe.
+
+298
+00:22:40.852 --> 00:22:42.303
+R3, Bus safety.
+
+299
+00:22:42.583 --> 00:22:48.471
+Every message schema change must pass the registry's FULL compatibility check before it can be produced.
+
+300
+00:22:48.751 --> 00:22:50.329
+R4, Backfills batched.
+
+301
+00:22:50.609 --> 00:22:56.177
+No unbounded UPDATE or DELETE on a table over 100k rows; batch and commit.
+
+302
+00:22:56.457 --> 00:22:58.889
+R5, Reversible until contract.
+
+303
+00:22:59.169 --> 00:23:06.657
+Dual-write continues until the read-switch has been stable in production for one release; only then may the old shape be dropped.
+
+304
+00:23:08.007 --> 00:23:09.415
+Decisions in detail.
+
+305
+00:23:09.695 --> 00:23:13.087
+Online DDL only (ADR-140).
+
+306
+00:23:13.367 --> 00:23:16.866
+Migrations run with SET locktimeout='3s'.
+
+307
+00:23:17.146 --> 00:23:22.799
+Allowed: nullable or constant-default ADD COLUMN, CREATE INDEX CONCURRENTLY, ADD CONSTRAINT...
+
+308
+00:23:23.079 --> 00:23:24.701
+NOT VALID then VALIDATE.
+
+309
+00:23:24.981 --> 00:23:34.517
+Forbidden without a maintenance window: volatile-default ADD COLUMN, in-place ALTER TYPE, naive SET NOT NULL, plain CREATE INDEX on large tables.
+
+310
+00:23:34.797 --> 00:23:36.525
+(Rationale measured in L1.).
+
+311
+00:23:36.805 --> 00:23:40.901
+Expand or contract for columns (ADR-141).
+
+312
+00:23:41.181 --> 00:23:45.725
+The six phases (§2.4), each a separate deployable step.
+
+313
+00:23:46.005 --> 00:23:50.143
+Rename and retype are always expand or contract, never in place.
+
+314
+00:23:50.423 --> 00:23:51.277
+(L2.).
+
+315
+00:23:52.627 --> 00:23:55.613
+Batched backfills (ADR-142).
+
+316
+00:23:55.893 --> 00:24:02.080
+Key-range batches, commit per batch, optional throttle, driven off the PK or index, never OFFSET.
+
+317
+00:24:02.360 --> 00:24:03.256
+(L4.).
+
+318
+00:24:03.536 --> 00:24:07.291
+Bus under FULL compatibility (ADR-143).
+
+319
+00:24:07.571 --> 00:24:11.773
+Protobuf, registry set to FULL, retired field numbers reserved.
+
+320
+00:24:12.053 --> 00:24:15.829
+CI runs the compatibility check on every schema PR.
+
+321
+00:24:16.109 --> 00:24:17.027
+(L3.).
+
+322
+00:24:17.307 --> 00:24:20.955
+API additive-first (ADR-144).
+
+323
+00:24:21.235 --> 00:24:29.853
+New or vN only for breaks; run versions in parallel; Deprecation or Sunset headers and caller telemetry before retiring.
+
+324
+00:24:30.133 --> 00:24:33.013
+Store-to-store (ADR-145).
+
+325
+00:24:33.293 --> 00:24:41.955
+Dual-write (preferably via outbox or CDC), batched backfill, continuous reconciliation, flagged read-switch, delayed decommission.
+
+326
+00:24:43.305 --> 00:24:46.953
+Forward-only migrations (ADR-146).
+
+327
+00:24:47.233 --> 00:24:52.694
+Numbered, applied once, tracked; a rollback is a new forward migration, not a down-script.
+
+328
+00:24:52.974 --> 00:24:53.998
+Consequences.
+
+329
+00:24:54.278 --> 00:25:00.955
+Changes take more steps and more than one release to complete, and engineers must think in compatible increments.
+
+330
+00:25:01.235 --> 00:25:08.830
+In return: no migration outages, safe rollbacks, and independently-deployable producers or consumers or clients.
+
+331
+00:25:09.110 --> 00:25:12.609
+The one-ALTER habit is explicitly traded away for safety.
+
+332
+00:25:13.959 --> 00:25:14.919
+Part 5.
+
+333
+00:25:15.199 --> 00:25:17.183
+Hands-On Code, Level Ladder.
+
+334
+00:25:18.433 --> 00:25:19.201
+Info:
+
+335
+00:25:19.481 --> 00:25:20.569
+What's real here.
+
+336
+00:25:20.849 --> 00:25:40.326
+L1, L2 and L4 run against real PostgreSQL 16 (a local cluster on port 5581, sharedbuffers=256MB, locktimeout=8s) with millions of rows and concurrent traffic driven through the real JDBC driver.
+
+337
+00:25:40.606 --> 00:25:52.553
+L3 uses real protoc 28.3 to encode or decode wire bytes and compiles real FileDescriptorSets that a Python checker parses with the real protobuf library.
+
+338
+00:25:52.833 --> 00:25:58.465
+Framework or registry snippets that need a running Kafka or registry are marked VERIFY.
+
+339
+00:25:58.745 --> 00:26:05.806
+Outputs are shown verbatim; the small machine makes absolute times modest, but the relative blocking is the lesson.
+
+340
+00:26:07.156 --> 00:26:09.865
+L1, Which DDL blocks a live table.
+
+341
+00:26:10.145 --> 00:26:11.084
+Requirement:
+
+342
+00:26:11.364 --> 00:26:17.465
+Before we run any migration, know exactly which schema changes stall live traffic, and for how long.
+
+343
+00:26:17.745 --> 00:26:24.956
+A 2,000,000-row orders table has an 8-thread background workload doing SELECT-by-id + UPDATE continuously.
+
+344
+00:26:25.236 --> 00:26:35.241
+We run five DDL operations against it and measure the worst stall any live query suffered during each, and how many queries errored (hit the 8 s locktimeout).
+
+345
+00:26:36.591 --> 00:26:39.429
+Here is the Java code, SchemaL1.java.
+
+346
+00:26:39.709 --> 00:26:43.975
+It runs to 117 lines; the full listing is in the chapter.
+
+347
+00:26:44.255 --> 00:26:54.943
+SchemaL1.java, run with: java -Duser.timezone=UTC -cp or tmp or pgjdbc.jar SchemaL1.java.
+
+348
+00:26:55.223 --> 00:27:00.621
+Online schema changes on a REAL PostgreSQL table under concurrent traffic.
+
+349
+00:27:00.901 --> 00:27:11.951
+A background workload issues SELECT or UPDATE on. orders continuously; meanwhile we run several DDL changes and measure how long each one BLOCKS that traffic (query.
+
+350
+00:27:14.801 --> 00:27:15.719
+On screen:
+
+351
+00:27:15.999 --> 00:27:17.151
+2,000,000 orders.
+
+352
+00:27:17.431 --> 00:27:23.255
+A background workload runs SELECT-by-id + UPDATE continuously while. we alter the schema.
+
+353
+00:27:23.535 --> 00:27:26.457
+DDL operation max stall queries errored.
+
+354
+00:27:26.737 --> 00:27:34.801
+ADD COLUMN with a volatile DEFAULT (rewrites the whole table) 1829 ms 0 (DDL took.
+
+355
+00:27:35.081 --> 00:27:37.471
+1,868 ms).
+
+356
+00:27:37.751 --> 00:27:47.116
+ADD COLUMN with a constant DEFAULT (metadata-only in PG 11 plus, fast) 14 ms 0 (DDL. took 25 ms).
+
+357
+00:27:47.396 --> 00:27:58.319
+ADD NOT NULL by validating existing rows (scans + locks the table) 8012 ms 8 (DDL. took 8,724 ms).
+
+358
+00:27:58.599 --> 00:28:07.111
+CREATE INDEX (blocks writes for the whole build) 765 ms 0 (DDL took 761 ms).
+
+359
+00:28:07.391 --> 00:28:16.116
+CREATE INDEX CONCURRENTLY (builds without blocking writes) 32 ms 0 (DDL took 2,128. ms).
+
+360
+00:28:16.396 --> 00:28:17.911
+The rest is in the chapter.
+
+361
+00:28:20.761 --> 00:28:21.614
+Reading it:
+
+362
+00:28:21.894 --> 00:28:31.537
+The volatile-default ADD COLUMN rewrote the whole table under ACCESS EXCLUSIVE, live queries stalled ~1.8 s (the rewrite duration).
+
+363
+00:28:31.817 --> 00:28:39.923
+The constant-default add is metadata-only in PG 11 plus and finished in ~14 ms with essentially no stall.
+
+364
+00:28:40.203 --> 00:28:42.593
+Same feature, 100 times difference.
+
+365
+00:28:42.873 --> 00:28:55.267
+The naive SET NOT NULL scanned and locked the table to validate; stalls hit the 8 s locktimeout and 8 queries errored out rather than wait forever, exactly why you set a lock timeout.
+
+366
+00:28:56.617 --> 00:29:08.841
+CREATE INDEX blocked writes for its whole build (~0.8 s stall); CREATE INDEX CONCURRENTLY built in ~2 s but never stalled a live query, the weaker lock lets writes through.
+
+367
+00:29:09.121 --> 00:29:22.476
+The lesson isn't the absolute milliseconds (a small machine); it's the shape: strong-lock, full-table operations stall everyone for their duration, while metadata-only ops and CONCURRENTLY or VALIDATE don't.
+
+368
+00:29:23.826 --> 00:29:27.837
+L2, Zero-downtime column change: expand or contract.
+
+369
+00:29:28.117 --> 00:29:29.055
+Requirement:
+
+370
+00:29:29.335 --> 00:29:36.567
+Rename totalpaise (bigint paise) to amountrupees (numeric rupees) with no downtime, while orders keep flowing.
+
+371
+00:29:36.847 --> 00:29:42.053
+The lab runs the full six-phase expand or contract on real PostgreSQL.
+
+372
+00:29:42.333 --> 00:29:51.058
+A writer thread inserts orders using the contract of the current phase, and a reader thread verifies the data on both contracts, the whole time.
+
+373
+00:29:51.338 --> 00:29:54.346
+It counts any error and any old-versus-new mismatch.
+
+374
+00:29:55.696 --> 00:29:58.619
+Here is the Java code, ExpandL2.java.
+
+375
+00:29:58.899 --> 00:30:03.165
+It runs to 216 lines; the full listing is in the chapter.
+
+376
+00:30:03.445 --> 00:30:14.475
+ExpandL2.java, run with: java -Duser.timezone=UTC -cp or tmp or pgjdbc.jar ExpandL2.java.
+
+377
+00:30:14.755 --> 00:30:22.733
+EXPAND or CONTRACT (the parallel change) on a REAL PostgreSQL table, with zero downtime and NO stopped writes.
+
+378
+00:30:23.013 --> 00:30:29.264
+The business wants to rename totalpaise - amountpaise AND change its type from a bigint of paise to a numeric.
+
+379
+00:30:32.114 --> 00:30:33.031
+On screen:
+
+380
+00:30:33.311 --> 00:30:40.799
+EXPAND or CONTRACT: rename totalpaise (bigint paise) - amountrupees (numeric rupees). with zero downtime.
+
+381
+00:30:41.079 --> 00:30:42.615
+300,000 rows.
+
+382
+00:30:42.895 --> 00:30:53.967
+A writer thread inserts new orders and a reader thread verifies BOTH. contracts, the whole time. phase 1 EXPAND: added nullable amountrupees (metadata-only).
+
+383
+00:30:54.247 --> 00:31:01.309
+Old code. unaffected, new column NULL for now. phase 2 DUAL-WRITE: new inserts populate BOTH columns.
+
+384
+00:31:01.589 --> 00:31:12.981
+Old rows + old-instance. rows still have amountrupees NULL. phase 3 BACKFILL: filled 300,517 historical rows in batches.
+
+385
+00:31:13.261 --> 00:31:16.567
+NULLs 300,517 - 0.
+
+386
+00:31:16.847 --> 00:31:27.215
+(remaining are in-flight, caught by dual-write). phase 3 Added CHECK (amountrupees IS NOT NULL) as NOT VALID then VALIDATE --. enforced without blocking writes.
+
+387
+00:31:27.495 --> 00:31:29.010
+The rest is in the chapter.
+
+388
+00:31:31.860 --> 00:31:32.713
+Reading it:
+
+389
+00:31:32.993 --> 00:31:45.452
+Each phase is individually safe: expand (add nullable column) is metadata-only; dual-write keeps old and new consistent for new rows; backfill fills history in batches; the CHECK...
+
+390
+00:31:45.732 --> 00:31:53.796
+NOT VALID + VALIDATE enforces presence without blocking writes; read-new switches reads; contract drops the old column last.
+
+391
+00:31:54.076 --> 00:32:03.228
+Through all six phases, with a writer and reader hammering the table, there were zero errors and zero mismatches, old and new contracts always agreed.
+
+392
+00:32:04.578 --> 00:32:15.693
+The magic is ordering: additive, backward-compatible steps let old and new code coexist, and the one destructive step happens only after nothing depends on the old shape.
+
+393
+00:32:15.973 --> 00:32:21.093
+A rollback at any phase before contract is a code deploy, not a data emergency.
+
+394
+00:32:22.443 --> 00:32:25.877
+L3, Message schema compatibility with real protoc.
+
+395
+00:32:26.157 --> 00:32:27.096
+Requirement:
+
+396
+00:32:27.376 --> 00:32:36.528
+Prove which changes to our OrderPlaced event are safe, and build the check a schema registry runs so an incompatible producer can never ship.
+
+397
+00:32:36.808 --> 00:32:47.368
+First we use real protoc to encode a message with the v2 schema and decode those bytes with different schema versions, showing what old and new readers actually see on the wire.
+
+398
+00:32:48.718 --> 00:32:59.598
+On screen: ==== encode an Order with the V2 schema (id, sku, totalpaise, currency, tags), then raw. wire bytes ====.
+
+399
+00:32:59.878 --> 00:33:10.139
+08 2a 12 04 53 4b 55 37 18 ec f6 07 22 03 49 4e.
+
+400
+00:33:10.419 --> 00:33:28.617
+52 2a 05 66 72 65 73 68 2a 03 76 65 67. == FORWARD COMPAT: decode V2 bytes with the OLD V1 schema (old code, new data) ==. id:
+
+401
+00:33:28.897 --> 00:33:30.134
+42. sku:
+
+402
+00:33:30.414 --> 00:33:32.142
+SKU7. totalpaise:
+
+403
+00:33:32.422 --> 00:33:34.939
+129900.
+
+404
+00:33:35.219 --> 00:33:35.966
+4:
+
+405
+00:33:36.246 --> 00:33:36.907
+INR.
+
+406
+00:33:37.187 --> 00:33:38.382
+5: fresh.
+
+407
+00:33:38.662 --> 00:33:45.937
+5: veg. - V1 reader parsed id or sku or totalpaise fine and silently skipped fields 4,5 it.
+
+408
+00:33:46.217 --> 00:33:47.731
+The rest is in the chapter.
+
+409
+00:33:50.581 --> 00:33:51.840
+The.proto schemas:
+
+410
+00:33:53.190 --> 00:34:08.273
+Here is the PROTOBUF code, order_v1.proto / order_v2.proto / order_v3_bad.proto. v2, SAFE: add optional + repeated fields. v3, BREAKING: reuse 3 with a new type, move sku to 6.
+
+411
+00:34:11.123 --> 00:34:22.515
+Now the registry's job: compile each schema to a real binary FileDescriptorSet (protoc --descriptorsetout) and classify the change under the registry compatibility modes.
+
+412
+00:34:23.865 --> 00:34:29.241
+Here is the PYTHON code, compat.py — a real descriptor-based compatibility checker.
+
+413
+00:34:29.521 --> 00:34:45.009
+It runs to 100 lines; the full listing is in the chapter. !/usr or bin or env python3. compat.py -- a REAL protobuf schema-compatibility checker, the way a schema registry (Confluent, Buf, Apicurio) does it.
+
+414
+00:34:45.289 --> 00:34:52.563
+It loads two compiled FileDescriptorSets (protoc --descriptorsetout) and classifies the change between them under the.
+
+415
+00:34:55.413 --> 00:34:56.331
+On screen:
+
+416
+00:34:56.611 --> 00:35:18.691
+Registry compatibility check (loads REAL protoc descriptor sets, applies the. field-level rules): v1 - v2 (added currency + tags). field 4 (currency) ADDED -- backward+forward safe (old readers skip it, new readers. default it). field 5 (tags) ADDED -- backward+forward safe (old readers skip it, new readers. default it). -- BACKWARD:
+
+417
+00:35:18.971 --> 00:35:19.973
+PASS FORWARD:
+
+418
+00:35:20.253 --> 00:35:21.725
+PASS registry verdict:
+
+419
+00:35:22.005 --> 00:35:37.835
+FULL. v1 - v3 (reused 3 with a new type, moved sku). field 2 (sku) REMOVED -- ok, but its number must be RESERVED so it is never reused. field 6 (sku) ADDED -- backward+forward safe (old readers skip it, new readers.
+
+420
+00:35:38.115 --> 00:35:39.629
+The rest is in the chapter.
+
+421
+00:35:42.479 --> 00:35:43.333
+Reading it:
+
+422
+00:35:43.613 --> 00:35:58.034
+Adding fields (v1, then v2) is FULL-compatible: the forward round-trip shows a v1 reader keeping the fields it knows and skipping 4/5; the backward round-trip shows a v2 reader defaulting the absent fields.
+
+423
+00:35:58.314 --> 00:35:59.509
+The checker agrees:
+
+424
+00:35:59.789 --> 00:36:02.839
+FULL, so a FULL or BACKWARD registry would accept it.
+
+425
+00:36:04.189 --> 00:36:14.003
+Reusing a field number (v1, then v3) breaks both directions: the wire value for 3 can't be reinterpreted as a new type, so it's silently lost.
+
+426
+00:36:14.283 --> 00:36:25.419
+The checker flags the type change and the moved field and returns INCOMPATIBLE, the registry rejects the producer at publish time, which is how you avoid a flag-day break on the bus.
+
+427
+00:36:25.699 --> 00:36:34.125
+Protobuf keys on number, not name, so a pure rename (same number) is wire-safe; it's number reuse and type changes that corrupt.
+
+428
+00:36:34.405 --> 00:36:37.541
+Reserve retired numbers so nobody reuses them.
+
+429
+00:36:38.891 --> 00:36:39.638
+Note:
+
+430
+00:36:39.918 --> 00:36:56.835
+Production shape (VERIFY: needs a running registry or Kafka). // Confluent Schema Registry set to FULL: the producer's serializer registers the schema and the registry. // rejects an incompatible one before the first message is sent.
+
+431
+00:36:57.115 --> 00:37:17.681
+Enforce the same check in CI on every schema PR. props.put(schema.registry.url, http://registry:8081);. props.put(auto.register.schemas, true); // registry runs the compatibility check on register. props.put(use.latest.version, true);.
+
+432
+00:37:19.031 --> 00:37:24.471
+// CLI or CI gate: mvn io.confluenttest-compatibility.
+
+433
+00:37:25.821 --> 00:37:29.959
+L4, Backfilling a huge table: one big UPDATE versus batched.
+
+434
+00:37:30.239 --> 00:37:31.178
+Requirement:
+
+435
+00:37:31.458 --> 00:37:38.221
+Backfill a column across 3,000,000 rows while the table is live, without blocking writers or bloating the table.
+
+436
+00:37:38.501 --> 00:37:51.045
+We backfill amountrupees on a 3M-row table two ways, one unbounded UPDATE, then 25k-row committed batches, while a live writer updates random rows and records its worst wait.
+
+437
+00:37:52.395 --> 00:37:55.381
+Here is the Java code, BackfillL4.java.
+
+438
+00:37:55.661 --> 00:37:59.928
+It runs to 133 lines; the full listing is in the chapter.
+
+439
+00:38:00.208 --> 00:38:11.237
+BackfillL4.java, run with: java -Duser.timezone=UTC -cp or tmp or pgjdbc.jar BackfillL4.java.
+
+440
+00:38:11.517 --> 00:38:17.171
+The recurring backfill a column across a huge table problem on REAL PostgreSQL.
+
+441
+00:38:17.451 --> 00:38:24.576
+We compare two ways to set. amountrupees on 3,000,000 rows while a live writer keeps updating random rows:
+
+442
+00:38:27.426 --> 00:38:28.343
+On screen:
+
+443
+00:38:28.623 --> 00:38:29.818
+3,000,000 rows.
+
+444
+00:38:30.098 --> 00:38:33.127
+A live writer updates random rows the whole time.
+
+445
+00:38:33.407 --> 00:38:35.647
+We backfill. amountrupees two ways.
+
+446
+00:38:35.927 --> 00:38:37.229
+A) ONE big UPDATE:
+
+447
+00:38:37.509 --> 00:38:45.679
+11,613 ms total concurrent writer blocked up to 8,011 ms dead. tuples after:
+
+448
+00:38:45.959 --> 00:38:47.325
+3,000,085.
+
+449
+00:38:47.605 --> 00:38:50.165
+B) BATCHED (25k or txn):
+
+450
+00:38:50.445 --> 00:38:57.826
+11,108 ms total concurrent writer blocked up to 100 ms dead. tuples after:
+
+451
+00:38:58.106 --> 00:39:15.087
+3,002,345 (120 batches). then the single UPDATE locks every row it rewrites for the entire statement, so a. concurrent writer touching one of. those rows waits behind the whole backfill -- here it blocked until locktimeout.
+
+452
+00:39:15.367 --> 00:39:16.434
+(8 s) fired.
+
+453
+00:39:16.714 --> 00:39:23.733
+Both forms create. ~3M dead tuples, but the single UPDATE holds them in ONE uncommitted transaction.
+
+454
+00:39:24.013 --> 00:39:25.527
+The rest is in the chapter.
+
+455
+00:39:28.377 --> 00:39:29.231
+Reading it:
+
+456
+00:39:29.511 --> 00:39:40.113
+The single UPDATE locked every row it rewrote for the whole statement, so the concurrent writer, when it hit a row inside the backfill, waited until the 8 s locktimeout fired.
+
+457
+00:39:40.393 --> 00:39:46.687
+The batched form capped that wait at ~100 ms for the same end result and same total time.
+
+458
+00:39:46.967 --> 00:40:04.225
+Both create ~3M dead tuples, but the single UPDATE holds them in one uncommitted transaction that autovacuum cannot touch until it ends; the batched form commits every 25k rows, so autovacuum can reclaim as it goes and each lock is momentary.
+
+459
+00:40:05.575 --> 00:40:22.599
+Production hardening (§2.5, Q18): drive batches off an indexed key range (not OFFSET), make each batch idempotent (WHERE amountrupees IS NULL) so a crash resumes cleanly, persist a checkpoint cursor, and throttle on replication lag.
+
+460
+00:40:22.879 --> 00:40:26.378
+This is the only backfill shape that's safe on a live table.
+
+461
+00:40:27.728 --> 00:40:28.667
+Part 6.
+
+462
+00:40:28.947 --> 00:40:30.227
+Production Concerns.
+
+463
+00:40:31.477 --> 00:40:32.629
+Failure modes.
+
+464
+00:40:32.909 --> 00:40:34.253
+Here is a quick table:
+
+465
+00:40:34.533 --> 00:40:36.730
+Failure, and Cause, and Mitigation.
+
+466
+00:40:37.010 --> 00:40:38.311
+Migration outage.
+
+467
+00:40:38.591 --> 00:40:39.359
+Cause:
+
+468
+00:40:39.639 --> 00:40:44.930
+In-place ALTER TYPE or volatile-default add or plain CREATE INDEX on a big table.
+
+469
+00:40:45.210 --> 00:40:46.213
+Mitigation:
+
+470
+00:40:46.493 --> 00:40:53.127
+Online-DDL rules (§2.3, L1); locktimeout so it fails fast instead of pileup.
+
+471
+00:40:53.407 --> 00:40:54.538
+Lock-queue pileup.
+
+472
+00:40:54.818 --> 00:40:55.586
+Cause:
+
+473
+00:40:55.866 --> 00:41:00.623
+A slow DDL waits behind a long transaction while new queries queue behind it.
+
+474
+00:41:00.903 --> 00:41:07.389
+Mitigation: locktimeout; kill long transactions before migrating; run in low-traffic window.
+
+475
+00:41:07.669 --> 00:41:08.842
+Rollback breaks.
+
+476
+00:41:09.122 --> 00:41:09.890
+Cause:
+
+477
+00:41:10.170 --> 00:41:13.818
+Read-new deployed while old code still running, then rolled back.
+
+478
+00:41:14.098 --> 00:41:15.101
+Mitigation:
+
+479
+00:41:15.381 --> 00:41:20.757
+Keep dual-writing across the read-switch; drop only after a stable release (R5).
+
+480
+00:41:21.037 --> 00:41:22.125
+Dead-letter flood.
+
+481
+00:41:22.405 --> 00:41:23.173
+Cause:
+
+482
+00:41:23.453 --> 00:41:27.997
+Message field renamed or removed; un-upgraded consumer can't parse.
+
+483
+00:41:28.277 --> 00:41:29.279
+Mitigation:
+
+484
+00:41:29.559 --> 00:41:34.167
+Registry FULL compatibility (L3); reserve retired field numbers.
+
+485
+00:41:34.447 --> 00:41:35.898
+Backfill bloats table.
+
+486
+00:41:36.178 --> 00:41:36.946
+Cause:
+
+487
+00:41:37.226 --> 00:41:41.727
+One huge UPDATE, then 3M dead tuples un-vacuumable until commit.
+
+488
+00:41:42.007 --> 00:41:43.010
+Mitigation:
+
+489
+00:41:43.290 --> 00:41:47.258
+Batched, committed backfill (L4); watch ndeadtup, VACUUM after.
+
+490
+00:41:48.608 --> 00:41:49.952
+Silent data drift.
+
+491
+00:41:50.232 --> 00:41:51.000
+Cause:
+
+492
+00:41:51.280 --> 00:41:53.541
+Store-to-store dual-write bug not caught.
+
+493
+00:41:53.821 --> 00:41:54.824
+Mitigation:
+
+494
+00:41:55.104 --> 00:41:59.541
+Continuous reconciliation before the read-switch (§2.9).
+
+495
+00:41:59.821 --> 00:42:01.613
+NOT VALID never validated.
+
+496
+00:42:01.893 --> 00:42:02.661
+Cause:
+
+497
+00:42:02.941 --> 00:42:05.544
+Team adds NOT VALID and forgets VALIDATE.
+
+498
+00:42:05.824 --> 00:42:06.827
+Mitigation:
+
+499
+00:42:07.107 --> 00:42:12.120
+Constraint stays untrusted (new rows checked, old rows not); track and finish.
+
+500
+00:42:13.470 --> 00:42:15.689
+Observability (Ch 24).
+
+501
+00:42:15.969 --> 00:42:24.161
+Lock waits: pglocks joined to pgstatactivity shows who's blocking whom; alert on lock waits N seconds during a deploy.
+
+502
+00:42:24.441 --> 00:42:32.206
+DDL duration: log every migration's wall-clock and lock-hold time; a spike means a rewrite slipped through review.
+
+503
+00:42:32.486 --> 00:42:38.374
+Bloat: ndeadtup or nlivetup per table (pgstatusertables); autovacuum activity.
+
+504
+00:42:38.654 --> 00:42:45.566
+Backfill progress: emit rows-done or rows-total per batch so a long backfill is observable and resumable.
+
+505
+00:42:46.916 --> 00:42:52.228
+Bus: dead-letter rate per topic, and the registry's rejected-schema count in CI.
+
+506
+00:42:52.508 --> 00:42:58.524
+Migration history: the schemahistory table (Flyway) is the source of truth for what's applied where.
+
+507
+00:42:59.874 --> 00:43:00.813
+Security.
+
+508
+00:43:01.093 --> 00:43:10.373
+Migrations often run with elevated (DDL) privileges, keep that credential separate from the app's runtime credential and out of the app image.
+
+509
+00:43:10.653 --> 00:43:19.954
+A backfill that copies PII into a new column inherits the same classification, apply the same encryption or masking (Ch 23).
+
+510
+00:43:20.234 --> 00:43:27.658
+Reserve retired message fields so a future reuse can't accidentally expose an old field's data to a new consumer.
+
+511
+00:43:29.008 --> 00:43:42.448
+Performance and tuning knobs. locktimeout (fail fast), statementtimeout (bound runaway DDL), maintenanceworkmem (faster index builds), maxparallelmaintenanceworkers (parallel CREATE INDEX).
+
+512
+00:43:42.728 --> 00:43:48.829
+Backfill batch size (throughput versus lock duration), and an inter-batch sleep under load (L4).
+
+513
+00:43:49.109 --> 00:43:59.243
+Run CREATE INDEX CONCURRENTLY off-peak: it's slower and does two table passes, and a failed concurrent build leaves an invalid index you must drop and retry.
+
+514
+00:44:00.593 --> 00:44:01.318
+Cost.
+
+515
+00:44:01.598 --> 00:44:14.163
+Zero-downtime migrations cost engineering time (more steps, more than one release) and some transient storage (the new column + old column coexist; index builds need scratch space).
+
+516
+00:44:14.443 --> 00:44:19.329
+The alternative, a migration outage on a checkout path, costs revenue and trust.
+
+517
+00:44:19.609 --> 00:44:23.449
+The trade is almost always worth it above a few hundred thousand rows.
+
+518
+00:44:24.799 --> 00:44:25.737
+Part 7.
+
+519
+00:44:26.017 --> 00:44:27.724
+Anti-Patterns and Pitfalls.
+
+520
+00:44:28.974 --> 00:44:29.891
+Watch out:
+
+521
+00:44:30.171 --> 00:44:30.811
+1.
+
+522
+00:44:31.091 --> 00:44:33.609
+Renaming a column in place on a live table.
+
+523
+00:44:33.889 --> 00:44:34.699
+ALTER...
+
+524
+00:44:34.979 --> 00:44:43.897
+RENAME breaks every running instance of the old code the instant it commits, including, during a rolling deploy, pods that haven't updated yet.
+
+525
+00:44:44.177 --> 00:44:46.651
+Expand or contract instead (L2).
+
+526
+00:44:48.001 --> 00:44:48.919
+Watch out:
+
+527
+00:44:49.199 --> 00:44:49.903
+2.
+
+528
+00:44:50.183 --> 00:44:51.249
+ALTER COLUMN...
+
+529
+00:44:51.529 --> 00:44:53.940
+TYPE on a big table during business hours.
+
+530
+00:44:54.220 --> 00:44:58.273
+Most type changes rewrite the whole table under ACCESS EXCLUSIVE.
+
+531
+00:44:58.553 --> 00:45:02.180
+Nine-minute outage on 40M rows (§1.1).
+
+532
+00:45:02.460 --> 00:45:05.788
+Add a new column of the new type and expand or contract.
+
+533
+00:45:07.138 --> 00:45:08.055
+Watch out:
+
+534
+00:45:08.335 --> 00:45:09.082
+3.
+
+535
+00:45:09.362 --> 00:45:12.413
+One unbounded UPDATE to backfill millions of rows.
+
+536
+00:45:12.693 --> 00:45:17.066
+Locks every touched row until commit, blocks concurrent writers (L4:
+
+537
+00:45:17.346 --> 00:45:21.442
+8 s versus 100 ms), and creates un-vacuumable bloat.
+
+538
+00:45:21.722 --> 00:45:23.173
+Always batch and commit.
+
+539
+00:45:24.523 --> 00:45:25.440
+Watch out:
+
+540
+00:45:25.720 --> 00:45:26.424
+4.
+
+541
+00:45:26.704 --> 00:45:27.685
+ADD COLUMN...
+
+542
+00:45:27.965 --> 00:45:30.099
+DEFAULT volatile / DEFAULT now().
+
+543
+00:45:30.379 --> 00:45:33.749
+A volatile default forces a full-table rewrite (L1:
+
+544
+00:45:34.029 --> 00:45:36.803
+1.8 s under lock on 2M rows).
+
+545
+00:45:37.083 --> 00:45:40.475
+A constant default is metadata-only (14 ms).
+
+546
+00:45:40.755 --> 00:45:43.763
+Add nullable, or with a constant default, then backfill.
+
+547
+00:45:45.113 --> 00:45:46.030
+Watch out:
+
+548
+00:45:46.310 --> 00:45:47.078
+5.
+
+549
+00:45:47.358 --> 00:45:50.131
+Naive SET NOT NULL on a big table.
+
+550
+00:45:50.411 --> 00:45:56.129
+Scans and locks the whole table to validate (L1: stalled queries to the 8 s timeout).
+
+551
+00:45:56.409 --> 00:45:57.774
+Use ADD CONSTRAINT...
+
+552
+00:45:58.054 --> 00:46:03.323
+CHECK (col IS NOT NULL) NOT VALID then VALIDATE CONSTRAINT (which doesn't block writes).
+
+553
+00:46:04.673 --> 00:46:05.591
+Watch out:
+
+554
+00:46:05.871 --> 00:46:06.617
+6.
+
+555
+00:46:06.897 --> 00:46:08.881
+Plain CREATE INDEX on a hot table.
+
+556
+00:46:09.161 --> 00:46:11.295
+Blocks writes for the whole build (L1).
+
+557
+00:46:11.575 --> 00:46:13.388
+Use CREATE INDEX CONCURRENTLY.
+
+558
+00:46:14.738 --> 00:46:15.655
+Watch out:
+
+559
+00:46:15.935 --> 00:46:16.682
+7.
+
+560
+00:46:16.962 --> 00:46:19.778
+Reusing a message field number or enum value.
+
+561
+00:46:20.058 --> 00:46:26.607
+Old data on the wire for that number gets misread by the new schema, silent corruption, no error (L3).
+
+562
+00:46:26.887 --> 00:46:29.554
+Reserve retired numbers; never reuse.
+
+563
+00:46:30.904 --> 00:46:31.821
+Watch out:
+
+564
+00:46:32.101 --> 00:46:32.784
+8.
+
+565
+00:46:33.064 --> 00:46:35.453
+No schema registry (or set to NONE).
+
+566
+00:46:35.733 --> 00:46:43.029
+Without an enforced compatibility check, an incompatible producer ships and floods consumers' dead-letter queues in production.
+
+567
+00:46:43.309 --> 00:46:46.360
+Set the registry to FULL and check in CI (L3).
+
+568
+00:46:47.710 --> 00:46:48.627
+Watch out:
+
+569
+00:46:48.907 --> 00:46:49.654
+9.
+
+570
+00:46:49.934 --> 00:46:51.641
+Dropping the old shape too early.
+
+571
+00:46:51.921 --> 00:47:00.603
+Contracting while any deployed (or rollback-target) code still reads or writes the old column or field turns a rollback into an outage.
+
+572
+00:47:00.883 --> 00:47:05.086
+Keep the old shape until the new path is stable for a release (R5).
+
+573
+00:47:06.436 --> 00:47:07.353
+Watch out:
+
+574
+00:47:07.633 --> 00:47:08.337
+10.
+
+575
+00:47:08.617 --> 00:47:11.241
+Migrating stores without reconciliation.
+
+576
+00:47:11.521 --> 00:47:16.919
+Dual-write bugs are silent; you discover them after the read-switch when data is already wrong.
+
+577
+00:47:17.199 --> 00:47:22.020
+Reconcile continuously and fix before switching reads (§2.9).
+
+578
+00:47:23.370 --> 00:47:24.287
+Watch out:
+
+579
+00:47:24.567 --> 00:47:25.399
+11.
+
+580
+00:47:25.679 --> 00:47:27.429
+Down-migrations in production.
+
+581
+00:47:27.709 --> 00:47:30.781
+Down-scripts are rarely tested and often destructive.
+
+582
+00:47:31.061 --> 00:47:33.621
+Roll forward with a new migration instead.
+
+583
+00:47:34.971 --> 00:47:35.888
+Watch out:
+
+584
+00:47:36.168 --> 00:47:36.957
+12.
+
+585
+00:47:37.237 --> 00:47:39.648
+NOT VALID without the follow-up VALIDATE.
+
+586
+00:47:39.928 --> 00:47:45.496
+The constraint only checks new rows; old rows are never verified and the planner can't trust it.
+
+587
+00:47:45.776 --> 00:47:47.888
+Always finish with VALIDATE CONSTRAINT.
+
+588
+00:47:49.238 --> 00:47:50.113
+Part 8.
+
+589
+00:47:50.393 --> 00:47:51.737
+Interview Q and A.
+
+590
+00:47:52.987 --> 00:47:53.819
+Beginner.
+
+591
+00:47:54.099 --> 00:47:55.123
+Question 1.
+
+592
+00:47:55.403 --> 00:48:00.288
+What is a zero-downtime schema migration, and why can't you just run ALTER TABLE?
+
+593
+00:48:00.568 --> 00:48:01.933
+Thirty-second answer:
+
+594
+00:48:02.213 --> 00:48:08.720
+Zero-downtime means the schema changes while the system keeps serving traffic and while code is mid-deploy.
+
+595
+00:48:09.000 --> 00:48:25.427
+You can't just ALTER because (a) many ALTERs take a strong lock and rewrite the whole table, stalling every query for the duration, and (b) during a rolling deploy old and new code run at once, so a rename or type change breaks whichever version doesn't expect it.
+
+596
+00:48:25.707 --> 00:48:29.525
+You change the schema in small, backward-compatible steps instead.
+
+597
+00:48:30.875 --> 00:48:31.878
+Question 2.
+
+598
+00:48:32.158 --> 00:48:34.995
+Explain backward versus forward compatibility.
+
+599
+00:48:35.275 --> 00:48:36.641
+Thirty-second answer:
+
+600
+00:48:36.921 --> 00:48:42.937
+Backward compatible = new code can read data written by the old schema (deploy readers first).
+
+601
+00:48:43.217 --> 00:48:49.254
+Forward compatible = old code can read data written by the new schema (deploy writers first).
+
+602
+00:48:49.534 --> 00:48:57.235
+Full = both, which is what you need during a rolling deploy because you can't control which version reads a given row or message.
+
+603
+00:48:58.585 --> 00:48:59.631
+Question 3.
+
+604
+00:48:59.911 --> 00:49:03.516
+What is the expand or contract (parallel change) pattern?
+
+605
+00:49:03.796 --> 00:49:05.161
+Thirty-second answer:
+
+606
+00:49:05.441 --> 00:49:17.153
+To change a column safely: expand (add the new column), dual-write (write both), backfill (fill history in batches), validate, read-new (switch reads), contract (drop the old column).
+
+607
+00:49:17.433 --> 00:49:24.367
+Each step is backward+forward compatible, so old and new code coexist and you can roll back at any point.
+
+608
+00:49:24.647 --> 00:49:26.460
+The destructive drop is last.
+
+609
+00:49:27.810 --> 00:49:28.877
+Question 4.
+
+610
+00:49:29.157 --> 00:49:32.634
+Why is one big UPDATE to backfill a huge table dangerous?
+
+611
+00:49:32.914 --> 00:49:34.279
+Thirty-second answer:
+
+612
+00:49:34.559 --> 00:49:50.943
+It touches every row in one transaction: it locks all those rows until commit (blocking concurrent writers), writes one giant WAL record, and creates a mass of dead tuples that autovacuum can't reclaim until the transaction ends, table bloat.
+
+613
+00:49:51.223 --> 00:49:53.762
+If it fails near the end, it all rolls back.
+
+614
+00:49:54.042 --> 00:49:56.858
+Batch it: update key ranges and commit each batch.
+
+615
+00:49:58.208 --> 00:49:59.211
+Intermediate.
+
+616
+00:49:59.491 --> 00:50:00.600
+Question 5.
+
+617
+00:50:00.880 --> 00:50:05.317
+Which PostgreSQL DDL operations block, and how do you avoid it?
+
+618
+00:50:05.597 --> 00:50:06.963
+Thirty-second answer:
+
+619
+00:50:07.243 --> 00:50:18.933
+Blocking: volatile-default ADD COLUMN, most ALTER COLUMN TYPE, naive SET NOT NULL, ADD CHECK, and plain CREATE INDEX, they take a strong lock and do a full-table operation under it.
+
+620
+00:50:19.213 --> 00:50:26.317
+Safe: nullable or constant-default ADD COLUMN (metadata-only), CREATE INDEX CONCURRENTLY, and ADD CONSTRAINT...
+
+621
+00:50:26.597 --> 00:50:30.224
+NOT VALID then VALIDATE CONSTRAINT (which doesn't block writes).
+
+622
+00:50:31.574 --> 00:50:32.683
+Question 6.
+
+623
+00:50:32.963 --> 00:50:35.395
+How do you rename a column with no downtime?
+
+624
+00:50:35.675 --> 00:50:37.041
+Thirty-second answer:
+
+625
+00:50:37.321 --> 00:50:39.753
+You don't rename, you expand or contract.
+
+626
+00:50:40.033 --> 00:50:49.995
+Add the new column, dual-write both, backfill history in batches, switch reads to the new column (still dual-writing), then drop the old column once nothing uses it.
+
+627
+00:50:50.275 --> 00:50:54.990
+A rename in place would break every not-yet-upgraded pod the instant it runs.
+
+628
+00:50:56.340 --> 00:50:57.428
+Question 7.
+
+629
+00:50:57.708 --> 00:51:01.143
+How do Protobuf and Avro each handle schema evolution?
+
+630
+00:51:01.423 --> 00:51:02.788
+Thirty-second answer:
+
+631
+00:51:03.068 --> 00:51:18.236
+Protobuf keys fields by number: old readers skip unknown numbers (forward-compat) and new readers default missing ones (backward-compat), so adding fields and even renaming is safe, but reusing a number or changing a type is not.
+
+632
+00:51:18.516 --> 00:51:27.092
+Avro uses both a writer and reader schema and resolves between them, so adding or removing fields needs defaults to stay compatible.
+
+633
+00:51:27.372 --> 00:51:29.697
+Both are enforced by a schema registry.
+
+634
+00:51:31.047 --> 00:51:32.071
+Question 8.
+
+635
+00:51:32.351 --> 00:51:34.677
+What are schema-registry compatibility modes?
+
+636
+00:51:34.957 --> 00:51:36.322
+Thirty-second answer:
+
+637
+00:51:36.602 --> 00:51:46.415
+BACKWARD (new schema reads old data, deploy consumers first), FORWARD (old schema reads new data, deploy producers first), FULL (both), and NONE (no checks).
+
+638
+00:51:46.695 --> 00:51:54.141
+The registry rejects a schema that violates the configured mode at publish time, so an incompatible producer never ships.
+
+639
+00:51:55.491 --> 00:51:56.557
+Question 9.
+
+640
+00:51:56.837 --> 00:52:00.955
+How do you version an HTTP API without breaking clients?
+
+641
+00:52:01.235 --> 00:52:02.600
+Thirty-second answer:
+
+642
+00:52:02.880 --> 00:52:08.384
+Make additive changes (new optional fields) in place, clients ignore unknown fields.
+
+643
+00:52:08.664 --> 00:52:25.901
+Only introduce a new version (/v2) for true breaks (removed or renamed fields, changed types or semantics), run it alongside or v1, migrate clients, and retire or v1 with Deprecation or Sunset headers after monitoring who still calls it.
+
+644
+00:52:27.251 --> 00:52:28.019
+Senior.
+
+645
+00:52:28.299 --> 00:52:29.345
+Question 10.
+
+646
+00:52:29.625 --> 00:52:36.878
+Walk through migrating orders.total (bigint paise) to amount (numeric rupees) on a 40M-row live table.
+
+647
+00:52:37.158 --> 00:52:38.523
+Thirty-second answer:
+
+648
+00:52:38.803 --> 00:52:40.233
+Expand or contract.
+
+649
+00:52:40.513 --> 00:52:45.035
+(1) ADD COLUMN amount numeric(12,2) nullable, metadata-only.
+
+650
+00:52:45.315 --> 00:52:48.643
+(2) Deploy dual-write: writes set both total and amount.
+
+651
+00:52:48.923 --> 00:52:56.091
+(3) Batched backfill amount = total or 100.0 over PK ranges, committing each batch.
+
+652
+00:52:56.371 --> 00:53:01.961
+(4) ADD CONSTRAINT amountpresent CHECK (amount IS NOT NULL) NOT VALID then VALIDATE.
+
+653
+00:53:02.241 --> 00:53:05.441
+(5) Deploy read-new (reads amount, still dual-writes).
+
+654
+00:53:05.721 --> 00:53:08.793
+(6) After a stable release, DROP COLUMN total.
+
+655
+00:53:09.073 --> 00:53:11.078
+Never rename or retype in place.
+
+656
+00:53:12.428 --> 00:53:13.559
+Question 11.
+
+657
+00:53:13.839 --> 00:53:18.383
+How do you migrate a dataset from one datastore to another with no downtime?
+
+658
+00:53:18.663 --> 00:53:20.028
+Thirty-second answer:
+
+659
+00:53:20.308 --> 00:53:39.999
+Dual-write to old and new (ideally via an outbox or CDC so you avoid a distributed transaction), backfill history in batches, continuously reconcile old versus new (counts, checksums, sampled diffs) and fix the dual-write bugs it finds, switch reads to the new store behind a flag with a canary,
+
+660
+00:53:40.279 --> 00:53:44.673
+keep the old store as fallback, and decommission only after reads are stable.
+
+661
+00:53:46.023 --> 00:53:47.111
+Question 12.
+
+662
+00:53:47.391 --> 00:53:51.189
+Why set locktimeout on migrations, and what's a lock-queue pileup?
+
+663
+00:53:51.469 --> 00:53:52.834
+Thirty-second answer:
+
+664
+00:53:53.114 --> 00:54:07.386
+If a migration's ACCESS EXCLUSIVE lock request can't be granted immediately (a long transaction holds a conflicting lock), it waits at the head of the lock queue, and every new query that needs the table then queues behind the migration.
+
+665
+00:54:07.666 --> 00:54:18.418
+So one slow migration behind one slow transaction can stall the whole table. locktimeout makes the migration give up quickly and retry, instead of triggering that pileup.
+
+666
+00:54:19.768 --> 00:54:21.048
+Question 13.
+
+667
+00:54:21.328 --> 00:54:25.232
+What exactly happens on the wire when you reuse a Protobuf field number?
+
+668
+00:54:25.512 --> 00:54:26.877
+Thirty-second answer:
+
+669
+00:54:27.157 --> 00:54:31.360
+Protobuf identifies fields by number + wire type, not name.
+
+670
+00:54:31.640 --> 00:54:45.208
+If you reuse number 3 (previously an int64) as a string, old data on the wire carries a varint for 3, but the new schema expects a length-delimited value, so the new reader can't map it to the string field.
+
+671
+00:54:45.488 --> 00:54:50.587
+It ends up as an unknown field and the declared string reads as its default (empty).
+
+672
+00:54:50.867 --> 00:54:53.064
+No exception, silent data loss.
+
+673
+00:54:54.414 --> 00:54:55.609
+Question 14.
+
+674
+00:54:55.889 --> 00:54:58.982
+Compare NOT NULL via full validation versus CHECK...
+
+675
+00:54:59.262 --> 00:55:00.947
+NOT VALID + VALIDATE.
+
+676
+00:55:01.227 --> 00:55:02.593
+Thirty-second answer:
+
+677
+00:55:02.873 --> 00:55:04.430
+A naive ALTER COLUMN...
+
+678
+00:55:04.710 --> 00:55:12.475
+SET NOT NULL scans and locks the whole table under ACCESS EXCLUSIVE to prove no nulls exist, blocking everyone.
+
+679
+00:55:12.755 --> 00:55:29.203
+Adding a CHECK (col IS NOT NULL) NOT VALID is a fast metadata-only step (new rows are checked, existing rows aren't), and a subsequent VALIDATE CONSTRAINT scans the table under a weaker SHARE UPDATE EXCLUSIVE lock that does not block reads or writes.
+
+680
+00:55:29.483 --> 00:55:31.382
+Same guarantee, no outage.
+
+681
+00:55:32.732 --> 00:55:33.628
+Architect.
+
+682
+00:55:33.908 --> 00:55:35.103
+Question 15.
+
+683
+00:55:35.383 --> 00:55:41.740
+Design an org-wide standard so schema or message or API changes never cause an outage.
+
+684
+00:55:42.020 --> 00:55:43.385
+Thirty-second answer:
+
+685
+00:55:43.665 --> 00:55:44.583
+Codify:
+
+686
+00:55:44.863 --> 00:56:02.569
+(1) online-DDL rules with enforced locktimeout and a CI linter that rejects rewriting DDL; (2) expand or contract for all column changes; (3) batched backfills only; (4) Protobuf or Avro on the bus under a registry set to FULL,
+
+687
+00:56:02.849 --> 00:56:19.425
+checked in CI; (5) additive-first APIs with or vN only for breaks and Sunset headers; (6) forward-only versioned migrations run as a pipeline step before deploy; (7) store migrations via dual-write + reconcile.
+
+688
+00:56:19.705 --> 00:56:22.308
+Gate destructive steps on usage telemetry.
+
+689
+00:56:23.658 --> 00:56:24.853
+Question 16.
+
+690
+00:56:25.133 --> 00:56:28.631
+How do blue-green deployment and schema migration interact?
+
+691
+00:56:28.911 --> 00:56:30.277
+Thirty-second answer:
+
+692
+00:56:30.557 --> 00:56:36.167
+Blue-green swaps whole app environments, but blue and green almost always share one database.
+
+693
+00:56:36.447 --> 00:56:42.911
+So the schema must be compatible with both colors simultaneously, which is exactly expand or contract.
+
+694
+00:56:43.191 --> 00:56:54.711
+You run the additive (expand) migration before cutting traffic to green, keep dual-writing so you can cut back to blue, and only contract after green is confirmed and blue is retired.
+
+695
+00:56:56.061 --> 00:56:57.405
+Question 17.
+
+696
+00:56:57.685 --> 00:57:00.971
+A downstream team can't upgrade their consumer for months.
+
+697
+00:57:01.251 --> 00:57:02.765
+How do you evolve the event?
+
+698
+00:57:03.045 --> 00:57:04.411
+Thirty-second answer:
+
+699
+00:57:04.691 --> 00:57:14.483
+Keep the event FULL-compatible: only add fields, never remove or rename or retype or reuse numbers, so their old consumer keeps working untouched.
+
+700
+00:57:14.763 --> 00:57:29.845
+If you genuinely need a breaking change, publish a new event type or topic version alongside the old, dual-produce to both, and let them migrate on their timeline before you retire the old one, same expand or contract shape, applied to the topic.
+
+701
+00:57:31.195 --> 00:57:32.369
+Question 18.
+
+702
+00:57:32.649 --> 00:57:36.894
+How do you make a huge backfill resumable, throttled, and safe under load?
+
+703
+00:57:37.174 --> 00:57:38.539
+Thirty-second answer:
+
+704
+00:57:38.819 --> 00:57:45.049
+Drive it off an indexed key range and persist the last-completed key so a crash resumes where it stopped.
+
+705
+00:57:45.329 --> 00:57:46.438
+Commit each batch.
+
+706
+00:57:46.718 --> 00:57:53.651
+Throttle with an inter-batch sleep and or or by watching replication lag and lock waits, backing off when they rise.
+
+707
+00:57:53.931 --> 00:57:58.411
+Make it idempotent (WHERE newcol IS NULL) so re-running a batch is harmless.
+
+708
+00:57:58.691 --> 00:58:00.142
+Emit progress metrics.
+
+709
+00:58:01.492 --> 00:58:02.729
+Question 19.
+
+710
+00:58:03.009 --> 00:58:06.636
+What's your rollback strategy at each phase of a schema migration?
+
+711
+00:58:06.916 --> 00:58:08.281
+Thirty-second answer:
+
+712
+00:58:08.561 --> 00:58:14.663
+During expand or dual-write: roll back the code freely, the old column still works and is still written.
+
+713
+00:58:14.943 --> 00:58:18.356
+During backfill: it's idempotent and additive; just stop it.
+
+714
+00:58:18.636 --> 00:58:25.100
+During read-new: roll back the code, because you kept dual-writing, the old column is still current and readable.
+
+715
+00:58:25.380 --> 00:58:30.991
+Only contract (drop) is irreversible, which is why it's last and gated on a stable release.
+
+716
+00:58:31.271 --> 00:58:35.495
+Rollbacks are always forward-only new migrations, never down-scripts.
+
+717
+00:58:36.845 --> 00:58:37.954
+Question 20.
+
+718
+00:58:38.234 --> 00:58:42.522
+When is a maintenance window (accepting downtime) actually the right call?
+
+719
+00:58:42.802 --> 00:58:44.167
+Thirty-second answer:
+
+720
+00:58:44.447 --> 00:59:07.103
+When the change genuinely has no compatible incremental path and the online approach would cost more than a short, scheduled outage, for example, a fundamental primary-key type change on a modest table, a storage-engine migration, or a small internal tool where the engineering cost of expand or contract dwarfs the impact of five minutes down at 3 a.m.
+
+721
+00:59:07.383 --> 00:59:14.039
+You make it a conscious decision with stakeholder sign-off, a tested runbook, and a rehearsed rollback, not an accident.
+
+722
+00:59:15.389 --> 00:59:16.285
+Part 9.
+
+723
+00:59:16.565 --> 00:59:17.973
+Summary and Practice.
+
+724
+00:59:19.223 --> 00:59:20.311
+Key takeaways.
+
+725
+00:59:20.591 --> 00:59:24.517
+Every intermediate state must be compatible with old and new code.
+
+726
+00:59:24.797 --> 00:59:27.719
+Rolling deploys and rollbacks run both at once.
+
+727
+00:59:27.999 --> 00:59:30.346
+This single rule generates everything else.
+
+728
+00:59:30.626 --> 00:59:31.714
+Know what locks.
+
+729
+00:59:31.994 --> 00:59:44.090
+Metadata-only adds and CONCURRENTLY or VALIDATE are safe; volatile-default adds, in-place ALTER TYPE, naive SET NOT NULL and plain CREATE INDEX stall live traffic (L1).
+
+730
+00:59:44.370 --> 00:59:52.349
+Change columns by expand or contract: add, then dual-write, then batched backfill, then validate, then read-new, then drop.
+
+731
+00:59:52.629 --> 00:59:54.869
+The destructive step is last (L2).
+
+732
+00:59:56.219 --> 01:00:02.320
+Backfill in committed batches, off an indexed key range, never one unbounded UPDATE (L4).
+
+733
+01:00:02.600 --> 01:00:08.211
+Message and API schemas are append-only contracts with parties you can't redeploy.
+
+734
+01:00:08.491 --> 01:00:14.059
+Evolve them under registry compatibility modes; reserve retired field numbers (L3).
+
+735
+01:00:14.339 --> 01:00:22.403
+Migrate stores with dual-write + backfill + reconcile + flagged read-switch; reconciliation catches the silent bugs.
+
+736
+01:00:22.683 --> 01:00:28.251
+Set locktimeout so a blocked migration fails fast instead of causing a lock-queue pileup.
+
+737
+01:00:29.601 --> 01:00:34.443
+Roll forward, not down, and gate the irreversible drop on usage telemetry.
+
+738
+01:00:35.793 --> 01:00:37.116
+Decision cheat sheet.
+
+739
+01:00:37.396 --> 01:00:38.740
+Here is a quick table:
+
+740
+01:00:39.020 --> 01:00:40.641
+Situation, and Do this.
+
+741
+01:00:40.921 --> 01:00:41.924
+Add a column:
+
+742
+01:00:42.204 --> 01:00:46.940
+Nullable or constant default (metadata-only); backfill in batches if needed.
+
+743
+01:00:47.220 --> 01:00:48.884
+Rename or retype a column:
+
+744
+01:00:49.164 --> 01:00:51.532
+Expand or contract (never in place).
+
+745
+01:00:51.812 --> 01:00:53.476
+Add an index on a hot table:
+
+746
+01:00:53.756 --> 01:00:55.313
+CREATE INDEX CONCURRENTLY.
+
+747
+01:00:55.593 --> 01:00:57.087
+Add NOT NULL or a CHECK:
+
+748
+01:00:57.367 --> 01:00:58.519
+ADD CONSTRAINT...
+
+749
+01:00:58.799 --> 01:01:00.420
+NOT VALID then VALIDATE.
+
+750
+01:01:00.700 --> 01:01:02.215
+Backfill millions of rows:
+
+751
+01:01:02.495 --> 01:01:05.183
+Batched, committed, key-range, idempotent, throttled.
+
+752
+01:01:05.463 --> 01:01:07.063
+Change an event or message:
+
+753
+01:01:07.343 --> 01:01:13.465
+Additive only; registry FULL; reserve retired numbers; new topic version for real breaks.
+
+754
+01:01:13.745 --> 01:01:15.004
+Change an API:
+
+755
+01:01:15.284 --> 01:01:19.636
+Additive in place; /vN + Sunset headers only for breaks.
+
+756
+01:01:20.986 --> 01:01:22.586
+Move data between stores:
+
+757
+01:01:22.866 --> 01:01:27.922
+Dual-write (outbox), then backfill, then reconcile, then read-switch, then decommission.
+
+758
+01:01:28.202 --> 01:01:30.719
+Truly no compatible path, low impact:
+
+759
+01:01:30.999 --> 01:01:33.218
+A conscious, tested maintenance window.
+
+760
+01:01:34.568 --> 01:01:35.699
+Exercises.
+
+761
+01:01:35.979 --> 01:01:40.544
+(B2) Take a table with a status text column and add a statuscode smallint.
+
+762
+01:01:40.824 --> 01:01:45.133
+Write the six expand or contract migrations and the dual-write logic.
+
+763
+01:01:45.413 --> 01:01:47.099
+Which steps are metadata-only?
+
+764
+01:01:47.379 --> 01:01:53.821
+(B2) Write a.proto, add two fields for v2, then deliberately reuse a field number for v3.
+
+765
+01:01:54.101 --> 01:01:59.307
+Run the L3 encode or decode round-trip and explain what the v3 reader sees.
+
+766
+01:01:59.587 --> 01:02:08.611
+(B3) Rewrite a naive UPDATE bigtable SET x = f(y) as a resumable, throttled batched backfill with a checkpoint cursor.
+
+767
+01:02:08.891 --> 01:02:11.536
+Add a throttle that backs off on replication lag.
+
+768
+01:02:12.886 --> 01:02:21.419
+(B3) Given a migration that must SET NOT NULL on a 50M-row column, write the non-blocking sequence and explain each lock.
+
+769
+01:02:21.699 --> 01:02:31.171
+(B4) Design the CI checks that would have prevented the §1.1 outage: a DDL linter rule set and a registry compatibility gate.
+
+770
+01:02:31.451 --> 01:02:32.753
+What does each reject?
+
+771
+01:02:34.103 --> 01:02:35.105
+Further reading.
+
+772
+01:02:35.385 --> 01:02:36.985
+PostgreSQL docs:
+
+773
+01:02:37.265 --> 01:02:42.321
+ALTER TABLE, CREATE INDEX CONCURRENTLY, Explicit Locking, VALIDATE CONSTRAINT.
+
+774
+01:02:42.601 --> 01:02:50.964
+Refactoring Databases (Ambler and Sadalage), the canonical catalogue of database refactorings incl. expand or contract.
+
+775
+01:02:51.244 --> 01:02:57.644
+Confluent Schema Registry docs, compatibility types (BACKWARD or FORWARD or FULL or transitive).
+
+776
+01:02:57.924 --> 01:03:03.428
+Protobuf language guide, Updating a Message Type (reserved fields, wire compatibility).
+
+777
+01:03:04.778 --> 01:03:13.631
+Squawk or pgroll or gh-ost or pt-online-schema-change, online-migration tooling (VERIFY: not runnable offline here).
+
+778
+01:03:14.981 --> 01:03:16.219
+Related chapters.
+
+779
+01:03:16.499 --> 01:03:22.152
+Ch 05, Relational Databases Deep Dive: locks, MVCC, indexes.
+
+780
+01:03:22.432 --> 01:03:27.424
+Ch 13, Distributed Transactions: why dual-write needs an outbox.
+
+781
+01:03:27.704 --> 01:03:32.653
+Ch 14, Messaging and Event Streaming: the bus these schemas travel on.
+
+782
+01:03:32.933 --> 01:03:38.693
+Ch 15, EDA, CQRS and Event Sourcing: outbox pattern, persisted events.
+
+783
+01:03:38.973 --> 01:03:46.120
+Ch 26, Deployment and Infrastructure: rolling or blue-green deploys, migration pipeline steps.
+
+784
+01:03:46.400 --> 01:03:48.896
+Ch 04, API Design:
+
+785
+01:03:49.176 --> 01:03:51.309
+API versioning and deprecation.
+
+786
+01:03:52.659 --> 01:03:54.259
+That's the end of this chapter.
+
+787
+01:03:54.539 --> 01:04:00.577
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+788
+01:04:00.857 --> 01:04:02.307
+See you in the next chapter.
+

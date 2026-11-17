@@ -1,0 +1,486 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.993
+LFU Cache in O(1).
+
+2
+00:00:02.273 --> 00:00:06.177
+Chapter 3, from the Coding Interview part of the System Design Playbook.
+
+3
+00:00:07.927 --> 00:00:08.780
+Part 1.
+
+4
+00:00:09.060 --> 00:00:09.956
+Problem.
+
+5
+00:00:11.206 --> 00:00:14.363
+Implement an LFU cache with O(1) get and put.
+
+6
+00:00:14.643 --> 00:00:19.187
+Evict the least frequently used key, and break ties by least recently used.
+
+7
+00:00:19.467 --> 00:00:23.883
+Show why LFU resists a one-off scan that would flush an LRU cache.
+
+8
+00:00:25.233 --> 00:00:26.108
+Part 2.
+
+9
+00:00:26.388 --> 00:00:27.305
+Key idea.
+
+10
+00:00:28.555 --> 00:00:36.022
+Keep a map of frequency, then keys in LRU order (LinkedHashSet), each key's count, and the current minimum frequency.
+
+11
+00:00:36.302 --> 00:00:40.590
+A hit moves the key from bucket f to f+1, which is O(1).
+
+12
+00:00:40.870 --> 00:00:44.795
+Eviction takes the oldest key in bucket minFreq, also O(1).
+
+13
+00:00:45.075 --> 00:00:47.486
+A new key always resets minFreq to 1.
+
+14
+00:00:48.836 --> 00:00:50.180
+Here is the diagram.
+
+15
+00:00:54.030 --> 00:00:54.947
+Part 3.
+
+16
+00:00:55.227 --> 00:00:56.102
+Solution.
+
+17
+00:00:57.352 --> 00:01:00.211
+Here is the Java code, LfuCache.java.
+
+18
+00:01:00.491 --> 00:01:04.096
+It runs to 81 lines; the full listing is in the chapter.
+
+19
+00:01:04.376 --> 00:01:05.251
+Problem:
+
+20
+00:01:05.531 --> 00:01:12.805
+LFU cache with O(1) get or put: evict the least frequently used key; ties - least recently used among them.
+
+21
+00:01:15.655 --> 00:01:16.594
+Part 4.
+
+22
+00:01:16.874 --> 00:01:17.706
+Walkthrough.
+
+23
+00:01:18.956 --> 00:01:20.279
+Here is a quick table:
+
+24
+00:01:20.559 --> 00:01:21.625
+Code, and Why.
+
+25
+00:01:21.905 --> 00:01:24.465
+MapInteger, LinkedHashSetK buckets:
+
+26
+00:01:24.745 --> 00:01:43.604
+A LinkedHashSet gives O(1) add, remove and oldest (iterator().next()), which is the LRU tie-break inside a frequency. if (bucket.isEmpty()) buckets.remove(f); if (minFreq == f) minFreq = f + 1;: minFreq can only rise by one on a touch.
+
+27
+00:01:43.884 --> 00:01:47.895
+No scan is needed. minFreq = 1 (in put of a new key):
+
+28
+00:01:48.175 --> 00:01:56.772
+New keys have frequency 1, which is always the minimum. for 100 keys: hot.put(scan- + i, i), then hot key still cached:
+
+29
+00:01:57.052 --> 00:02:03.260
+The scan keys all have frequency 1 and evict each other, while the hot key (frequency 6) survives.
+
+30
+00:02:03.540 --> 00:02:05.417
+An LRU cache would have lost it.
+
+31
+00:02:06.767 --> 00:02:07.727
+Part 5.
+
+32
+00:02:08.007 --> 00:02:08.946
+Complexity.
+
+33
+00:02:10.196 --> 00:02:11.519
+Here is a quick table:
+
+34
+00:02:11.799 --> 00:02:15.191
+Approach, and Time, and Space. get or put or evict.
+
+35
+00:02:15.471 --> 00:02:16.217
+Time:
+
+36
+00:02:16.497 --> 00:02:17.372
+O(1).
+
+37
+00:02:17.652 --> 00:02:18.505
+Space:
+
+38
+00:02:18.785 --> 00:02:19.873
+O(capacity).
+
+39
+00:02:21.223 --> 00:02:22.162
+Part 6.
+
+40
+00:02:22.442 --> 00:02:23.189
+Run it.
+
+41
+00:02:24.439 --> 00:02:25.761
+Here is the shell code.
+
+42
+00:02:28.611 --> 00:02:51.139
+On screen: after gets: freq buckets 1=c, 2=b, 3=a, min=1. put d: freq buckets 1=d, 2=b, 3=a, min=1 (c evicted). put e: freq buckets 1=e, 2=b, 3=a, min=1 (d evicted). after a 100-key scan, hot key still cached: true.
+
+43
+00:02:51.419 --> 00:02:52.166
+PASS.
+
+44
+00:02:55.016 --> 00:02:55.955
+Part 7.
+
+45
+00:02:56.235 --> 00:02:57.899
+Solve it with Spring Boot 4.
+
+46
+00:02:59.149 --> 00:03:05.805
+The interview class plugs into Spring's cache abstraction as a custom Cache, so any method can use it with @Cacheable.
+
+47
+00:03:06.085 --> 00:03:17.946
+The same CacheManager also registers a Caffeine cache, which is what you would actually run: its W-TinyLFU policy is an LFU with an admission filter and frequency decay.
+
+48
+00:03:19.296 --> 00:03:22.069
+The sequence diagram walks through it step by step.
+
+49
+00:03:22.349 --> 00:03:23.267
+C to P:
+
+50
+00:03:23.547 --> 00:03:26.555
+GET or api or v1 or products per day.
+
+51
+00:03:26.835 --> 00:03:28.520
+P to X: find(d).
+
+52
+00:03:28.800 --> 00:03:30.955
+X to L: get(d, loader) locked.
+
+53
+00:03:31.235 --> 00:03:32.685
+L to X: miss.
+
+54
+00:03:32.965 --> 00:03:36.101
+X to D: load (sync = true: once per key).
+
+55
+00:03:36.381 --> 00:03:37.405
+D to X:
+
+56
+00:03:37.685 --> 00:03:38.752
+Product d.
+
+57
+00:03:39.032 --> 00:03:42.403
+X to L: put(d) - evict min-frequency, oldest (c).
+
+58
+00:03:42.683 --> 00:03:43.643
+X to C:
+
+59
+00:03:43.923 --> 00:03:45.437
+200 Product D.
+
+60
+00:03:49.287 --> 00:03:50.653
+Spring Cache adapter.
+
+61
+00:03:50.933 --> 00:03:54.111
+Here is the Java code, LfuSpringCache.java.
+
+62
+00:03:54.391 --> 00:03:58.082
+It runs to 54 lines; the full listing is in the chapter.
+
+63
+00:03:58.362 --> 00:04:03.994
+Plugs the interview LFU into Spring's cache abstraction, so any @Cacheable method can use it.
+
+64
+00:04:04.274 --> 00:04:10.247
+One lock guards the structure (a get also mutates frequency buckets, so reads need the lock too).
+
+65
+00:04:13.097 --> 00:04:14.185
+CacheManager.
+
+66
+00:04:14.465 --> 00:04:17.260
+Here is the Java code, CacheConfig.java.
+
+67
+00:04:17.540 --> 00:04:21.188
+It runs to 22 lines; the full listing is in the chapter.
+
+68
+00:04:21.468 --> 00:04:23.047
+Two caches side by side:
+
+69
+00:04:25.897 --> 00:04:27.241
+@Cacheable service.
+
+70
+00:04:27.521 --> 00:04:30.443
+Here is the Java code, ProductService.java.
+
+71
+00:04:30.723 --> 00:04:34.222
+It runs to 20 lines; the full listing is in the chapter.
+
+72
+00:04:34.502 --> 00:04:39.793
+The cache sits in front of the slow source; sync = true means concurrent misses load once.
+
+73
+00:04:42.643 --> 00:04:43.709
+LFU core.
+
+74
+00:04:43.989 --> 00:04:46.848
+Here is the Java code, LfuCache.java.
+
+75
+00:04:47.128 --> 00:04:50.819
+It runs to 54 lines; the full listing is in the chapter.
+
+76
+00:04:51.099 --> 00:04:57.627
+The interview O(1) LFU: frequency buckets of LinkedHashSet (LRU tie-break) + minFreq.
+
+77
+00:04:57.907 --> 00:04:59.507
+Not thread-safe by itself.
+
+78
+00:05:02.357 --> 00:05:03.701
+Run it as a service.
+
+79
+00:05:03.981 --> 00:05:09.997
+The integration test LfuCacheIT.java drives the API against a real Redis.
+
+80
+00:05:10.277 --> 00:05:12.922
+This is its transcript ( request, response):
+
+81
+00:05:14.272 --> 00:05:19.072
+On screen: @Cacheable(products) backed by the O(1) LFU, capacity 3.
+
+82
+00:05:19.352 --> 00:05:22.851
+GET a x3, b x2, c x1 - database reads:
+
+83
+00:05:23.131 --> 00:05:26.949
+3, frequencies a=3 b=2 c=1.
+
+84
+00:05:27.229 --> 00:05:30.237
+GET or api or v1 or products per day.
+
+85
+00:05:30.517 --> 00:05:32.971
+200 id:d,name:Product D.
+
+86
+00:05:33.251 --> 00:05:37.709
+GET d (miss) evicts the least-frequently used entry: c present? false.
+
+87
+00:05:37.989 --> 00:05:40.891
+GET or api or v1 or products or a.
+
+88
+00:05:41.171 --> 00:05:43.581
+200 id:a,name:Product A.
+
+89
+00:05:43.861 --> 00:05:46.101
+GET a (hit) - database reads still 4.
+
+90
+00:05:46.381 --> 00:05:49.347
+GET or api or v1 or products or b.
+
+91
+00:05:49.627 --> 00:05:58.544
+200 id:b,name:Product B. @CacheEvict on update, then GET b - reloaded, database reads 5, evictions so far 1.
+
+92
+00:05:58.824 --> 00:05:59.571
+PASS.
+
+93
+00:06:02.421 --> 00:06:04.511
+What changes from the interview version.
+
+94
+00:06:04.791 --> 00:06:06.114
+Here is a quick table:
+
+95
+00:06:06.394 --> 00:06:27.919
+Interview, and Production (Spring Boot 4). single-threaded class: one ReentrantLock (a get also mutates frequency buckets, so reads need it too). callers call get or put: @Cacheable(sync = true): concurrent misses load once (no cache stampede). no invalidation: @CacheEvict on writes. pure LFU (old popular items stick forever):
+
+96
+00:06:28.199 --> 00:06:33.383
+Caffeine W-TinyLFU: frequency sketch with ageing + LRU window.
+
+97
+00:06:33.663 --> 00:06:35.093
+Prefer it in production.
+
+98
+00:06:36.443 --> 00:06:48.304
+For a cache shared by many instances, put Redis behind the same abstraction (spring.cache.type=redis, eviction policy allkeys-lfu) and keep Caffeine as a small L1.
+
+99
+00:06:49.654 --> 00:06:50.507
+Part 8.
+
+100
+00:06:50.787 --> 00:06:51.918
+Common mistakes.
+
+101
+00:06:53.168 --> 00:06:54.747
+Using a heap for eviction.
+
+102
+00:06:55.027 --> 00:06:58.419
+That's O(log n) and needs a decrease-key operation.
+
+103
+00:06:58.699 --> 00:07:02.197
+Forgetting to update minFreq when the minimum bucket empties.
+
+104
+00:07:02.477 --> 00:07:06.488
+Pure LFU without ageing: yesterday's hot item stays forever.
+
+105
+00:07:06.768 --> 00:07:11.163
+Production policies (W-TinyLFU in Caffeine) decay counts.
+
+106
+00:07:12.513 --> 00:07:13.409
+Part 9.
+
+107
+00:07:13.689 --> 00:07:15.033
+Follow-up questions.
+
+108
+00:07:16.283 --> 00:07:17.157
+Question.
+
+109
+00:07:17.437 --> 00:07:21.192
+LRU versus LFU versus W-TinyLFU?
+
+110
+00:07:21.472 --> 00:07:22.795
+Thirty-second answer:
+
+111
+00:07:23.075 --> 00:07:27.107
+LRU is simple and adapts to recency, but it's flushed by scans.
+
+112
+00:07:27.387 --> 00:07:31.077
+LFU resists scans but adapts slowly and needs ageing.
+
+113
+00:07:31.357 --> 00:07:43.283
+W-TinyLFU (Caffeine) admits new items only if their approximate frequency (from a Count-Min sketch) beats the eviction victim's, plus a small LRU window for bursts.
+
+114
+00:07:43.563 --> 00:07:45.952
+It's close to optimal on real workloads.
+
+115
+00:07:47.302 --> 00:07:48.177
+Question.
+
+116
+00:07:48.457 --> 00:07:50.761
+What eviction policies does Redis offer?
+
+117
+00:07:51.041 --> 00:08:02.966
+Thirty-second answer: allkeys-lru, allkeys-lfu (approximate: an 8-bit log counter with decay), the volatile- variants that only evict keys with a TTL, and noeviction.
+
+118
+00:08:03.246 --> 00:08:07.513
+Redis samples keys instead of keeping exact structures, to save memory.
+
+119
+00:08:08.863 --> 00:08:10.484
+That's the end of this chapter.
+
+120
+00:08:10.764 --> 00:08:16.759
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+121
+00:08:17.039 --> 00:08:18.468
+See you in the next chapter.
+

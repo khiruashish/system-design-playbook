@@ -1,0 +1,5998 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.569
+Consistency, Time and Consensus.
+
+2
+00:00:02.849 --> 00:00:06.966
+Chapter 12, from the Distributed Core part of the System Design Playbook.
+
+3
+00:00:08.716 --> 00:00:09.676
+At a glance:
+
+4
+00:00:09.956 --> 00:00:11.129
+Chapter at a glance.
+
+5
+00:00:11.409 --> 00:00:12.412
+Reader bands:
+
+6
+00:00:12.692 --> 00:00:14.996
+B1, then B4, Prerequisites:
+
+7
+00:00:15.276 --> 00:00:19.393
+Ch 05, Ch 10, Ch 11, What you will build:
+
+8
+00:00:19.673 --> 00:00:22.788
+Coordination and ordering for the grocery platform.
+
+9
+00:00:23.068 --> 00:00:31.879
+L1 compares clocks: wall clocks with skew, Lamport, vector and hybrid logical clocks, and monotonic versus wall-clock timeouts.
+
+10
+00:00:32.159 --> 00:00:36.575
+L2 checks histories of a replicated register for linearizability.
+
+11
+00:00:36.855 --> 00:00:45.751
+L3 is a Raft simulator with fault injection and safety checks, including two deliberately broken rules and the paper's Figure 8 scenario.
+
+12
+00:00:46.031 --> 00:00:54.500
+L4 builds leader election with leases and fencing tokens, and linearizable reads (ReadIndex versus leases under clock drift).
+
+13
+00:00:54.780 --> 00:00:55.889
+Two real labs:
+
+14
+00:00:56.169 --> 00:01:03.636
+PostgreSQL 16 shows a paused leader corrupting a settlement without a fencing token, and being rejected with one.
+
+15
+00:01:03.916 --> 00:01:18.316
+A 3-member etcd 3.5 cluster shows lease-based election with revision tokens, leader failover, a minority member serving a stale serializable read, CAS on modrevision, and watches versus compaction.
+
+16
+00:01:18.596 --> 00:01:19.577
+Reading time:
+
+17
+00:01:19.857 --> 00:01:22.396
+130 min + code + labs.
+
+18
+00:01:23.746 --> 00:01:24.599
+Part 1.
+
+19
+00:01:24.879 --> 00:01:26.799
+Introduction and Why It Matters.
+
+20
+00:01:28.049 --> 00:01:28.967
+A story:
+
+21
+00:01:29.247 --> 00:01:31.785
+214 dark stores paid twice.
+
+22
+00:01:32.065 --> 00:01:40.855
+The nightly store-settlement job computes each dark store's payout (sales minus refunds, commission and GST) and writes it for the bank file.
+
+23
+00:01:41.135 --> 00:01:46.639
+It must run on exactly one pod, so the team used a Redis lock with a 10-second TTL:
+
+24
+00:01:46.919 --> 00:01:50.012
+SET settle-lock pod-A NX PX 10000.
+
+25
+00:01:50.292 --> 00:01:52.041
+Whoever got the lock was the leader.
+
+26
+00:01:53.391 --> 00:01:57.125
+One Diwali night, pod A took the lock and loaded the day's sales.
+
+27
+00:01:57.405 --> 00:02:05.789
+Then it stopped for 14 seconds: a full GC on a heap swollen by the sale-day data, while its VM was also being live-migrated.
+
+28
+00:02:06.069 --> 00:02:07.327
+The lock expired.
+
+29
+00:02:07.607 --> 00:02:14.562
+Pod B took it, recomputed every payout (now including 3,100 late refunds) and wrote them.
+
+30
+00:02:14.842 --> 00:02:15.887
+Pod A woke up.
+
+31
+00:02:16.167 --> 00:02:18.535
+From its point of view no time had passed.
+
+32
+00:02:18.815 --> 00:02:25.855
+It still held the lock, so it wrote its payouts over B's, and the bank-file step, triggered by both, picked up both batches.
+
+33
+00:02:26.135 --> 00:02:30.765
+214 stores were paid twice, 38 lakh rupees in total.
+
+34
+00:02:31.045 --> 00:02:33.071
+Recovering it took three weeks of calls.
+
+35
+00:02:34.421 --> 00:02:39.733
+The same week, support was confused by order timelines that showed Packing before Paid.
+
+36
+00:02:40.013 --> 00:02:50.872
+Events from different services were sorted by their wall-clock timestamps, and the order-service host's clock had drifted 90 ms behind after an NTP misconfiguration.
+
+37
+00:02:51.152 --> 00:02:53.157
+Neither was a bug in one service.
+
+38
+00:02:53.437 --> 00:02:58.621
+Both came from assumptions about time and agreement that don't hold in a distributed system:
+
+39
+00:02:59.971 --> 00:03:03.235
+A lock with a TTL doesn't stop a paused process.
+
+40
+00:03:03.515 --> 00:03:05.329
+The process doesn't know it paused.
+
+41
+00:03:05.609 --> 00:03:15.657
+The fix is a fencing token: a number that increases with every new lease, sent with every write, and checked by the resource (update... where fence =:token).
+
+42
+00:03:15.937 --> 00:03:19.243
+The lab shows both outcomes on real PostgreSQL.
+
+43
+00:03:19.523 --> 00:03:35.075
+Who is the leader must be decided by a consensus system (etcd, ZooKeeper, a Kubernetes Lease backed by etcd, or a database acting as the single linearizable store), not by a cache that can lose writes on failover (Ch 10).
+
+44
+00:03:36.425 --> 00:03:40.095
+Wall-clock timestamps from different machines don't order events.
+
+45
+00:03:40.375 --> 00:03:44.535
+Causally related events need a logical or hybrid logical clock.
+
+46
+00:03:44.815 --> 00:03:46.713
+Timeouts need a monotonic clock.
+
+47
+00:03:48.063 --> 00:03:48.746
+Quote:
+
+48
+00:03:49.026 --> 00:03:50.690
+The thesis of this chapter.
+
+49
+00:03:50.970 --> 00:03:58.586
+In a distributed system there is no global now and no reliable way to know whether another process is dead or just slow.
+
+50
+00:03:58.866 --> 00:04:03.154
+Consistency models say exactly which orderings a reader may observe.
+
+51
+00:04:03.434 --> 00:04:08.405
+Clocks give you orderings that are either causal (logical) or approximate (physical).
+
+52
+00:04:08.685 --> 00:04:11.351
+Consensus lets a majority agree anyway.
+
+53
+00:04:11.631 --> 00:04:21.914
+Anything else that claims exactly one leader or latest value is relying on timing assumptions, so make those assumptions explicit and put a fence behind them.
+
+54
+00:04:23.264 --> 00:04:25.568
+Where this lives in the grocery platform.
+
+55
+00:04:25.848 --> 00:04:27.213
+Here is a quick table:
+
+56
+00:04:27.493 --> 00:04:29.776
+Need, and Mechanism, and Chapter link.
+
+57
+00:04:30.056 --> 00:04:34.387
+Exactly-one runner for settlement, reconciliation and the bucket mover.
+
+58
+00:04:34.667 --> 00:04:39.701
+Mechanism: etcd election (lease) + fencing token checked by the database.
+
+59
+00:04:39.981 --> 00:04:40.941
+Chapter link:
+
+60
+00:04:41.221 --> 00:04:42.928
+This chapter (L4, lab).
+
+61
+00:04:43.208 --> 00:04:46.109
+Shard map, feature flags, rate-limit configs.
+
+62
+00:04:46.389 --> 00:04:50.869
+Mechanism: etcd keys with revisions, compare-and-swap updates, watches.
+
+63
+00:04:51.149 --> 00:04:52.109
+Chapter link:
+
+64
+00:04:52.389 --> 00:04:53.456
+Ch 11.
+
+65
+00:04:53.736 --> 00:04:56.637
+PostgreSQL failover without split brain.
+
+66
+00:04:56.917 --> 00:04:57.856
+Mechanism:
+
+67
+00:04:58.136 --> 00:05:00.227
+Patroni with etcd as the DCS.
+
+68
+00:05:00.507 --> 00:05:01.467
+Chapter link:
+
+69
+00:05:01.747 --> 00:05:02.749
+Ch 10.
+
+70
+00:05:03.029 --> 00:05:05.376
+Kafka metadata and partition leaders.
+
+71
+00:05:05.656 --> 00:05:06.595
+Mechanism:
+
+72
+00:05:06.875 --> 00:05:09.243
+KRaft (Raft-based controller quorum).
+
+73
+00:05:09.523 --> 00:05:10.483
+Chapter link:
+
+74
+00:05:10.763 --> 00:05:11.915
+Ch 14.
+
+75
+00:05:12.195 --> 00:05:14.243
+Order status never goes backwards.
+
+76
+00:05:14.523 --> 00:05:15.461
+Mechanism:
+
+77
+00:05:15.741 --> 00:05:18.728
+Monotonic version per order, conditional updates.
+
+78
+00:05:19.008 --> 00:05:19.968
+Chapter link:
+
+79
+00:05:20.248 --> 00:05:21.677
+This chapter (L2).
+
+80
+00:05:21.957 --> 00:05:25.285
+Ordering events across services for timelines and audit.
+
+81
+00:05:25.565 --> 00:05:26.504
+Mechanism:
+
+82
+00:05:26.784 --> 00:05:30.389
+Hybrid logical clock (HLC) in the event envelope.
+
+83
+00:05:30.669 --> 00:05:31.629
+Chapter link:
+
+84
+00:05:31.909 --> 00:05:33.339
+This chapter (L1).
+
+85
+00:05:34.689 --> 00:05:37.718
+Timeouts, retries, circuit breakers, rate limits.
+
+86
+00:05:37.998 --> 00:05:38.937
+Mechanism:
+
+87
+00:05:39.217 --> 00:05:41.627
+Monotonic clock (System.nanoTime).
+
+88
+00:05:41.907 --> 00:05:42.867
+Chapter link:
+
+89
+00:05:43.147 --> 00:05:44.214
+Ch 18.
+
+90
+00:05:44.494 --> 00:05:46.521
+Money: one authoritative value.
+
+91
+00:05:46.801 --> 00:05:47.739
+Mechanism:
+
+92
+00:05:48.019 --> 00:05:52.329
+Single-leader PostgreSQL per shard (linearizable at the primary).
+
+93
+00:05:52.609 --> 00:05:53.569
+Chapter link:
+
+94
+00:05:53.849 --> 00:05:56.067
+Ch 05, 10, 11.
+
+95
+00:05:56.347 --> 00:05:58.161
+Clock hygiene on every host.
+
+96
+00:05:58.441 --> 00:06:02.238
+Mechanism: chrony + cloud time service, offset alerting.
+
+97
+00:06:02.518 --> 00:06:04.289
+Chapter link: §6.
+
+98
+00:06:05.639 --> 00:06:06.961
+Learning objectives.
+
+99
+00:06:07.241 --> 00:06:08.607
+Here is a quick table:
+
+100
+00:06:08.887 --> 00:06:11.084
+Band, and After this chapter you can....
+
+101
+00:06:11.364 --> 00:06:12.196
+B1:
+
+102
+00:06:12.476 --> 00:06:20.049
+Explain strong versus eventual consistency, why wall clocks on different machines disagree, and what consensus is for.
+
+103
+00:06:20.329 --> 00:06:21.204
+B2:
+
+104
+00:06:21.484 --> 00:06:29.441
+Describe the consistency-model ladder, use Lamport, vector and hybrid clocks correctly, and use monotonic clocks for timeouts.
+
+105
+00:06:29.721 --> 00:06:30.617
+B3:
+
+106
+00:06:30.897 --> 00:06:40.284
+Explain Raft (elections, log replication, the commit rule), CAP or PACELC precisely, and how to check a history for linearizability.
+
+107
+00:06:40.564 --> 00:06:41.460
+B4:
+
+108
+00:06:41.740 --> 00:06:53.879
+Design leader election with leases and fencing tokens, choose between ReadIndex and lease reads, reason about TrueTime or HLC-based databases, and know when not to use consensus.
+
+109
+00:06:55.229 --> 00:06:56.103
+Part 2.
+
+110
+00:06:56.383 --> 00:06:58.282
+Core Concepts, Beginner to Deep.
+
+111
+00:06:59.532 --> 00:07:02.689
+Intuition: a family WhatsApp group deciding dinner.
+
+112
+00:07:02.969 --> 00:07:06.148
+Five family members decide on dinner over WhatsApp.
+
+113
+00:07:06.428 --> 00:07:08.775
+Messages arrive late and out of order.
+
+114
+00:07:09.055 --> 00:07:15.775
+Your phone shows Sure, pizza! before Pizza or biryani? because the first message was stuck on a slow network.
+
+115
+00:07:16.055 --> 00:07:21.495
+Each phone's clock also differs by a few seconds, so timestamps don't settle who said what first.
+
+116
+00:07:21.775 --> 00:07:23.012
+Someone goes quiet.
+
+117
+00:07:23.292 --> 00:07:26.364
+Is Uncle offline, asleep, or just typing slowly?
+
+118
+00:07:26.644 --> 00:07:27.604
+You can't tell.
+
+119
+00:07:27.884 --> 00:07:33.751
+That's the core problem of distributed systems: a slow process looks exactly like a dead one.
+
+120
+00:07:35.101 --> 00:07:39.623
+The decision rule: whatever a majority (3 of 5) agrees to is final.
+
+121
+00:07:39.903 --> 00:07:46.410
+Two majorities always share at least one person, so the family can never decide both pizza and biryani.
+
+122
+00:07:46.690 --> 00:07:53.666
+If only 2 people are online, no decision is made (the system is unavailable), but it's never inconsistent.
+
+123
+00:07:53.946 --> 00:07:55.119
+That's consensus.
+
+124
+00:07:55.399 --> 00:08:00.349
+The rule for the delivery app: only the person holding the family's payment card orders.
+
+125
+00:08:00.629 --> 00:08:07.626
+If Mom hands the card to Dad while she's stuck in a lift, and then she comes out of the lift and orders anyway, you get two dinners.
+
+126
+00:08:07.906 --> 00:08:13.218
+Unless the restaurant only accepts orders from the latest card holder: that's a fencing token.
+
+127
+00:08:14.568 --> 00:08:17.917
+What consistency means (it's used for three different things).
+
+128
+00:08:18.197 --> 00:08:19.563
+Here is a quick table:
+
+129
+00:08:19.843 --> 00:08:21.357
+Word, and Meaning, and Where.
+
+130
+00:08:21.637 --> 00:08:22.661
+C in ACID.
+
+131
+00:08:22.941 --> 00:08:23.731
+Meaning:
+
+132
+00:08:24.011 --> 00:08:27.467
+Transactions keep invariants (constraints, business rules).
+
+133
+00:08:27.747 --> 00:08:28.408
+Where:
+
+134
+00:08:28.688 --> 00:08:30.075
+Ch 05.
+
+135
+00:08:30.355 --> 00:08:32.979
+C in CAP or consistency models.
+
+136
+00:08:33.259 --> 00:08:34.048
+Meaning:
+
+137
+00:08:34.328 --> 00:08:41.240
+What values reads may return when data is replicated or distributed: linearizable, causal, eventual...
+
+138
+00:08:41.520 --> 00:08:42.181
+Where:
+
+139
+00:08:42.461 --> 00:08:43.464
+This chapter.
+
+140
+00:08:43.744 --> 00:08:46.325
+Isolation (often called consistency).
+
+141
+00:08:46.605 --> 00:08:47.395
+Meaning:
+
+142
+00:08:47.675 --> 00:08:52.560
+How concurrent transactions interleave: read committed, snapshot, serializable.
+
+143
+00:08:52.840 --> 00:08:53.501
+Where:
+
+144
+00:08:53.781 --> 00:08:55.168
+Ch 05.
+
+145
+00:08:56.518 --> 00:09:08.081
+Strongly consistent usually means linearizable: the system behaves as if there's one copy of the data, and every operation takes effect at a single instant between its start and its end.
+
+146
+00:09:08.361 --> 00:09:15.059
+Eventually consistent means replicas converge if writes stop, with no promise about what you read before that.
+
+147
+00:09:16.409 --> 00:09:18.095
+The consistency-model ladder.
+
+148
+00:09:18.375 --> 00:09:22.983
+From strongest to weakest (for single objects, plus the transactional versions):
+
+149
+00:09:24.333 --> 00:09:25.698
+Here is a quick table:
+
+150
+00:09:25.978 --> 00:09:28.773
+Model, and Guarantee, and Cost, and Example.
+
+151
+00:09:29.053 --> 00:09:32.466
+Strict serializable (linearizable + serializable).
+
+152
+00:09:32.746 --> 00:09:33.727
+Guarantee:
+
+153
+00:09:34.007 --> 00:09:37.421
+Transactions appear in one order that respects real time.
+
+154
+00:09:37.701 --> 00:09:38.426
+Cost:
+
+155
+00:09:38.706 --> 00:09:42.397
+Coordination on every transaction, cross-region latency.
+
+156
+00:09:42.677 --> 00:09:43.551
+Example:
+
+157
+00:09:43.831 --> 00:09:50.381
+Spanner, CockroachDB (mostly), FoundationDB, single-node PostgreSQL SERIALIZABLE.
+
+158
+00:09:50.661 --> 00:09:51.685
+Linearizable.
+
+159
+00:09:51.965 --> 00:09:52.946
+Guarantee:
+
+160
+00:09:53.226 --> 00:10:01.247
+Single-object ops appear atomic at one instant within their real-time interval; once any read sees a value, all later reads do.
+
+161
+00:10:01.527 --> 00:10:02.253
+Cost:
+
+162
+00:10:02.533 --> 00:10:04.581
+A leader or a quorum round per op.
+
+163
+00:10:04.861 --> 00:10:09.789
+Example: etcd (default reads), ZooKeeper writes, a PostgreSQL primary.
+
+164
+00:10:11.139 --> 00:10:12.099
+Sequential.
+
+165
+00:10:12.379 --> 00:10:13.360
+Guarantee:
+
+166
+00:10:13.640 --> 00:10:21.149
+All clients see the same order of ops, and each client's ops stay in program order, but not necessarily real-time order.
+
+167
+00:10:21.429 --> 00:10:22.155
+Cost:
+
+168
+00:10:22.435 --> 00:10:24.013
+Cheaper than linearizable.
+
+169
+00:10:24.293 --> 00:10:25.168
+Example:
+
+170
+00:10:25.448 --> 00:10:27.411
+ZooKeeper reads (without sync).
+
+171
+00:10:27.691 --> 00:10:28.416
+Causal.
+
+172
+00:10:28.696 --> 00:10:29.677
+Guarantee:
+
+173
+00:10:29.957 --> 00:10:35.931
+Operations that are causally related are seen in the same order by all; concurrent ones may differ.
+
+174
+00:10:36.211 --> 00:10:36.936
+Cost:
+
+175
+00:10:37.216 --> 00:10:40.672
+No global coordination; needs dependency tracking.
+
+176
+00:10:40.952 --> 00:10:41.827
+Example:
+
+177
+00:10:42.107 --> 00:10:46.331
+COPS, MongoDB causal sessions, many CRDT systems.
+
+178
+00:10:46.611 --> 00:10:47.869
+Session guarantees.
+
+179
+00:10:48.149 --> 00:10:49.131
+Guarantee:
+
+180
+00:10:49.411 --> 00:10:54.296
+Read-your-writes, monotonic reads, monotonic writes, writes-follow-reads, per client.
+
+181
+00:10:54.576 --> 00:10:55.301
+Cost:
+
+182
+00:10:55.581 --> 00:10:58.035
+Session tokens (Ch 10 L2).
+
+183
+00:10:58.315 --> 00:10:59.189
+Example:
+
+184
+00:10:59.469 --> 00:11:00.771
+Our replica reads.
+
+185
+00:11:02.121 --> 00:11:03.017
+Eventual.
+
+186
+00:11:03.297 --> 00:11:04.278
+Guarantee:
+
+187
+00:11:04.558 --> 00:11:06.563
+Replicas converge when writes stop.
+
+188
+00:11:06.843 --> 00:11:07.569
+Cost:
+
+189
+00:11:07.849 --> 00:11:09.598
+Cheapest, always available.
+
+190
+00:11:09.878 --> 00:11:10.753
+Example:
+
+191
+00:11:11.033 --> 00:11:13.123
+DNS, Cassandra ONE, caches.
+
+192
+00:11:14.473 --> 00:11:25.481
+Linearizability versus serializability: serializability is about transactions (multi-object) appearing in some serial order, which need not match real time.
+
+193
+00:11:25.761 --> 00:11:29.943
+Linearizability is about single objects respecting real time.
+
+194
+00:11:30.223 --> 00:11:32.164
+Snapshot isolation is neither.
+
+195
+00:11:32.444 --> 00:11:40.295
+A read-only replica in a serializable database can still serve stale reads, which is serializable but not linearizable.
+
+196
+00:11:40.575 --> 00:11:42.708
+Why the distinction matters in practice.
+
+197
+00:11:42.988 --> 00:11:45.420
+Linearizability is what makes these work:
+
+198
+00:11:45.700 --> 00:11:51.332
+Leader election and locks: the lock is mine must be the same answer for everyone right now.
+
+199
+00:11:52.682 --> 00:11:57.247
+Uniqueness constraints: is this username taken? must see the latest write.
+
+200
+00:11:57.527 --> 00:12:03.415
+Cross-channel ordering: a service writes an image and then sends resize image X through Kafka.
+
+201
+00:12:03.695 --> 00:12:07.450
+If the resizer reads a stale replica, it doesn't find the image.
+
+202
+00:12:07.730 --> 00:12:15.175
+L2 checks histories: an async follower read was non-linearizable in 61.67 % of histories.
+
+203
+00:12:15.455 --> 00:12:27.850
+A quorum read with R + W N, which people often assume is enough, was still non-linearizable in 0.06 %: one client read 2 and a later client read 1.
+
+204
+00:12:28.130 --> 00:12:31.927
+Only a read that writes back what it read (ABD) got to 0.
+
+205
+00:12:33.277 --> 00:12:34.963
+CAP and PACELC, precisely.
+
+206
+00:12:35.243 --> 00:12:51.328
+CAP (Brewer, proven by Gilbert and Lynch): during a network partition, a system that stores replicated data must choose between linearizability (C) and availability (A: every request to a non-failed node gets a non-error response).
+
+207
+00:12:51.608 --> 00:12:52.824
+Common misreadings:
+
+208
+00:12:53.104 --> 00:12:54.533
+Pick two of three is wrong.
+
+209
+00:12:54.813 --> 00:12:58.675
+Partitions aren't optional, so the choice is C or A when partitioned.
+
+210
+00:12:58.955 --> 00:13:04.779
+The C is linearizability only, and the A is a very strict availability (every node answers).
+
+211
+00:13:05.059 --> 00:13:10.008
+A CP system is usually still highly available when a majority is reachable.
+
+212
+00:13:10.288 --> 00:13:12.635
+It just refuses on the minority side.
+
+213
+00:13:13.985 --> 00:13:16.715
+Most systems are neither fully C nor fully A.
+
+214
+00:13:16.995 --> 00:13:24.078
+They make per-operation choices (Cassandra consistency levels, etcd serializable versus linearizable reads).
+
+215
+00:13:24.358 --> 00:13:31.867
+PACELC (Abadi) adds the everyday trade-off: if Partition, choose A or C; Else, choose Latency or Consistency.
+
+216
+00:13:32.147 --> 00:13:37.523
+Without any partition, strong consistency still costs round trips to a leader or quorum.
+
+217
+00:13:38.873 --> 00:13:40.239
+Here is a quick table:
+
+218
+00:13:40.519 --> 00:13:41.713
+System, and P:
+
+219
+00:13:41.993 --> 00:13:43.167
+A or C, and E:
+
+220
+00:13:43.447 --> 00:13:46.689
+L or C. etcd, ZooKeeper, Consul (default).
+
+221
+00:13:46.969 --> 00:13:47.695
+P:
+
+222
+00:13:47.975 --> 00:13:48.892
+A or C:
+
+223
+00:13:49.172 --> 00:13:50.900
+C (minority refuses).
+
+224
+00:13:51.180 --> 00:13:51.820
+E:
+
+225
+00:13:52.100 --> 00:13:53.081
+L or C:
+
+226
+00:13:53.361 --> 00:13:54.044
+C.
+
+227
+00:13:54.324 --> 00:13:57.865
+PostgreSQL with async replicas, reads on replicas.
+
+228
+00:13:58.145 --> 00:13:58.871
+P:
+
+229
+00:13:59.151 --> 00:14:00.068
+A or C:
+
+230
+00:14:00.348 --> 00:14:01.756
+A (replicas answer).
+
+231
+00:14:02.036 --> 00:14:02.676
+E:
+
+232
+00:14:02.956 --> 00:14:03.937
+L or C:
+
+233
+00:14:04.217 --> 00:14:04.836
+L.
+
+234
+00:14:05.116 --> 00:14:09.233
+PostgreSQL quorum sync (Ch 10), reads on primary.
+
+235
+00:14:09.513 --> 00:14:10.239
+P:
+
+236
+00:14:10.519 --> 00:14:11.436
+A or C:
+
+237
+00:14:11.716 --> 00:14:12.399
+C.
+
+238
+00:14:12.679 --> 00:14:13.319
+E:
+
+239
+00:14:13.599 --> 00:14:14.580
+L or C:
+
+240
+00:14:14.860 --> 00:14:15.543
+C.
+
+241
+00:14:15.823 --> 00:14:18.276
+Cassandra or DynamoDB (tunable).
+
+242
+00:14:18.556 --> 00:14:19.281
+P:
+
+243
+00:14:19.561 --> 00:14:20.479
+A or C:
+
+244
+00:14:20.759 --> 00:14:21.825
+A by default.
+
+245
+00:14:22.105 --> 00:14:22.745
+E:
+
+246
+00:14:23.025 --> 00:14:24.007
+L or C:
+
+247
+00:14:24.287 --> 00:14:25.417
+L by default.
+
+248
+00:14:25.697 --> 00:14:27.404
+Spanner, CockroachDB.
+
+249
+00:14:27.684 --> 00:14:28.409
+P:
+
+250
+00:14:28.689 --> 00:14:29.607
+A or C:
+
+251
+00:14:29.887 --> 00:14:30.569
+C.
+
+252
+00:14:30.849 --> 00:14:31.489
+E:
+
+253
+00:14:31.769 --> 00:14:32.751
+L or C:
+
+254
+00:14:33.031 --> 00:14:33.713
+C.
+
+255
+00:14:33.993 --> 00:14:35.081
+Redis Cluster.
+
+256
+00:14:35.361 --> 00:14:36.087
+P:
+
+257
+00:14:36.367 --> 00:14:37.284
+A or C:
+
+258
+00:14:37.564 --> 00:14:40.316
+A-ish (async replication, can lose writes).
+
+259
+00:14:40.596 --> 00:14:41.236
+E:
+
+260
+00:14:41.516 --> 00:14:42.497
+L or C:
+
+261
+00:14:42.777 --> 00:14:43.396
+L.
+
+262
+00:14:44.746 --> 00:14:47.050
+Physical time: why clocks lie, then.
+
+263
+00:14:47.330 --> 00:14:59.063
+Each machine has a quartz oscillator that drifts (roughly 10 to 100 parts per million, up to ~8.6 s a day at 100 ppm), and temperature changes the rate.
+
+264
+00:14:59.343 --> 00:15:11.674
+NTP synchronizes clocks over the network to within about 1 to 10 ms on a good LAN and tens of ms across the internet, and much worse if the time server is unreachable or wrong.
+
+265
+00:15:11.954 --> 00:15:23.239
+Cloud time services (AWS Time Sync, Google's) with PTP or local hardware references get to microseconds, but offsets are never zero and never guaranteed.
+
+266
+00:15:23.519 --> 00:15:24.757
+Clocks also jump:
+
+267
+00:15:26.107 --> 00:15:33.000
+NTP step: if the offset is large, ntpd or chrony may step the clock (possibly backwards) instead of slewing it.
+
+268
+00:15:34.280 --> 00:15:40.637
+Leap seconds: some hosts step, repeat a second or smear it (Google, AWS spread it over hours).
+
+269
+00:15:40.917 --> 00:15:45.739
+VM pauses and live migration: the guest's clock catches up in one jump.
+
+270
+00:15:46.019 --> 00:15:50.563
+Manual changes by operators, containers inheriting a bad host clock.
+
+271
+00:15:50.843 --> 00:15:53.637
+Two different clocks in every OS and in Java:
+
+272
+00:15:54.987 --> 00:15:56.353
+Here is a quick table:
+
+273
+00:15:56.633 --> 00:16:00.259
+Clock, and Java API, and Use for, and Never use for.
+
+274
+00:16:00.539 --> 00:16:02.203
+Wall clock (time of day).
+
+275
+00:16:02.483 --> 00:16:03.678
+Java API:
+
+276
+00:16:03.958 --> 00:16:08.310
+Instant.now(), System.currentTimeMillis(), InstantSource or Clock.
+
+277
+00:16:08.590 --> 00:16:09.443
+Use for:
+
+278
+00:16:09.723 --> 00:16:14.331
+Timestamps shown to humans, created at, expiry dates stored in a DB.
+
+279
+00:16:14.611 --> 00:16:15.678
+Never use for:
+
+280
+00:16:15.958 --> 00:16:19.883
+Measuring durations, timeouts, ordering events across machines.
+
+281
+00:16:20.163 --> 00:16:21.358
+Monotonic clock.
+
+282
+00:16:21.638 --> 00:16:22.833
+Java API:
+
+283
+00:16:23.113 --> 00:16:24.563
+System.nanoTime().
+
+284
+00:16:24.843 --> 00:16:25.697
+Use for:
+
+285
+00:16:25.977 --> 00:16:30.265
+Durations, timeouts, rate limits, lease checks inside one process.
+
+286
+00:16:30.545 --> 00:16:31.611
+Never use for:
+
+287
+00:16:31.891 --> 00:16:35.603
+Comparing across machines or restarts (arbitrary origin).
+
+288
+00:16:36.953 --> 00:16:48.879
+L1 E: a 2 s timeout measured with the wall clock while NTP steps it back 5 s reports minus 3,800 ms elapsed and fires 5.8 s late.
+
+289
+00:16:49.159 --> 00:16:51.420
+With the monotonic clock it fires on time.
+
+290
+00:16:51.700 --> 00:17:12.969
+Clock skew breaks things silently: last-write-wins picks the wrong write (Ch 10 L1: a 90 s skew kept the older edit), TTL-based locks expire early or late, events sort in the wrong order (L1 A: the effect was timestamped 87 ms before its cause), and certificate validation fails (Ch 23).
+
+291
+00:17:14.319 --> 00:17:15.578
+Logical clocks:
+
+292
+00:17:15.858 --> 00:17:17.778
+Lamport, vector and hybrid.
+
+293
+00:17:18.058 --> 00:17:27.594
+Happened-before (, then ): a, then b if a and b are on the same process in that order, or a is the send of a message and b its receipt, or transitively.
+
+294
+00:17:27.874 --> 00:17:30.946
+If neither a, then b nor b, then a, they're concurrent.
+
+295
+00:17:31.226 --> 00:17:32.314
+Lamport clock.
+
+296
+00:17:32.594 --> 00:17:40.935
+Each process keeps a counter: increment on every event, send it with messages, on receipt set max(local, received) + 1.
+
+297
+00:17:41.215 --> 00:17:43.541
+Guarantee: a, then b ⇒ L(a) L(b).
+
+298
+00:17:43.821 --> 00:17:49.111
+Ties are broken by process id, which gives a total order consistent with causality.
+
+299
+00:17:50.461 --> 00:17:51.464
+Limitation:
+
+300
+00:17:51.744 --> 00:17:54.005
+L(a) L(b) doesn't mean a, then b.
+
+301
+00:17:54.285 --> 00:18:00.792
+L1 B: an unrelated refund quote got L=2 6 even though it didn't cause the packing event.
+
+302
+00:18:01.072 --> 00:18:02.757
+You can't detect concurrency.
+
+303
+00:18:03.037 --> 00:18:04.040
+Vector clock.
+
+304
+00:18:04.320 --> 00:18:07.819
+Each process keeps a vector of counters, one per process.
+
+305
+00:18:08.099 --> 00:18:14.712
+Compare component-wise: at most in every component means happened-before, and neither at most means concurrent.
+
+306
+00:18:14.992 --> 00:18:22.757
+L1 C: phone and web edits of the same cart are CONCURRENT, so the system keeps both and merges (Ch 10 OR-Set).
+
+307
+00:18:23.037 --> 00:18:28.605
+Cost: vector size grows with the number of writers (use per-replica version vectors, and prune).
+
+308
+00:18:29.955 --> 00:18:33.475
+Hybrid logical clock (HLC) (Kulkarni et al.
+
+309
+00:18:33.755 --> 00:18:35.099
+2014).
+
+310
+00:18:35.379 --> 00:18:56.990
+A timestamp (wall, logical): wall tracks the max physical time seen, and logical breaks ties and preserves causality when clocks are behind. a, then b ⇒ HLC(a) HLC(b), like Lamport. wall stays within the clock-skew bound of real physical time, so timestamps are meaningful to humans and usable for time-range queries.
+
+311
+00:18:57.270 --> 00:19:01.494
+Fits in 64 bits (48-bit ms + 16-bit counter).
+
+312
+00:19:01.774 --> 00:19:09.283
+L1 D: with the same 90 ms skew, PAYMENTCAPTURED 1000.0 ORDERPACKING 1000.1.
+
+313
+00:19:10.633 --> 00:19:15.625
+Used by CockroachDB, YugabyteDB and MongoDB (cluster time).
+
+314
+00:19:15.905 --> 00:19:22.689
+We put an HLC in every domain event's envelope (Ch 14) for ordering timelines and audit logs.
+
+315
+00:19:24.039 --> 00:19:26.749
+TrueTime, commit wait and uncertainty intervals.
+
+316
+00:19:27.029 --> 00:19:29.333
+Spanner doesn't pretend clocks are exact.
+
+317
+00:19:29.613 --> 00:19:41.815
+TrueTime returns an interval earliest, latest guaranteed to contain real time, with ε typically a few ms thanks to GPS receivers and atomic clocks in every data centre.
+
+318
+00:19:42.095 --> 00:19:53.658
+A transaction gets commit timestamp s = TT.now().latest, then waits until TT.now().earliest s before making the commit visible (commit wait, ~2ε).
+
+319
+00:19:53.938 --> 00:20:01.746
+Any transaction that starts after this one finishes gets a larger timestamp, so timestamp order = real-time order.
+
+320
+00:20:02.026 --> 00:20:08.234
+That's external consistency (strict serializability) from clocks, at a cost of a few ms per write.
+
+321
+00:20:09.584 --> 00:20:17.605
+CockroachDB uses HLC without atomic clocks and a configured max clock offset (500 ms by default).
+
+322
+00:20:17.885 --> 00:20:26.995
+A read that sees a value with a timestamp inside its uncertainty window can't tell whether it's before or after, so it restarts at a higher timestamp.
+
+323
+00:20:27.275 --> 00:20:32.992
+Nodes whose clock offset exceeds the bound shut themselves down, because correctness depends on it.
+
+324
+00:20:33.272 --> 00:20:40.141
+The lesson for everyone else: if correctness depends on clocks, the bound must be explicit, monitored and enforced.
+
+325
+00:20:41.491 --> 00:20:42.899
+The consensus problem.
+
+326
+00:20:43.179 --> 00:20:49.729
+Several nodes must agree on a value (or on a sequence of values, which is a replicated log) such that:
+
+327
+00:20:50.009 --> 00:20:52.590
+Agreement: no two nodes decide differently.
+
+328
+00:20:52.870 --> 00:20:56.177
+Validity: the decided value was proposed by someone.
+
+329
+00:20:56.457 --> 00:20:59.998
+Termination: every non-failed node eventually decides.
+
+330
+00:21:01.348 --> 00:21:13.999
+FLP impossibility (Fischer, Lynch, Paterson, 1985): in a fully asynchronous system where even one process may crash, no deterministic algorithm guarantees all three.
+
+331
+00:21:14.279 --> 00:21:27.441
+Practical algorithms (Paxos, Raft) keep safety always (never two decisions) and get liveness only when the network behaves well enough for long enough (partial synchrony), using timeouts and randomization.
+
+332
+00:21:27.721 --> 00:21:34.889
+Majorities: with 2f + 1 nodes, the system tolerates f failures, because any two majorities intersect.
+
+333
+00:21:36.239 --> 00:21:37.605
+Here is a quick table:
+
+334
+00:21:37.885 --> 00:21:41.703
+Cluster size, and Majority, and Failures tolerated, and Note.
+
+335
+00:21:41.983 --> 00:21:42.623
+1.
+
+336
+00:21:42.903 --> 00:21:43.821
+Majority:
+
+337
+00:21:44.101 --> 00:21:44.741
+1.
+
+338
+00:21:45.021 --> 00:21:46.450
+Failures tolerated:
+
+339
+00:21:46.730 --> 00:21:47.477
+0.
+
+340
+00:21:47.757 --> 00:21:48.503
+Note:
+
+341
+00:21:48.783 --> 00:21:50.106
+No fault tolerance.
+
+342
+00:21:50.386 --> 00:21:51.133
+3.
+
+343
+00:21:51.413 --> 00:21:52.330
+Majority:
+
+344
+00:21:52.610 --> 00:21:53.314
+2.
+
+345
+00:21:53.594 --> 00:21:55.023
+Failures tolerated:
+
+346
+00:21:55.303 --> 00:21:55.943
+1.
+
+347
+00:21:56.223 --> 00:21:56.970
+Note:
+
+348
+00:21:57.250 --> 00:21:59.767
+The common choice, spread over 3 AZs.
+
+349
+00:22:00.047 --> 00:22:00.751
+4.
+
+350
+00:22:01.031 --> 00:22:01.949
+Majority:
+
+351
+00:22:02.229 --> 00:22:02.975
+3.
+
+352
+00:22:03.255 --> 00:22:04.685
+Failures tolerated:
+
+353
+00:22:04.965 --> 00:22:05.605
+1.
+
+354
+00:22:05.885 --> 00:22:06.631
+Note:
+
+355
+00:22:06.911 --> 00:22:09.386
+No better than 3, and more to replicate.
+
+356
+00:22:09.666 --> 00:22:10.434
+5.
+
+357
+00:22:10.714 --> 00:22:11.631
+Majority:
+
+358
+00:22:11.911 --> 00:22:12.658
+3.
+
+359
+00:22:12.938 --> 00:22:14.367
+Failures tolerated:
+
+360
+00:22:14.647 --> 00:22:15.351
+2.
+
+361
+00:22:15.631 --> 00:22:16.378
+Note:
+
+362
+00:22:16.658 --> 00:22:18.706
+Survives a failure during maintenance.
+
+363
+00:22:18.986 --> 00:22:19.733
+7.
+
+364
+00:22:20.013 --> 00:22:20.930
+Majority:
+
+365
+00:22:21.210 --> 00:22:21.914
+4.
+
+366
+00:22:22.194 --> 00:22:23.623
+Failures tolerated:
+
+367
+00:22:23.903 --> 00:22:24.650
+3.
+
+368
+00:22:24.930 --> 00:22:25.677
+Note:
+
+369
+00:22:25.957 --> 00:22:27.727
+Rarely worth the write latency.
+
+370
+00:22:29.077 --> 00:22:32.363
+What consensus gives you: a replicated state machine.
+
+371
+00:22:32.643 --> 00:22:38.168
+If every node applies the same log of commands in the same order, all nodes have the same state.
+
+372
+00:22:38.448 --> 00:22:49.648
+That's the foundation of etcd, ZooKeeper (Zab), Consul, Kafka KRaft, CockroachDB or TiKV ranges (Raft per range), Spanner (Paxos per split) and Chubby.
+
+373
+00:22:49.928 --> 00:22:56.221
+Consensus about linearizable CAS about atomic broadcast about leader election with a fence.
+
+374
+00:22:56.501 --> 00:22:57.995
+They're equivalent problems.
+
+375
+00:22:58.275 --> 00:23:00.387
+If you have one, you can build the others.
+
+376
+00:23:01.737 --> 00:23:02.782
+Raft in depth.
+
+377
+00:23:03.062 --> 00:23:09.355
+Raft (Ongaro and Ousterhout, 2014) splits consensus into understandable parts.
+
+378
+00:23:09.635 --> 00:23:10.425
+Terms.
+
+379
+00:23:10.705 --> 00:23:14.673
+Time is divided into numbered terms, each with at most one leader.
+
+380
+00:23:14.953 --> 00:23:19.433
+A node that sees a higher term immediately adopts it and becomes a follower.
+
+381
+00:23:19.713 --> 00:23:22.358
+Terms are the fencing tokens inside Raft.
+
+382
+00:23:22.638 --> 00:23:23.747
+Leader election.
+
+383
+00:23:24.027 --> 00:23:40.411
+A follower that hears nothing from a leader for a randomized election timeout (for example, 150 to 300 ms) becomes a candidate, increments its term, votes for itself and sends RequestVote(term, lastLogIndex, lastLogTerm).
+
+384
+00:23:41.761 --> 00:23:53.623
+A node grants at most one vote per term, and only if the candidate's log is at least as up-to-date as its own: a higher last term, or the same last term and an index at least as long.
+
+385
+00:23:53.903 --> 00:23:58.020
+With votes from a majority, the candidate becomes leader and sends heartbeats.
+
+386
+00:23:58.300 --> 00:24:00.604
+Randomized timeouts make split votes rare.
+
+387
+00:24:00.884 --> 00:24:02.164
+Log replication.
+
+388
+00:24:02.444 --> 00:24:10.743
+The leader appends a client command to its log and sends AppendEntries(term, prevLogIndex, prevLogTerm, entries, leaderCommit).
+
+389
+00:24:12.093 --> 00:24:17.639
+A follower accepts only if its log has an entry at prevLogIndex with prevLogTerm.
+
+390
+00:24:17.919 --> 00:24:20.970
+Otherwise it rejects, and the leader backs up and retries.
+
+391
+00:24:21.250 --> 00:24:24.663
+Conflicting follower entries are overwritten by the leader's.
+
+392
+00:24:24.943 --> 00:24:34.458
+That consistency check gives the Log Matching property: if two logs have an entry with the same index and term, the logs are identical up to that entry.
+
+393
+00:24:35.808 --> 00:24:36.704
+Commit rule.
+
+394
+00:24:36.984 --> 00:24:42.957
+An entry is committed when the leader has replicated it to a majority and it's from the leader's current term.
+
+395
+00:24:43.237 --> 00:24:48.677
+Earlier-term entries are committed only indirectly, when a current-term entry after them commits.
+
+396
+00:24:48.957 --> 00:24:52.307
+That's why a new leader immediately appends a no-op entry.
+
+397
+00:24:52.587 --> 00:25:03.701
+L3 runs the paper's Figure 8 scenario: with the rule broken (committing an old-term entry just because it's on a majority), a later leader overwrites a committed entry.
+
+398
+00:25:03.981 --> 00:25:07.245
+With the correct rule, the entry was never declared committed.
+
+399
+00:25:07.525 --> 00:25:10.853
+Safety properties (all checked continuously in L3):
+
+400
+00:25:12.203 --> 00:25:13.569
+Here is a quick table:
+
+401
+00:25:13.849 --> 00:25:16.153
+Property, and Meaning, and L3 check.
+
+402
+00:25:16.433 --> 00:25:17.627
+Election Safety.
+
+403
+00:25:17.907 --> 00:25:18.697
+Meaning:
+
+404
+00:25:18.977 --> 00:25:20.555
+At most one leader per term.
+
+405
+00:25:20.835 --> 00:25:22.990
+L3 check: leaderOfTerm map.
+
+406
+00:25:23.270 --> 00:25:24.294
+Log Matching.
+
+407
+00:25:24.574 --> 00:25:25.363
+Meaning:
+
+408
+00:25:25.643 --> 00:25:27.798
+Same index + term ⇒ same prefix.
+
+409
+00:25:28.078 --> 00:25:29.123
+L3 check:
+
+410
+00:25:29.403 --> 00:25:31.067
+Implied by the append check.
+
+411
+00:25:31.347 --> 00:25:32.627
+Leader Completeness.
+
+412
+00:25:32.907 --> 00:25:33.697
+Meaning:
+
+413
+00:25:33.977 --> 00:25:36.878
+A committed entry is in every later leader's log.
+
+414
+00:25:37.158 --> 00:25:38.203
+L3 check:
+
+415
+00:25:38.483 --> 00:25:39.977
+Checked at every election.
+
+416
+00:25:40.257 --> 00:25:41.622
+State Machine Safety.
+
+417
+00:25:41.902 --> 00:25:42.691
+Meaning:
+
+418
+00:25:42.971 --> 00:25:46.278
+No two nodes apply different commands at the same index.
+
+419
+00:25:46.558 --> 00:25:47.603
+L3 check:
+
+420
+00:25:47.883 --> 00:25:49.227
+Checked at every apply.
+
+421
+00:25:50.577 --> 00:26:00.028
+L3 ran 300 randomized runs per variant (5 nodes, 20 s each, 5 % message loss, partitions, crash or restarts).
+
+422
+00:26:00.308 --> 00:26:10.719
+The correct Raft had 0 violations over 23,845 elections and 416,335 committed entries.
+
+423
+00:26:10.999 --> 00:26:16.780
+Removing the up-to-date vote check broke safety in 294 or 300 runs.
+
+424
+00:26:17.060 --> 00:26:24.185
+The broken commit rule showed 0 or 300 in random runs and failed only in the targeted Figure 8 script.
+
+425
+00:26:24.465 --> 00:26:33.681
+That's a lesson in itself: random testing misses rare interleavings, so write the known-dangerous scenarios as explicit tests (Jepsen does both).
+
+426
+00:26:33.961 --> 00:26:35.007
+Beyond the core:
+
+427
+00:26:36.357 --> 00:26:45.893
+Membership changes: add or remove one server at a time, or use joint consensus, so two disjoint majorities can never exist during a change.
+
+428
+00:26:46.173 --> 00:26:51.997
+Log compaction: snapshots of the state machine plus InstallSnapshot for lagging followers.
+
+429
+00:26:52.277 --> 00:27:00.746
+PreVote and check-quorum: a node first asks would you vote for me? without bumping terms, so a flapping node can't disrupt a healthy leader.
+
+430
+00:27:01.026 --> 00:27:03.650
+A leader that can't reach a majority steps down.
+
+431
+00:27:04.000 --> 00:27:15.475
+Client interaction: commands carry a client id and sequence number, so a retried command after a leader change is applied once (idempotency, Ch 20).
+
+432
+00:27:16.825 --> 00:27:18.531
+Paxos, Zab and friends.
+
+433
+00:27:18.811 --> 00:27:20.177
+Here is a quick table:
+
+434
+00:27:20.457 --> 00:27:22.761
+Algorithm, and Idea, and Used by.
+
+435
+00:27:23.041 --> 00:27:24.449
+Paxos (Lamport).
+
+436
+00:27:24.729 --> 00:27:25.518
+Idea:
+
+437
+00:27:25.798 --> 00:27:32.113
+Two phases per value: prepare or promise with a ballot number, then accept or accepted by a majority.
+
+438
+00:27:32.393 --> 00:27:36.403
+Proposers adopt the highest-ballot accepted value they learn about.
+
+439
+00:27:36.683 --> 00:27:37.601
+Used by:
+
+440
+00:27:37.881 --> 00:27:40.590
+Chubby, Spanner (per split), many databases.
+
+441
+00:27:40.870 --> 00:27:42.065
+Multi-Paxos.
+
+442
+00:27:42.345 --> 00:27:43.134
+Idea:
+
+443
+00:27:43.414 --> 00:27:49.025
+A stable leader skips phase 1 for a sequence of values: in effect the same shape as Raft.
+
+444
+00:27:49.305 --> 00:27:50.222
+Used by:
+
+445
+00:27:50.502 --> 00:27:52.443
+Most Paxos systems in practice.
+
+446
+00:27:52.723 --> 00:27:53.427
+Zab.
+
+447
+00:27:53.707 --> 00:27:54.497
+Idea:
+
+448
+00:27:54.777 --> 00:27:58.787
+Primary-backup atomic broadcast with epochs, built for ZooKeeper.
+
+449
+00:27:59.067 --> 00:27:59.985
+Used by:
+
+450
+00:28:00.265 --> 00:28:01.182
+ZooKeeper.
+
+451
+00:28:01.462 --> 00:28:02.913
+Viewstamped Replication.
+
+452
+00:28:03.193 --> 00:28:03.982
+Idea:
+
+453
+00:28:04.262 --> 00:28:05.947
+View changes with a primary.
+
+454
+00:28:06.227 --> 00:28:09.961
+It predates Paxos's publication and is very close to Raft.
+
+455
+00:28:10.241 --> 00:28:11.158
+Used by:
+
+456
+00:28:11.438 --> 00:28:13.401
+Academic, some storage systems.
+
+457
+00:28:14.751 --> 00:28:16.287
+EPaxos or leaderless.
+
+458
+00:28:16.567 --> 00:28:17.356
+Idea:
+
+459
+00:28:17.636 --> 00:28:22.479
+Any replica can lead a command, and only conflicting commands need extra rounds.
+
+460
+00:28:22.759 --> 00:28:23.676
+Used by:
+
+461
+00:28:23.956 --> 00:28:26.452
+Research, some geo-distributed systems.
+
+462
+00:28:26.732 --> 00:28:29.655
+Byzantine (PBFT, HotStuff, Tendermint).
+
+463
+00:28:29.935 --> 00:28:30.724
+Idea:
+
+464
+00:28:31.004 --> 00:28:33.820
+Tolerate lying nodes, 3f + 1 nodes.
+
+465
+00:28:34.100 --> 00:28:35.017
+Used by:
+
+466
+00:28:35.297 --> 00:28:38.881
+Blockchains; not needed inside one company's trust boundary.
+
+467
+00:28:40.231 --> 00:28:53.607
+For interviews: know Raft well, know that Multi-Paxos and Raft are structurally similar (a leader, terms or ballots, majority acceptance), and know why Byzantine tolerance isn't used for internal systems.
+
+468
+00:28:54.957 --> 00:28:56.813
+Reading from a consensus system.
+
+469
+00:28:57.093 --> 00:28:58.480
+Writes go through the log.
+
+470
+00:28:58.760 --> 00:29:07.784
+Reads are the subtle part: a leader can't simply answer from its own state, because it may have been deposed without knowing it (partitioned away, or paused).
+
+471
+00:29:08.064 --> 00:29:12.011
+L4's read experiment, on top of the correct Raft from L3:
+
+472
+00:29:13.361 --> 00:29:14.726
+Here is a quick table:
+
+473
+00:29:15.006 --> 00:29:19.059
+Read method, and How, and Stale reads in the simulation, and Cost.
+
+474
+00:29:19.339 --> 00:29:21.195
+Leader answers from local state.
+
+475
+00:29:21.475 --> 00:29:22.137
+How:
+
+476
+00:29:22.417 --> 00:29:23.569
+Nothing extra.
+
+477
+00:29:23.849 --> 00:29:25.619
+Stale reads in the simulation:
+
+478
+00:29:25.899 --> 00:29:31.766
+66,224 of 509,784.
+
+479
+00:29:32.046 --> 00:29:32.771
+Cost:
+
+480
+00:29:33.051 --> 00:29:34.161
+Free, but wrong.
+
+481
+00:29:34.441 --> 00:29:35.486
+ReadIndex.
+
+482
+00:29:35.766 --> 00:29:36.427
+How:
+
+483
+00:29:36.707 --> 00:29:46.051
+Record the commit index, confirm leadership with a heartbeat round acked by a majority, wait until applied ≥ that index, then answer.
+
+484
+00:29:46.331 --> 00:29:48.102
+Stale reads in the simulation:
+
+485
+00:29:48.382 --> 00:29:52.222
+0 of 321,661.
+
+486
+00:29:52.502 --> 00:29:53.227
+Cost:
+
+487
+00:29:53.507 --> 00:29:55.470
+One round trip per read (batched).
+
+488
+00:29:55.750 --> 00:29:56.689
+Log read.
+
+489
+00:29:56.969 --> 00:29:57.630
+How:
+
+490
+00:29:57.910 --> 00:29:59.830
+Put the read through the log like a write.
+
+491
+00:30:00.110 --> 00:30:01.881
+Stale reads in the simulation:
+
+492
+00:30:02.161 --> 00:30:02.907
+0.
+
+493
+00:30:03.187 --> 00:30:03.913
+Cost:
+
+494
+00:30:04.193 --> 00:30:05.601
+A full write per read.
+
+495
+00:30:06.951 --> 00:30:07.911
+Lease read.
+
+496
+00:30:08.191 --> 00:30:08.852
+How:
+
+497
+00:30:09.132 --> 00:30:18.199
+After a majority acks a heartbeat, the leader answers locally until sentAt + lease (lease minimum election timeout), measured on its own clock.
+
+498
+00:30:18.479 --> 00:30:20.249
+Stale reads in the simulation:
+
+499
+00:30:20.529 --> 00:30:27.612
+0 with accurate clocks and 10 % drift; 298 when the leader's clock ran 50 % slow.
+
+500
+00:30:27.892 --> 00:30:28.617
+Cost:
+
+501
+00:30:28.897 --> 00:30:31.969
+No round trip, but depends on bounded clock drift.
+
+502
+00:30:32.249 --> 00:30:33.337
+Follower read.
+
+503
+00:30:33.617 --> 00:30:34.279
+How:
+
+504
+00:30:34.559 --> 00:30:38.228
+A follower asks the leader for the ReadIndex, then serves locally.
+
+505
+00:30:38.508 --> 00:30:40.279
+Stale reads in the simulation:
+
+506
+00:30:40.559 --> 00:30:41.305
+0.
+
+507
+00:30:41.585 --> 00:30:42.311
+Cost:
+
+508
+00:30:42.591 --> 00:30:43.615
+Spreads load.
+
+509
+00:30:44.965 --> 00:30:54.970
+Bug found while building ReadIndex: the first version answered a pending read as soon as the node had applied up to the read index, before the majority confirmation came back.
+
+510
+00:30:55.250 --> 00:31:02.205
+It produced 355 stale reads, and the fix was to answer only rounds that a majority had confirmed.
+
+511
+00:31:02.485 --> 00:31:05.557
+That's exactly the kind of bug that passes code review.
+
+512
+00:31:05.837 --> 00:31:07.287
+The safety checks caught it.
+
+513
+00:31:08.637 --> 00:31:11.944
+In etcd, Get is linearizable by default (ReadIndex).
+
+514
+00:31:12.224 --> 00:31:20.757
+With WithSerializable() (etcdctl get --consistency=s) a member answers from local state, which is fast but possibly stale.
+
+515
+00:31:21.037 --> 00:31:30.403
+Lab 2 shows a member cut off from its peers refusing the linearizable read and answering the serializable one with a value that was already overwritten.
+
+516
+00:31:30.683 --> 00:31:36.933
+ZooKeeper reads are local (sequential consistency), and sync() before a read makes it linearizable.
+
+517
+00:31:38.283 --> 00:31:49.995
+Lease reads also need leader stickiness: a follower that heard from the leader recently must refuse to vote for anyone else, otherwise a new leader could be elected while the old lease is still valid.
+
+518
+00:31:50.275 --> 00:31:56.291
+The simulation's fault model (symmetric partitions, message loss, crashes) didn't produce that case:
+
+519
+00:31:56.571 --> 00:31:58.662
+0 stale reads without stickiness.
+
+520
+00:31:58.942 --> 00:32:07.795
+Asymmetric partitions (A hears B, B doesn't hear A) do, which is why etcd and TiKV pair lease reads with check-quorum or PreVote.
+
+521
+00:32:09.145 --> 00:32:12.537
+Coordination services: etcd, ZooKeeper, Consul.
+
+522
+00:32:12.817 --> 00:32:16.188
+Here is a quick table: etcd, and ZooKeeper, and Consul.
+
+523
+00:32:16.468 --> 00:32:18.047
+Consensus. etcd:
+
+524
+00:32:18.327 --> 00:32:19.095
+Raft.
+
+525
+00:32:19.375 --> 00:32:20.292
+ZooKeeper:
+
+526
+00:32:20.572 --> 00:32:21.276
+Zab.
+
+527
+00:32:21.556 --> 00:32:22.324
+Consul:
+
+528
+00:32:22.604 --> 00:32:23.372
+Raft.
+
+529
+00:32:23.652 --> 00:32:25.273
+Data model. etcd:
+
+530
+00:32:25.553 --> 00:32:27.964
+Flat keys, MVCC revisions.
+
+531
+00:32:28.244 --> 00:32:29.161
+ZooKeeper:
+
+532
+00:32:29.441 --> 00:32:31.511
+Hierarchical znodes, versions.
+
+533
+00:32:31.791 --> 00:32:32.559
+Consul:
+
+534
+00:32:32.839 --> 00:32:34.567
+KV + service catalog.
+
+535
+00:32:34.847 --> 00:32:36.724
+Liveness primitive. etcd:
+
+536
+00:32:37.004 --> 00:32:40.631
+Leases (TTL, keep-alive), keys attached to leases.
+
+537
+00:32:40.911 --> 00:32:41.828
+ZooKeeper:
+
+538
+00:32:42.108 --> 00:32:44.049
+Sessions + ephemeral znodes.
+
+539
+00:32:44.329 --> 00:32:45.097
+Consul:
+
+540
+00:32:45.377 --> 00:32:46.231
+Sessions.
+
+541
+00:32:46.511 --> 00:32:48.495
+Change notification. etcd:
+
+542
+00:32:48.775 --> 00:32:53.020
+Watches from a revision (no missed events if the revision is still retained).
+
+543
+00:32:53.300 --> 00:32:54.217
+ZooKeeper:
+
+544
+00:32:54.497 --> 00:32:59.084
+One-shot watches (re-register), persistent watches (3.6 plus).
+
+545
+00:32:59.364 --> 00:33:00.132
+Consul:
+
+546
+00:33:00.412 --> 00:33:01.564
+Blocking queries.
+
+547
+00:33:01.844 --> 00:33:03.679
+Conditional writes. etcd:
+
+548
+00:33:03.959 --> 00:33:05.025
+Transactions:
+
+549
+00:33:05.305 --> 00:33:09.124
+If(modRevision == x).Then(put).Else(...).
+
+550
+00:33:09.404 --> 00:33:12.945
+ZooKeeper: setData(path, data, expectedVersion).
+
+551
+00:33:13.225 --> 00:33:13.993
+Consul:
+
+552
+00:33:14.273 --> 00:33:16.300
+CAS with ModifyIndex.
+
+553
+00:33:17.650 --> 00:33:19.378
+Typical users. etcd:
+
+554
+00:33:19.658 --> 00:33:22.794
+Kubernetes, Patroni, CoreDNS, our shard map.
+
+555
+00:33:23.074 --> 00:33:23.991
+ZooKeeper:
+
+556
+00:33:24.271 --> 00:33:26.810
+Kafka (pre-KRaft), HBase, Solr.
+
+557
+00:33:27.090 --> 00:33:27.858
+Consul:
+
+558
+00:33:28.138 --> 00:33:29.845
+Service mesh or discovery.
+
+559
+00:33:31.195 --> 00:33:41.883
+Recipes built on these: leader election, distributed locks (with fencing), configuration with atomic updates and watches, service discovery, barriers, and membership.
+
+560
+00:33:42.163 --> 00:33:55.048
+Limits: these are small, strongly consistent metadata stores. etcd recommends keeping the database to a few GB (default quota 2 GB) and requests small (1.5 MiB max).
+
+561
+00:33:55.328 --> 00:34:01.771
+Write throughput is thousands to tens of thousands per second, bounded by fsync and majority round trips.
+
+562
+00:34:02.051 --> 00:34:04.035
+Don't put orders or carts in etcd.
+
+563
+00:34:05.385 --> 00:34:07.155
+Leases and fencing tokens.
+
+564
+00:34:07.435 --> 00:34:14.923
+A lease is a lock with an expiry: whoever holds it may act until it expires, so a crashed holder doesn't block others forever.
+
+565
+00:34:15.203 --> 00:34:17.422
+But leases rest on timing assumptions:
+
+566
+00:34:17.702 --> 00:34:24.614
+The holder can pause (GC, VM migration, swap, a blocked syscall) past the expiry without noticing.
+
+567
+00:34:24.894 --> 00:34:28.457
+After waking it checks nothing, or checks a stale local timer.
+
+568
+00:34:28.737 --> 00:34:32.129
+Its clock may run slow, so it thinks the lease has time left.
+
+569
+00:34:32.409 --> 00:34:37.742
+Network delay means a write it sent while it held the lease can arrive after the lease expired.
+
+570
+00:34:39.092 --> 00:34:43.935
+So a lease guarantees at most one holder at any instant according to the lease store.
+
+571
+00:34:44.215 --> 00:34:46.881
+It doesn't guarantee at most one process acting.
+
+572
+00:34:47.161 --> 00:34:50.724
+The fix (Kleppmann's fencing tokens, and Chubby's sequencers):
+
+573
+00:34:51.004 --> 00:34:59.921
+The lease store hands out a monotonically increasing token with every grant: an epoch, a Raft term, an etcd revision, a ZooKeeper zxid.
+
+574
+00:35:00.201 --> 00:35:03.977
+The holder sends the token with every write to the protected resource.
+
+575
+00:35:04.257 --> 00:35:12.812
+The resource rejects any write with a token lower than the highest it has seen: update... set fence =:t where... and fence =:t.
+
+576
+00:35:14.162 --> 00:35:26.983
+The lab shows it on real PostgreSQL: without the check, a pod that paused for 6 s overwrote its successor's payout (41250.00 writtenby pod-A).
+
+577
+00:35:27.263 --> 00:35:37.503
+With the check, the stale write updated 0 rows and the correct payout stayed (39980.00 writtenby pod-B fence 2).
+
+578
+00:35:37.783 --> 00:35:39.511
+The resource must participate.
+
+579
+00:35:39.791 --> 00:35:50.991
+If the resource can't check tokens (an external email API, a bank file drop), make the operation idempotent with a key derived from the business action (Ch 20).
+
+580
+00:35:51.271 --> 00:35:57.394
+Or have the leader write its intent to a fenced table, and let a single dispatcher perform the side effect.
+
+581
+00:35:58.744 --> 00:36:06.637
+Redlock (Redis locks across 5 independent masters) doesn't provide fencing tokens and relies on timing assumptions.
+
+582
+00:36:06.917 --> 00:36:15.429
+It's fine for efficiency locks (avoid duplicate work) and not for correctness locks (Kleppmann versus Sanfilippo, 2016).
+
+583
+00:36:15.709 --> 00:36:25.501
+The §1.1 incident used a single Redis lock, which is worse again: a failover to an async replica can lose the lock key (Ch 10).
+
+584
+00:36:26.851 --> 00:36:28.451
+When not to use consensus.
+
+585
+00:36:28.731 --> 00:36:35.110
+Consensus costs a majority round trip per write (cross-AZ: ~1 to 3 ms, cross-region:
+
+586
+00:36:35.390 --> 00:36:42.537
+50 to 200 ms), limits throughput, needs 3 plus nodes, and becomes unavailable without a majority.
+
+587
+00:36:42.817 --> 00:36:43.819
+Avoid it when:
+
+588
+00:36:44.099 --> 00:36:51.651
+One authority already exists: a single PostgreSQL primary per shard is already linearizable for its data.
+
+589
+00:36:51.931 --> 00:36:53.574
+Use its row locks, SELECT...
+
+590
+00:36:53.854 --> 00:36:56.862
+FOR UPDATE, unique constraints or advisory locks.
+
+591
+00:36:57.142 --> 00:37:04.715
+Conflicts can be merged: carts, likes, counters, presence, then CRDTs or LWW with care (Ch 10).
+
+592
+00:37:06.065 --> 00:37:12.700
+Duplicates are harmless or preventable: idempotent consumers are simpler than exactly-one executors.
+
+593
+00:37:12.980 --> 00:37:23.924
+Coordination can be avoided by design: partition the work so each partition has one owner (Kafka consumer groups, Ch 14), or make the operation commutative.
+
+594
+00:37:24.204 --> 00:37:35.468
+The principle behind this is coordination avoidance (Bailis et al.; the CALM theorem): coordinate only for invariants that truly need it, such as money, uniqueness and leadership.
+
+595
+00:37:36.818 --> 00:37:37.714
+Part 3.
+
+596
+00:37:37.994 --> 00:37:39.722
+Architecture and Diagrams.
+
+597
+00:37:40.972 --> 00:37:44.343
+Component view: coordination and time in the platform.
+
+598
+00:37:44.623 --> 00:37:45.967
+Here is the diagram.
+
+599
+00:37:49.817 --> 00:37:55.534
+etcd holds only metadata: leader keys, the shard map and flags, a few MB in total.
+
+600
+00:37:55.814 --> 00:38:01.830
+Business data stays in PostgreSQL, where the fence check happens in the same statement as the write.
+
+601
+00:38:03.180 --> 00:38:06.551
+Sequence: happy path, leader election and a fenced write.
+
+602
+00:38:06.831 --> 00:38:09.497
+The sequence diagram walks through it step by step.
+
+603
+00:38:09.777 --> 00:38:12.209
+A to E: lease grant TTL 10 s.
+
+604
+00:38:12.489 --> 00:38:14.388
+E to A: lease 7a1.
+
+605
+00:38:14.668 --> 00:38:17.676
+A to E: campaign settlement with lease 7a1.
+
+606
+00:38:17.956 --> 00:38:21.903
+E to A: leader key revision 88412.
+
+607
+00:38:22.183 --> 00:38:24.167
+B to E: campaign settlement.
+
+608
+00:38:24.447 --> 00:38:26.879
+A to E: lease keep-alive 7a1.
+
+609
+00:38:27.159 --> 00:38:35.201
+A to DB: update payout set fence 88412 where fence at most 88412.
+
+610
+00:38:35.481 --> 00:38:36.527
+DB to A:
+
+611
+00:38:36.807 --> 00:38:37.660
+1 row.
+
+612
+00:38:37.940 --> 00:38:39.433
+A to E: resign.
+
+613
+00:38:39.713 --> 00:38:40.609
+E to B:
+
+614
+00:38:40.889 --> 00:38:44.537
+B elected, revision 88519.
+
+615
+00:38:48.387 --> 00:38:52.675
+Sequence: failure path, the leader pauses, loses its lease and wakes up.
+
+616
+00:38:52.955 --> 00:38:55.622
+The sequence diagram walks through it step by step.
+
+617
+00:38:55.902 --> 00:38:59.806
+A to E: leader with revision 88412.
+
+618
+00:39:00.086 --> 00:39:04.929
+E to E: lease 7a1 expires after 10 s, leader key deleted.
+
+619
+00:39:05.209 --> 00:39:06.105
+E to B:
+
+620
+00:39:06.385 --> 00:39:10.033
+B elected, revision 88519.
+
+621
+00:39:10.313 --> 00:39:15.241
+B to DB: write payouts with fence 88519.
+
+622
+00:39:15.521 --> 00:39:17.569
+DB to B: rows updated.
+
+623
+00:39:17.849 --> 00:39:22.734
+A to DB: write stale payouts with fence 88412.
+
+624
+00:39:23.014 --> 00:39:24.059
+DB to A:
+
+625
+00:39:24.339 --> 00:39:28.585
+0 rows, fence 88519 is newer.
+
+626
+00:39:28.865 --> 00:39:32.235
+A to A: treat as lost leadership, abort, re-campaign.
+
+627
+00:39:32.515 --> 00:39:34.777
+A to E: keep-alive 7a1.
+
+628
+00:39:35.057 --> 00:39:36.785
+E to A: lease not found.
+
+629
+00:39:40.635 --> 00:39:51.515
+Without the fence check that produces step 7, A's stale write in step 6 would have overwritten B's payouts from step 4: the §1.1 incident, and the lab's first run.
+
+630
+00:39:52.865 --> 00:39:54.273
+State: a Raft node.
+
+631
+00:39:54.553 --> 00:39:55.897
+Here is the diagram.
+
+632
+00:39:59.747 --> 00:40:00.664
+Part 4.
+
+633
+00:40:00.944 --> 00:40:02.565
+Design Document Excerpt:
+
+634
+00:40:02.845 --> 00:40:05.320
+Coordination, Leader Election and Time.
+
+635
+00:40:06.570 --> 00:40:07.935
+Here is a quick table:
+
+636
+00:40:08.215 --> 00:40:09.517
+Field, and Value.
+
+637
+00:40:09.797 --> 00:40:11.141
+Author or Reviewers:
+
+638
+00:40:11.421 --> 00:40:14.941
+Platform team or Payments, Finance, Orders, SRE.
+
+639
+00:40:15.221 --> 00:40:16.117
+Status:
+
+640
+00:40:16.397 --> 00:40:17.271
+Approved.
+
+641
+00:40:17.551 --> 00:40:18.874
+Related ADRs:
+
+642
+00:40:19.154 --> 00:40:36.327
+ADR-044 etcd as the coordination store; ADR-045 Fencing tokens on all leader-only writes; ADR-046 HLC timestamps in event envelopes; ADR-047 Clock policy.
+
+643
+00:40:37.677 --> 00:40:38.317
+1.
+
+644
+00:40:38.597 --> 00:40:40.005
+Context and Problem.
+
+645
+00:40:40.285 --> 00:40:45.107
+A Redis-lock leader paused past its TTL and overwrote its successor's settlement:
+
+646
+00:40:45.387 --> 00:40:49.291
+214 stores were paid twice (§1.1).
+
+647
+00:40:49.571 --> 00:40:55.373
+Order timelines sorted by wall-clock timestamps from different hosts showed effects before causes.
+
+648
+00:40:55.653 --> 00:41:02.501
+Several jobs (settlement, reconciliation, bucket mover, report exporters) each had their own ad-hoc locking.
+
+649
+00:41:02.781 --> 00:41:03.485
+2.
+
+650
+00:41:03.765 --> 00:41:05.109
+Goals or Non-Goals.
+
+651
+00:41:06.459 --> 00:41:21.862
+Goals: one standard for exactly one active runner; no write from a deposed leader can take effect; a linearizable store for shard maps and critical config; causal ordering of events across services; clock offsets measured and alerted.
+
+652
+00:41:22.142 --> 00:41:31.593
+Non-goals: strict serializability across order shards (Ch 13 covers sagas); multi-region consensus (Ch 27).
+
+653
+00:41:31.873 --> 00:41:32.619
+3.
+
+654
+00:41:32.899 --> 00:41:33.859
+Requirements.
+
+655
+00:41:35.209 --> 00:41:36.575
+Here is a quick table:
+
+656
+00:41:36.855 --> 00:41:38.327
+ID, and Requirement.
+
+657
+00:41:38.607 --> 00:41:39.652
+NFR-1:
+
+658
+00:41:39.932 --> 00:41:47.057
+At most one leader per job as seen by the resource: stale-token writes are rejected (0 accepted in tests).
+
+659
+00:41:47.337 --> 00:41:48.383
+NFR-2:
+
+660
+00:41:48.663 --> 00:41:53.505
+Leader failover at most 15 s (lease TTL 10 s + campaign).
+
+661
+00:41:53.785 --> 00:41:54.852
+NFR-3:
+
+662
+00:41:55.132 --> 00:42:01.703
+Coordination store survives one AZ loss; p99 write at most 20 ms in-region.
+
+663
+00:42:01.983 --> 00:42:03.071
+NFR-4:
+
+664
+00:42:03.351 --> 00:42:08.172
+Shard map reads linearizable on change; watches deliver every revision.
+
+665
+00:42:08.452 --> 00:42:09.497
+NFR-5:
+
+666
+00:42:09.777 --> 00:42:13.617
+Events carry an HLC; cause effect for every causal pair.
+
+667
+00:42:13.897 --> 00:42:14.985
+NFR-6:
+
+668
+00:42:15.265 --> 00:42:22.092
+Host clock offset 50 ms alerts; 250 ms removes the host from leader candidacy.
+
+669
+00:42:23.442 --> 00:42:24.146
+4.
+
+670
+00:42:24.426 --> 00:42:26.538
+Capacity and latency estimates.
+
+671
+00:42:27.888 --> 00:42:29.253
+Here is a quick table:
+
+672
+00:42:29.533 --> 00:42:32.669
+Item, and Calculation, and Result. etcd data.
+
+673
+00:42:32.949 --> 00:42:34.016
+Calculation:
+
+674
+00:42:34.296 --> 00:42:41.955
+Shard map (1,024 keys) + ~200 flags + ~20 election keys + Patroni.
+
+675
+00:42:42.235 --> 00:42:43.045
+Result:
+
+676
+00:42:43.325 --> 00:42:46.141
+10 MB (quota 2 GB). etcd writes.
+
+677
+00:42:46.421 --> 00:42:47.488
+Calculation:
+
+678
+00:42:47.768 --> 00:42:48.771
+Keep-alives:
+
+679
+00:42:49.051 --> 00:42:52.891
+30 candidates or 3 s + Patroni + map changes.
+
+680
+00:42:53.171 --> 00:42:57.288
+Result: ~20 writes per second (trivial). etcd write latency.
+
+681
+00:42:57.568 --> 00:42:58.635
+Calculation:
+
+682
+00:42:58.915 --> 00:43:04.909
+Majority round trip cross-AZ ~1 to 2 ms + fsync ~1 to 5 ms.
+
+683
+00:43:05.189 --> 00:43:07.621
+Result: p99 ~10 ms.
+
+684
+00:43:07.901 --> 00:43:08.797
+Watches.
+
+685
+00:43:09.077 --> 00:43:12.704
+Calculation: ~600 pods times 2 watches.
+
+686
+00:43:12.984 --> 00:43:16.888
+Result: ~1.2 K watches (fine for 3 nodes).
+
+687
+00:43:17.168 --> 00:43:18.299
+Failover time.
+
+688
+00:43:18.579 --> 00:43:19.645
+Calculation:
+
+689
+00:43:19.925 --> 00:43:24.960
+TTL 10 s, keep-alive every 3 s, campaign ~50 ms.
+
+690
+00:43:25.240 --> 00:43:27.309
+Result: at most ~11 s.
+
+691
+00:43:27.589 --> 00:43:28.848
+HLC size.
+
+692
+00:43:29.128 --> 00:43:30.195
+Calculation:
+
+693
+00:43:30.475 --> 00:43:33.461
+48-bit ms + 16-bit logical.
+
+694
+00:43:33.741 --> 00:43:34.552
+Result:
+
+695
+00:43:34.832 --> 00:43:36.133
+8 bytes per event.
+
+696
+00:43:37.483 --> 00:43:38.251
+5.
+
+697
+00:43:38.531 --> 00:43:55.833
+Proposed design. etcd, 3 members in 3 AZs (5 in a later phase if maintenance windows show a need), on dedicated SSD-backed VMs, TLS + client certificates, per-job RBAC prefixes, defragmented and snapshotted on a schedule.
+
+698
+00:43:56.113 --> 00:43:59.953
+Shared with Patroni (separate prefix), monitored as tier-0.
+
+699
+00:44:00.233 --> 00:44:09.043
+Leader election library (FencedLeadership): lease TTL 10 s, keep-alive 3 s, campaign on a job-specific election name.
+
+700
+00:44:09.323 --> 00:44:14.657
+Fencing token = the leader key's create revision, which is cluster-wide monotonic.
+
+701
+00:44:14.937 --> 00:44:19.715
+The leader loop checks leadership before each batch and passes the token into every write.
+
+702
+00:44:21.065 --> 00:44:30.281
+Resources enforce the fence: tables written by leader-only jobs have a fence bigint column, and every write is... where fence =:token.
+
+703
+00:44:30.561 --> 00:44:34.636
+A zero-row result means lost leadership: abort and re-campaign.
+
+704
+00:44:34.916 --> 00:44:39.780
+External side effects go through an idempotent outbox, never straight from the leader.
+
+705
+00:44:40.060 --> 00:44:51.196
+Shard map and flags in etcd, updated only with transactions (If(modRevision == expected)), and read through watches starting at the revision last seen.
+
+706
+00:44:52.546 --> 00:45:00.887
+HLC in the event envelope (hlc: ms.logical), sent on every outgoing call and message, merged on receipt.
+
+707
+00:45:01.167 --> 00:45:04.133
+Timelines sort by HLC, then event id.
+
+708
+00:45:04.413 --> 00:45:18.599
+Clock policy: chrony against the cloud time service, makestep only at boot, offset exported as a metric, and every timeout and duration uses System.nanoTime (a lint rule bans currentTimeMillis differences).
+
+709
+00:45:18.879 --> 00:45:19.626
+7.
+
+710
+00:45:19.906 --> 00:45:21.421
+Alternatives considered.
+
+711
+00:45:22.771 --> 00:45:24.136
+Here is a quick table:
+
+712
+00:45:24.416 --> 00:45:26.976
+Option, and Pros, and Cons, and Verdict.
+
+713
+00:45:27.256 --> 00:45:30.413
+Redis SET NX PX lock (status quo).
+
+714
+00:45:30.693 --> 00:45:31.547
+Pros:
+
+715
+00:45:31.827 --> 00:45:32.893
+Simple, fast.
+
+716
+00:45:33.173 --> 00:45:33.984
+Cons:
+
+717
+00:45:34.264 --> 00:45:38.339
+No fencing; async replication can lose the lock (Ch 10).
+
+718
+00:45:38.619 --> 00:45:39.429
+Verdict:
+
+719
+00:45:39.709 --> 00:45:41.245
+Rejected for correctness.
+
+720
+00:45:41.525 --> 00:45:42.400
+Redlock.
+
+721
+00:45:42.680 --> 00:45:43.533
+Pros:
+
+722
+00:45:43.813 --> 00:45:45.285
+Tolerates master loss.
+
+723
+00:45:45.565 --> 00:45:46.376
+Cons:
+
+724
+00:45:46.656 --> 00:45:49.131
+Timing assumptions, no fencing token.
+
+725
+00:45:49.411 --> 00:45:50.221
+Verdict:
+
+726
+00:45:50.501 --> 00:45:53.424
+Rejected. etcd election + fencing tokens.
+
+727
+00:45:53.704 --> 00:45:54.557
+Pros:
+
+728
+00:45:54.837 --> 00:45:58.101
+Linearizable, monotonic revisions, leases, watches.
+
+729
+00:45:58.381 --> 00:45:59.192
+Cons:
+
+730
+00:45:59.472 --> 00:46:01.285
+A tier-0 cluster to run.
+
+731
+00:46:01.565 --> 00:46:02.376
+Verdict:
+
+732
+00:46:02.656 --> 00:46:03.488
+Chosen.
+
+733
+00:46:03.768 --> 00:46:04.685
+ZooKeeper.
+
+734
+00:46:04.965 --> 00:46:05.819
+Pros:
+
+735
+00:46:06.099 --> 00:46:08.744
+Mature, ephemeral nodes, zxid tokens.
+
+736
+00:46:09.024 --> 00:46:09.835
+Cons:
+
+737
+00:46:10.115 --> 00:46:13.272
+JVM ops, heavier; Kafka no longer needs it.
+
+738
+00:46:13.552 --> 00:46:14.363
+Verdict:
+
+739
+00:46:14.643 --> 00:46:16.733
+Rejected (no existing footprint).
+
+740
+00:46:18.083 --> 00:46:19.747
+Kubernetes Lease objects.
+
+741
+00:46:20.027 --> 00:46:20.881
+Pros:
+
+742
+00:46:21.161 --> 00:46:23.251
+No new infrastructure, etcd-backed.
+
+743
+00:46:23.531 --> 00:46:24.342
+Cons:
+
+744
+00:46:24.622 --> 00:46:31.491
+Coupled to the cluster API server; no token in the API (use leaseTransitions or resourceVersion).
+
+745
+00:46:31.771 --> 00:46:32.582
+Verdict:
+
+746
+00:46:32.862 --> 00:46:35.529
+Accepted for in-cluster, non-money jobs.
+
+747
+00:46:35.809 --> 00:46:38.966
+PostgreSQL lease table + epoch (the lab).
+
+748
+00:46:39.246 --> 00:46:40.099
+Pros:
+
+749
+00:46:40.379 --> 00:46:44.326
+Uses the DB that holds the data; fence in the same DB.
+
+750
+00:46:44.606 --> 00:46:45.417
+Cons:
+
+751
+00:46:45.697 --> 00:46:49.067
+Load on the primary; failover semantics (Ch 10).
+
+752
+00:46:49.347 --> 00:46:50.158
+Verdict:
+
+753
+00:46:50.438 --> 00:46:53.126
+Accepted where job and data share one DB.
+
+754
+00:46:54.476 --> 00:46:55.159
+8.
+
+755
+00:46:55.439 --> 00:46:58.681
+Failure modes. etcd minority loss: keeps working.
+
+756
+00:46:58.961 --> 00:47:08.817
+Majority loss: no elections or map changes, current leaders keep going only until their lease can't be renewed, and fenced resources refuse stale tokens.
+
+757
+00:47:09.097 --> 00:47:10.889
+Leader pause: fenced (lab).
+
+758
+00:47:11.169 --> 00:47:21.409
+Clock skew on a candidate: over 250 ms it withdraws from campaigning. etcd slow disk: leader elections flap, so alert on fsync latency.
+
+759
+00:47:21.689 --> 00:47:25.252
+Watch compaction: re-list from the current revision, then watch.
+
+760
+00:47:26.602 --> 00:47:27.306
+10.
+
+761
+00:47:27.586 --> 00:47:28.674
+Observability.
+
+762
+00:47:28.954 --> 00:47:48.559
+Leader identity and token per job, leadership changes per hour, fenced-write rejections (a nonzero value means a pause or partition happened, which is worth a look), lease keep-alive failures, etcd raft proposals committed or failed, fsync and backend commit durations, DB size versus quota,
+
+763
+00:47:48.839 --> 00:47:56.050
+watch count, host clock offset, HLC logical-counter growth (a large counter means a clock far behind).
+
+764
+00:47:57.400 --> 00:47:58.253
+14.
+
+765
+00:47:58.533 --> 00:48:02.736
+Decision (ADR-044 to 047 summary).
+
+766
+00:48:03.016 --> 00:48:11.272
+Leader-only work uses etcd elections with leases, and the leader key revision is the fencing token enforced by every resource.
+
+767
+00:48:11.552 --> 00:48:16.544
+Shard maps and flags live in etcd with revision-checked transactions and watches.
+
+768
+00:48:16.824 --> 00:48:18.808
+Events carry HLC timestamps.
+
+769
+00:48:19.088 --> 00:48:25.445
+Durations use monotonic clocks, and host offsets are monitored with hard limits for leadership candidates.
+
+770
+00:48:26.795 --> 00:48:27.755
+Part 5.
+
+771
+00:48:28.035 --> 00:48:30.019
+Hands-On Code, Level Ladder.
+
+772
+00:48:31.269 --> 00:48:32.635
+Here is a quick table:
+
+773
+00:48:32.915 --> 00:48:35.603
+Level, and New requirement that forces the step.
+
+774
+00:48:35.883 --> 00:48:36.715
+L1:
+
+775
+00:48:36.995 --> 00:48:42.051
+Order events from two services, one with a skewed clock, and time a request correctly.
+
+776
+00:48:42.331 --> 00:48:43.397
+(plain Java).
+
+777
+00:48:43.677 --> 00:48:44.488
+L2:
+
+778
+00:48:44.768 --> 00:48:50.827
+Prove which replicated-read designs are linearizable, and keep an order's status from going backwards.
+
+779
+00:48:51.107 --> 00:48:51.960
+L3:
+
+780
+00:48:52.240 --> 00:48:54.309
+Understand consensus by building it:
+
+781
+00:48:54.589 --> 00:48:58.173
+Raft with faults, safety checks and deliberately broken rules.
+
+782
+00:48:58.453 --> 00:48:59.328
+Lab 1:
+
+783
+00:48:59.608 --> 00:49:05.944
+Real PostgreSQL 16: a lease with an epoch, a paused leader, with and without a fencing check.
+
+784
+00:49:06.224 --> 00:49:07.120
+Lab 2:
+
+785
+00:49:07.400 --> 00:49:16.723
+Real etcd 3.5, 3 members: elections with revision tokens, failover, quorum loss, stale serializable reads, CAS, watches.
+
+786
+00:49:18.073 --> 00:49:18.947
+L4:
+
+787
+00:49:19.227 --> 00:49:25.926
+Exactly one settlement runner in production, fenced; linearizable reads without paying a round trip where safe.
+
+788
+00:49:27.276 --> 00:49:32.076
+L1, Concept: wall, Lamport, vector and hybrid clocks (plain Java).
+
+789
+00:49:32.356 --> 00:49:33.892
+Here is the Java code.
+
+790
+00:49:34.172 --> 00:49:38.567
+It runs to 143 lines; the full listing is in the chapter.
+
+791
+00:49:38.847 --> 00:49:42.836
+ClocksL1.java, run with: java ClocksL1.java.
+
+792
+00:49:43.116 --> 00:49:46.679
+A. wall clocks with skew reorder causally related events B.
+
+793
+00:49:46.959 --> 00:49:48.964
+Lamport clocks keep causal order.
+
+794
+00:49:49.244 --> 00:49:57.180
+C. vector clocks tell before from concurrent D. hybrid logical clocks (HLC): causal AND close to real time.
+
+795
+00:50:00.030 --> 00:50:01.822
+Actual output from running it:
+
+796
+00:50:03.172 --> 00:50:04.089
+On screen:
+
+797
+00:50:04.369 --> 00:50:04.988
+A.
+
+798
+00:50:05.268 --> 00:50:10.111
+Wall-clock timestamps from two servers (order-service is 90 ms behind).
+
+799
+00:50:10.391 --> 00:50:17.239
+PAYMENTCAPTURED @1000 then (because of it) ORDERPACKING @913. sorted by timestamp:
+
+800
+00:50:17.519 --> 00:50:21.487
+ORDERPACKING before PAYMENTCAPTURED ← effect before cause.
+
+801
+00:50:21.767 --> 00:50:22.449
+B.
+
+802
+00:50:22.729 --> 00:50:25.567
+Lamport clocks: the message carries the counter.
+
+803
+00:50:25.847 --> 00:50:38.583
+PAYMENTCAPTURED L=1 ORDERPACKING L=6 (cause effect, always). unrelated REFUNDQUOTE on payment L=2 ORDERPACKING L=6, yet neither caused the. other:
+
+804
+00:50:38.863 --> 00:50:41.551
+Lamport order can't tell 'concurrent' from 'before'.
+
+805
+00:50:41.831 --> 00:50:42.513
+C.
+
+806
+00:50:42.793 --> 00:51:01.183
+Vector clocks on a cart edited from phone and web. base server=1 versus phone phone=1, server=1, then happened-before. phone phone=1, server=1 versus web server=1, web=1, then CONCURRENT ← keep both, merge.
+
+807
+00:51:01.463 --> 00:51:09.015
+(Ch 10 OR-Set). merged phone=1, server=2, web=1 versus phone, then happened-after.
+
+808
+00:51:09.295 --> 00:51:10.020
+D.
+
+809
+00:51:10.300 --> 00:51:13.649
+Hybrid logical clocks with the same 90 ms skew.
+
+810
+00:51:13.929 --> 00:51:15.444
+The rest is in the chapter.
+
+811
+00:51:18.294 --> 00:51:23.435
+What L1 shows: a 90 ms skew is enough to put an effect before its cause (A).
+
+812
+00:51:23.715 --> 00:51:28.217
+Lamport clocks fix causal order but can't tell concurrent events apart (B).
+
+813
+00:51:28.497 --> 00:51:32.891
+Vector clocks can, which is what you need to keep both concurrent edits (C).
+
+814
+00:51:33.171 --> 00:51:37.310
+HLC keeps causal order and stays close to physical time (D).
+
+815
+00:51:37.590 --> 00:51:42.241
+Section E is why every timeout in this handbook uses System.nanoTime().
+
+816
+00:51:43.591 --> 00:51:47.793
+L2, Checking linearizability, and keeping order status monotonic.
+
+817
+00:51:48.073 --> 00:51:52.169
+Requirement: the order-status register is replicated 3 ways.
+
+818
+00:51:52.449 --> 00:51:54.668
+Which read designs are linearizable?
+
+819
+00:51:54.948 --> 00:51:59.641
+Rather than argue, generate thousands of concurrent histories and check each one.
+
+820
+00:51:59.921 --> 00:52:11.292
+The checker searches for a total order that respects real time (an operation that finished before another started must come first) and register semantics (a read returns the latest write).
+
+821
+00:52:11.572 --> 00:52:16.436
+This is the idea behind Knossos and Porcupine, the checkers used by Jepsen.
+
+822
+00:52:17.786 --> 00:52:19.322
+Here is the Java code.
+
+823
+00:52:19.602 --> 00:52:23.869
+It runs to 148 lines; the full listing is in the chapter.
+
+824
+00:52:24.149 --> 00:52:29.631
+LinearizabilityL2.java, run with: java LinearizabilityL2.java.
+
+825
+00:52:29.911 --> 00:52:34.541
+3 replicas hold one register (for example, an order's status version).
+
+826
+00:52:34.821 --> 00:52:39.791
+A writer and 3 readers run concurrently over a. network with random delays.
+
+827
+00:52:40.071 --> 00:52:44.807
+Every history is checked for linearizability with a Wing and Gong style search.
+
+828
+00:52:47.657 --> 00:52:49.449
+Actual output from running it:
+
+829
+00:52:50.799 --> 00:52:51.717
+On screen:
+
+830
+00:52:51.997 --> 00:52:59.527
+3 replicas, 1 writer (writes 1,2,3), 3 readers (3 reads each), random delays 1 to 30 ms;.
+
+831
+00:52:59.807 --> 00:53:01.727
+20000 histories per mode.
+
+832
+00:53:02.007 --> 00:53:05.442
+LEADERWRITESASYNCFOLLOWERREADS non-linearizable histories:
+
+833
+00:53:05.722 --> 00:53:10.074
+12334 (61.67%).
+
+834
+00:53:10.354 --> 00:53:13.469
+QUORUMW2R2 non-linearizable histories:
+
+835
+00:53:13.749 --> 00:53:44.740
+11 ( 0.06%). example (times in ms): client 3 read 0 9, then 47. client 2 read 1 12, then 45. client 1 read 1 15, then 42. client 0 write 1 16, then 49. client 1 read 2 57, then 80. client 2 read 1 66, then 83. client 3 read 2 66, then 85. client 0 write 2 66, then 107.
+
+836
+00:53:45.020 --> 00:53:46.535
+The rest is in the chapter.
+
+837
+00:53:49.385 --> 00:53:55.721
+Async follower reads: most histories are non-linearizable, as expected (Ch 10's staleness).
+
+838
+00:53:56.001 --> 00:54:03.019
+R = 2, W = 2 of N = 3: only 0.06 %, but not zero.
+
+839
+00:54:03.299 --> 00:54:13.689
+In the example, client 1 reads 2 (57, then 80 ms), and then, after that read finished, client 1 reads 1 (82, then 108 ms).
+
+840
+00:54:13.969 --> 00:54:15.462
+Both reads saw a quorum.
+
+841
+00:54:15.742 --> 00:54:23.251
+The write of 2 was still in flight, on one replica only, so the first read's quorum included that replica and the second's didn't.
+
+842
+00:54:23.531 --> 00:54:30.486
+Quorum overlap guarantees you see the latest completed write, not that you never see an in-progress one and then lose it.
+
+843
+00:54:31.836 --> 00:54:42.097
+ABD (read + write-back): before returning, the reader writes the value it's about to return to a quorum, so any later read's quorum overlaps a replica that has it.
+
+844
+00:54:42.377 --> 00:54:45.300
+0 violations in 20,000 histories.
+
+845
+00:54:45.580 --> 00:54:48.311
+In the service: status that never goes backwards.
+
+846
+00:54:48.591 --> 00:54:54.948
+Order status is written by several consumers (payment, picking, delivery), and events arrive out of order.
+
+847
+00:54:55.228 --> 00:55:01.073
+Each transition carries the order's monotonic version, and the database only accepts a newer one.
+
+848
+00:55:01.353 --> 00:55:05.855
+The primary is linearizable for this row, so no consensus system is needed:
+
+849
+00:55:07.205 --> 00:55:08.826
+Conditional status update.
+
+850
+00:55:09.106 --> 00:55:10.642
+Here is the Java code.
+
+851
+00:55:10.922 --> 00:55:14.719
+It runs to 27 lines; the full listing is in the chapter.
+
+852
+00:55:14.999 --> 00:55:20.397
+Apply a transition only if it is newer than what we have AND allowed by the state machine.
+
+853
+00:55:20.677 --> 00:55:27.567
+Returns false for duplicates, reordered (older) events and illegal transitions: all safe to ack and drop.
+
+854
+00:55:30.417 --> 00:55:32.508
+HLC in the event envelope.
+
+855
+00:55:32.788 --> 00:55:34.324
+Here is the Java code.
+
+856
+00:55:34.604 --> 00:55:38.273
+It runs to 44 lines; the full listing is in the chapter.
+
+857
+00:55:38.553 --> 00:55:45.871
+64-bit HLC: upper 48 bits = wall ms, lower 16 bits = logical counter.
+
+858
+00:55:46.151 --> 00:55:51.911
+Lock-free. now() for local events and sends; observe(remote) when a message or event arrives.
+
+859
+00:55:54.761 --> 00:56:02.185
+The packed form keeps ordering a single long comparison. observe with max(...) + 1 is the standard packed HLC.
+
+860
+00:56:02.465 --> 00:56:05.963
+It keeps cause effect even when the physical clock is behind.
+
+861
+00:56:06.243 --> 00:56:12.281
+The forward-drift guard stops one host with a clock set to next year from dragging every HLC forward.
+
+862
+00:56:13.631 --> 00:56:14.889
+Ordering a timeline.
+
+863
+00:56:15.169 --> 00:56:16.705
+Here is the Java code.
+
+864
+00:56:16.985 --> 00:56:21.657
+Sort by HLC, then by event id for a deterministic tie-break.
+
+865
+00:56:21.937 --> 00:56:24.519
+Never by the producer's wall-clock occurredAt.
+
+866
+00:56:27.369 --> 00:56:28.115
+Warning:
+
+867
+00:56:28.395 --> 00:56:30.785
+What was and wasn't verified for L2.
+
+868
+00:56:31.065 --> 00:56:35.417
+The checker and the three replication modes were executed (output above).
+
+869
+00:56:35.697 --> 00:56:55.686
+HybridLogicalClock was also run on its own, with the @Component annotation removed, in a harness: cause effect across a 90 ms skew, the forward-drift guard, and 0 ordering violations over 100,000 causal hops between three clocks skewed 0 or minus 90 / +40 ms.
+
+870
+00:56:55.966 --> 00:57:01.833
+The repository and Spring wiring weren't compiled (no Maven Central access here).!-- VERIFY --.
+
+871
+00:57:03.183 --> 00:57:06.468
+L3, Raft from scratch, with faults and safety checks.
+
+872
+00:57:06.748 --> 00:57:13.980
+Requirement: understand consensus well enough to operate etcd or Kafka KRaft and answer design questions.
+
+873
+00:57:14.260 --> 00:57:17.375
+The simulator is deterministic (seeded) and has:
+
+874
+00:57:17.655 --> 00:57:24.439
+5 nodes, randomized election timeouts, a client write every 10 ms and a read every 10 ms.
+
+875
+00:57:24.719 --> 00:57:34.916
+5 % message loss, 1 to 15 ms delays, and every 700 ms either a random two-way partition, a heal, a crash or restarts.
+
+876
+00:57:35.196 --> 00:57:40.188
+Persistent state (term, vote, log) that survives crashes, and volatile state that doesn't.
+
+877
+00:57:41.538 --> 00:57:48.983
+An oracle that checks Election Safety, Leader Completeness, committed-entry stability and State Machine Safety on every step.
+
+878
+00:57:49.263 --> 00:57:54.853
+Two bug switches, each removing one rule from the paper, and a scripted Figure 8 scenario.
+
+879
+00:57:55.133 --> 00:57:56.605
+Five read strategies.
+
+880
+00:57:57.955 --> 00:57:59.491
+Here is the Java code.
+
+881
+00:57:59.771 --> 00:58:04.165
+It runs to 442 lines; the full listing is in the chapter.
+
+882
+00:58:04.445 --> 00:58:07.859
+RaftSim.java, run with: java RaftSim.java.
+
+883
+00:58:08.139 --> 00:58:19.488
+A deterministic Raft simulator (elections, log replication, commit rule, ReadIndex reads) with message delays. drops, network partitions and crash or restarts.
+
+884
+00:58:19.768 --> 00:58:22.157
+Safety invariants are checked on every step.
+
+885
+00:58:25.007 --> 00:58:28.933
+Actual output from running java RaftSim.java 300:
+
+886
+00:58:30.283 --> 00:58:31.200
+On screen:
+
+887
+00:58:31.480 --> 00:58:43.640
+5 nodes, 20 s simulated per run, 5 % message loss, random partitions and. crash or restarts, 300 seeds each. correct Raft runs with a safety violation:
+
+888
+00:58:43.920 --> 00:58:53.627
+0 or 300 (elections 23,845, committed. entries 416,335).
+
+889
+00:58:53.907 --> 00:58:58.387
+BUG: vote without the up-to-date log check runs with a safety violation:
+
+890
+00:58:58.667 --> 00:59:00.949
+294 or 300.
+
+891
+00:59:01.229 --> 00:59:09.187
+(elections 4,565, committed entries 119,202). first: seed 1:
+
+892
+00:59:09.467 --> 00:59:14.672
+LEADER COMPLETENESS: leader 3 term 6 lacks committed index 241.
+
+893
+00:59:14.952 --> 00:59:20.435
+BUG: commit old-term entries by counting replicas runs with a safety violation:
+
+894
+00:59:20.715 --> 00:59:30.080
+0 or 300 (elections 23,845, committed entries 416,681).
+
+895
+00:59:30.360 --> 00:59:32.856
+Figure 8 script, BUG commit rule:
+
+896
+00:59:33.136 --> 00:59:36.613
+S1 leader t1, idx1 committed everywhere.
+
+897
+00:59:36.893 --> 00:59:40.435
+S1 writes idx2 (t1) but only S2 gets it.
+
+898
+00:59:40.715 --> 00:59:47.925
+S1 crashes; S5 elected t2 (votes S3,S4), writes idx2 (t2) locally, crashes.
+
+899
+00:59:48.205 --> 00:59:49.720
+The rest is in the chapter.
+
+900
+00:59:52.570 --> 00:59:53.573
+How to read it:
+
+901
+00:59:53.853 --> 00:59:54.898
+Correct Raft:
+
+902
+00:59:55.178 --> 01:00:08.661
+0 violations across 300 runs with 23,845 elections and 416,335 committed entries under loss, partitions and crashes.
+
+903
+01:00:08.941 --> 01:00:18.285
+Without the up-to-date vote check, a node with a short log wins an election and overwrites committed entries (294 or 300 runs).
+
+904
+01:00:18.565 --> 01:00:23.706
+The first failure: the leader of term 6 lacked committed index 241.
+
+905
+01:00:25.056 --> 01:00:35.083
+Committing old-term entries by counting replicas passed all 300 random runs, and failed the scripted Figure 8 run exactly as the paper describes.
+
+906
+01:00:35.363 --> 01:00:40.461
+S1 counted idx2 (term 1) as committed once it was on 3 of 5 nodes.
+
+907
+01:00:40.741 --> 01:00:47.227
+S5, whose last log term was 2, then won an election and overwrote idx2 on S2 and S3.
+
+908
+01:00:47.507 --> 01:00:57.661
+With the correct rule, S1's commit stays at 0: it may not count old-term entries, and idx1 becomes committed again only once a term-3 entry commits.
+
+909
+01:00:57.941 --> 01:01:00.245
+So nothing that was acknowledged was lost.
+
+910
+01:01:01.595 --> 01:01:08.209
+Reads: a leader answering from local state served 66,224 stale reads.
+
+911
+01:01:08.489 --> 01:01:14.633
+These came from deposed leaders stuck in a minority partition, and from new leaders that hadn't yet caught up.
+
+912
+01:01:14.913 --> 01:01:17.217
+ReadIndex served 0 stale reads.
+
+913
+01:01:17.497 --> 01:01:32.537
+Lease reads served 0 with accurate clocks and with a 10 % slow leader clock (the lease is 135 ms against a 150 ms minimum election timeout, so a 10 % drift uses up exactly the margin).
+
+914
+01:01:32.817 --> 01:01:37.126
+With a 50 % slow clock they served 298 stale reads.
+
+915
+01:01:38.476 --> 01:01:44.129
+Lab 1, real PostgreSQL 16: a lease, a paused leader and a fencing token.
+
+916
+01:01:44.409 --> 01:01:56.783
+The database is the linearizable store here: the lease row is updated only by an atomic conditional UPDATE, and expiry is judged by the database's clock (now()), never by the pods' clocks.
+
+917
+01:01:57.063 --> 01:02:00.945
+Pod A takes the lease and pauses for 6 s (TTL 3 s).
+
+918
+01:02:01.225 --> 01:02:03.017
+Pod B takes over and writes.
+
+919
+01:02:03.297 --> 01:02:04.748
+Then A wakes up and writes.
+
+920
+01:02:05.028 --> 01:02:13.625
+The script was run as-is against PostgreSQL 16, as a non-root user, and is in labs or ch12-consensus/.
+
+921
+01:02:14.975 --> 01:02:15.701
+Setup.
+
+922
+01:02:15.981 --> 01:02:17.303
+Here is the shell code.
+
+923
+01:02:17.583 --> 01:02:27.269
+One PostgreSQL 16 instance on 5531 used as the linearizable store for a lease + fencing tokens.
+
+924
+01:02:30.119 --> 01:02:31.143
+Experiment.
+
+925
+01:02:31.423 --> 01:02:32.745
+Here is the shell code.
+
+926
+01:02:33.025 --> 01:02:36.716
+It runs to 56 lines; the full listing is in the chapter.
+
+927
+01:02:36.996 --> 01:02:40.751
+The nightly store-settlement job must run on exactly one pod.
+
+928
+01:02:41.031 --> 01:02:44.807
+Leader = holder of a 3 s lease in PostgreSQL.
+
+929
+01:02:45.087 --> 01:02:50.164
+Pod A takes the lease, then stalls for 6 s (a GC pause, a frozen VM).
+
+930
+01:02:50.444 --> 01:02:51.767
+Pod B takes over.
+
+931
+01:02:52.047 --> 01:03:01.391
+A wakes up and writes. acquire: succeeds only if the lease expired (by the DATABASE's clock) or we already hold it; epoch = fencing token.
+
+932
+01:03:04.241 --> 01:03:05.094
+Output.
+
+933
+01:03:05.374 --> 01:03:35.043
+On screen: == without a fencing check at the resource. t=0s pod-A acquires lease, then epoch 1; computes payout 41,250.00 from a snapshot. taken now. t=0s pod-A stalls for 6 s (lease TTL is 3 s). t=1s pod-B tries, then refused (lease still valid). t=4s pod-B tries, then epoch 2; recomputes with 3 late refunds:
+
+934
+01:03:35.323 --> 01:03:47.589
+39,980.00. t=4s pod-B writes with token 2, then 1 row updated. t=6s pod-A wakes, still believes it is leader,
+
+935
+01:03:47.869 --> 01:04:12.488
+writes its stale payout with token 1. then 1 row updated. final row: payout 41250.00 writtenby pod-A fence 0. == with a fencing check (update... where fence = mytoken). t=0s pod-A acquires lease, then epoch 1; computes payout 41,250.00 from a snapshot. taken now.
+
+936
+01:04:12.768 --> 01:04:14.283
+The rest is in the chapter.
+
+937
+01:04:17.133 --> 01:04:25.389
+The lease worked as specified: at t = 1 s pod B was refused, and it only got the lease (epoch 2) after expiry.
+
+938
+01:04:25.669 --> 01:04:32.815
+Without a fence, the paused pod still did damage: its 6-second-old computation overwrote B's correct payout.
+
+939
+01:04:33.095 --> 01:04:34.119
+Nothing errored.
+
+940
+01:04:34.399 --> 01:04:40.202
+With where fence =:token, the stale write updated 0 rows and B's payout survived.
+
+941
+01:04:40.482 --> 01:04:43.746
+Pod A learns it lost leadership from the zero row count.
+
+942
+01:04:45.096 --> 01:04:51.219
+Lab 2, real etcd 3.5: elections, failover, quorum loss, CAS and watches.
+
+943
+01:04:51.499 --> 01:05:00.267
+Three etcd 3.5.17 members on one host (heartbeat 100 ms, election timeout 1 s), driven by etcdctl.
+
+944
+01:05:00.547 --> 01:05:16.035
+The script uses the same recipe the L4 Java code uses: a leader key created in a transaction only if it doesn't exist (createrevision == 0), attached to a lease, and the key's createrevision as the fencing token.
+
+945
+01:05:16.315 --> 01:05:20.837
+It also writes into the Lab 1 PostgreSQL table with those tokens.
+
+946
+01:05:21.117 --> 01:05:26.579
+The partition in step 4 is made with iptables, dropping every peer connection of one member.
+
+947
+01:05:26.859 --> 01:05:30.059
+The script was run as-is, and the output is verbatim.
+
+948
+01:05:30.339 --> 01:05:33.389
+Revisions, terms and timings will differ on your machine.
+
+949
+01:05:34.739 --> 01:05:35.465
+Setup.
+
+950
+01:05:35.745 --> 01:05:37.067
+Here is the shell code.
+
+951
+01:05:37.347 --> 01:05:40.974
+It runs to 21 lines; the full listing is in the chapter.
+
+952
+01:05:41.254 --> 01:06:33.743
+3-member etcd 3.5 cluster on localhost: e1:2379/:2380, e2:22379/:22380, e3:32379/:32380. listen-client-urls http://127.0.0.1:$2 --advertise-client-urls http://127.0.0.1:$2 \. listen-peer-urls http://127.0.0.1:$3 --initial-advertise-peer-urls http://127.0.0.1:$3 \.
+
+953
+01:06:36.593 --> 01:06:37.617
+Experiment.
+
+954
+01:06:37.897 --> 01:06:39.220
+Here is the shell code.
+
+955
+01:06:39.500 --> 01:06:43.724
+It runs to 154 lines; the full listing is in the chapter.
+
+956
+01:06:44.004 --> 01:06:46.415
+Real etcd 3.5, 3 members.
+
+957
+01:06:46.695 --> 01:06:57.105
+Needs: setup.sh running; the fencing DB from the Ch 12 PostgreSQL lab on:5531 (optional part 2).
+
+958
+01:06:59.955 --> 01:07:00.809
+Output.
+
+959
+01:07:01.089 --> 01:07:23.766
+On screen: == 1. cluster status. e1: raft term 2, LEADER. e2: raft term 2, follower. e3: raft term 2, follower. == 2. leader election with a lease; the leader key's createrevision is the fencing. token. pod-A campaigns (lease TTL 3 s, keep-alive running), then token 2. pod-B campaigns,
+
+960
+01:07:24.046 --> 01:07:49.262
+then lost (and keeps its own lease alive, retrying). pod-A freezes (SIGSTOP on its keep-alive process). leader key gone after 3233 ms (lease expired on the etcd leader's clock). pod-B campaigns again, then token 4. pod-A wakes; its keep-alive now reports: lease 6ca3a0d869c49308 already expired.
+
+961
+01:07:49.542 --> 01:07:56.582
+PostgreSQL: pod-B writes with token 4, then 1 row; pod-A writes with token 2, then 0 rows.
+
+962
+01:07:56.862 --> 01:07:58.377
+The rest is in the chapter.
+
+963
+01:08:01.227 --> 01:08:07.008
+Election and fencing, end to end: pod B's campaign fails while pod A's lease is alive.
+
+964
+01:08:07.288 --> 01:08:15.928
+Pod A's keep-alive is frozen, and the etcd leader's clock expires the lease about 3.2 s later (the TTL is 3 s).
+
+965
+01:08:16.208 --> 01:08:19.344
+Pod B wins with token 4 against A's token 2.
+
+966
+01:08:19.624 --> 01:08:27.944
+When A wakes, etcd tells it the lease is gone, but A's stale write had already been sent and was rejected by PostgreSQL (0 rows).
+
+967
+01:08:28.224 --> 01:08:31.275
+The fence is what protected the data, not A noticing.
+
+968
+01:08:31.555 --> 01:08:42.435
+Failover: killing the Raft leader (SIGKILL, a crash) produced a new leader in ~2.4 s: the randomized 1 to 2 s election timeout plus detection.
+
+969
+01:08:42.715 --> 01:08:45.424
+The term went from 2 to 3, and writes resumed.
+
+970
+01:08:46.774 --> 01:08:52.129
+Quorum loss is CP: alone, a member refuses writes and linearizable reads.
+
+971
+01:08:52.409 --> 01:08:59.918
+It will answer a serializable read, and here it returned after-failover although v2 had been acknowledged to a client earlier.
+
+972
+01:09:00.198 --> 01:09:05.510
+That's a real stale read, the etcd version of leader answers from local state in L3.
+
+973
+01:09:05.790 --> 01:09:08.521
+After healing, the same member returns v2.
+
+974
+01:09:08.801 --> 01:09:11.254
+CAS: two movers read modrevision 9.
+
+975
+01:09:11.534 --> 01:09:16.142
+The first transaction succeeds, and the second fails because the revision changed.
+
+976
+01:09:16.422 --> 01:09:19.281
+Exactly one flip wins, with no lock needed.
+
+977
+01:09:20.631 --> 01:09:28.417
+Watches: a watch from revision + 1 replays every change since the snapshot, so nothing falls between load and watch.
+
+978
+01:09:28.697 --> 01:09:33.561
+After compaction, the watch is cancelled with required revision has been compacted.
+
+979
+01:09:33.841 --> 01:09:36.721
+That's why L4's loadAndWatch has a resync path.
+
+980
+01:09:38.071 --> 01:09:41.698
+L4, Fenced leadership in production, and reads that are safe.
+
+981
+01:09:41.978 --> 01:09:51.642
+Requirement: exactly one settlement runner across 30 pods, failover within ~15 s, and no write from a deposed leader ever taking effect.
+
+982
+01:09:51.922 --> 01:09:58.599
+The shard map (Ch 11) must be updated only by compare-and-swap, and read without missing a change.
+
+983
+01:09:59.949 --> 01:10:01.976
+FencedLeadership (etcd, jetcd).
+
+984
+01:10:02.256 --> 01:10:03.792
+Here is the Java code.
+
+985
+01:10:04.072 --> 01:10:07.677
+It runs to 82 lines; the full listing is in the chapter.
+
+986
+01:10:07.957 --> 01:10:10.005
+Campaign for leadership of one job.
+
+987
+01:10:10.285 --> 01:10:18.968
+While leader, run work(token) repeatedly; the token is the leader key's. revision (cluster-wide monotonic) and MUST be passed to every write.
+
+988
+01:10:19.248 --> 01:10:21.467
+Any sign of lost leadership stops work.
+
+989
+01:10:24.317 --> 01:10:26.258
+Settlement job using the token.
+
+990
+01:10:26.538 --> 01:10:28.074
+Here is the Java code.
+
+991
+01:10:28.354 --> 01:10:32.023
+It runs to 38 lines; the full listing is in the chapter.
+
+992
+01:10:32.303 --> 01:10:33.541
+Called in the leader loop.
+
+993
+01:10:33.821 --> 01:10:38.599
+Every write carries the token; a 0-row update means we are no longer leader.
+
+994
+01:10:41.449 --> 01:10:42.388
+Shard map:
+
+995
+01:10:42.668 --> 01:10:44.844
+CAS update and gap-free watch.
+
+996
+01:10:45.124 --> 01:10:46.660
+Here is the Java code.
+
+997
+01:10:46.940 --> 01:10:50.759
+It runs to 37 lines; the full listing is in the chapter.
+
+998
+01:10:51.039 --> 01:10:57.119
+Flip one bucket only if nobody changed it since we read it (the mover's step 5, Ch 11).
+
+999
+01:10:59.969 --> 01:11:00.715
+Warning:
+
+1000
+01:11:00.995 --> 01:11:03.491
+What was and wasn't verified for L4.
+
+1001
+01:11:03.771 --> 01:11:08.166
+The fencing behaviour was verified on real PostgreSQL (Lab 1).
+
+1002
+01:11:08.446 --> 01:11:26.345
+The etcd semantics this code relies on were verified against a real etcd 3.5 cluster with etcdctl (Lab 2): a create-if-absent leader key attached to a lease, createrevision as the token, lease expiry, modrevision CAS, and watch-from-revision with compaction.
+
+1003
+01:11:26.625 --> 01:11:30.443
+The read strategies were verified in the Raft simulation (L3).
+
+1004
+01:11:30.723 --> 01:11:37.827
+The jetcd Java code itself wasn't compiled or run, because Maven Central isn't reachable from this environment.
+
+1005
+01:11:38.107 --> 01:11:51.718
+Method names follow jetcd 0.7 or 0.8 (campaign(...).getLeader().getRevision(), txn().If().Then().commit(), WatchOption.builder().isPrefix(true).withRevision(...)).
+
+1006
+01:11:51.998 --> 01:11:54.665
+Check them against the version you use.!-- VERIFY --.
+
+1007
+01:11:56.015 --> 01:11:58.212
+Alternatives in the Spring ecosystem:
+
+1008
+01:11:58.492 --> 01:12:08.711
+Spring Integration's LeaderInitiator (ZooKeeper, via Curator) and LockRegistryLeaderInitiator (any LockRegistry, including JDBC).
+
+1009
+01:12:08.991 --> 01:12:12.767
+Spring Cloud Kubernetes leader election (the Lease API).
+
+1010
+01:12:13.047 --> 01:12:16.311
+ShedLock for run this @Scheduled method on one node.
+
+1011
+01:12:16.591 --> 01:12:19.343
+None of these gives you the fencing token for free.
+
+1012
+01:12:19.623 --> 01:12:25.873
+Wire in the epoch or revision or resourceVersion yourself, or make the protected write idempotent.
+
+1013
+01:12:27.223 --> 01:12:29.911
+Choosing the read path for the shard map and flags:
+
+1014
+01:12:31.261 --> 01:12:32.627
+Here is a quick table:
+
+1015
+01:12:32.907 --> 01:12:35.936
+Reader, and Read, and Why. order-service routing.
+
+1016
+01:12:36.216 --> 01:12:36.984
+Read:
+
+1017
+01:12:37.264 --> 01:12:40.805
+Local cache fed by the watch (stale by up to the watch delay).
+
+1018
+01:12:41.085 --> 01:12:41.768
+Why:
+
+1019
+01:12:42.048 --> 01:12:48.149
+The fence (BUCKETMOVED) catches staleness where it matters (Ch 11). bucket mover before a flip.
+
+1020
+01:12:48.429 --> 01:12:49.197
+Read:
+
+1021
+01:12:49.477 --> 01:12:53.552
+Linearizable get (etcd default) + CAS on modRevision.
+
+1022
+01:12:53.832 --> 01:12:54.515
+Why:
+
+1023
+01:12:54.795 --> 01:12:56.523
+Must act on the latest value.
+
+1024
+01:12:56.803 --> 01:12:57.912
+Feature flags.
+
+1025
+01:12:58.192 --> 01:12:58.960
+Read:
+
+1026
+01:12:59.240 --> 01:13:00.392
+Watch-fed cache.
+
+1027
+01:13:00.672 --> 01:13:01.355
+Why:
+
+1028
+01:13:01.635 --> 01:13:03.683
+Seconds of staleness is acceptable.
+
+1029
+01:13:03.963 --> 01:13:05.307
+Settlement leader check.
+
+1030
+01:13:05.587 --> 01:13:06.355
+Read:
+
+1031
+01:13:06.635 --> 01:13:08.725
+Local lease check and DB fence.
+
+1032
+01:13:09.005 --> 01:13:09.688
+Why:
+
+1033
+01:13:09.968 --> 01:13:12.891
+Local check for speed; the fence for correctness.
+
+1034
+01:13:14.241 --> 01:13:16.374
+What changed from L1 to L4.
+
+1035
+01:13:16.654 --> 01:13:18.019
+Here is a quick table:
+
+1036
+01:13:18.299 --> 01:13:22.417
+Concern, and L1, and L2, and L3, and Lab or L4.
+
+1037
+01:13:22.697 --> 01:13:23.763
+Ordering events.
+
+1038
+01:13:24.043 --> 01:13:24.875
+L1:
+
+1039
+01:13:25.155 --> 01:13:27.993
+Skew breaks wall clocks; HLC fixes it.
+
+1040
+01:13:28.273 --> 01:13:29.083
+L2:
+
+1041
+01:13:29.363 --> 01:13:32.051
+HLC in envelopes; versioned status.
+
+1042
+01:13:32.331 --> 01:13:33.185
+L3:
+
+1043
+01:13:33.465 --> 01:13:34.638
+Raft log order.
+
+1044
+01:13:34.918 --> 01:13:36.155
+Lab or L4:
+
+1045
+01:13:36.435 --> 01:13:37.843
+Tokens order leaders.
+
+1046
+01:13:38.123 --> 01:13:39.233
+Latest value.
+
+1047
+01:13:39.513 --> 01:13:40.323
+L2:
+
+1048
+01:13:40.603 --> 01:13:44.934
+Checked: follower reads and plain quorums aren't linearizable; ABD is.
+
+1049
+01:13:45.214 --> 01:13:46.067
+L3:
+
+1050
+01:13:46.347 --> 01:13:51.787
+ReadIndex 0 stale; local reads 66,224 stale.
+
+1051
+01:13:52.067 --> 01:13:53.305
+Lab or L4:
+
+1052
+01:13:53.585 --> 01:13:55.889
+Linearizable get + CAS for the map.
+
+1053
+01:13:56.169 --> 01:13:57.043
+Agreement.
+
+1054
+01:13:57.323 --> 01:13:58.177
+L3:
+
+1055
+01:13:58.457 --> 01:14:01.635
+Raft, 0 violations; two broken rules shown.
+
+1056
+01:14:01.915 --> 01:14:04.134
+Lab or L4: etcd election.
+
+1057
+01:14:04.414 --> 01:14:05.993
+Paused or deposed leader.
+
+1058
+01:14:06.273 --> 01:14:07.105
+L1:
+
+1059
+01:14:07.385 --> 01:14:08.707
+Monotonic timeouts.
+
+1060
+01:14:08.987 --> 01:14:09.841
+L3:
+
+1061
+01:14:10.121 --> 01:14:12.766
+Lease reads fail only beyond the drift bound.
+
+1062
+01:14:13.046 --> 01:14:14.283
+Lab or L4:
+
+1063
+01:14:14.563 --> 01:14:18.851
+Fencing token: stale write 0 rows (real PostgreSQL).
+
+1064
+01:14:20.201 --> 01:14:21.076
+Evidence.
+
+1065
+01:14:21.356 --> 01:14:22.188
+L1:
+
+1066
+01:14:22.468 --> 01:14:23.407
+Executed.
+
+1067
+01:14:23.687 --> 01:14:24.497
+L2:
+
+1068
+01:14:24.777 --> 01:14:27.209
+20,000 histories per mode, checked.
+
+1069
+01:14:27.489 --> 01:14:28.343
+L3:
+
+1070
+01:14:28.623 --> 01:14:31.951
+300 seeded runs per variant + Figure 8 script.
+
+1071
+01:14:32.231 --> 01:14:33.468
+Lab or L4:
+
+1072
+01:14:33.748 --> 01:14:38.740
+Real PostgreSQL + real etcd labs; jetcd Java marked VERIFY.
+
+1073
+01:14:40.090 --> 01:14:41.029
+Part 6.
+
+1074
+01:14:41.309 --> 01:14:42.589
+Production Concerns.
+
+1075
+01:14:43.839 --> 01:14:44.991
+Failure modes.
+
+1076
+01:14:45.271 --> 01:14:46.636
+Here is a quick table:
+
+1077
+01:14:46.916 --> 01:14:50.756
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+1078
+01:14:51.036 --> 01:14:53.340
+Paused or partitioned leader keeps acting.
+
+1079
+01:14:53.620 --> 01:14:54.815
+Detection signal:
+
+1080
+01:14:55.095 --> 01:14:58.337
+Fenced-write rejections 0; two pods logging leader.
+
+1081
+01:14:58.617 --> 01:14:59.833
+Blast radius:
+
+1082
+01:15:00.113 --> 01:15:03.825
+Duplicate or overwritten side effects (§1.1).
+
+1083
+01:15:04.105 --> 01:15:05.108
+Mitigation:
+
+1084
+01:15:05.388 --> 01:15:10.956
+Fencing tokens checked by the resource; idempotent side effects. etcd loses quorum.
+
+1085
+01:15:11.236 --> 01:15:15.780
+Detection signal: etcdserverhasleader = 0; proposals failing.
+
+1086
+01:15:16.060 --> 01:15:17.276
+Blast radius:
+
+1087
+01:15:17.556 --> 01:15:20.863
+No elections, map changes or Patroni failovers.
+
+1088
+01:15:21.143 --> 01:15:22.145
+Mitigation:
+
+1089
+01:15:22.425 --> 01:15:28.825
+3 AZs; alert on member down; never run 2 members; restore runbook. etcd slow disk (fsync).
+
+1090
+01:15:29.105 --> 01:15:34.481
+Detection signal: walfsyncduration p99 10 ms; leader changes.
+
+1091
+01:15:34.761 --> 01:15:35.977
+Blast radius:
+
+1092
+01:15:36.257 --> 01:15:40.225
+Election flapping, lease expiries, cascading job failovers.
+
+1093
+01:15:40.505 --> 01:15:41.508
+Mitigation:
+
+1094
+01:15:41.788 --> 01:15:46.844
+Dedicated SSDs; no noisy neighbours; tune heartbeat or election timeouts.
+
+1095
+01:15:48.194 --> 01:15:49.837
+etcd DB over quota.
+
+1096
+01:15:50.117 --> 01:15:54.917
+Detection signal: mvccdbtotalsize near quota; NOSPACE alarm.
+
+1097
+01:15:55.197 --> 01:15:56.413
+Blast radius:
+
+1098
+01:15:56.693 --> 01:15:58.101
+All writes rejected.
+
+1099
+01:15:58.381 --> 01:15:59.383
+Mitigation:
+
+1100
+01:15:59.663 --> 01:16:03.354
+Auto-compaction, periodic defrag, don't store data there.
+
+1101
+01:16:03.634 --> 01:16:04.850
+Watch compacted.
+
+1102
+01:16:05.130 --> 01:16:06.325
+Detection signal:
+
+1103
+01:16:06.605 --> 01:16:09.655
+Watch error required revision has been compacted.
+
+1104
+01:16:09.935 --> 01:16:11.151
+Blast radius:
+
+1105
+01:16:11.431 --> 01:16:13.010
+A client misses changes.
+
+1106
+01:16:13.290 --> 01:16:14.293
+Mitigation:
+
+1107
+01:16:14.573 --> 01:16:17.047
+Re-list then re-watch (L4 resync).
+
+1108
+01:16:17.327 --> 01:16:18.607
+Clock step or skew.
+
+1109
+01:16:18.887 --> 01:16:23.922
+Detection signal: chrony offset metric; HLC logical counter growth.
+
+1110
+01:16:24.202 --> 01:16:25.418
+Blast radius:
+
+1111
+01:16:25.698 --> 01:16:30.647
+Wrong LWW winners, early or late lease expiry, TLS errors.
+
+1112
+01:16:30.927 --> 01:16:37.114
+Mitigation: chrony slew-only after boot; offset alerts; monotonic clocks for durations.
+
+1113
+01:16:37.394 --> 01:16:38.397
+Leap second.
+
+1114
+01:16:38.677 --> 01:16:39.871
+Detection signal:
+
+1115
+01:16:40.151 --> 01:16:41.026
+Calendar.
+
+1116
+01:16:41.306 --> 01:16:42.522
+Blast radius:
+
+1117
+01:16:42.802 --> 01:16:45.234
+Duplicate or skipped second in timestamps.
+
+1118
+01:16:45.514 --> 01:16:46.517
+Mitigation:
+
+1119
+01:16:46.797 --> 01:16:49.101
+Leap smearing on all hosts consistently.
+
+1120
+01:16:50.451 --> 01:16:52.819
+Lease reads with clock drift beyond the bound.
+
+1121
+01:16:53.099 --> 01:16:54.293
+Detection signal:
+
+1122
+01:16:54.573 --> 01:16:56.664
+Stale-read audits; drift metrics.
+
+1123
+01:16:56.944 --> 01:16:58.160
+Blast radius:
+
+1124
+01:16:58.440 --> 01:17:01.021
+Stale reads from a deposed leader (L3:
+
+1125
+01:17:01.301 --> 01:17:02.645
+298).
+
+1126
+01:17:02.925 --> 01:17:03.928
+Mitigation:
+
+1127
+01:17:04.208 --> 01:17:08.667
+ReadIndex for critical reads; bounded drift + check-quorum for leases.
+
+1128
+01:17:08.947 --> 01:17:10.845
+Non-linearizable strong reads.
+
+1129
+01:17:11.125 --> 01:17:12.320
+Detection signal:
+
+1130
+01:17:12.600 --> 01:17:15.139
+Jepsen-style tests; customer reports.
+
+1131
+01:17:15.419 --> 01:17:16.635
+Blast radius:
+
+1132
+01:17:16.915 --> 01:17:18.685
+Uniqueness or ordering bugs.
+
+1133
+01:17:18.965 --> 01:17:19.968
+Mitigation:
+
+1134
+01:17:20.248 --> 01:17:24.899
+Know each store's read semantics; linearizable reads where invariants need them.
+
+1135
+01:17:25.179 --> 01:17:27.995
+Split-brain from a non-consensus lock (Redis).
+
+1136
+01:17:28.275 --> 01:17:29.469
+Detection signal:
+
+1137
+01:17:29.749 --> 01:17:31.307
+Duplicate executions.
+
+1138
+01:17:31.587 --> 01:17:32.803
+Blast radius:
+
+1139
+01:17:33.083 --> 01:17:34.043
+Money errors.
+
+1140
+01:17:34.323 --> 01:17:35.325
+Mitigation:
+
+1141
+01:17:35.605 --> 01:17:37.909
+Consensus-backed election + fencing.
+
+1142
+01:17:39.259 --> 01:17:40.347
+Observability.
+
+1143
+01:17:40.627 --> 01:18:04.371
+Leadership per job: current holder, token, leadership changes per hour, time without a leader, fenced rejections (each one is a caught pause or partition, so log it with details). etcd: hasleader, leaderchangesseentotal, proposalsfailedtotal, WAL fsync and backend commit p99, DB size versus quota, watchers, gRPC error rates, peer round-trip time.
+
+1144
+01:18:04.651 --> 01:18:16.235
+Time: host clock offset and estimated error (chrony tracking), leap status, the max HLC logical counter observed and the max remote minus local drift at observe().
+
+1145
+01:18:17.585 --> 01:18:25.991
+Consistency: stale-read probes (write a canary value, read it through each path, measure the lag), BUCKETMOVED and version-conflict rates.
+
+1146
+01:18:27.341 --> 01:18:32.909
+Security. etcd holds the keys to the kingdom (shard maps, leader keys, Patroni state).
+
+1147
+01:18:33.189 --> 01:18:38.991
+Use mutual TLS, per-client certificates, RBAC per key prefix, and network isolation.
+
+1148
+01:18:39.271 --> 01:18:43.858
+Encrypt snapshots, and never expose the client port outside the cluster network.
+
+1149
+01:18:44.138 --> 01:18:48.298
+A client that can write or elections or settlement can make itself leader.
+
+1150
+01:18:48.578 --> 01:18:52.567
+RBAC must restrict election prefixes to the job's identity.
+
+1151
+01:18:52.847 --> 01:19:01.957
+Fencing tokens aren't secrets, but the fence column must only be writable through the fenced path (no ad-hoc scripts that reset fence = 0).
+
+1152
+01:19:03.307 --> 01:19:04.864
+Time is an attack surface:
+
+1153
+01:19:05.144 --> 01:19:09.517
+NTP spoofing can move clocks and expire leases or certificates.
+
+1154
+01:19:09.797 --> 01:19:15.408
+Use authenticated time sources (NTS or the cloud provider's link-local service).
+
+1155
+01:19:16.758 --> 01:19:18.422
+Performance and tuning knobs.
+
+1156
+01:19:18.702 --> 01:19:20.067
+Here is a quick table:
+
+1157
+01:19:20.347 --> 01:19:23.291
+Knob, and Default here, and Effect. etcd members.
+
+1158
+01:19:23.571 --> 01:19:24.489
+Default here:
+
+1159
+01:19:24.769 --> 01:19:25.515
+3.
+
+1160
+01:19:25.795 --> 01:19:26.585
+Effect:
+
+1161
+01:19:26.865 --> 01:19:33.691
+5 tolerates 2 failures; more members = slower writes. etcd heartbeat-interval or election-timeout.
+
+1162
+01:19:33.971 --> 01:19:34.889
+Default here:
+
+1163
+01:19:35.169 --> 01:19:37.601
+100 ms or 1000 ms.
+
+1164
+01:19:37.881 --> 01:19:38.670
+Effect:
+
+1165
+01:19:38.950 --> 01:19:43.643
+Lower = faster failover, more false elections on slow disks or networks.
+
+1166
+01:19:43.923 --> 01:19:45.779
+Lease TTL or keep-alive.
+
+1167
+01:19:46.059 --> 01:19:46.977
+Default here:
+
+1168
+01:19:47.257 --> 01:19:48.579
+10 s or 3 s.
+
+1169
+01:19:48.859 --> 01:19:49.649
+Effect:
+
+1170
+01:19:49.929 --> 01:19:53.833
+Lower = faster failover, more churn on GC pauses.
+
+1171
+01:19:54.113 --> 01:19:56.225
+Leader's local validity margin.
+
+1172
+01:19:56.505 --> 01:19:57.422
+Default here:
+
+1173
+01:19:57.702 --> 01:19:59.323
+TTL minus 3 s.
+
+1174
+01:19:59.603 --> 01:20:00.393
+Effect:
+
+1175
+01:20:00.673 --> 01:20:03.766
+Bigger margin = stops earlier on uncertainty.
+
+1176
+01:20:04.046 --> 01:20:05.006
+Read mode.
+
+1177
+01:20:05.286 --> 01:20:06.203
+Default here:
+
+1178
+01:20:06.483 --> 01:20:09.961
+Linearizable for CAS paths; watch cache for routing.
+
+1179
+01:20:10.241 --> 01:20:11.030
+Effect:
+
+1180
+01:20:11.310 --> 01:20:12.953
+Round trip versus staleness.
+
+1181
+01:20:14.303 --> 01:20:15.135
+Batching.
+
+1182
+01:20:15.415 --> 01:20:18.572
+Default here: etcd batches proposals automatically.
+
+1183
+01:20:18.852 --> 01:20:19.641
+Effect:
+
+1184
+01:20:19.921 --> 01:20:21.244
+Throughput under load.
+
+1185
+01:20:21.524 --> 01:20:23.359
+HLC max forward drift.
+
+1186
+01:20:23.639 --> 01:20:24.556
+Default here:
+
+1187
+01:20:24.836 --> 01:20:26.180
+500 ms.
+
+1188
+01:20:26.460 --> 01:20:27.249
+Effect:
+
+1189
+01:20:27.529 --> 01:20:31.775
+Rejects faulty upstream clocks versus false alarms. chrony makestep.
+
+1190
+01:20:32.055 --> 01:20:32.972
+Default here:
+
+1191
+01:20:33.252 --> 01:20:34.340
+Only at boot.
+
+1192
+01:20:34.620 --> 01:20:35.409
+Effect:
+
+1193
+01:20:35.689 --> 01:20:38.271
+No steps during operation (slew only).
+
+1194
+01:20:39.621 --> 01:20:40.346
+Cost.
+
+1195
+01:20:40.626 --> 01:20:47.986
+A 3-member etcd cluster on small dedicated VMs is cheap compared to one incident like §1.1.
+
+1196
+01:20:48.266 --> 01:20:54.581
+The real costs are operations (upgrades, defrag, backup or restore drills) and on-call knowledge.
+
+1197
+01:20:54.861 --> 01:21:04.994
+Kubernetes already runs etcd, but don't put application coordination into the cluster's own etcd unless you accept that an application bug can hurt the control plane.
+
+1198
+01:21:05.274 --> 01:21:10.330
+Use Lease objects through the API server (rate-limited), or run a separate etcd.
+
+1199
+01:21:10.610 --> 01:21:15.922
+Linearizable reads cost a round trip each, and at high QPS that's real capacity.
+
+1200
+01:21:16.202 --> 01:21:19.167
+Use watch-fed caches plus fences for routing.
+
+1201
+01:21:20.517 --> 01:21:24.741
+Consensus across regions costs 50 to 200 ms per write.
+
+1202
+01:21:25.021 --> 01:21:35.176
+Keep quorums in-region and replicate asynchronously across regions unless RPO 0 across regions is a business requirement (Ch 27).
+
+1203
+01:21:36.526 --> 01:21:37.465
+Part 7.
+
+1204
+01:21:37.745 --> 01:21:39.451
+Anti-Patterns and Pitfalls.
+
+1205
+01:21:40.701 --> 01:21:41.341
+1.
+
+1206
+01:21:41.621 --> 01:21:44.480
+A lock with a TTL, and no fencing token.
+
+1207
+01:21:44.760 --> 01:21:45.571
+Symptom:
+
+1208
+01:21:45.851 --> 01:21:51.269
+A paused leader wakes up and writes over its successor (§1.1, lab run 1).
+
+1209
+01:21:52.619 --> 01:22:01.643
+Here is the SQL code. before: the lock is checked in the app, the write trusts it. after: the resource enforces the newest leader's token.
+
+1210
+01:22:04.493 --> 01:22:05.197
+2.
+
+1211
+01:22:05.477 --> 01:22:07.739
+Measuring durations with the wall clock.
+
+1212
+01:22:09.089 --> 01:22:11.137
+Here is the Java code. before:
+
+1213
+01:22:11.417 --> 01:22:23.641
+NTP steps, VM resumes and manual changes make this negative or huge (L1 E: minus 3,800 ms). after: monotonic, immune to clock changes.
+
+1214
+01:22:26.491 --> 01:22:27.237
+3.
+
+1215
+01:22:27.517 --> 01:22:31.229
+Ordering events from different machines by wall-clock timestamps.
+
+1216
+01:22:31.509 --> 01:22:32.320
+Symptom:
+
+1217
+01:22:32.600 --> 01:22:35.203
+Packing before Paid in the timeline (L1 A).
+
+1218
+01:22:35.483 --> 01:22:36.208
+Fix:
+
+1219
+01:22:36.488 --> 01:22:41.437
+HLC (or Lamport + tie-break) in the envelope, sorted by HLC.
+
+1220
+01:22:41.717 --> 01:22:42.421
+4.
+
+1221
+01:22:42.701 --> 01:22:45.027
+Assuming quorum reads are linearizable.
+
+1222
+01:22:45.307 --> 01:22:46.117
+Symptom:
+
+1223
+01:22:46.397 --> 01:22:50.579
+A reader sees a new value and a later reader sees the old one (L2:
+
+1224
+01:22:50.859 --> 01:22:53.461
+0.06 % of histories).
+
+1225
+01:22:53.741 --> 01:22:54.467
+Fix:
+
+1226
+01:22:54.747 --> 01:23:00.315
+Read repair or write-back before returning (ABD), or read through the leader with ReadIndex.
+
+1227
+01:23:01.665 --> 01:23:02.433
+5.
+
+1228
+01:23:02.713 --> 01:23:06.638
+Reading from the leader's local state and calling it strongly consistent.
+
+1229
+01:23:06.918 --> 01:23:07.729
+Symptom:
+
+1230
+01:23:08.009 --> 01:23:12.297
+A deposed leader in a minority partition keeps answering (L3:
+
+1231
+01:23:12.577 --> 01:23:15.734
+66,224 stale reads).
+
+1232
+01:23:16.014 --> 01:23:16.739
+Fix:
+
+1233
+01:23:17.019 --> 01:23:20.475
+ReadIndex, or leases with bounded drift and check-quorum.
+
+1234
+01:23:20.755 --> 01:23:23.870
+In etcd, don't use serializable reads for decisions.
+
+1235
+01:23:24.150 --> 01:23:24.897
+6.
+
+1236
+01:23:25.177 --> 01:23:28.249
+Using a 2-node or 4-node consensus cluster.
+
+1237
+01:23:28.529 --> 01:23:29.339
+Symptom:
+
+1238
+01:23:29.619 --> 01:23:31.923
+2 nodes: one failure stops everything.
+
+1239
+01:23:32.203 --> 01:23:36.321
+4 nodes: tolerates 1, the same as 3, with more to replicate.
+
+1240
+01:23:36.601 --> 01:23:37.326
+Fix:
+
+1241
+01:23:37.606 --> 01:23:40.443
+3 or 5 members, in different failure domains.
+
+1242
+01:23:41.793 --> 01:23:42.540
+7.
+
+1243
+01:23:42.820 --> 01:23:45.807
+Putting application data in etcd or ZooKeeper.
+
+1244
+01:23:46.087 --> 01:23:46.897
+Symptom:
+
+1245
+01:23:47.177 --> 01:23:55.540
+DB size near quota, slow fsyncs, elections flapping, and Kubernetes or Patroni affected by an application's write load.
+
+1246
+01:23:55.820 --> 01:23:56.545
+Fix:
+
+1247
+01:23:56.825 --> 01:23:58.063
+Metadata only.
+
+1248
+01:23:58.343 --> 01:24:00.071
+Data goes in databases.
+
+1249
+01:24:00.351 --> 01:24:01.033
+8.
+
+1250
+01:24:01.313 --> 01:24:06.817
+Treating LWW with wall clocks as conflict resolution for important data.
+
+1251
+01:24:07.097 --> 01:24:07.908
+Symptom:
+
+1252
+01:24:08.188 --> 01:24:11.388
+Silent loss of the newer update (Ch 10 L1).
+
+1253
+01:24:11.668 --> 01:24:12.393
+Fix:
+
+1254
+01:24:12.673 --> 01:24:17.964
+Versions or CAS, vector clocks with merges, or a single authoritative writer.
+
+1255
+01:24:19.314 --> 01:24:20.061
+9.
+
+1256
+01:24:20.341 --> 01:24:22.261
+Believing CAP means pick two.
+
+1257
+01:24:22.541 --> 01:24:23.351
+Symptom:
+
+1258
+01:24:23.631 --> 01:24:26.810
+Design docs claiming CA for a distributed store.
+
+1259
+01:24:27.090 --> 01:24:27.815
+Fix:
+
+1260
+01:24:28.095 --> 01:24:36.479
+Partitions happen: state what each operation does during a partition (refuse or answer stale), and what it costs without one (PACELC).
+
+1261
+01:24:36.759 --> 01:24:37.463
+10.
+
+1262
+01:24:37.743 --> 01:24:39.557
+Trusting that tests found no bug.
+
+1263
+01:24:39.837 --> 01:24:40.647
+Symptom:
+
+1264
+01:24:40.927 --> 01:24:51.658
+The broken Raft commit rule passed 300 random runs (L3), and the first ReadIndex implementation served 355 stale reads before the fix.
+
+1265
+01:24:51.938 --> 01:24:52.663
+Fix:
+
+1266
+01:24:52.943 --> 01:25:02.821
+Invariant checks everywhere, targeted scenario tests for known-dangerous interleavings, and Jepsen-style fault injection for anything coordination-related.
+
+1267
+01:25:04.171 --> 01:25:05.045
+Part 8.
+
+1268
+01:25:05.325 --> 01:25:06.669
+Interview Q and A.
+
+1269
+01:25:07.919 --> 01:25:08.751
+Beginner.
+
+1270
+01:25:09.031 --> 01:25:10.055
+Question 1.
+
+1271
+01:25:10.335 --> 01:25:13.642
+What's the difference between strong and eventual consistency?
+
+1272
+01:25:13.922 --> 01:25:15.287
+Thirty-second answer:
+
+1273
+01:25:15.567 --> 01:25:24.314
+Strong (linearizable) consistency makes a replicated system behave like one copy: once a write completes, every later read sees it.
+
+1274
+01:25:24.594 --> 01:25:32.722
+Eventual consistency only promises that replicas converge if writes stop, so reads in between may be stale or out of order.
+
+1275
+01:25:34.072 --> 01:25:35.075
+Question 2.
+
+1276
+01:25:35.355 --> 01:25:38.960
+Why can't we trust timestamps from different servers to order events?
+
+1277
+01:25:39.240 --> 01:25:40.605
+Thirty-second answer:
+
+1278
+01:25:40.885 --> 01:25:49.120
+Every machine's clock drifts and is corrected by NTP only to within milliseconds, sometimes much worse, and clocks can jump.
+
+1279
+01:25:49.400 --> 01:25:54.648
+Two events a few ms apart on different machines can get timestamps in the wrong order.
+
+1280
+01:25:54.928 --> 01:26:00.133
+L1: a 90 ms skew timestamped the effect 87 ms before its cause.
+
+1281
+01:26:01.483 --> 01:26:02.529
+Question 3.
+
+1282
+01:26:02.809 --> 01:26:04.835
+What problem does consensus solve?
+
+1283
+01:26:05.115 --> 01:26:06.481
+Thirty-second answer:
+
+1284
+01:26:06.761 --> 01:26:16.702
+Getting several machines to agree on a value or a sequence of values (a log), even when some crash or the network misbehaves, so that no two decide differently.
+
+1285
+01:26:16.982 --> 01:26:24.939
+It's used for leader election, configuration, locks, and replicated state machines like etcd, ZooKeeper and Kafka's KRaft.
+
+1286
+01:26:26.289 --> 01:26:27.356
+Question 4.
+
+1287
+01:26:27.636 --> 01:26:31.647
+What is CAP in one sentence, and what's the common misunderstanding?
+
+1288
+01:26:31.927 --> 01:26:33.292
+Thirty-second answer:
+
+1289
+01:26:33.572 --> 01:26:43.791
+When the network partitions, a replicated store must choose between answering every request (availability) and always returning the latest value (linearizability).
+
+1290
+01:26:44.071 --> 01:26:50.705
+The misunderstanding is pick 2 of 3: partitions aren't optional, so the real choice is what to do during one.
+
+1291
+01:26:52.055 --> 01:26:53.058
+Intermediate.
+
+1292
+01:26:53.338 --> 01:26:54.447
+Question 5.
+
+1293
+01:26:54.727 --> 01:26:57.415
+Linearizability versus serializability?
+
+1294
+01:26:57.695 --> 01:26:59.061
+Thirty-second answer:
+
+1295
+01:26:59.341 --> 01:27:10.477
+Serializability is a transaction isolation guarantee: concurrent transactions behave as if run one at a time in some order, not necessarily real-time order.
+
+1296
+01:27:10.757 --> 01:27:20.527
+Linearizability is a recency guarantee on single objects: each operation appears to happen instantly between its start and end, respecting real time.
+
+1297
+01:27:20.807 --> 01:27:23.367
+Both together is strict serializability.
+
+1298
+01:27:24.717 --> 01:27:25.827
+Question 6.
+
+1299
+01:27:26.107 --> 01:27:28.283
+Lamport clocks versus vector clocks?
+
+1300
+01:27:28.563 --> 01:27:29.928
+Thirty-second answer:
+
+1301
+01:27:30.208 --> 01:27:39.296
+A Lamport clock is a single counter that guarantees cause effect, but a smaller timestamp doesn't prove causality, so it can't detect concurrency.
+
+1302
+01:27:39.576 --> 01:27:48.088
+A vector clock keeps a counter per process and can tell happened-before from concurrent, at the cost of size that grows with the number of processes.
+
+1303
+01:27:49.438 --> 01:27:50.526
+Question 7.
+
+1304
+01:27:50.806 --> 01:27:53.899
+What's a hybrid logical clock and why would you use one?
+
+1305
+01:27:54.179 --> 01:27:55.545
+Thirty-second answer:
+
+1306
+01:27:55.825 --> 01:28:03.867
+A timestamp combining physical time with a logical counter: wall is the max physical time seen, logical breaks ties.
+
+1307
+01:28:04.147 --> 01:28:14.345
+It preserves causality like a Lamport clock but stays close to real time, so it's usable for time-range queries and human debugging, and fits in 64 bits.
+
+1308
+01:28:15.695 --> 01:28:16.719
+Question 8.
+
+1309
+01:28:16.999 --> 01:28:19.260
+Why must timeouts use a monotonic clock?
+
+1310
+01:28:19.540 --> 01:28:20.905
+Thirty-second answer:
+
+1311
+01:28:21.185 --> 01:28:29.804
+Wall clocks can be stepped by NTP, leap handling, VM resume or operators, so now minus start can go negative or jump.
+
+1312
+01:28:30.084 --> 01:28:33.177
+A monotonic clock only moves forward at a steady rate.
+
+1313
+01:28:33.457 --> 01:28:45.340
+L1 E: with a minus 5 s NTP step, a 2 s timeout measured on the wall clock computed minus 3,800 ms elapsed and fired 5.8 s late.
+
+1314
+01:28:46.690 --> 01:28:47.757
+Question 9.
+
+1315
+01:28:48.037 --> 01:28:51.365
+Are quorum reads (R + W N) linearizable?
+
+1316
+01:28:51.645 --> 01:28:53.010
+Thirty-second answer:
+
+1317
+01:28:53.290 --> 01:28:54.506
+Not by themselves.
+
+1318
+01:28:54.786 --> 01:29:02.978
+They guarantee you see the latest completed write, but during an in-flight write one reader can see the new value and a later reader the old one.
+
+1319
+01:29:03.258 --> 01:29:06.906
+L2 found this in 0.06 % of histories.
+
+1320
+01:29:07.186 --> 01:29:11.581
+Adding a write-back phase before returning (ABD) makes them linearizable:
+
+1321
+01:29:11.861 --> 01:29:13.887
+0 in 20,000 histories.
+
+1322
+01:29:15.237 --> 01:29:16.005
+Senior.
+
+1323
+01:29:16.285 --> 01:29:17.331
+Question 10.
+
+1324
+01:29:17.611 --> 01:29:20.960
+Walk me through Raft leader election and log replication.
+
+1325
+01:29:21.240 --> 01:29:22.605
+Thirty-second answer:
+
+1326
+01:29:22.885 --> 01:29:28.496
+Followers that time out (randomized) become candidates, increment the term and ask for votes.
+
+1327
+01:29:28.776 --> 01:29:34.131
+A node grants one vote per term, only to candidates whose log is at least as up-to-date.
+
+1328
+01:29:34.411 --> 01:29:35.968
+A majority makes a leader.
+
+1329
+01:29:36.248 --> 01:29:41.773
+The leader appends commands and replicates them with a consistency check on the previous entry.
+
+1330
+01:29:42.053 --> 01:29:48.219
+An entry from the current term is committed once it's on a majority, and committed entries are applied in order.
+
+1331
+01:29:49.569 --> 01:29:50.699
+Question 11.
+
+1332
+01:29:50.979 --> 01:29:56.142
+Why can't a Raft leader commit an entry from an earlier term just because a majority has it?
+
+1333
+01:29:56.422 --> 01:29:57.787
+Thirty-second answer:
+
+1334
+01:29:58.067 --> 01:30:04.489
+Because a node with a higher last term, but missing that entry, can still win a later election and overwrite it.
+
+1335
+01:30:04.769 --> 01:30:06.667
+That's the Raft paper's Figure 8.
+
+1336
+01:30:06.947 --> 01:30:10.531
+A leader counts replicas only for entries of its current term.
+
+1337
+01:30:10.811 --> 01:30:13.414
+Earlier entries become committed indirectly.
+
+1338
+01:30:14.764 --> 01:30:15.852
+Question 12.
+
+1339
+01:30:16.132 --> 01:30:18.351
+How does etcd serve a linearizable read?
+
+1340
+01:30:18.631 --> 01:30:19.996
+Thirty-second answer:
+
+1341
+01:30:20.276 --> 01:30:21.364
+With ReadIndex.
+
+1342
+01:30:21.644 --> 01:30:32.929
+The leader records its commit index, confirms it's still leader with a heartbeat round acknowledged by a majority, waits until its state machine has applied up to that index, then answers.
+
+1343
+01:30:33.209 --> 01:30:38.863
+A serializable read answers from any member's local state, which is faster but may be stale.
+
+1344
+01:30:40.213 --> 01:30:41.493
+Question 13.
+
+1345
+01:30:41.773 --> 01:30:44.653
+How would you implement leader election for a batch job?
+
+1346
+01:30:44.933 --> 01:30:46.298
+Thirty-second answer:
+
+1347
+01:30:46.578 --> 01:30:54.578
+Campaign on an etcd election (or a ZooKeeper ephemeral sequential node, or a Kubernetes Lease) with a lease and keep-alives.
+
+1348
+01:30:54.858 --> 01:30:57.823
+Use the leader key's revision as a fencing token.
+
+1349
+01:30:58.103 --> 01:31:00.834
+Before each unit of work, check local leadership.
+
+1350
+01:31:01.114 --> 01:31:05.509
+Pass the token with every write, and let the resource reject stale tokens.
+
+1351
+01:31:05.789 --> 01:31:07.943
+Make external side effects idempotent.
+
+1352
+01:31:09.293 --> 01:31:10.488
+Question 14.
+
+1353
+01:31:10.768 --> 01:31:15.419
+What are fencing tokens, and why doesn't a lock service alone prevent split brain?
+
+1354
+01:31:15.699 --> 01:31:17.064
+Thirty-second answer:
+
+1355
+01:31:17.344 --> 01:31:27.115
+A monotonically increasing number issued with each lock grant, sent with every write and checked by the resource, which rejects anything older than the newest it has seen.
+
+1356
+01:31:27.395 --> 01:31:35.885
+A lock service decides who holds the lock now, but a paused or delayed former holder doesn't know it lost the lock and can still send writes.
+
+1357
+01:31:36.165 --> 01:31:38.043
+Only the resource can reject them.
+
+1358
+01:31:39.393 --> 01:31:40.289
+Architect.
+
+1359
+01:31:40.569 --> 01:31:41.763
+Question 15.
+
+1360
+01:31:42.043 --> 01:31:47.825
+How does Spanner achieve external consistency, and what do databases without atomic clocks do?
+
+1361
+01:31:48.105 --> 01:31:49.470
+Thirty-second answer:
+
+1362
+01:31:49.750 --> 01:31:53.889
+TrueTime returns an interval guaranteed to contain real time.
+
+1363
+01:31:54.169 --> 01:32:04.665
+A transaction picks commit timestamp TT.now().latest and waits until TT.now().earliest passes it (commit wait, about 2ε) before becoming visible.
+
+1364
+01:32:04.945 --> 01:32:08.166
+So later transactions always get larger timestamps.
+
+1365
+01:32:08.446 --> 01:32:20.777
+CockroachDB uses HLC with a max clock offset: reads that find values inside their uncertainty window restart at a higher timestamp, and nodes beyond the offset bound shut down.
+
+1366
+01:32:22.127 --> 01:32:23.321
+Question 16.
+
+1367
+01:32:23.601 --> 01:32:26.716
+When would you use lease-based reads instead of ReadIndex?
+
+1368
+01:32:26.996 --> 01:32:28.361
+Thirty-second answer:
+
+1369
+01:32:28.641 --> 01:32:37.345
+When read latency matters more than a small risk tied to clock behaviour, and you can bound clock drift and enable check-quorum or leader stickiness.
+
+1370
+01:32:37.625 --> 01:32:43.855
+The leader serves locally until its lease (less than the election timeout, adjusted for drift) expires.
+
+1371
+01:32:44.135 --> 01:32:44.988
+L3:
+
+1372
+01:32:45.268 --> 01:32:52.841
+0 stale reads with accurate or 10 % slow clocks, and 298 with a 50 % slow leader clock.
+
+1373
+01:32:54.191 --> 01:32:55.535
+Question 17.
+
+1374
+01:32:55.815 --> 01:32:58.994
+How do you test a consensus or coordination system?
+
+1375
+01:32:59.274 --> 01:33:00.639
+Thirty-second answer:
+
+1376
+01:33:00.919 --> 01:33:19.543
+Deterministic simulation with fault injection (delays, loss, partitions, crashes, clock skew), invariant checks on every step, targeted scenario tests for known dangerous interleavings, linearizability checking of client histories, and Jepsen-style tests against the real system.
+
+1377
+01:33:20.893 --> 01:33:22.067
+Question 18.
+
+1378
+01:33:22.347 --> 01:33:25.589
+Design the coordination layer for the grocery platform.
+
+1379
+01:33:25.869 --> 01:33:27.235
+Thirty-second answer:
+
+1380
+01:33:27.515 --> 01:33:40.827
+A 3-member etcd across AZs for metadata only: leader elections with leases and fencing tokens, the shard map with CAS updates and gap-free watches, feature flags, and Patroni's DCS.
+
+1381
+01:33:41.107 --> 01:33:42.941
+Resources enforce tokens.
+
+1382
+01:33:43.221 --> 01:33:44.779
+Events carry HLCs.
+
+1383
+01:33:45.059 --> 01:33:47.277
+Hosts run chrony with offset alerting.
+
+1384
+01:33:47.557 --> 01:33:49.072
+Kafka uses KRaft.
+
+1385
+01:33:50.422 --> 01:33:51.659
+Question 19.
+
+1386
+01:33:51.939 --> 01:33:54.499
+Where would you deliberately avoid coordination?
+
+1387
+01:33:54.779 --> 01:33:56.145
+Thirty-second answer:
+
+1388
+01:33:56.425 --> 01:34:12.553
+Anywhere the invariant doesn't need it: carts (CRDT merge), counters and likes (sharded counters), analytics (eventual), notifications (idempotent, at-least-once), and partitioned work where each partition has one owner (Kafka consumer groups).
+
+1389
+01:34:12.833 --> 01:34:15.499
+Coordinate for money, uniqueness and leadership.
+
+1390
+01:34:16.849 --> 01:34:17.959
+Question 20.
+
+1391
+01:34:18.239 --> 01:34:21.737
+A Redis-lock-based job ran twice and paid stores twice.
+
+1392
+01:34:22.017 --> 01:34:23.681
+Run the post-incident review.
+
+1393
+01:34:23.961 --> 01:34:25.327
+Thirty-second answer:
+
+1394
+01:34:25.607 --> 01:34:34.993
+Root cause: a lock with a TTL and no fencing, where a GC or VM pause outlived the TTL, plus direct side effects from the leader.
+
+1395
+01:34:35.273 --> 01:34:49.289
+Fixes: a consensus-backed election, fencing tokens enforced by the settlement table, bank file generation by an idempotent dispatcher keyed on (store, date), reconciliation before release, and pause monitoring.
+
+1396
+01:34:50.639 --> 01:34:51.535
+Part 9.
+
+1397
+01:34:51.815 --> 01:34:53.223
+Summary and Practice.
+
+1398
+01:34:54.473 --> 01:34:55.561
+Key takeaways.
+
+1399
+01:34:55.841 --> 01:34:57.655
+Consistency has three meanings.
+
+1400
+01:34:57.935 --> 01:35:03.695
+In CAP and replication it means linearizability: one copy, real-time order.
+
+1401
+01:35:03.975 --> 01:35:10.375
+The ladder: strict serializable, then linearizable, then sequential, then causal, then session, then eventual.
+
+1402
+01:35:10.655 --> 01:35:12.681
+Pick per data class and operation.
+
+1403
+01:35:12.961 --> 01:35:20.471
+CAP is about what happens during a partition, and PACELC adds latency versus consistency the rest of the time.
+
+1404
+01:35:20.751 --> 01:35:22.095
+Clocks drift and jump.
+
+1405
+01:35:22.375 --> 01:35:32.423
+Never order cross-machine events by wall-clock timestamps, and never measure durations with wall clocks (L1: minus 3,800 ms elapsed).
+
+1406
+01:35:33.773 --> 01:35:41.645
+Lamport for causal total order, vector for detecting concurrency, HLC for causal and human-readable timestamps.
+
+1407
+01:35:41.925 --> 01:35:44.826
+Consensus = majority agreement on a log.
+
+1408
+01:35:45.106 --> 01:35:51.143
+2f + 1 nodes tolerate f failures, it's always safe, and live when the network behaves.
+
+1409
+01:35:51.423 --> 01:35:59.551
+Raft's two critical rules, the up-to-date vote check and committing only current-term entries, are each shown in L3 to be necessary.
+
+1410
+01:35:59.831 --> 01:36:06.658
+Reads need care: leader-local reads are stale after deposition (66,224).
+
+1411
+01:36:06.938 --> 01:36:08.239
+ReadIndex is safe.
+
+1412
+01:36:08.519 --> 01:36:11.378
+Leases are safe only within the clock-drift bound.
+
+1413
+01:36:12.728 --> 01:36:14.819
+Leases don't stop paused processes.
+
+1414
+01:36:15.099 --> 01:36:20.240
+Fencing tokens enforced by the resource do (lab: stale write, then 0 rows).
+
+1415
+01:36:20.520 --> 01:36:25.171
+Coordinate only where invariants demand it: money, uniqueness, leadership.
+
+1416
+01:36:25.451 --> 01:36:28.693
+Merge, partition or make everything else idempotent.
+
+1417
+01:36:30.043 --> 01:36:31.366
+Decision cheat sheet.
+
+1418
+01:36:31.646 --> 01:36:33.011
+Here is a quick table:
+
+1419
+01:36:33.291 --> 01:36:34.401
+Need, and Choose.
+
+1420
+01:36:34.681 --> 01:36:42.467
+Exactly one active job runner: etcd or ZooKeeper or K8s Lease election + fencing token at the resource.
+
+1421
+01:36:42.747 --> 01:36:45.307
+Job and data in one PostgreSQL:
+
+1422
+01:36:45.587 --> 01:36:48.446
+Lease row + epoch in that DB, fence column.
+
+1423
+01:36:48.726 --> 01:36:55.489
+Config per shard map with atomic changes: etcd txn on modRevision + watch from revision.
+
+1424
+01:36:55.769 --> 01:36:57.689
+Ordering events across services:
+
+1425
+01:36:57.969 --> 01:36:59.590
+HLC in the envelope.
+
+1426
+01:36:59.870 --> 01:37:01.577
+Detecting concurrent edits:
+
+1427
+01:37:01.857 --> 01:37:04.139
+Vector or version vectors + merge.
+
+1428
+01:37:04.419 --> 01:37:06.403
+Timeouts, retries, rate limits:
+
+1429
+01:37:06.683 --> 01:37:08.134
+System.nanoTime().
+
+1430
+01:37:09.484 --> 01:37:11.276
+Linearizable read from Raft:
+
+1431
+01:37:11.556 --> 01:37:16.249
+ReadIndex (default); lease reads only with a drift bound + check-quorum.
+
+1432
+01:37:16.529 --> 01:37:19.004
+Strict serializability across regions:
+
+1433
+01:37:19.284 --> 01:37:23.679
+Spanner or CockroachDB-class database, and accept the commit latency.
+
+1434
+01:37:23.959 --> 01:37:25.281
+Data that can merge:
+
+1435
+01:37:25.561 --> 01:37:27.503
+CRDTs, no consensus.
+
+1436
+01:37:28.853 --> 01:37:29.983
+Exercises.
+
+1437
+01:37:30.263 --> 01:37:31.629
+Here is a quick table:
+
+1438
+01:37:31.909 --> 01:37:33.765
+Band, and Exercise, and Hint.
+
+1439
+01:37:34.045 --> 01:37:34.877
+B1.
+
+1440
+01:37:35.157 --> 01:37:36.223
+Exercise:
+
+1441
+01:37:36.503 --> 01:37:40.173
+Change L1's skew to 5 ms and 500 ms.
+
+1442
+01:37:40.453 --> 01:37:42.437
+When does the wall-clock order break?
+
+1443
+01:37:42.717 --> 01:37:43.399
+Hint:
+
+1444
+01:37:43.679 --> 01:37:45.813
+Compare skew with the gap between events.
+
+1445
+01:37:46.093 --> 01:37:46.925
+B1.
+
+1446
+01:37:47.205 --> 01:37:48.271
+Exercise:
+
+1447
+01:37:48.551 --> 01:37:52.733
+Add a Clock-injected retry loop and test it with a clock that jumps back.
+
+1448
+01:37:53.013 --> 01:37:53.695
+Hint:
+
+1449
+01:37:53.975 --> 01:37:56.322
+InstantSource + nanoTime supplier.
+
+1450
+01:37:56.602 --> 01:37:57.477
+B2.
+
+1451
+01:37:57.757 --> 01:37:58.823
+Exercise:
+
+1452
+01:37:59.103 --> 01:38:04.991
+Add a second writer to L2's QUORUM mode with LWW timestamps from skewed clocks.
+
+1453
+01:38:05.271 --> 01:38:05.954
+Hint:
+
+1454
+01:38:06.234 --> 01:38:07.813
+Expect more violations.
+
+1455
+01:38:08.093 --> 01:38:08.967
+B2.
+
+1456
+01:38:09.247 --> 01:38:10.314
+Exercise:
+
+1457
+01:38:10.594 --> 01:38:15.117
+Extend L1's vector clock to prune entries for retired replicas.
+
+1458
+01:38:15.397 --> 01:38:16.079
+Hint:
+
+1459
+01:38:16.359 --> 01:38:18.151
+Version vectors per replica.
+
+1460
+01:38:18.431 --> 01:38:19.306
+B3.
+
+1461
+01:38:19.586 --> 01:38:20.653
+Exercise:
+
+1462
+01:38:20.933 --> 01:38:25.050
+Add PreVote to RaftSim and measure elections under a flapping node.
+
+1463
+01:38:25.330 --> 01:38:26.013
+Hint:
+
+1464
+01:38:26.293 --> 01:38:27.594
+Count terms per run.
+
+1465
+01:38:28.944 --> 01:38:29.819
+B3.
+
+1466
+01:38:30.099 --> 01:38:31.165
+Exercise:
+
+1467
+01:38:31.445 --> 01:38:35.733
+Implement single-server membership change in RaftSim and check safety.
+
+1468
+01:38:36.013 --> 01:38:36.696
+Hint:
+
+1469
+01:38:36.976 --> 01:38:39.173
+Add, then remove, one node at a time.
+
+1470
+01:38:39.453 --> 01:38:40.328
+B4.
+
+1471
+01:38:40.608 --> 01:38:41.675
+Exercise:
+
+1472
+01:38:41.955 --> 01:38:47.480
+Add asymmetric partitions to RaftSim and show lease reads without stickiness going stale.
+
+1473
+01:38:47.760 --> 01:38:48.443
+Hint:
+
+1474
+01:38:48.723 --> 01:38:50.216
+One-way message drops.
+
+1475
+01:38:50.496 --> 01:38:51.371
+B4.
+
+1476
+01:38:51.651 --> 01:38:52.717
+Exercise:
+
+1477
+01:38:52.997 --> 01:38:58.693
+Run the lab with the pause shorter than the TTL, then with kill -STOP on a real Java process.
+
+1478
+01:38:58.973 --> 01:38:59.656
+Hint:
+
+1479
+01:38:59.936 --> 01:39:03.264
+Fence rejections should appear only when leadership changed.
+
+1480
+01:39:04.614 --> 01:39:05.617
+Further reading.
+
+1481
+01:39:05.897 --> 01:39:12.595
+Leslie Lamport, Time, Clocks, and the Ordering of Events in a Distributed System (1978).
+
+1482
+01:39:12.875 --> 01:39:15.158
+Herlihy and Wing, Linearizability:
+
+1483
+01:39:15.438 --> 01:39:19.385
+A Correctness Condition for Concurrent Objects (1990).
+
+1484
+01:39:19.665 --> 01:39:27.259
+Fischer, Lynch, Paterson, Impossibility of Distributed Consensus with One Faulty Process (1985).
+
+1485
+01:39:27.539 --> 01:39:38.526
+Ongaro and Ousterhout, In Search of an Understandable Consensus Algorithm (Raft, 2014); Ongaro's PhD thesis (PreVote, leases, membership).
+
+1486
+01:39:39.876 --> 01:39:43.823
+Lamport, Paxos Made Simple (2001); Chandra et al.
+
+1487
+01:39:44.103 --> 01:39:46.599
+Paxos Made Live (2007).
+
+1488
+01:39:46.879 --> 01:39:48.116
+Kulkarni et al.
+
+1489
+01:39:48.396 --> 01:39:53.239
+Logical Physical Clocks (HLC, 2014); Corbett et al.
+
+1490
+01:39:53.519 --> 01:39:55.567
+Spanner (OSDI 2012).
+
+1491
+01:39:55.847 --> 01:39:59.751
+Martin Kleppmann, Designing Data-Intensive Applications ch.
+
+1492
+01:40:00.031 --> 01:40:03.935
+8 to 9; How to do distributed locking (2016).
+
+1493
+01:40:04.215 --> 01:40:11.319
+Abadi, Consistency Tradeoffs in Modern Distributed Database System Design (PACELC, 2012).
+
+1494
+01:40:11.599 --> 01:40:16.463
+Jepsen analyses (jepsen.io) of etcd, ZooKeeper, Consul, CockroachDB.
+
+1495
+01:40:17.813 --> 01:40:19.050
+Related chapters.
+
+1496
+01:40:19.330 --> 01:40:38.679
+05, Relational Databases, 10, Replication, 11, Partitioning and Sharding, 13, Distributed Transactions, 14, Messaging and Event Streaming, 20, Idempotency, IDs and Locks, 18, Resilience Patterns, 27, Reliability and DR, 45, Payment System.
+
+1497
+01:40:40.029 --> 01:40:41.629
+That's the end of this chapter.
+
+1498
+01:40:41.909 --> 01:40:48.032
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1499
+01:40:48.312 --> 01:40:49.763
+See you in the next chapter.
+

@@ -1,0 +1,2926 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:03.038
+Multi-Tenancy and SaaS Architecture.
+
+2
+00:00:03.318 --> 00:00:07.094
+Chapter 30, from the Production part of the System Design Playbook.
+
+3
+00:00:08.844 --> 00:00:09.804
+At a glance:
+
+4
+00:00:10.084 --> 00:00:11.257
+Chapter at a glance.
+
+5
+00:00:11.537 --> 00:00:12.540
+Reader bands:
+
+6
+00:00:12.820 --> 00:00:15.103
+B2, then B4, Prerequisites:
+
+7
+00:00:15.383 --> 00:00:21.057
+Ch 05, Ch 11, Ch 23, Ch 28, What you will build:
+
+8
+00:00:21.337 --> 00:00:34.009
+How one deployment of the grocery platform safely serves many isolated customer organizations (tenants), data isolation, performance isolation, tiered plans, and tenant lifecycle.
+
+9
+00:00:34.289 --> 00:00:47.367
+Two labs run against real PostgreSQL 16 (isolation models + Row-Level Security) and two against real Redis and a deterministic scheduler (rate limiting, noisy-neighbor fairness).
+
+10
+00:00:48.717 --> 00:00:50.935
+L1: data isolation models.
+
+11
+00:00:51.215 --> 00:01:05.274
+On real PostgreSQL, a shared table leaked all 9 rows across 3 tenants the moment a query forgot WHERE tenantid=?; schema-per-tenant and database-per-tenant made that same forgotten filter harmless.
+
+12
+00:01:05.554 --> 00:01:06.365
+L2:
+
+13
+00:01:06.645 --> 00:01:07.989
+Row-Level Security.
+
+14
+00:01:08.269 --> 00:01:24.311
+A real RLS policy scoped every query to the connection's tenant: the L1 leak query returned only 3 rows, a cross-tenant UPDATE hit 0 rows, and with no tenant set it failed closed (0 rows), the leak became impossible.
+
+15
+00:01:25.661 --> 00:01:27.283
+L3: noisy neighbor.
+
+16
+00:01:27.563 --> 00:01:40.640
+A 300-task burst from one tenant pushed quiet tenants' wait to ~224 ticks under FIFO; per-tenant fair queuing dropped it to ~0 while the noisy tenant simply drained its own burst.
+
+17
+00:01:40.920 --> 00:01:42.691
+L4: tiered rate limiting.
+
+18
+00:01:42.971 --> 00:01:57.669
+A real Redis atomic token bucket let the free tenant through 5 or 30, pro 20 or 30, enterprise 30 or 30, metered each tenant's served requests for billing, and refilled ~2 tokens in 4 s for the free plan.
+
+19
+00:01:57.949 --> 00:01:58.931
+Reading time:
+
+20
+00:01:59.211 --> 00:02:01.131
+120 min + code.
+
+21
+00:02:02.481 --> 00:02:03.334
+Part 1.
+
+22
+00:02:03.614 --> 00:02:05.534
+Introduction and Why It Matters.
+
+23
+00:02:06.784 --> 00:02:09.941
+A story: the report that showed another company's orders.
+
+24
+00:02:10.221 --> 00:02:15.043
+The grocery platform started as a single-tenant system for one retail chain.
+
+25
+00:02:15.323 --> 00:02:23.408
+It grew into a SaaS product: dozens of independent retail brands (tenants) ran their storefronts on one shared deployment.
+
+26
+00:02:23.688 --> 00:02:27.421
+The team added a tenantid column to every table and moved on.
+
+27
+00:02:27.701 --> 00:02:36.875
+Then, on a Monday, a brand manager at Acme Grocers opened the weekly sales report and saw line items from Globex Foods, a competitor.
+
+28
+00:02:37.155 --> 00:02:44.813
+The report query had been written months earlier, before multi-tenancy, and it simply never got a WHERE tenantid =? clause.
+
+29
+00:02:45.093 --> 00:02:48.784
+One forgotten filter, and a customer saw a competitor's revenue.
+
+30
+00:02:49.064 --> 00:02:52.413
+The incident review found the multi-tenancy was skin-deep:
+
+31
+00:02:53.763 --> 00:02:57.966
+Isolation depended on every query remembering the tenant filter.
+
+32
+00:02:58.246 --> 00:03:01.979
+Hundreds of queries, one human mistake away from a breach each.
+
+33
+00:03:02.259 --> 00:03:04.606
+There was no backstop (L1, L2).
+
+34
+00:03:04.886 --> 00:03:09.174
+A batch import from one large tenant regularly slowed everyone down.
+
+35
+00:03:09.454 --> 00:03:17.518
+One tenant's nightly 2-million-row load saturated the shared connection pool; small tenants' checkout latency tripled every night.
+
+36
+00:03:17.798 --> 00:03:20.145
+No performance isolation (L3).
+
+37
+00:03:21.495 --> 00:03:23.329
+Every tenant got the same limits.
+
+38
+00:03:23.609 --> 00:03:32.783
+A free-trial tenant hammering the API with a scraper degraded paying customers, because there were no per-tenant rate limits or plans (L4).
+
+39
+00:03:33.063 --> 00:03:35.260
+Offboarding was manual and incomplete.
+
+40
+00:03:35.540 --> 00:03:45.737
+When a tenant churned, deleting only their data across 40 shared tables was a risky hand-written script; nobody was confident it was complete (a compliance problem).
+
+41
+00:03:46.017 --> 00:03:47.553
+Cost per tenant was unknown.
+
+42
+00:03:47.833 --> 00:03:54.404
+Finance couldn't say whether the free tier was subsidized by whom, because nothing attributed resource use to tenants.
+
+43
+00:03:55.754 --> 00:04:11.221
+The rebuild made tenancy a first-class property of the platform: isolation enforced by the database (not by discipline), performance fenced per tenant, plans and limits per tenant, and a clean lifecycle for onboarding, export and deletion.
+
+44
+00:04:11.501 --> 00:04:12.781
+That is this chapter.
+
+45
+00:04:14.131 --> 00:04:16.435
+Where this lives in the grocery platform.
+
+46
+00:04:16.715 --> 00:04:18.059
+Here is a quick table:
+
+47
+00:04:18.339 --> 00:04:20.195
+Concern, and Approach, and Notes.
+
+48
+00:04:20.475 --> 00:04:21.776
+Data isolation.
+
+49
+00:04:22.056 --> 00:04:22.931
+Approach:
+
+50
+00:04:23.211 --> 00:04:29.355
+Shared-table + RLS for small tenants; dedicated DB for large or regulated ones.
+
+51
+00:04:29.635 --> 00:04:30.445
+Notes:
+
+52
+00:04:30.725 --> 00:04:32.048
+L1, L2.
+
+53
+00:04:32.328 --> 00:04:33.480
+Tenant context.
+
+54
+00:04:33.760 --> 00:04:34.635
+Approach:
+
+55
+00:04:34.915 --> 00:04:41.613
+Resolve from subdomain or JWT, then propagate through every layer, then set at DB checkout.
+
+56
+00:04:41.893 --> 00:04:43.771
+Notes: §2.4.
+
+57
+00:04:44.051 --> 00:04:45.565
+Performance isolation.
+
+58
+00:04:45.845 --> 00:04:46.720
+Approach:
+
+59
+00:04:46.000 --> 00:04:50.477
+Per-tenant connection caps, fair queuing, per-tenant rate limits.
+
+60
+00:04:50.757 --> 00:04:51.568
+Notes:
+
+61
+00:04:51.848 --> 00:04:53.192
+L3, L4.
+
+62
+00:04:53.472 --> 00:04:54.709
+Plans and metering.
+
+63
+00:04:54.989 --> 00:04:55.864
+Approach:
+
+64
+00:04:56.144 --> 00:05:01.093
+Tiered plans (free or pro or enterprise); usage metered per tenant for billing.
+
+65
+00:05:01.373 --> 00:05:02.184
+Notes:
+
+66
+00:05:02.464 --> 00:05:03.339
+L4.
+
+67
+00:05:03.619 --> 00:05:04.621
+Lifecycle.
+
+68
+00:05:04.901 --> 00:05:05.776
+Approach:
+
+69
+00:05:06.056 --> 00:05:09.469
+Automated provisioning, per-tenant export and hard-delete.
+
+70
+00:05:09.749 --> 00:05:11.584
+Notes: §2.8.
+
+71
+00:05:12.934 --> 00:05:13.830
+Compliance.
+
+72
+00:05:14.110 --> 00:05:14.985
+Approach:
+
+73
+00:05:15.265 --> 00:05:17.953
+Data residency, per-tenant encryption keys.
+
+74
+00:05:18.233 --> 00:05:21.283
+Notes: §2.9, Ch 23.
+
+75
+00:05:21.563 --> 00:05:22.331
+Scale.
+
+76
+00:05:22.611 --> 00:05:23.486
+Approach:
+
+77
+00:05:23.766 --> 00:05:28.545
+Pool small tenants; silo big ones; cell-based at very high tenant counts.
+
+78
+00:05:28.825 --> 00:05:30.979
+Notes: §2.10.
+
+79
+00:05:32.329 --> 00:05:33.652
+Learning objectives.
+
+80
+00:05:33.932 --> 00:05:35.831
+By the end you will be able to:
+
+81
+00:05:36.111 --> 00:05:42.340
+Choose an isolation model (pool or bridge or silo) per tenant tier, and know the trade-offs (L1).
+
+82
+00:05:42.620 --> 00:05:49.105
+Enforce isolation in the database with Row-Level Security so a forgotten filter can't leak (L2).
+
+83
+00:05:49.385 --> 00:05:52.201
+Propagate tenant context cleanly through the stack.
+
+84
+00:05:52.481 --> 00:05:59.009
+Fence performance per tenant against noisy neighbors (L3) and rate-limit and meter by plan (L4).
+
+85
+00:06:00.359 --> 00:06:06.205
+Run the tenant lifecycle, onboarding, export, deletion, and address residency, cost, and scale.
+
+86
+00:06:07.555 --> 00:06:08.429
+Part 2.
+
+87
+00:06:08.709 --> 00:06:10.587
+Core Concepts, Beginner to Deep.
+
+88
+00:06:11.837 --> 00:06:13.991
+What multi-tenancy is (and isn't).
+
+89
+00:06:14.271 --> 00:06:24.383
+A tenant is an isolated customer of your system, usually a whole organization (a retail brand), not an individual user; a tenant has many users.
+
+90
+00:06:24.663 --> 00:06:34.263
+Multi-tenancy means one running system serves many tenants who must not see or affect each other, while sharing infrastructure to keep unit costs low.
+
+91
+00:06:34.543 --> 00:06:40.687
+It is the economic engine of SaaS: one codebase, one (or few) deployments, many customers.
+
+92
+00:06:42.037 --> 00:06:47.136
+It is not the same as having many users, a single-tenant app can have millions of users.
+
+93
+00:06:47.416 --> 00:07:04.909
+The defining requirement is isolation between tenants: data isolation (Acme never sees Globex's rows), performance isolation (Globex's burst doesn't slow Acme), and often configuration or branding isolation (each tenant's own settings, theme, plan).
+
+94
+00:07:05.189 --> 00:07:13.424
+The central tension throughout: sharing lowers cost but weakens isolation; dedicating strengthens isolation but raises cost.
+
+95
+00:07:13.704 --> 00:07:16.648
+Every decision in this chapter sits on that spectrum.
+
+96
+00:07:17.998 --> 00:07:20.963
+The isolation spectrum: pool, bridge, silo.
+
+97
+00:07:21.243 --> 00:07:25.766
+The industry (notably AWS's SaaS guidance) names three points:
+
+98
+00:07:26.046 --> 00:07:31.977
+Silo, dedicated resources per tenant (own database, sometimes own app instance or stack).
+
+99
+00:07:32.257 --> 00:07:39.382
+Strongest isolation, easiest per-tenant backup or restore or residency, simplest noisy neighbor story.
+
+100
+00:07:39.662 --> 00:07:43.886
+Highest cost and operational overhead; hard at thousands of tenants.
+
+101
+00:07:44.166 --> 00:07:51.398
+Pool, all tenants share the same resources (one database, one app fleet), separated logically by a tenantid.
+
+102
+00:07:51.678 --> 00:07:57.054
+Cheapest and most scalable; isolation depends on software correctness (and RLS).
+
+103
+00:07:57.334 --> 00:08:00.299
+Noisy-neighbor and blast-radius risks are highest.
+
+104
+00:08:01.649 --> 00:08:10.225
+Bridge, a mix: shared app tier, but separated storage per tenant (schema-per-tenant), or pool for small tenants and silo for big ones.
+
+105
+00:08:10.505 --> 00:08:19.892
+Most mature SaaS is not one model, it's pool for the long tail of small tenants and silo for large or regulated ones, chosen per tier.
+
+106
+00:08:20.172 --> 00:08:26.615
+L1 builds all three storage variants on real PostgreSQL and shows the isolation each gives.
+
+107
+00:08:27.965 --> 00:08:30.205
+Data isolation models in detail.
+
+108
+00:08:30.485 --> 00:08:31.829
+Here is a quick table:
+
+109
+00:08:32.109 --> 00:08:39.682
+Model, and Isolation, and Cost @ 10k tenants, and Per-tenant backup or restore, and Migrations, and Noisy neighbor.
+
+110
+00:08:39.962 --> 00:08:41.562
+Shared table (tenantid).
+
+111
+00:08:41.842 --> 00:08:42.887
+Isolation:
+
+112
+00:08:43.167 --> 00:08:44.959
+Weakest (software-enforced).
+
+113
+00:08:45.239 --> 00:08:46.690
+Cost @ 10k tenants:
+
+114
+00:08:46.970 --> 00:08:47.781
+Lowest.
+
+115
+00:08:48.061 --> 00:08:49.725
+Per-tenant backup or restore:
+
+116
+00:08:50.005 --> 00:08:51.626
+Hard (filter by tenant).
+
+117
+00:08:51.906 --> 00:08:52.909
+Migrations:
+
+118
+00:08:53.189 --> 00:08:55.365
+One migration, all tenants at once.
+
+119
+00:08:55.645 --> 00:08:56.711
+Noisy neighbor:
+
+120
+00:08:56.991 --> 00:08:57.738
+Worst.
+
+121
+00:08:58.018 --> 00:08:59.874
+Shared DB, schema-per-tenant.
+
+122
+00:09:00.154 --> 00:09:01.199
+Isolation:
+
+123
+00:09:01.479 --> 00:09:02.290
+Medium.
+
+124
+00:09:02.570 --> 00:09:04.021
+Cost @ 10k tenants:
+
+125
+00:09:04.301 --> 00:09:05.111
+Medium.
+
+126
+00:09:05.391 --> 00:09:07.055
+Per-tenant backup or restore:
+
+127
+00:09:07.335 --> 00:09:08.786
+Medium (per-schema).
+
+128
+00:09:09.066 --> 00:09:10.069
+Migrations:
+
+129
+00:09:10.349 --> 00:09:12.610
+Repeat per schema (10k times).
+
+130
+00:09:12.890 --> 00:09:13.957
+Noisy neighbor:
+
+131
+00:09:14.237 --> 00:09:15.047
+Medium.
+
+132
+00:09:15.327 --> 00:09:17.162
+Database-per-tenant (silo).
+
+133
+00:09:17.442 --> 00:09:18.487
+Isolation:
+
+134
+00:09:18.767 --> 00:09:19.685
+Strongest.
+
+135
+00:09:19.965 --> 00:09:21.415
+Cost @ 10k tenants:
+
+136
+00:09:21.695 --> 00:09:22.485
+Highest.
+
+137
+00:09:22.765 --> 00:09:24.429
+Per-tenant backup or restore:
+
+138
+00:09:24.709 --> 00:09:26.010
+Easy (per-DB).
+
+139
+00:09:26.290 --> 00:09:27.293
+Migrations:
+
+140
+00:09:27.573 --> 00:09:28.853
+Repeat per DB.
+
+141
+00:09:29.133 --> 00:09:30.199
+Noisy neighbor:
+
+142
+00:09:30.479 --> 00:09:31.226
+Best.
+
+143
+00:09:32.576 --> 00:09:38.571
+The shared-table model's fatal weakness is that isolation lives in every query (L1's leak).
+
+144
+00:09:38.851 --> 00:09:40.131
+The two mitigations:
+
+145
+00:09:40.411 --> 00:09:51.483
+Row-Level Security (L2) pushes the filter into the engine, and careful framework enforcement (a tenant-aware repository layer that refuses an unscoped query).
+
+146
+00:09:51.763 --> 00:10:03.027
+Schema- and database-per-tenant move isolation into the topology, at the price of running migrations and connections N times (§2.10, Ch 28).
+
+147
+00:10:04.377 --> 00:10:07.022
+Tenant context: resolve and propagate.
+
+148
+00:10:07.302 --> 00:10:11.910
+Every request must be tagged with its tenant, and that tag must travel everywhere:
+
+149
+00:10:12.190 --> 00:10:29.747
+Resolve the tenant at the edge from a trustworthy source: a subdomain (acme.shop.in), a path (/t or acme/...), or, best, a claim in the authenticated JWT (Ch 23), never from a user-supplied header or body a client could forge.
+
+150
+00:10:31.097 --> 00:10:44.452
+Propagate it through the call stack: a request-scoped TenantContext (a ThreadLocal, or explicit parameter, or context propagated across async boundaries and to other services via a header or baggage).
+
+151
+00:10:44.732 --> 00:10:49.660
+Losing tenant context across a thread pool or an async hop is a classic bug.
+
+152
+00:10:49.940 --> 00:11:04.340
+Apply it at every tenant-aware resource: set app.tenant on the DB connection at checkout (L2), prefix cache keys, scope search queries, route to the tenant's database (silo), and stamp logs or metrics with the tenant.
+
+153
+00:11:05.690 --> 00:11:14.991
+The golden rule: derive the tenant from the authenticated principal, once, at the boundary, and never trust a tenant id that came from the request body.
+
+154
+00:11:16.341 --> 00:11:18.688
+Row-Level Security as the backstop.
+
+155
+00:11:18.968 --> 00:11:27.800
+PostgreSQL Row-Level Security attaches a policy to a table so the engine automatically adds the tenant predicate to every statement.
+
+156
+00:11:28.080 --> 00:11:43.248
+L2 shows a policy keyed to a per-connection setting (app.tenant): even SELECT FROM orders with no WHERE returns only the current tenant's rows, a cross-tenant UPDATE matches nothing, and with no tenant set it returns nothing (fails closed).
+
+157
+00:11:43.528 --> 00:11:46.707
+Two non-negotiable cautions the lab demonstrates:
+
+158
+00:11:46.987 --> 00:11:50.037
+Superusers and table owners bypass RLS.
+
+159
+00:11:50.317 --> 00:11:57.592
+The app must connect as a limited, non-owner role (L2's first attempt leaked because it connected as the superuser).
+
+160
+00:11:57.872 --> 00:12:02.032
+Use FORCE ROW LEVEL SECURITY if the owner must be subject to it.
+
+161
+00:12:03.382 --> 00:12:11.147
+Set the tenant from the authenticated principal at connection checkout, never from client input, or you've just moved the injection point.
+
+162
+00:12:11.427 --> 00:12:20.899
+RLS is defense in depth, not a license to stop filtering in the app, it's the backstop that makes a forgotten filter a non-event instead of a breach.
+
+163
+00:12:22.249 --> 00:12:24.980
+Performance isolation and the noisy neighbor.
+
+164
+00:12:25.260 --> 00:12:34.177
+In a pool model, tenants share CPU, connections, threads and I or O, so one tenant's spike can starve others, the noisy neighbor (L3).
+
+165
+00:12:34.457 --> 00:12:35.375
+Defenses:
+
+166
+00:12:35.655 --> 00:12:43.463
+Per-tenant concurrency caps: a tenant can hold at most K connections or N in-flight requests, so it can't drain the shared pool.
+
+167
+00:12:43.743 --> 00:12:58.676
+Fair scheduling: per-tenant queues served round-robin or weighted fair queuing (weight by plan), so each tenant gets its share regardless of others' load (L3: quiet-tenant wait dropped from ~224 ticks to ~0).
+
+168
+00:12:58.956 --> 00:13:05.953
+Per-tenant rate limits and quotas (L4): cap request rate and resource use per tenant or plan at admission.
+
+169
+00:13:07.303 --> 00:13:12.466
+Bulkheads (Ch 18): separate pools so one tenant's saturation is contained.
+
+170
+00:13:12.746 --> 00:13:19.125
+Silo the heavy tenants: a tenant big enough to be a permanent noisy neighbor gets dedicated resources.
+
+171
+00:13:19.405 --> 00:13:27.618
+Performance isolation is about isolating throughput and latency, the complement to L1 or L2's isolation of data.
+
+172
+00:13:28.968 --> 00:13:31.443
+Rate limiting, metering, and tiered plans.
+
+173
+00:13:31.723 --> 00:13:37.867
+SaaS monetizes through plans (free or pro or enterprise) that differ in limits and features.
+
+174
+00:13:38.147 --> 00:13:39.299
+Two mechanisms:
+
+175
+00:13:39.579 --> 00:13:48.581
+Rate limiting at admission, a token bucket per tenant sized by plan (L4: free 5, pro 20, enterprise 200 capacity).
+
+176
+00:13:48.861 --> 00:14:00.104
+It smooths bursts (the bucket allows a burst up to capacity, then throttles to the refill rate) and returns HTTP 429 with a Retry-After when empty.
+
+177
+00:14:00.384 --> 00:14:07.339
+Implement it atomically and centrally (a Redis Lua script, L4) so limits hold across all app instances.
+
+178
+00:14:08.689 --> 00:14:22.257
+Metering, count each tenant's billable usage (requests, orders, storage, API calls) into a per-tenant, per-period counter (L4's usage meter) that feeds usage-based billing and quota enforcement.
+
+179
+00:14:22.537 --> 00:14:25.971
+Meter what you bill; make the meter accurate and idempotent.
+
+180
+00:14:26.251 --> 00:14:32.566
+Feature gating (which features a plan unlocks) is usually done with per-tenant feature flags keyed on plan.
+
+181
+00:14:33.916 --> 00:14:37.009
+Tenant lifecycle: onboarding, export, offboarding.
+
+182
+00:14:37.289 --> 00:14:50.089
+Onboarding or provisioning: creating a tenant must be automated and fast, create the tenant record, (for silo) provision its schema or database and run migrations, seed defaults, set the plan.
+
+183
+00:14:50.369 --> 00:14:53.975
+Manual onboarding doesn't scale past a handful of tenants.
+
+184
+00:14:54.255 --> 00:15:00.057
+Export: tenants expect to get their data out (portability, and a legal right in many regimes).
+
+185
+00:15:00.337 --> 00:15:07.057
+A per-tenant export is trivial in silo (dump the DB) and needs a careful tenant-scoped extract in pool.
+
+186
+00:15:08.407 --> 00:15:17.645
+Offboarding or deletion: when a tenant leaves you must completely delete their data, every table, cache, search index, blob, backup-with-caveats.
+
+187
+00:15:17.925 --> 00:15:27.653
+Silo makes this a DROP DATABASE; pool makes it a tenant-scoped delete across every store, which is exactly why knowing every place tenant data lives matters.
+
+188
+00:15:27.933 --> 00:15:34.354
+This is both a trust and a compliance requirement (GDPR or DPDP right to erasure).
+
+189
+00:15:35.704 --> 00:15:39.267
+Compliance: residency, encryption, and the tenant boundary.
+
+190
+00:15:39.547 --> 00:15:44.432
+Data residency: some tenants (or laws) require data to stay in a region.
+
+191
+00:15:44.712 --> 00:15:51.368
+Silo-by-region or a region-aware routing layer satisfies this; a single global pool usually can't.
+
+192
+00:15:51.648 --> 00:16:07.371
+Per-tenant encryption: envelope encryption (Ch 23) with a per-tenant data key means a key can be revoked or rotated per tenant, and crypto-shredding (destroying a tenant's key) is a fast, provable deletion for that tenant's encrypted data.
+
+193
+00:16:08.721 --> 00:16:20.113
+The tenant boundary is a security boundary: cross-tenant access is a top-severity vulnerability class (it's the SaaS form of IDOR or broken object-level authorization).
+
+194
+00:16:20.393 --> 00:16:29.481
+Every authorization check must include the tenant (Ch 23); RLS (L2) is the data-layer enforcement of the same boundary.
+
+195
+00:16:30.831 --> 00:16:33.199
+Scaling tenancy: sharding and cells.
+
+196
+00:16:33.479 --> 00:16:35.804
+At high tenant counts the model must scale:
+
+197
+00:16:36.084 --> 00:16:44.873
+Shard tenants across databases or clusters: partition by tenantid (Ch 11) so no single database holds all tenants.
+
+198
+00:16:45.153 --> 00:16:54.199
+A tenant, then shard routing map (a lookup service) directs each request; you can place big tenants on their own shard and pack small ones together.
+
+199
+00:16:55.549 --> 00:17:01.757
+Cell-based architecture: run many independent cells, each a full stack serving a subset of tenants.
+
+200
+00:17:02.037 --> 00:17:12.149
+A cell is a blast-radius boundary, an incident, a bad deploy, or a noisy tenant is contained to one cell, and cells scale horizontally by adding more.
+
+201
+00:17:12.429 --> 00:17:18.658
+This is how the largest SaaS platforms combine pool economics with silo-like isolation.
+
+202
+00:17:18.938 --> 00:17:36.026
+The 10 or 1,000 or 100,000 tenants rule of thumb: database-per-tenant is fine at 10, painful at 1,000 (connection and migration overhead), impractical at 100,000 (pool + RLS + sharding + cells instead).
+
+203
+00:17:36.306 --> 00:17:38.525
+Design for the count you'll actually have.
+
+204
+00:17:39.875 --> 00:17:41.304
+Tenant-aware everything.
+
+205
+00:17:41.584 --> 00:17:45.808
+Multi-tenancy touches every subsystem, and forgetting one is a leak:
+
+206
+00:17:46.088 --> 00:17:55.837
+Cache (Ch 07): prefix every key with the tenant (t:acme:cart:42) or a cache-per-tenant, or one tenant's data serves another's request.
+
+207
+00:17:56.117 --> 00:18:01.877
+Search (Ch 22): a per-tenant index or a mandatory tenant filter on every query.
+
+208
+00:18:02.157 --> 00:18:10.925
+Messaging (Ch 14): tenant on every message; consumers scope by it; consider per-tenant topics or partitions for isolation.
+
+209
+00:18:12.275 --> 00:18:23.646
+Observability (Ch 24): stamp logs, metrics and traces with the tenant so you can see per-tenant health, cost and SLOs, and debug one tenant without wading through all.
+
+210
+00:18:23.926 --> 00:18:29.153
+Config or feature flags: per-tenant and per-plan settings, branding, and feature gates.
+
+211
+00:18:30.503 --> 00:18:31.399
+Part 3.
+
+212
+00:18:31.679 --> 00:18:33.407
+Architecture and Diagrams.
+
+213
+00:18:34.657 --> 00:18:37.259
+Component view: a multi-tenant request.
+
+214
+00:18:37.539 --> 00:18:38.883
+Here is the diagram.
+
+215
+00:18:42.733 --> 00:18:45.827
+Sequence: resolving and enforcing tenant context.
+
+216
+00:18:46.107 --> 00:18:48.901
+The sequence diagram walks through it step by step.
+
+217
+00:18:49.181 --> 00:18:54.131
+Client to GW: request with JWT (tenant=acme claim).
+
+218
+00:18:54.411 --> 00:19:00.960
+GW to GW: verify JWT, extract tenant=acme (never from body).
+
+219
+00:19:01.240 --> 00:19:05.592
+GW to App: forward with tenant=acme in trusted context.
+
+220
+00:19:05.872 --> 00:19:09.840
+App to App: set TenantContext=acme for this request.
+
+221
+00:19:10.120 --> 00:19:14.024
+App to DB: checkout connection, SET app.tenant='acme'.
+
+222
+00:19:14.304 --> 00:19:15.435
+App to DB:
+
+223
+00:19:15.715 --> 00:19:16.547
+SELECT...
+
+224
+00:19:16.827 --> 00:19:18.576
+(no explicit tenant filter).
+
+225
+00:19:18.856 --> 00:19:22.739
+DB to App: only acme rows (RLS policy applied).
+
+226
+00:19:26.589 --> 00:19:29.725
+Sequence: the noisy-neighbor failure and the fair-queue fix.
+
+227
+00:19:30.005 --> 00:19:32.799
+The sequence diagram walks through it step by step.
+
+228
+00:19:33.079 --> 00:19:35.746
+Noisy to Q: burst of 300 tasks.
+
+229
+00:19:36.026 --> 00:19:37.050
+Quiet to Q:
+
+230
+00:19:37.330 --> 00:19:39.485
+1 task (arrives after the burst).
+
+231
+00:19:39.765 --> 00:19:44.223
+Q to Quiet: served only after ~300 tasks, huge wait.
+
+232
+00:19:44.503 --> 00:19:47.874
+Noisy to Q: burst of 300 tasks (its own queue).
+
+233
+00:19:48.154 --> 00:19:49.178
+Quiet to Q:
+
+234
+00:19:49.458 --> 00:19:51.079
+1 task (its own queue).
+
+235
+00:19:51.359 --> 00:19:55.327
+Q to Quiet: served on the quiet tenant's next turn, tiny wait.
+
+236
+00:19:59.177 --> 00:20:01.375
+State: a tenant through its lifecycle.
+
+237
+00:20:01.655 --> 00:20:02.999
+Here is the diagram.
+
+238
+00:20:06.849 --> 00:20:07.766
+Part 4.
+
+239
+00:20:08.046 --> 00:20:09.667
+Design Document Excerpt:
+
+240
+00:20:09.947 --> 00:20:11.995
+Grocery Multi-Tenancy Standard.
+
+241
+00:20:13.245 --> 00:20:13.992
+Note:
+
+242
+00:20:14.272 --> 00:20:19.029
+Design Document (excerpt), Multi-Tenancy Standard v1.0.
+
+243
+00:20:19.309 --> 00:20:20.205
+Status:
+
+244
+00:20:20.485 --> 00:20:21.765
+Accepted, Authors:
+
+245
+00:20:22.045 --> 00:20:24.243
+Platform Architecture Guild, Reviewers:
+
+246
+00:20:24.523 --> 00:20:26.400
+Security, SRE, Billing.
+
+247
+00:20:26.680 --> 00:20:30.179
+Context, The platform is SaaS for many retail brands.
+
+248
+00:20:30.459 --> 00:20:39.952
+A cross-tenant data leak (a report missing its tenant filter) and recurring noisy-neighbor slowdowns showed tenancy was not enforced, only convention.
+
+249
+00:20:40.232 --> 00:20:43.347
+Decision, Tenancy is a first-class platform property.
+
+250
+00:20:43.627 --> 00:21:00.459
+Isolation is enforced by the database (RLS), not by query discipline; big or regulated tenants are siloed; performance is fenced per tenant; plans set per-tenant limits; a standard lifecycle governs onboarding or export or deletion.
+
+251
+00:21:01.809 --> 00:21:18.705
+Related ADRs, ADR-160 Pool+RLS for standard tenants, silo (dedicated DB) for enterprise or regulated; ADR-161 Tenant from JWT claim only, propagated via TenantContext,
+
+252
+00:21:18.985 --> 00:21:50.103
+set as app.tenant at DB checkout; ADR-162 App connects as a non-owner role so RLS applies; ADR-163 Per-tenant rate limits + concurrency caps + fair queuing; ADR-164 Usage metering per tenant for billing; ADR-165 Automated provisioning + tenant export + hard-delete (crypto-shred); ADR-166 Cell-based topology beyond N tenants.
+
+253
+00:21:50.383 --> 00:21:51.343
+Requirements.
+
+254
+00:21:52.693 --> 00:21:55.317
+R1, No cross-tenant read or write, ever.
+
+255
+00:21:55.597 --> 00:22:00.589
+Enforced at the data layer (RLS or silo), not only in application code.
+
+256
+00:22:00.869 --> 00:22:02.789
+A forgotten filter MUST NOT leak.
+
+257
+00:22:03.069 --> 00:22:04.349
+(L1, L2.).
+
+258
+00:22:04.629 --> 00:22:06.485
+R2, Tenant from identity.
+
+259
+00:22:06.765 --> 00:22:14.872
+The tenant is derived from the authenticated principal at the edge and never accepted from request bodies or headers a client controls.
+
+260
+00:22:15.152 --> 00:22:16.603
+(§2.4.).
+
+261
+00:22:16.883 --> 00:22:18.931
+R3, Performance isolation.
+
+262
+00:22:19.211 --> 00:22:27.360
+No tenant may consume more than its per-plan share of connections or CPU; noisy tenants MUST NOT breach other tenants' SLOs.
+
+263
+00:22:27.640 --> 00:22:29.027
+(L3, L4.).
+
+264
+00:22:29.307 --> 00:22:31.632
+R4, Metered and limited by plan.
+
+265
+00:22:31.912 --> 00:22:38.525
+Every tenant has a plan; limits are enforced centrally and atomically; billable usage is metered per tenant.
+
+266
+00:22:38.805 --> 00:22:39.701
+(L4.).
+
+267
+00:22:41.051 --> 00:22:42.886
+R5, Clean lifecycle.
+
+268
+00:22:43.166 --> 00:22:48.009
+Onboarding is automated; export and complete deletion are supported and audited.
+
+269
+00:22:48.289 --> 00:22:49.697
+(§2.8.).
+
+270
+00:22:49.977 --> 00:22:51.982
+R6, Residency and keys.
+
+271
+00:22:52.262 --> 00:22:58.598
+Regulated tenants can be pinned to a region and have a per-tenant encryption key (crypto-shred on deletion).
+
+272
+00:22:58.878 --> 00:23:00.307
+(§2.9.).
+
+273
+00:23:00.587 --> 00:23:01.995
+Decisions in detail.
+
+274
+00:23:02.275 --> 00:23:08.163
+Pool + RLS default, silo for big or regulated (ADR-160).
+
+275
+00:23:08.443 --> 00:23:18.065
+Standard tenants share DBs with RLS; enterprise or regulated tenants get a dedicated database (residency, backup, blast radius).
+
+276
+00:23:18.345 --> 00:23:19.625
+(L1, L2.).
+
+277
+00:23:20.975 --> 00:23:25.433
+Tenant context (ADR-161 or 162).
+
+278
+00:23:25.713 --> 00:23:34.289
+JWT claim, then TenantContext, then SET app.tenant at checkout, app connects as a limited role so RLS binds.
+
+279
+00:23:34.569 --> 00:23:35.423
+(L2.).
+
+280
+00:23:35.703 --> 00:23:38.860
+Performance fences (ADR-163).
+
+281
+00:23:39.140 --> 00:23:43.513
+Per-tenant connection caps + weighted fair queuing + per-tenant rate limits.
+
+282
+00:23:43.793 --> 00:23:45.180
+(L3, L4.).
+
+283
+00:23:45.460 --> 00:23:47.977
+Metering (ADR-164).
+
+284
+00:23:48.257 --> 00:23:51.095
+Atomic per-tenant counters feed billing and quotas.
+
+285
+00:23:51.375 --> 00:23:52.271
+(L4.).
+
+286
+00:23:52.551 --> 00:23:55.367
+Lifecycle (ADR-165).
+
+287
+00:23:55.647 --> 00:24:01.172
+Automated provision; export; hard-delete across every store; crypto-shred the tenant key.
+
+288
+00:24:02.522 --> 00:24:04.954
+Cells (ADR-166).
+
+289
+00:24:05.234 --> 00:24:09.863
+Beyond a set tenant count, run independent cells as blast-radius boundaries.
+
+290
+00:24:10.143 --> 00:24:11.850
+(§2.10.).
+
+291
+00:24:12.130 --> 00:24:13.154
+Consequences.
+
+292
+00:24:13.434 --> 00:24:22.821
+More platform machinery (RLS, tenant context plumbing, fair scheduling, metering, provisioning automation, cells) and a per-tenant tier decision.
+
+293
+00:24:23.101 --> 00:24:30.887
+In return: no cross-tenant leaks, contained blast radius, fair performance, monetizable plans, and compliant lifecycle.
+
+294
+00:24:31.167 --> 00:24:34.581
+The just add a tenantid column era is explicitly ended.
+
+295
+00:24:35.931 --> 00:24:36.891
+Part 5.
+
+296
+00:24:37.171 --> 00:24:39.155
+Hands-On Code, Level Ladder.
+
+297
+00:24:40.405 --> 00:24:41.173
+Info:
+
+298
+00:24:41.453 --> 00:24:42.541
+What's real here.
+
+299
+00:24:42.821 --> 00:24:58.095
+L1 and L2 run against real PostgreSQL 16 (:5581), real schemas, real databases, and a real Row-Level Security policy (including the superuser-bypass footgun and the fix).
+
+300
+00:24:58.375 --> 00:25:03.261
+L4 runs against real Redis with an atomic server-side Lua token bucket.
+
+301
+00:25:03.541 --> 00:25:10.559
+L3 is a deterministic discrete-time simulation of a shared worker (reproducible, no timing flakiness).
+
+302
+00:25:10.839 --> 00:25:17.154
+Managed equivalents (per-tenant KMS keys, cell routers, silo provisioners) are marked VERIFY.
+
+303
+00:25:18.504 --> 00:25:21.981
+L1, The three data isolation models, and a real leak.
+
+304
+00:25:22.261 --> 00:25:23.200
+Requirement:
+
+305
+00:25:23.480 --> 00:25:29.795
+Show what a query that forgets the tenant boundary returns under each isolation model, on a real database.
+
+306
+00:25:30.075 --> 00:25:39.163
+Three tenants store orders three ways on real PostgreSQL: a shared table with tenantid, a schema per tenant, and a database per tenant.
+
+307
+00:25:39.443 --> 00:25:42.365
+We run the same forgot the filter query against each.
+
+308
+00:25:43.715 --> 00:25:47.086
+Here is the Java code, IsolationL1.java.
+
+309
+00:25:47.366 --> 00:25:51.761
+It runs to 137 lines; the full listing is in the chapter.
+
+310
+00:25:52.041 --> 00:26:08.702
+IsolationL1.java, run with: java -Duser.timezone=UTC -cp or tmp or pgjdbc.jar IsolationL1.java (real PostgreSQL 16 on:5581).
+
+311
+00:26:08.982 --> 00:26:18.987
+The three canonical multi-tenant DATA ISOLATION models, built on a real database, and the failure that motivates the. stronger ones: a CROSS-TENANT LEAK.
+
+312
+00:26:19.267 --> 00:26:22.830
+Three tenants (acme, globex, initech) share the platform.
+
+313
+00:26:23.110 --> 00:26:24.497
+We store each tenant's.
+
+314
+00:26:27.347 --> 00:26:28.264
+On screen:
+
+315
+00:26:28.544 --> 00:26:33.365
+Three multi-tenant isolation models on real PostgreSQL 16.
+
+316
+00:26:33.645 --> 00:26:35.928
+Tenants: acme, globex. initech.
+
+317
+00:26:36.208 --> 00:26:43.099
+A) SHARED TABLE (one table, tenantid column): correct query (WHERE tenantid='acme') sees 3 rows.
+
+318
+00:26:43.379 --> 00:26:49.416
+BUG, a query that forgot the tenant filter sees 9 rows (ALL tenants), then. cross-tenant leak.
+
+319
+00:26:49.696 --> 00:26:56.629
+B) SCHEMA-PER-TENANT (acme.orders, globex.orders,...): request scoped to acme (searchpath=acme):
+
+320
+00:26:56.909 --> 00:26:58.851
+'select count() from orders' sees.
+
+321
+00:26:59.131 --> 00:27:03.973
+3 rows, only acme's. same query after switching searchpath to globex:
+
+322
+00:27:04.253 --> 00:27:06.045
+3 rows, only globex's.
+
+323
+00:27:06.325 --> 00:27:08.053
+The. filter can't be forgotten.
+
+324
+00:27:08.333 --> 00:27:11.576
+C) DATABASE-PER-TENANT (tenantacme, tenantglobex,...):
+
+325
+00:27:11.856 --> 00:27:13.371
+The rest is in the chapter.
+
+326
+00:27:16.221 --> 00:27:17.074
+Reading it:
+
+327
+00:27:17.354 --> 00:27:31.775
+Shared table: the correct WHERE tenantid='acme' sees 3 rows, but a query that forgot the filter sees all 9 rows across every tenant, the §1.1 leak, one missing clause away in every query you write.
+
+328
+00:27:32.055 --> 00:27:45.879
+Schema-per-tenant: with searchpath scoped to the tenant, select count() from orders (no tenant filter at all) returns only that tenant's 3 rows; switch the path and it's a different tenant's 3, the filter can't be forgotten.
+
+329
+00:27:47.229 --> 00:27:56.381
+Database-per-tenant: a connection to tenantacme physically cannot reach tenantglobex.orders, cross-DB access is rejected outright.
+
+330
+00:27:56.661 --> 00:28:09.589
+The trade-off ladder: shared table is cheapest but leans entirely on query correctness (fix with RLS, L2); schema and database move isolation into the topology at rising cost.
+
+331
+00:28:09.869 --> 00:28:17.720
+Real SaaS mixes them, pooled shared tables for small tenants, dedicated databases for large or regulated ones.
+
+332
+00:28:19.070 --> 00:28:22.441
+L2, Row-Level Security makes the leak impossible.
+
+333
+00:28:22.721 --> 00:28:23.659
+Requirement:
+
+334
+00:28:23.939 --> 00:28:29.337
+Even if a query forgets the tenant filter, the database must not leak another tenant's data.
+
+335
+00:28:29.617 --> 00:28:35.633
+A real RLS policy on sharedorders scopes every statement to the connection's app.tenant setting.
+
+336
+00:28:35.913 --> 00:28:41.118
+We run the exact L1 leak query, a cross-tenant UPDATE, and the no-tenant-set case.
+
+337
+00:28:42.468 --> 00:28:45.519
+Here is the Java code, RlsL2.java.
+
+338
+00:28:45.799 --> 00:28:49.895
+It runs to 112 lines; the full listing is in the chapter.
+
+339
+00:28:50.175 --> 00:29:06.025
+RlsL2.java, run with: java -Duser.timezone=UTC -cp or tmp or pgjdbc.jar RlsL2.java (real PostgreSQL 16 on:5581).
+
+340
+00:29:06.305 --> 00:29:12.748
+ROW-LEVEL SECURITY: the database enforces tenant isolation, so a forgotten WHERE tenantid=?
+
+341
+00:29:13.028 --> 00:29:14.692
+(L1's leak) CANNOT leak.
+
+342
+00:29:14.972 --> 00:29:20.817
+We create a real RLS policy on sharedorders keyed to a per-connection setting app.tenant.
+
+343
+00:29:21.097 --> 00:29:22.591
+Every request sets that.
+
+344
+00:29:25.441 --> 00:29:26.358
+On screen:
+
+345
+00:29:26.638 --> 00:29:35.811
+Row-Level Security on real PostgreSQL: the policy scopes EVERY query to. currentsetting('app.tenant'). as tenant=acme:
+
+346
+00:29:36.091 --> 00:29:41.190
+'select count() from rlsorders' (no WHERE!), then 3 rows (only. acme's).
+
+347
+00:29:41.470 --> 00:29:44.542
+The leak is impossible. as tenant=acme:
+
+348
+00:29:44.822 --> 00:29:45.675
+UPDATE...
+
+349
+00:29:45.955 --> 00:30:07.587
+WHERE tenantid='globex' affected 0 rows, RLS hid. globex entirely, so nothing matched. as tenant=globex: sees 3 rows, and 0 were zeroed by the acme attempt (proof globex. was untouched). with app.tenant UNSET: sees 0 rows, RLS fails CLOSED (no tenant context = no. rows),
+
+350
+00:30:07.867 --> 00:30:14.822
+never open. then RLS turns 'every query must remember the tenant filter' (fragile, one bug = full.
+
+351
+00:30:15.102 --> 00:30:16.617
+The rest is in the chapter.
+
+352
+00:30:19.467 --> 00:30:20.320
+Reading it:
+
+353
+00:30:20.600 --> 00:30:31.352
+As tenant=acme, select count() from rlsorders with no WHERE returns only acme's 3 rows, the leak that returned 9 in L1 is now impossible.
+
+354
+00:30:31.632 --> 00:30:32.955
+A malicious UPDATE...
+
+355
+00:30:33.235 --> 00:30:46.973
+WHERE tenantid='globex' run as acme affects 0 rows, RLS hid globex entirely, so nothing matched; switching to tenant=globex confirms 0 rows were zeroed (globex untouched).
+
+356
+00:30:47.253 --> 00:30:55.147
+With no tenant set, the query returns 0 rows, RLS fails closed (no context = no data), never open.
+
+357
+00:30:56.497 --> 00:31:17.126
+Two production cautions the lab bakes in: the first version leaked because it connected as the superuser (superusers and table owners bypass RLS), the fix is to connect as a limited, non-owner role (appuser); and app.tenant must be set from the authenticated principal at connection checkout, never from user input.
+
+358
+00:31:17.406 --> 00:31:24.553
+On a pooled connection, use SET LOCAL app.tenant inside the request's transaction so it can't leak to the next borrower.
+
+359
+00:31:25.903 --> 00:31:28.335
+L3, The noisy neighbor, and fair queuing.
+
+360
+00:31:28.615 --> 00:31:29.553
+Requirement:
+
+361
+00:31:29.833 --> 00:31:33.247
+One tenant's burst must not wreck everyone else's latency.
+
+362
+00:31:33.527 --> 00:31:42.679
+A deterministic simulation of one shared worker: a noisy tenant bursts 300 tasks at once while two quiet tenants trickle in a few each.
+
+363
+00:31:42.959 --> 00:31:47.076
+We compare FIFO against per-tenant fair queuing, measuring each tenant's wait.
+
+364
+00:31:48.426 --> 00:31:51.349
+Here is the Java code, NoisyL3.java.
+
+365
+00:31:51.629 --> 00:31:55.703
+It runs to 109 lines; the full listing is in the chapter.
+
+366
+00:31:55.983 --> 00:32:03.130
+NoisyL3.java, run with: java NoisyL3.java (JDK 21, no dependencies).
+
+367
+00:32:03.410 --> 00:32:05.458
+THE NOISY-NEIGHBOR PROBLEM and its fix.
+
+368
+00:32:05.738 --> 00:32:10.581
+Three tenants share ONE worker (a thread pool or DB connection or CPU).
+
+369
+00:32:10.861 --> 00:32:19.181
+The. noisy tenant dumps a 300-task burst at t=0; two quiet tenants submit a few tasks each, spread over time.
+
+370
+00:32:19.461 --> 00:32:20.335
+We run the.
+
+371
+00:32:23.185 --> 00:32:24.103
+On screen:
+
+372
+00:32:24.383 --> 00:32:25.449
+Noisy neighbor:
+
+373
+00:32:25.729 --> 00:32:32.449
+'noisy' bursts 300 tasks at once; 'quietA'/'quietB' submit 20 tasks. each, spread out.
+
+374
+00:32:32.729 --> 00:32:33.924
+One shared worker.
+
+375
+00:32:34.204 --> 00:32:37.703
+Wait time = ticks a task waited before being served.
+
+376
+00:32:37.983 --> 00:33:02.985
+FIFO (one shared queue, arrival order): noisy tasks=300 mean wait= 149.5 ticks max wait= 299 ticks. quietA tasks=20 mean wait= 224.0 ticks max wait= 300 ticks. quietB tasks=20 mean wait= 222.0 ticks max wait= 298 ticks.
+
+377
+00:33:03.265 --> 00:33:26.284
+FAIR (per-tenant queues, round-robin): noisy tasks=300 mean wait= 179.2 ticks max wait= 339 ticks. quietA tasks=20 mean wait= 0.1 ticks max wait= 1 ticks. quietB tasks=20 mean wait= 0.0 ticks max wait= 0 ticks.
+
+378
+00:33:26.564 --> 00:33:28.079
+The rest is in the chapter.
+
+379
+00:33:30.929 --> 00:33:31.782
+Reading it:
+
+380
+00:33:32.062 --> 00:33:43.582
+FIFO: the burst lands first, so the quiet tenants, who barely use the system, wait a mean of ~224 / ~222 ticks purely because of a neighbor.
+
+381
+00:33:43.862 --> 00:33:46.849
+Their latency is hostage to someone else's load.
+
+382
+00:33:47.129 --> 00:34:04.878
+Fair queuing: per-tenant queues served round-robin drop the quiet tenants' wait to ~0.1 or 0.0 ticks; the noisy tenant's mean rises slightly (149, then 179) because it now yields turns instead of monopolizing the worker.
+
+383
+00:34:05.158 --> 00:34:08.678
+It still gets its full share, it just can't steal everyone else's.
+
+384
+00:34:10.028 --> 00:34:15.319
+This is throughput isolation, the complement to L1 or L2's data isolation.
+
+385
+00:34:15.599 --> 00:34:26.308
+In production the same idea appears as per-tenant connection-pool caps, per-tenant thread limits, weighted fair queuing (weight by plan), and admission-level rate limits (L4).
+
+386
+00:34:27.658 --> 00:34:30.303
+L4, Per-tenant rate limiting and tiered plans.
+
+387
+00:34:30.583 --> 00:34:31.522
+Requirement:
+
+388
+00:34:31.802 --> 00:34:36.773
+Enforce plan limits per tenant, centrally and atomically, and meter usage for billing.
+
+389
+00:34:37.053 --> 00:34:42.813
+A real Redis atomic token bucket (server-side Lua) rate-limits each tenant by plan.
+
+390
+00:34:43.093 --> 00:34:53.418
+Three tenants on free or pro or enterprise each fire a 30-request burst; we count allowed versus throttled, meter served requests, and show the bucket refill.
+
+391
+00:34:54.768 --> 00:34:59.803
+Here is the LUA code, token_bucket.lua (runs inside Redis, atomically).
+
+392
+00:35:00.083 --> 00:35:13.267
+It runs to 29 lines; the full listing is in the chapter. tokenbucket.lua, an ATOMIC per-tenant token-bucket rate limiter, evaluated server-side in Redis so concurrent. requests can't race.
+
+393
+00:35:13.547 --> 00:35:15.915
+KEYS1 = the tenant's bucket key.
+
+394
+00:35:16.195 --> 00:35:20.141
+ARGV: capacity, refillpersec, nowms, requested(=1).
+
+395
+00:35:20.421 --> 00:35:25.115
+State stored in a hash: tokens (current) + ts (last refill, ms).
+
+396
+00:35:25.395 --> 00:35:28.445
+Refill lazily by elapsed time, then try to spend.
+
+397
+00:35:31.295 --> 00:35:34.175
+Here is the shell code, exp-ratelimit.sh.
+
+398
+00:35:34.455 --> 00:35:45.997
+It runs to 60 lines; the full listing is in the chapter. exp-ratelimit.sh, REAL per-tenant rate limiting + usage metering on REAL Redis, with tiered SaaS plans.
+
+399
+00:35:46.277 --> 00:35:50.671
+Each tenant's. plan sets its token-bucket capacity + refill rate.
+
+400
+00:35:50.951 --> 00:36:03.581
+We fire an identical burst of 30 requests at three tenants on. different plans and count ALLOWED versus THROTTLED (429), then read the per-tenant usage meter that billing would bill on.
+
+401
+00:36:06.431 --> 00:36:07.348
+On screen:
+
+402
+00:36:07.628 --> 00:36:11.511
+Per-tenant rate limiting on real Redis (atomic token bucket).
+
+403
+00:36:11.791 --> 00:36:14.799
+Each tenant fires 30. requests in a tight burst.
+
+404
+00:36:15.079 --> 00:36:36.988
+Plans: free = capacity 5 (refill 0.5 per second), pro = capacity 20 (refill 5 per second), enterprise =. capacity 200 (refill 50 per second). tenant plan sent allowed throttled. acme free 30 5 25. globex pro 30 20 10. initech enterprise 30 30 0.
+
+405
+00:36:37.268 --> 00:36:41.983
+Usage meter (what billing reads for the period). acme served requests today:
+
+406
+00:36:42.263 --> 00:36:44.439
+5. globex served requests today:
+
+407
+00:36:44.719 --> 00:36:45.508
+20.
+
+408
+00:36:45.788 --> 00:36:47.303
+The rest is in the chapter.
+
+409
+00:36:50.153 --> 00:36:51.006
+Reading it:
+
+410
+00:36:51.286 --> 00:37:02.230
+The free tenant (capacity 5) got 5 of 30 requests through and 25 throttled; pro (capacity 20) got 20; enterprise (capacity 200) got all 30.
+
+411
+00:37:02.510 --> 00:37:06.947
+Same burst, different plans, enforced by one atomic bucket per tenant.
+
+412
+00:37:07.227 --> 00:37:15.633
+The usage meter tallied served requests per tenant (5 or 20 or 30), exactly what usage-based billing reads for the period.
+
+413
+00:37:15.913 --> 00:37:19.646
+Meter only what you bill, and only served (allowed) requests.
+
+414
+00:37:20.996 --> 00:37:30.020
+After 4 s idle, the free bucket allowed 2 of 10, it refilled ~0.5 token per second times 4 s about 2 tokens.
+
+415
+00:37:30.300 --> 00:37:37.575
+A token bucket is steady-state, not a fixed-window reset: capacity sets the burst, refill sets the sustained rate.
+
+416
+00:37:37.855 --> 00:37:48.244
+Doing this in Redis with Lua makes it atomic and global, every app instance shares one authoritative bucket, so concurrent requests across the fleet can't race past the limit.
+
+417
+00:37:48.524 --> 00:37:52.961
+Return 429 with Retry-After when the bucket is empty.
+
+418
+00:37:54.311 --> 00:37:55.250
+Part 6.
+
+419
+00:37:55.530 --> 00:37:56.810
+Production Concerns.
+
+420
+00:37:58.060 --> 00:37:59.212
+Failure modes.
+
+421
+00:37:59.492 --> 00:38:00.836
+Here is a quick table:
+
+422
+00:38:01.116 --> 00:38:03.313
+Failure, and Cause, and Mitigation.
+
+423
+00:38:03.593 --> 00:38:05.001
+Cross-tenant data leak.
+
+424
+00:38:05.281 --> 00:38:06.049
+Cause:
+
+425
+00:38:06.329 --> 00:38:09.039
+Forgotten WHERE tenantid in shared-table model.
+
+426
+00:38:09.319 --> 00:38:10.321
+Mitigation:
+
+427
+00:38:10.601 --> 00:38:16.255
+RLS backstop (L2); tenant-aware repository; silo for sensitive tenants.
+
+428
+00:38:16.535 --> 00:38:18.412
+RLS silently not applied.
+
+429
+00:38:18.692 --> 00:38:19.460
+Cause:
+
+430
+00:38:19.740 --> 00:38:23.452
+App connects as owner or superuser (bypasses RLS).
+
+431
+00:38:23.732 --> 00:38:24.735
+Mitigation:
+
+432
+00:38:25.015 --> 00:38:29.580
+Connect as a limited non-owner role; FORCE ROW LEVEL SECURITY (L2).
+
+433
+00:38:29.860 --> 00:38:31.311
+Tenant context lost.
+
+434
+00:38:31.591 --> 00:38:32.359
+Cause:
+
+435
+00:38:32.639 --> 00:38:36.393
+Not propagated across async or thread-pool or service hops.
+
+436
+00:38:36.673 --> 00:38:37.676
+Mitigation:
+
+437
+00:38:37.956 --> 00:38:42.756
+Explicit context propagation; assert tenant is set before any DB call.
+
+438
+00:38:43.036 --> 00:38:44.508
+Tenant from user input.
+
+439
+00:38:44.788 --> 00:38:45.556
+Cause:
+
+440
+00:38:45.836 --> 00:38:48.055
+Trusting a body or header tenant id.
+
+441
+00:38:48.335 --> 00:38:49.337
+Mitigation:
+
+442
+00:38:49.617 --> 00:38:54.353
+Derive from the authenticated JWT only (§2.4).
+
+443
+00:38:54.633 --> 00:38:55.700
+Noisy neighbor.
+
+444
+00:38:55.980 --> 00:38:56.748
+Cause:
+
+445
+00:38:57.028 --> 00:38:59.033
+Shared pool, no per-tenant limits.
+
+446
+00:38:59.313 --> 00:39:00.316
+Mitigation:
+
+447
+00:39:00.596 --> 00:39:05.481
+Concurrency caps, fair queuing, rate limits (L3, L4), silo the whale.
+
+448
+00:39:06.831 --> 00:39:08.154
+Incomplete deletion.
+
+449
+00:39:08.434 --> 00:39:09.202
+Cause:
+
+450
+00:39:09.482 --> 00:39:11.701
+Tenant data spread across many stores.
+
+451
+00:39:11.981 --> 00:39:12.983
+Mitigation:
+
+452
+00:39:13.263 --> 00:39:20.111
+Inventory every store; automated tenant-scoped delete; crypto-shred (§2.8 or 2.9).
+
+453
+00:39:20.391 --> 00:39:22.354
+One tenant's bad deploy hits all.
+
+454
+00:39:22.634 --> 00:39:23.402
+Cause:
+
+455
+00:39:23.682 --> 00:39:25.538
+Single global blast radius.
+
+456
+00:39:25.818 --> 00:39:26.821
+Mitigation:
+
+457
+00:39:27.101 --> 00:39:30.258
+Cell-based architecture (§2.10).
+
+458
+00:39:30.538 --> 00:39:32.159
+Runaway cost on free tier.
+
+459
+00:39:32.439 --> 00:39:33.207
+Cause:
+
+460
+00:39:33.487 --> 00:39:35.493
+No per-tenant metering or limits.
+
+461
+00:39:35.773 --> 00:39:36.775
+Mitigation:
+
+462
+00:39:37.055 --> 00:39:39.999
+Metering + quotas + plan limits (L4).
+
+463
+00:39:41.349 --> 00:39:43.568
+Observability (Ch 24).
+
+464
+00:39:43.848 --> 00:39:51.251
+Stamp everything with the tenant, logs, metrics, traces, so you have per-tenant SLOs, error rates, latency, and cost.
+
+465
+00:39:51.531 --> 00:39:56.587
+A dashboard by tenant is how you spot a noisy neighbor or a single tenant's outage.
+
+466
+00:39:56.867 --> 00:40:05.059
+Alert on cross-tenant access attempts (an RLS deny, an authz failure with a tenant mismatch), these are security signals.
+
+467
+00:40:05.339 --> 00:40:12.208
+Track per-tenant usage versus plan limits to spot tenants about to hit quota (upsell) or abusing the free tier.
+
+468
+00:40:13.558 --> 00:40:15.563
+Security (Ch 23).
+
+469
+00:40:15.843 --> 00:40:27.363
+The tenant is part of every authorization decision, object-level checks must verify the object belongs to the caller's tenant (cross-tenant IDOR is the 1 SaaS vuln class).
+
+470
+00:40:27.643 --> 00:40:34.299
+RLS is the data-layer enforcement of the tenant boundary (L2); connect as a least-privilege role.
+
+471
+00:40:34.579 --> 00:40:41.918
+Per-tenant encryption keys enable revocation and crypto-shredding; store tenant keys in a KMS, never with the data.
+
+472
+00:40:42.198 --> 00:40:51.649
+Test cross-tenant isolation explicitly (Ch 29): a test that tenant A cannot read or modify tenant B for every resource.
+
+473
+00:40:52.999 --> 00:40:54.364
+Performance and tuning.
+
+474
+00:40:54.644 --> 00:40:59.167
+Per-tenant connection caps stop one tenant draining the pool; size them by plan.
+
+475
+00:40:59.447 --> 00:41:06.679
+Token-bucket capacity versus refill: capacity sets the allowed burst, refill sets the sustained rate (L4).
+
+476
+00:41:06.959 --> 00:41:16.537
+In silo, connection count multiplies by tenants, use a proxy or pooler (PgBouncer) or you'll exhaust maxconnections at a few hundred tenants.
+
+477
+00:41:16.817 --> 00:41:28.209
+RLS adds the tenant predicate to every query, ensure tenantid is the leading column of the relevant indexes (composite (tenantid,...)), or every query does extra work.
+
+478
+00:41:29.559 --> 00:41:30.285
+Cost.
+
+479
+00:41:30.565 --> 00:41:43.066
+Cost per tenant is a first-class metric: attribute compute, storage and I or O to tenants (via the tenant stamp) so finance knows margins per plan and which tenants are unprofitable.
+
+480
+00:41:43.346 --> 00:41:49.063
+Pool is cheapest per tenant but risks noisy neighbors; silo is priciest but predictable.
+
+481
+00:41:49.343 --> 00:41:57.343
+Place tenants on the model whose cost matches their revenue, free-tier tenants pooled densely, enterprise tenants siloed and paying for it.
+
+482
+00:41:58.693 --> 00:41:59.632
+Part 7.
+
+483
+00:41:59.912 --> 00:42:01.619
+Anti-Patterns and Pitfalls.
+
+484
+00:42:02.869 --> 00:42:03.786
+Watch out:
+
+485
+00:42:04.066 --> 00:42:04.706
+1.
+
+486
+00:42:04.986 --> 00:42:07.397
+Isolation by query discipline alone.
+
+487
+00:42:07.677 --> 00:42:15.421
+Relying on every query to remember WHERE tenantid=? guarantees a leak eventually (§1.1, L1).
+
+488
+00:42:15.701 --> 00:42:18.901
+Add an engine-level backstop (RLS) or silo.
+
+489
+00:42:20.251 --> 00:42:21.168
+Watch out:
+
+490
+00:42:21.448 --> 00:42:22.152
+2.
+
+491
+00:42:22.432 --> 00:42:25.525
+RLS while connecting as a superuser or owner.
+
+492
+00:42:25.805 --> 00:42:32.184
+Superusers and table owners bypass RLS, your policy does nothing (L2's first run leaked).
+
+493
+00:42:32.464 --> 00:42:35.707
+Connect as a limited non-owner role; FORCE for the owner.
+
+494
+00:42:37.057 --> 00:42:37.974
+Watch out:
+
+495
+00:42:38.254 --> 00:42:39.001
+3.
+
+496
+00:42:39.281 --> 00:42:41.457
+Trusting a tenant id from the request.
+
+497
+00:42:41.737 --> 00:42:46.003
+A tenantid in the body or a header can be forged to access another tenant.
+
+498
+00:42:46.283 --> 00:42:51.681
+Derive the tenant from the authenticated JWT only (§2.4).
+
+499
+00:42:53.031 --> 00:42:53.948
+Watch out:
+
+500
+00:42:54.228 --> 00:42:54.932
+4.
+
+501
+00:42:55.212 --> 00:42:58.007
+Losing tenant context across async boundaries.
+
+502
+00:42:58.287 --> 00:43:05.817
+A ThreadLocal tenant that isn't propagated into a thread pool or async task silently becomes null or another tenant's.
+
+503
+00:43:06.097 --> 00:43:09.745
+Propagate explicitly; assert it's set before DB access.
+
+504
+00:43:11.095 --> 00:43:12.013
+Watch out:
+
+505
+00:43:12.293 --> 00:43:13.061
+5.
+
+506
+00:43:13.341 --> 00:43:14.962
+No performance isolation.
+
+507
+00:43:15.242 --> 00:43:22.495
+A shared pool with no per-tenant limits lets one tenant's batch job starve everyone (§1.1, L3).
+
+508
+00:43:22.775 --> 00:43:25.186
+Cap concurrency, fair-queue, rate-limit.
+
+509
+00:43:26.536 --> 00:43:27.453
+Watch out:
+
+510
+00:43:27.733 --> 00:43:28.480
+6.
+
+511
+00:43:28.760 --> 00:43:30.211
+One plan for everyone.
+
+512
+00:43:30.491 --> 00:43:34.843
+No per-tenant limits means a free or abusive tenant degrades paying ones.
+
+513
+00:43:35.123 --> 00:43:38.259
+Tiered plans + rate limits + metering (L4).
+
+514
+00:43:39.609 --> 00:43:40.526
+Watch out:
+
+515
+00:43:40.806 --> 00:43:41.553
+7.
+
+516
+00:43:41.833 --> 00:43:45.865
+Un-prefixed cache keys or shared search index with no tenant filter.
+
+517
+00:43:46.145 --> 00:43:50.987
+A cache key or search query without the tenant serves one tenant's data to another.
+
+518
+00:43:51.267 --> 00:43:55.427
+Prefix keys; scope every index query (§2.11).
+
+519
+00:43:56.777 --> 00:43:57.695
+Watch out:
+
+520
+00:43:57.975 --> 00:43:58.657
+8.
+
+521
+00:43:58.937 --> 00:44:01.391
+Database-per-tenant at 10,000 tenants.
+
+522
+00:44:01.671 --> 00:44:05.084
+Connections, migrations and operational load explode.
+
+523
+00:44:05.364 --> 00:44:11.337
+Pool + RLS + sharding + cells at high tenant counts (§2.10).
+
+524
+00:44:12.687 --> 00:44:13.605
+Watch out:
+
+525
+00:44:13.885 --> 00:44:14.631
+9.
+
+526
+00:44:14.911 --> 00:44:16.874
+Manual onboarding or offboarding.
+
+527
+00:44:17.154 --> 00:44:24.002
+Hand-written provisioning and deletion scripts don't scale and miss stores (incomplete deletion is a compliance breach).
+
+528
+00:44:24.282 --> 00:44:26.970
+Automate the lifecycle (§2.8).
+
+529
+00:44:28.320 --> 00:44:29.237
+Watch out:
+
+530
+00:44:29.517 --> 00:44:30.221
+10.
+
+531
+00:44:30.501 --> 00:44:32.208
+Tenant-blind observability.
+
+532
+00:44:32.488 --> 00:44:38.120
+Metrics aggregated across all tenants hide a single tenant's outage or noisy behavior.
+
+533
+00:44:38.400 --> 00:44:43.008
+Stamp everything with the tenant (§2.11, Ch 24).
+
+534
+00:44:44.358 --> 00:44:45.275
+Watch out:
+
+535
+00:44:45.555 --> 00:44:46.387
+11.
+
+536
+00:44:46.667 --> 00:44:48.886
+Forgetting the tenant in authorization.
+
+537
+00:44:49.166 --> 00:44:56.078
+Object-level checks that don't verify tenant ownership are cross-tenant IDOR, a top SaaS vulnerability.
+
+538
+00:44:56.358 --> 00:44:59.942
+Tenant is part of every authz decision (Ch 23).
+
+539
+00:45:01.292 --> 00:45:02.209
+Watch out:
+
+540
+00:45:02.489 --> 00:45:03.279
+12.
+
+541
+00:45:03.559 --> 00:45:05.393
+No per-tenant cost attribution.
+
+542
+00:45:05.673 --> 00:45:10.879
+Without it you can't tell which tenants or plans are profitable and you'll subsidize abusers.
+
+543
+00:45:11.159 --> 00:45:14.295
+Attribute cost per tenant (§6.5).
+
+544
+00:45:15.645 --> 00:45:16.519
+Part 8.
+
+545
+00:45:16.799 --> 00:45:18.143
+Interview Q and A.
+
+546
+00:45:19.393 --> 00:45:20.225
+Beginner.
+
+547
+00:45:20.505 --> 00:45:21.529
+Question 1.
+
+548
+00:45:21.809 --> 00:45:25.244
+What is multi-tenancy and why do SaaS products use it?
+
+549
+00:45:25.524 --> 00:45:26.889
+Thirty-second answer:
+
+550
+00:45:27.169 --> 00:45:39.671
+Multi-tenancy means one running system serves many isolated customers (tenants, usually whole organizations), sharing infrastructure while keeping each tenant's data and performance separate.
+
+551
+00:45:39.951 --> 00:45:53.199
+SaaS uses it because sharing one codebase and few deployments across many customers is what makes the unit economics work; the hard part is enforcing isolation so tenants never see or affect each other.
+
+552
+00:45:54.549 --> 00:45:55.551
+Question 2.
+
+553
+00:45:55.831 --> 00:45:58.370
+Describe the three data isolation models.
+
+554
+00:45:58.650 --> 00:46:00.015
+Thirty-second answer:
+
+555
+00:46:00.295 --> 00:46:07.698
+(1) Shared table, one table with a tenantid column; cheapest, weakest isolation (a forgotten filter leaks).
+
+556
+00:46:07.978 --> 00:46:13.973
+(2) Schema-per-tenant, one schema per tenant in a shared database; medium isolation and cost.
+
+557
+00:46:14.253 --> 00:46:23.597
+(3) Database-per-tenant (silo), a separate database per tenant; strongest isolation, easy per-tenant backup or residency, highest cost.
+
+558
+00:46:23.877 --> 00:46:27.119
+Most SaaS pools small tenants and siloes big ones.
+
+559
+00:46:28.469 --> 00:46:29.515
+Question 3.
+
+560
+00:46:29.795 --> 00:46:32.483
+How does a request know which tenant it belongs to?
+
+561
+00:46:32.763 --> 00:46:34.128
+Thirty-second answer:
+
+562
+00:46:34.408 --> 00:46:46.099
+You resolve the tenant at the edge from a trustworthy source, ideally a claim in the authenticated JWT, or a subdomain or path, never from a header or body the client controls.
+
+563
+00:46:46.379 --> 00:46:54.699
+Then you propagate it through the whole request (a tenant context) and apply it everywhere: the DB, the cache, the search index, logs.
+
+564
+00:46:56.049 --> 00:46:57.115
+Question 4.
+
+565
+00:46:57.395 --> 00:46:59.230
+What is the 'noisy neighbor' problem?
+
+566
+00:46:59.510 --> 00:47:00.875
+Thirty-second answer:
+
+567
+00:47:01.155 --> 00:47:15.513
+In a shared (pool) model, tenants share CPU, connections and I or O, so one tenant's spike, a big batch job, a traffic burst, can consume the shared resources and slow down or break other tenants who did nothing wrong.
+
+568
+00:47:15.793 --> 00:47:17.841
+It's a performance-isolation failure.
+
+569
+00:47:19.191 --> 00:47:20.193
+Intermediate.
+
+570
+00:47:20.473 --> 00:47:21.583
+Question 5.
+
+571
+00:47:21.863 --> 00:47:25.617
+What is Row-Level Security and how does it help multi-tenancy?
+
+572
+00:47:25.897 --> 00:47:27.263
+Thirty-second answer:
+
+573
+00:47:27.543 --> 00:47:38.849
+RLS is a database feature that attaches a policy to a table so the engine automatically adds a predicate to every query, for multi-tenancy, tenantid = currenttenant.
+
+574
+00:47:39.129 --> 00:47:50.372
+Then even a query that forgets the tenant filter returns only the current tenant's rows, a cross-tenant update matches nothing, and with no tenant set it returns nothing (fails closed).
+
+575
+00:47:50.652 --> 00:47:54.940
+It's the backstop that makes a forgotten filter a non-event instead of a breach.
+
+576
+00:47:56.290 --> 00:47:57.399
+Question 6.
+
+577
+00:47:57.679 --> 00:48:00.901
+How do you implement per-tenant rate limiting and tiered plans?
+
+578
+00:48:01.181 --> 00:48:02.546
+Thirty-second answer:
+
+579
+00:48:02.826 --> 00:48:09.930
+A token bucket per tenant, sized by plan (capacity = allowed burst, refill rate = sustained rate).
+
+580
+00:48:10.210 --> 00:48:21.389
+Enforce it centrally and atomically, a Redis Lua script, so the limit holds across all app instances; return 429 with Retry-After when the bucket is empty.
+
+581
+00:48:21.669 --> 00:48:28.645
+Separately meter each tenant's billable usage into a per-period counter for usage-based billing and quota checks.
+
+582
+00:48:29.995 --> 00:48:31.083
+Question 7.
+
+583
+00:48:31.363 --> 00:48:34.712
+Shared-table versus database-per-tenant, how do you choose?
+
+584
+00:48:34.992 --> 00:48:36.357
+Thirty-second answer:
+
+585
+00:48:36.637 --> 00:48:37.704
+By tenant tier.
+
+586
+00:48:37.984 --> 00:48:44.469
+Shared-table (pool) for the long tail of small tenants, cheapest, most scalable, isolate with RLS.
+
+587
+00:48:44.749 --> 00:48:57.741
+Database-per-tenant (silo) for large or regulated tenants, strongest isolation, easy per-tenant backup and residency, contained blast radius, but expensive and operationally heavy at scale.
+
+588
+00:48:58.021 --> 00:49:00.453
+Many SaaS run both simultaneously.
+
+589
+00:49:01.803 --> 00:49:02.827
+Question 8.
+
+590
+00:49:03.107 --> 00:49:05.603
+How do you make sure tenant deletion is complete?
+
+591
+00:49:05.883 --> 00:49:07.249
+Thirty-second answer:
+
+592
+00:49:07.529 --> 00:49:19.625
+Know every place a tenant's data lives, every table, cache, search index, blob store, and message log, and delete from all of them, ideally through an automated, audited offboarding job.
+
+593
+00:49:19.905 --> 00:49:24.918
+In silo it's a DROP DATABASE; in pool it's a tenant-scoped delete across each store.
+
+594
+00:49:25.198 --> 00:49:31.790
+Per-tenant encryption enables crypto-shredding, destroy the tenant's key and the encrypted data is irrecoverable.
+
+595
+00:49:33.140 --> 00:49:34.207
+Question 9.
+
+596
+00:49:34.487 --> 00:49:38.647
+Why prefix cache keys with the tenant, and what else needs tenant-awareness?
+
+597
+00:49:38.927 --> 00:49:40.292
+Thirty-second answer:
+
+598
+00:49:40.572 --> 00:49:49.617
+Because a shared cache keyed only by, say, cart:42 would serve tenant A's cart for tenant B's request, a cross-tenant leak through the cache.
+
+599
+00:49:49.897 --> 00:49:53.161
+Prefix keys with the tenant (t:acme:cart:42).
+
+600
+00:49:53.441 --> 00:50:05.665
+The same applies to search indexes (per-tenant index or mandatory filter), messaging (tenant on every message), logs or metrics (stamp with tenant), and config or feature flags.
+
+601
+00:50:07.015 --> 00:50:07.783
+Senior.
+
+602
+00:50:08.063 --> 00:50:09.109
+Question 10.
+
+603
+00:50:09.389 --> 00:50:15.319
+Design the data layer for a SaaS with 50,000 small tenants and 50 enterprise tenants.
+
+604
+00:50:15.599 --> 00:50:16.965
+Thirty-second answer:
+
+605
+00:50:17.245 --> 00:50:18.162
+Two tiers.
+
+606
+00:50:18.442 --> 00:50:30.922
+The 50,000 small tenants go pool + RLS, sharded across several databases by tenantid (no single DB holds all), with a tenant, then shard routing map and a connection pooler.
+
+607
+00:50:31.202 --> 00:50:39.138
+The 50 enterprise tenants get silo, a dedicated database each (residency, backup, blast radius, custom SLAs).
+
+608
+00:50:39.418 --> 00:50:41.978
+Both share the app tier, with per-tenant limits.
+
+609
+00:50:42.258 --> 00:50:45.693
+Consider cells to cap blast radius for the pooled tenants.
+
+610
+00:50:47.043 --> 00:50:48.173
+Question 11.
+
+611
+00:50:48.453 --> 00:50:51.184
+How do you prevent cross-tenant access at every layer?
+
+612
+00:50:51.464 --> 00:50:52.829
+Thirty-second answer:
+
+613
+00:50:53.109 --> 00:50:54.261
+Defense in depth:
+
+614
+00:50:54.541 --> 00:51:17.731
+(1) derive tenant from the authenticated JWT at the edge, never from input; (2) include the tenant in every authorization check (object-level ownership); (3) enforce it at the data layer with RLS (pool) or physical separation (silo); (4) prefix caches, scope search, stamp messages; (5) test isolation explicitly for every resource.
+
+615
+00:51:18.011 --> 00:51:19.995
+No single layer is trusted alone.
+
+616
+00:51:21.345 --> 00:51:22.433
+Question 12.
+
+617
+00:51:22.713 --> 00:51:25.913
+How do you achieve performance isolation in a pool model?
+
+618
+00:51:26.193 --> 00:51:27.558
+Thirty-second answer:
+
+619
+00:51:27.838 --> 00:51:42.579
+Per-tenant concurrency caps (a tenant can hold at most K connections or N in-flight requests), fair scheduling (per-tenant queues served round-robin or weighted by plan), per-tenant rate limits (L4), and bulkheads (separate pools).
+
+620
+00:51:42.859 --> 00:51:45.867
+A tenant big enough to be a permanent problem gets siloed.
+
+621
+00:51:46.147 --> 00:51:49.539
+The goal: one tenant's load can't breach another's SLO.
+
+622
+00:51:50.889 --> 00:51:52.169
+Question 13.
+
+623
+00:51:52.449 --> 00:51:56.161
+How does RLS interact with connection pooling, and what breaks?
+
+624
+00:51:56.441 --> 00:51:57.807
+Thirty-second answer:
+
+625
+00:51:58.087 --> 00:52:06.684
+RLS reads the tenant from a per-connection setting (app.tenant), but a connection pool reuses connections across requests or tenants.
+
+626
+00:52:06.964 --> 00:52:14.857
+If you set app.tenant and don't reset it, the next request on that pooled connection inherits the previous tenant's context, a leak.
+
+627
+00:52:15.137 --> 00:52:25.505
+So you must set the tenant at checkout and reset it at return (or use SET LOCAL inside the request's transaction so it's scoped and auto-cleared on commit or rollback).
+
+628
+00:52:26.855 --> 00:52:28.050
+Question 14.
+
+629
+00:52:28.330 --> 00:52:32.639
+How do you migrate schemas across thousands of tenants (Ch 28)?
+
+630
+00:52:32.919 --> 00:52:34.285
+Thirty-second answer:
+
+631
+00:52:34.565 --> 00:52:41.434
+For pool (shared table), one expand or contract migration covers all tenants at once, that's a big advantage.
+
+632
+00:52:41.714 --> 00:52:57.693
+For silo or schema-per-tenant, you must run the migration against every database or schema, which you do as an orchestrated, resumable rollout (batch the tenants, track per-tenant migration state, retry failures) rather than one giant transaction.
+
+633
+00:52:57.973 --> 00:53:05.525
+Either way the changes are backward-compatible (expand or contract) so old and new code coexist during the rollout.
+
+634
+00:53:06.875 --> 00:53:07.771
+Architect.
+
+635
+00:53:08.051 --> 00:53:09.245
+Question 15.
+
+636
+00:53:09.525 --> 00:53:12.427
+What is cell-based architecture and when do you need it?
+
+637
+00:53:12.707 --> 00:53:14.072
+Thirty-second answer:
+
+638
+00:53:14.352 --> 00:53:20.325
+You run many independent cells, each a complete stack (app + data) serving a subset of tenants.
+
+639
+00:53:20.605 --> 00:53:29.885
+A cell is a blast-radius boundary: a bad deploy, an incident, or a noisy tenant is contained to one cell instead of taking down all tenants.
+
+640
+00:53:30.165 --> 00:53:35.285
+You scale by adding cells and route each tenant to its cell via a thin routing layer.
+
+641
+00:53:35.565 --> 00:53:41.219
+It's how the largest SaaS platforms get pool economics with silo-like fault isolation.
+
+642
+00:53:42.569 --> 00:53:43.763
+Question 16.
+
+643
+00:53:44.043 --> 00:53:47.265
+How do you handle data residency for regulated tenants?
+
+644
+00:53:47.545 --> 00:53:48.910
+Thirty-second answer:
+
+645
+00:53:49.190 --> 00:54:01.009
+Pin those tenants to a region: silo-by-region (their database and processing live in the required region) with a region-aware routing layer that sends their requests only to that region.
+
+646
+00:54:01.289 --> 00:54:10.334
+A single global pool usually can't satisfy residency, so residency-bound tenants typically get dedicated, region-local infrastructure.
+
+647
+00:54:10.614 --> 00:54:14.155
+Combine with per-tenant encryption keys managed in-region.
+
+648
+00:54:15.505 --> 00:54:16.849
+Question 17.
+
+649
+00:54:17.129 --> 00:54:21.161
+How do you meter usage accurately for billing across a distributed system?
+
+650
+00:54:21.441 --> 00:54:22.807
+Thirty-second answer:
+
+651
+00:54:23.087 --> 00:54:35.737
+Emit a usage event per billable action, tagged with tenant, and aggregate into per-tenant, per-period counters, idempotently, so retries don't double-count (dedup by an event id, Ch 20).
+
+652
+00:54:36.017 --> 00:54:39.388
+Store raw events (for dispute or audit) and roll them up.
+
+653
+00:54:39.668 --> 00:54:43.188
+Reconcile the meter against the source of truth periodically.
+
+654
+00:54:43.468 --> 00:54:46.348
+Enforce quotas off the same counters (L4).
+
+655
+00:54:47.698 --> 00:54:48.871
+Question 18.
+
+656
+00:54:49.151 --> 00:54:52.522
+A single tenant is 100 times larger than any other.
+
+657
+00:54:52.802 --> 00:54:53.975
+How do you handle it?
+
+658
+00:54:54.255 --> 00:54:55.621
+Thirty-second answer:
+
+659
+00:54:55.901 --> 00:54:56.797
+Silo it.
+
+660
+00:54:57.077 --> 00:55:11.114
+A tenant that large is a permanent noisy neighbor and a blast-radius risk in any pool, give it dedicated resources (its own database, possibly its own cell), tuned and scaled for its load, on a plan that pays for it.
+
+661
+00:55:11.394 --> 00:55:13.655
+Keep the thousands of small tenants pooled.
+
+662
+00:55:13.935 --> 00:55:16.965
+This pool the small, silo the whale split is standard.
+
+663
+00:55:18.315 --> 00:55:19.552
+Question 19.
+
+664
+00:55:19.832 --> 00:55:23.459
+How do you know and control per-tenant cost and profitability?
+
+665
+00:55:23.739 --> 00:55:25.104
+Thirty-second answer:
+
+666
+00:55:25.384 --> 00:55:40.488
+Attribute resource use to tenants: stamp compute or storage or I or O and API calls with the tenant (the same tenant tag used in observability), roll it into a per-tenant cost figure, and compare to per-tenant revenue.
+
+667
+00:55:40.768 --> 00:55:52.160
+Then act: pool dense free tenants cheaply, ensure enterprise silos are priced above their cost, rate-limit or meter abusers, and flag unprofitable tenants for plan changes.
+
+668
+00:55:53.510 --> 00:55:54.619
+Question 20.
+
+669
+00:55:54.899 --> 00:55:57.907
+You're converting a single-tenant app to multi-tenant.
+
+670
+00:55:58.187 --> 00:55:59.169
+What's your plan?
+
+671
+00:55:59.449 --> 00:56:00.814
+Thirty-second answer:
+
+672
+00:56:01.094 --> 00:56:18.331
+(1) Add tenantid everywhere and a tenant model; (2) resolve or propagate tenant context from auth; (3) enforce isolation at the data layer (RLS now, silo for those who need it), not by query discipline; (4) add per-tenant limits, metering,
+
+673
+00:56:18.611 --> 00:56:35.849
+and plans; (5) make caches or search or messaging or observability tenant-aware; (6) build automated onboarding or export or deletion; (7) test cross-tenant isolation exhaustively; (8) plan for scale (sharding or cells) before you need it.
+
+674
+00:56:37.199 --> 00:56:38.095
+Part 9.
+
+675
+00:56:38.375 --> 00:56:39.783
+Summary and Practice.
+
+676
+00:56:41.033 --> 00:56:42.121
+Key takeaways.
+
+677
+00:56:42.401 --> 00:56:53.835
+Isolation is the whole game, and the tension is always sharing (cheap) versus dedicating (isolated), decided per tenant tier (§2.1, §2.2).
+
+678
+00:56:54.115 --> 00:56:55.993
+Don't rely on query discipline.
+
+679
+00:56:56.273 --> 00:57:04.657
+Enforce data isolation in the engine (RLS) or the topology (silo); a forgotten filter must not leak (L1, L2).
+
+680
+00:57:04.937 --> 00:57:15.646
+Connect as a limited role for RLS to apply, set the tenant from the authenticated principal, and reset it per request on pooled connections (L2, Q13).
+
+681
+00:57:15.926 --> 00:57:24.097
+Fence performance per tenant, concurrency caps, fair queuing, rate limits, so no tenant breaches another's SLO (L3, L4).
+
+682
+00:57:25.447 --> 00:57:33.703
+Plans, limits, and metering are how SaaS monetizes and protects itself; enforce limits centrally and atomically (L4).
+
+683
+00:57:33.983 --> 00:57:41.748
+Make every subsystem tenant-aware, DB, cache, search, messaging, observability, config (§2.11).
+
+684
+00:57:42.028 --> 00:57:51.415
+Automate the lifecycle, onboarding, export, complete deletion (crypto-shred), and respect residency (§2.8, §2.9).
+
+685
+00:57:51.695 --> 00:57:58.799
+Scale with sharding and cells at high tenant counts; pool the small, silo the whales (§2.10).
+
+686
+00:58:00.149 --> 00:58:01.471
+Decision cheat sheet.
+
+687
+00:58:01.751 --> 00:58:03.095
+Here is a quick table:
+
+688
+00:58:03.375 --> 00:58:04.698
+Question, and Answer.
+
+689
+00:58:04.978 --> 00:58:07.666
+Isolation for the long tail of small tenants:
+
+690
+00:58:07.946 --> 00:58:09.333
+Pool + RLS.
+
+691
+00:58:09.613 --> 00:58:12.407
+Isolation for large or regulated tenants:
+
+692
+00:58:12.687 --> 00:58:15.482
+Silo (dedicated DB, possibly own cell).
+
+693
+00:58:15.762 --> 00:58:17.661
+Where does the tenant id come from:
+
+694
+00:58:17.941 --> 00:58:21.439
+The authenticated JWT, never request input.
+
+695
+00:58:21.719 --> 00:58:23.789
+Backstop against a forgotten filter:
+
+696
+00:58:24.069 --> 00:58:26.330
+Row-Level Security (fail closed).
+
+697
+00:58:26.610 --> 00:58:28.082
+RLS not working?:
+
+698
+00:58:28.362 --> 00:58:31.797
+You're connected as owner or superuser, use a limited role.
+
+699
+00:58:32.077 --> 00:58:34.082
+Pooled connections + RLS:
+
+700
+00:58:34.362 --> 00:58:37.114
+SET LOCAL app.tenant inside a transaction.
+
+701
+00:58:37.394 --> 00:58:38.461
+Noisy neighbor:
+
+702
+00:58:38.741 --> 00:58:42.730
+Concurrency caps + fair queuing + rate limits; silo the whale.
+
+703
+00:58:43.010 --> 00:58:44.354
+Enforce plan limits:
+
+704
+00:58:44.634 --> 00:58:47.429
+Per-tenant token bucket, atomic (Redis Lua).
+
+705
+00:58:48.779 --> 00:58:50.229
+Complete tenant deletion:
+
+706
+00:58:50.509 --> 00:58:53.752
+Automated delete across all stores + crypto-shred.
+
+707
+00:58:54.032 --> 00:58:55.632
+100,000 tenants:
+
+708
+00:58:55.912 --> 00:58:58.493
+Pool + RLS + sharding + cells.
+
+709
+00:58:59.843 --> 00:59:00.974
+Exercises.
+
+710
+00:59:01.254 --> 00:59:12.305
+(B2) Extend L2's RLS to add an INSERT policy that stamps tenantid from app.tenant automatically, and prove a tenant can't insert a row for another tenant.
+
+711
+00:59:12.585 --> 00:59:25.427
+(B2) Reproduce the pooled-connection RLS leak (Q13): set app.tenant without SET LOCAL, reuse the connection for another tenant, and show the leak; then fix it with SET LOCAL.
+
+712
+00:59:25.707 --> 00:59:34.454
+(B3) Add weighted fair queuing to L3 (enterprise gets 3 turns per round, free gets 1) and measure how each tier's wait changes.
+
+713
+00:59:35.804 --> 00:59:47.751
+(B3) Extend L4 to add a monthly quota (a hard cap per tenant) alongside the rate limit, and return 429 versus 402 Payment Required appropriately.
+
+714
+00:59:48.031 --> 00:59:59.039
+(B4) Design the tenant, then shard, then cell routing map for 100k tenants: what's in the control plane, how a request is routed, and how you rebalance a hot shard.
+
+715
+01:00:00.389 --> 01:00:01.391
+Further reading.
+
+716
+01:00:01.671 --> 01:00:09.543
+AWS SaaS Lens or SaaS Factory, silo or pool or bridge, tenant isolation, cell-based architecture.
+
+717
+01:00:09.823 --> 01:00:11.423
+PostgreSQL docs:
+
+718
+01:00:11.703 --> 01:00:13.261
+Row Security Policies.
+
+719
+01:00:13.541 --> 01:00:19.322
+Designing Data-Intensive Applications (Kleppmann), partitioning (the basis for tenant sharding).
+
+720
+01:00:19.602 --> 01:00:25.149
+Stripe or Shopify or Salesforce engineering write-ups on multi-tenancy and cells.
+
+721
+01:00:25.429 --> 01:00:30.399
+Crypto-shredding and per-tenant KMS patterns (cloud provider KMS docs).
+
+722
+01:00:31.749 --> 01:00:32.987
+Related chapters.
+
+723
+01:00:33.267 --> 01:00:39.731
+Ch 05, Relational Databases Deep Dive: the engine features RLS builds on.
+
+724
+01:00:40.011 --> 01:00:44.875
+Ch 11, Partitioning and Sharding: sharding tenants across databases.
+
+725
+01:00:45.155 --> 01:00:51.277
+Ch 23, Security Architecture: the tenant as a security boundary, per-tenant keys.
+
+726
+01:00:51.557 --> 01:00:55.995
+Ch 24, Observability: per-tenant metrics, SLOs, and cost.
+
+727
+01:00:56.275 --> 01:01:01.949
+Ch 28, Schema and Data Evolution: migrating schemas across many tenants.
+
+728
+01:01:02.229 --> 01:01:07.584
+Ch 29, Testing Distributed Systems: testing cross-tenant isolation.
+
+729
+01:01:08.934 --> 01:01:10.534
+That's the end of this chapter.
+
+730
+01:01:10.814 --> 01:01:16.851
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+731
+01:01:17.131 --> 01:01:18.582
+See you in the next chapter.
+

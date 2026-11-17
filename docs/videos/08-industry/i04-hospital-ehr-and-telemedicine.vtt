@@ -1,0 +1,3866 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:03.913
+Hospital Information System, EHR and Telemedicine.
+
+2
+00:00:04.193 --> 00:00:09.078
+Chapter I04, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:10.828 --> 00:00:11.788
+At a glance:
+
+4
+00:00:12.068 --> 00:00:13.241
+Chapter at a glance.
+
+5
+00:00:13.521 --> 00:00:14.332
+Sector:
+
+6
+00:00:14.612 --> 00:00:18.879
+Healthcare, Format: system design walkthrough (no code), Reader bands:
+
+7
+00:00:19.159 --> 00:00:20.673
+B1, then B4.
+
+8
+00:00:20.953 --> 00:00:38.980
+What you get: a complete design for a multi-hospital chain in India (10 hospitals, 3,000 beds, 30 clinics, telemedicine), explained the way it actually runs: how a patient moves through registration, OPD, emergency, admission, surgery, discharge and billing,
+
+9
+00:00:39.260 --> 00:00:52.188
+and what each system does at every step;. the clinical record (EHR) and how orders, results, medications and notes flow;. lab, radiology (PACS), pharmacy, nursing, operating theatres and beds;.
+
+10
+00:00:53.538 --> 00:01:00.514
+insurance and cashless claims;. telemedicine video consultations and e-prescriptions;. interoperability:
+
+11
+00:01:00.794 --> 00:01:21.402
+HL7 v2, FHIR, DICOM, and India's Ayushman Bharat Digital Mission (ABDM);. the algorithms behind patient matching, scheduling, bed assignment, early-warning scores, drug checks, inventory and claims;. the data platform: operational stores, event streaming, data lake, warehouse, research data model and ML;.
+
+12
+00:01:22.752 --> 00:01:29.835
+the tech stack, layer by layer;. security, privacy, consent, compliance, reliability and disaster recovery.
+
+13
+00:01:30.115 --> 00:01:31.096
+Reading time:
+
+14
+00:01:31.376 --> 00:01:32.336
+90 min.
+
+15
+00:01:33.686 --> 00:01:34.433
+Warning:
+
+16
+00:01:34.713 --> 00:01:36.825
+Clinical and regulatory content.
+
+17
+00:01:37.105 --> 00:01:40.283
+This is an engineering design, not clinical guidance.
+
+18
+00:01:40.563 --> 00:01:49.267
+Clinical scores (NEWS2, triage levels), drug-interaction logic and treatment pathways must be validated and owned by clinicians.
+
+19
+00:01:49.547 --> 00:02:03.030
+Statements about Indian law and programmes (DPDP Act 2023, ABDM, Telemedicine Practice Guidelines 2020, NHCX, record retention) are summaries marked VERIFY.
+
+20
+00:02:03.310 --> 00:02:05.059
+Check the current official texts.
+
+21
+00:02:05.339 --> 00:02:10.374
+The tech stack is a reference choice, not a description of any specific hospital's systems.
+
+22
+00:02:11.724 --> 00:02:12.577
+Part 1.
+
+23
+00:02:12.857 --> 00:02:14.393
+The System in One Page.
+
+24
+00:02:15.643 --> 00:02:17.542
+What a hospital's software must do.
+
+25
+00:02:17.822 --> 00:02:23.326
+A hospital is a 24 times 7 operation where information errors can harm people:
+
+26
+00:02:23.606 --> 00:02:26.443
+A lab result that reaches the wrong patient's chart.
+
+27
+00:02:26.723 --> 00:02:30.201
+A drug allergy that isn't visible when the prescription is written.
+
+28
+00:02:30.481 --> 00:02:32.230
+A bed shown as free that isn't.
+
+29
+00:02:32.510 --> 00:02:37.395
+A discharge delayed for hours because billing is waiting for an insurer's approval.
+
+30
+00:02:38.745 --> 00:02:52.292
+The software's job is to make the right information available to the right person at the right moment, to record everything that was done (legally and clinically), and to coordinate hundreds of staff, rooms, machines and payers.
+
+31
+00:02:53.642 --> 00:02:54.773
+The main systems.
+
+32
+00:02:55.053 --> 00:02:56.397
+Here is a quick table:
+
+33
+00:02:56.677 --> 00:02:59.023
+System, and Common name, and What it does.
+
+34
+00:02:59.303 --> 00:03:00.818
+Patient administration.
+
+35
+00:03:01.098 --> 00:03:02.015
+Common name:
+
+36
+00:03:02.295 --> 00:03:03.341
+PAS or ADT.
+
+37
+00:03:03.621 --> 00:03:04.538
+What it does:
+
+38
+00:03:04.818 --> 00:03:09.234
+Registration, identity, admission, discharge, transfer, bed census.
+
+39
+00:03:09.514 --> 00:03:10.431
+Scheduling.
+
+40
+00:03:10.711 --> 00:03:11.629
+What it does:
+
+41
+00:03:11.909 --> 00:03:16.645
+OPD appointments, doctor rosters, OT schedules, telemedicine slots.
+
+42
+00:03:16.925 --> 00:03:18.439
+Electronic health record.
+
+43
+00:03:18.719 --> 00:03:19.637
+Common name:
+
+44
+00:03:19.917 --> 00:03:20.962
+EHR or EMR.
+
+45
+00:03:21.242 --> 00:03:22.159
+What it does:
+
+46
+00:03:22.439 --> 00:03:27.709
+Problems, allergies, medications, vitals, notes, orders, results, discharge summaries.
+
+47
+00:03:27.989 --> 00:03:30.229
+Computerised provider order entry.
+
+48
+00:03:30.509 --> 00:03:31.426
+Common name:
+
+49
+00:03:31.706 --> 00:03:32.538
+CPOE.
+
+50
+00:03:32.818 --> 00:03:33.735
+What it does:
+
+51
+00:03:34.015 --> 00:03:38.687
+Doctors order labs, imaging, drugs, diets, procedures, with safety checks.
+
+52
+00:03:38.967 --> 00:03:40.738
+Laboratory information system.
+
+53
+00:03:41.018 --> 00:03:41.935
+Common name:
+
+54
+00:03:42.215 --> 00:03:42.941
+LIS.
+
+55
+00:03:43.221 --> 00:03:44.138
+What it does:
+
+56
+00:03:44.418 --> 00:03:49.282
+Sample collection, barcode tracking, analyser interfaces, results, validation.
+
+57
+00:03:50.632 --> 00:03:53.811
+Radiology information system + image archive.
+
+58
+00:03:54.091 --> 00:03:55.008
+Common name:
+
+59
+00:03:55.288 --> 00:03:56.931
+RIS or PACS or VNA.
+
+60
+00:03:57.211 --> 00:03:58.128
+What it does:
+
+61
+00:03:58.408 --> 00:04:02.227
+Imaging orders, modality worklists, DICOM images, reports.
+
+62
+00:04:02.507 --> 00:04:03.381
+Pharmacy.
+
+63
+00:04:03.661 --> 00:04:04.579
+What it does:
+
+64
+00:04:04.859 --> 00:04:07.909
+Dispensing, formulary, stock, controlled drugs.
+
+65
+00:04:08.189 --> 00:04:10.557
+Nursing and medication administration.
+
+66
+00:04:10.837 --> 00:04:12.309
+Common name: eMAR.
+
+67
+00:04:12.589 --> 00:04:13.507
+What it does:
+
+68
+00:04:13.787 --> 00:04:18.309
+Care plans, vitals, bedside barcode-verified drug administration.
+
+69
+00:04:18.589 --> 00:04:20.275
+Operating theatre management.
+
+70
+00:04:20.555 --> 00:04:21.472
+Common name:
+
+71
+00:04:21.752 --> 00:04:22.413
+OT.
+
+72
+00:04:22.693 --> 00:04:23.611
+What it does:
+
+73
+00:04:23.891 --> 00:04:27.517
+Scheduling, checklists, anaesthesia records, instrument tracking.
+
+74
+00:04:27.797 --> 00:04:29.227
+Emergency department.
+
+75
+00:04:29.507 --> 00:04:30.424
+Common name:
+
+76
+00:04:30.704 --> 00:04:31.344
+ED.
+
+77
+00:04:31.624 --> 00:04:32.541
+What it does:
+
+78
+00:04:32.821 --> 00:04:35.509
+Triage, tracking board, fast registration.
+
+79
+00:04:36.859 --> 00:04:37.990
+Revenue cycle.
+
+80
+00:04:38.270 --> 00:04:39.187
+Common name:
+
+81
+00:04:39.467 --> 00:04:40.854
+Billing or RCM.
+
+82
+00:04:41.134 --> 00:04:42.051
+What it does:
+
+83
+00:04:42.331 --> 00:04:47.174
+Charges, packages, deposits, insurance pre-authorisation, claims, payments.
+
+84
+00:04:47.454 --> 00:04:48.542
+Supply chain.
+
+85
+00:04:48.822 --> 00:04:49.739
+Common name:
+
+86
+00:04:50.019 --> 00:04:50.958
+Inventory.
+
+87
+00:04:51.238 --> 00:04:52.155
+What it does:
+
+88
+00:04:52.435 --> 00:04:56.147
+Drugs, consumables, implants; purchase, stock, expiry.
+
+89
+00:04:56.427 --> 00:04:57.515
+Telemedicine.
+
+90
+00:04:57.795 --> 00:04:58.713
+What it does:
+
+91
+00:04:58.993 --> 00:05:02.470
+Video consultations, e-prescriptions, remote follow-up.
+
+92
+00:05:02.750 --> 00:05:04.179
+Patient app and portal.
+
+93
+00:05:04.459 --> 00:05:05.377
+What it does:
+
+94
+00:05:05.657 --> 00:05:08.601
+Booking, reports, bills, teleconsults, consent.
+
+95
+00:05:08.881 --> 00:05:10.225
+Integration engine.
+
+96
+00:05:10.505 --> 00:05:11.422
+What it does:
+
+97
+00:05:11.702 --> 00:05:16.545
+HL7 v2 and FHIR messages, device feeds, ABDM, insurers.
+
+98
+00:05:16.825 --> 00:05:18.361
+Clinical decision support.
+
+99
+00:05:18.641 --> 00:05:19.558
+Common name:
+
+100
+00:05:19.838 --> 00:05:20.841
+CDS.
+
+101
+00:05:21.121 --> 00:05:22.038
+What it does:
+
+102
+00:05:22.318 --> 00:05:25.966
+Drug checks, early-warning scores, sepsis alerts, reminders.
+
+103
+00:05:27.316 --> 00:05:28.511
+Data platform.
+
+104
+00:05:28.791 --> 00:05:29.708
+Common name:
+
+105
+00:05:29.988 --> 00:05:31.183
+Lake or warehouse.
+
+106
+00:05:31.463 --> 00:05:32.380
+What it does:
+
+107
+00:05:32.660 --> 00:05:35.369
+Reporting, quality indicators, research, ML.
+
+108
+00:05:36.719 --> 00:05:38.874
+Scale for this design (assumptions).
+
+109
+00:05:39.154 --> 00:05:40.498
+Here is a quick table:
+
+110
+00:05:40.778 --> 00:05:42.101
+Quantity, and Value.
+
+111
+00:05:42.381 --> 00:05:44.279
+Hospitals or beds or clinics:
+
+112
+00:05:44.559 --> 00:05:46.437
+10 or 3,000 or 30.
+
+113
+00:05:46.717 --> 00:05:53.138
+OPD visits per day: ~15,000 (in person) + ~2,000 teleconsults.
+
+114
+00:05:53.418 --> 00:05:57.301
+Admissions per day: ~600; average stay 4 days.
+
+115
+00:05:57.581 --> 00:06:00.823
+ED visits per day: ~1,200.
+
+116
+00:06:01.103 --> 00:06:05.135
+Lab tests per day: ~60,000 (many tests per sample).
+
+117
+00:06:05.415 --> 00:06:13.309
+Imaging studies per day: ~3,000; CT or MRI studies are 100 MB, 2 GB each.
+
+118
+00:06:13.589 --> 00:06:18.133
+Vitals observations: ~2M per day (monitors + nursing).
+
+119
+00:06:18.413 --> 00:06:23.191
+Staff users: ~20,000; ~6,000 concurrent at peak.
+
+120
+00:06:24.541 --> 00:06:25.757
+Records retention:
+
+121
+00:06:26.037 --> 00:06:30.773
+Many years; imaging petabyte-scale over time (VERIFY retention rules).
+
+122
+00:06:32.123 --> 00:06:33.510
+Estimation highlights:
+
+123
+00:06:33.790 --> 00:06:35.411
+Imaging dominates storage.
+
+124
+00:06:35.691 --> 00:06:47.489
+3,000 studies per day at an average of ~150 MB is ~450 GB per day, or ~160 TB per year before compression.
+
+125
+00:06:47.769 --> 00:06:50.030
+Clinical data is small but critical.
+
+126
+00:06:50.310 --> 00:06:53.723
+Notes, orders and results total tens of GB per day.
+
+127
+00:06:54.003 --> 00:06:55.134
+Latency needs:
+
+128
+00:06:55.414 --> 00:06:59.681
+Clinical screens: open a patient chart in 1 s at p95.
+
+129
+00:06:59.961 --> 00:07:01.369
+Order entry with checks:
+
+130
+00:07:01.649 --> 00:07:02.502
+2 s.
+
+131
+00:07:03.852 --> 00:07:06.839
+Lab analyser interfaces: near real time.
+
+132
+00:07:07.119 --> 00:07:09.935
+ED tracking board: updates within seconds.
+
+133
+00:07:11.285 --> 00:07:12.159
+Part 2.
+
+134
+00:07:12.439 --> 00:07:13.399
+Requirements.
+
+135
+00:07:14.649 --> 00:07:15.503
+Functional.
+
+136
+00:07:15.783 --> 00:07:24.871
+Register patients once and recognise them everywhere (one patient, one record), linking the national health ID (ABHA) with consent (VERIFY).
+
+137
+00:07:25.151 --> 00:07:31.892
+Book, reschedule and cancel appointments across doctors, clinics and teleconsults, with queue tokens on the day.
+
+138
+00:07:32.172 --> 00:07:37.740
+Triage and treat emergency patients with minimal registration first (register later).
+
+139
+00:07:38.020 --> 00:07:43.055
+Admit, transfer and discharge patients; manage beds and housekeeping turnaround.
+
+140
+00:07:44.405 --> 00:07:53.962
+Document care (history, examination, diagnoses, notes, vitals, nursing charts) and order tests, imaging, drugs and procedures, with safety checks.
+
+141
+00:07:54.242 --> 00:08:01.538
+Run the lab from sample collection to validated results; the radiology workflow from order to report with images.
+
+142
+00:08:01.818 --> 00:08:05.573
+Dispense and administer medicines with bedside verification.
+
+143
+00:08:05.853 --> 00:08:07.858
+Schedule and document surgeries.
+
+144
+00:08:08.138 --> 00:08:15.925
+Bill correctly (itemised and packages), take deposits, obtain insurance pre-authorisation, and submit and track claims.
+
+145
+00:08:17.275 --> 00:08:21.435
+Offer teleconsultations with video, documents and e-prescriptions.
+
+146
+00:08:21.715 --> 00:08:27.752
+Exchange records with other providers and national systems (FHIR, ABDM), with patient consent.
+
+147
+00:08:28.032 --> 00:08:34.304
+Report quality indicators, statutory reports and management dashboards; support approved research.
+
+148
+00:08:35.654 --> 00:08:36.763
+Non-functional.
+
+149
+00:08:37.043 --> 00:08:38.387
+Here is a quick table:
+
+150
+00:08:38.667 --> 00:08:40.033
+Attribute, and Target.
+
+151
+00:08:40.313 --> 00:08:41.379
+Availability:
+
+152
+00:08:41.659 --> 00:08:51.963
+Clinical core ≥ 99.95%, with downtime procedures (read-only copies, printed MARs) for anything below that.
+
+153
+00:08:52.243 --> 00:08:53.161
+Latency:
+
+154
+00:08:53.441 --> 00:08:59.478
+Chart open p95 1 s; result delivery to the chart 1 min after validation.
+
+155
+00:08:59.758 --> 00:09:00.633
+Integrity:
+
+156
+00:09:00.913 --> 00:09:08.913
+No result ever filed to the wrong patient; every clinical entry signed, timestamped and immutable (amendments are new versions).
+
+157
+00:09:09.193 --> 00:09:10.195
+Security:
+
+158
+00:09:10.475 --> 00:09:16.342
+Role-based and relationship-based access, break-glass with audit, encryption, device control.
+
+159
+00:09:16.622 --> 00:09:17.539
+Privacy:
+
+160
+00:09:17.819 --> 00:09:23.110
+Consent-based sharing; minimum necessary; DPDP Act obligations (VERIFY).
+
+161
+00:09:23.390 --> 00:09:24.371
+Auditability:
+
+162
+00:09:24.651 --> 00:09:27.851
+Who viewed or changed what, and when, for every record.
+
+163
+00:09:29.201 --> 00:09:30.460
+Interoperability:
+
+164
+00:09:30.740 --> 00:09:36.564
+HL7 v2, FHIR R4, DICOM, ABDM APIs (VERIFY versions).
+
+165
+00:09:36.844 --> 00:09:37.740
+Recovery:
+
+166
+00:09:38.020 --> 00:09:47.492
+RPO about 0 for clinical data in-region; RTO 1 h for the clinical core; imaging archive recoverable within a day for older studies.
+
+167
+00:09:48.842 --> 00:09:49.738
+Part 3.
+
+168
+00:09:50.018 --> 00:09:51.533
+High-Level Architecture.
+
+169
+00:09:52.783 --> 00:09:53.828
+Component view.
+
+170
+00:09:54.108 --> 00:09:55.452
+Here is the diagram.
+
+171
+00:09:59.302 --> 00:10:00.795
+Architectural decisions.
+
+172
+00:10:01.075 --> 00:10:02.419
+Here is a quick table:
+
+173
+00:10:02.699 --> 00:10:04.470
+Decision, and Choice, and Why.
+
+174
+00:10:04.750 --> 00:10:06.478
+Monolith versus services.
+
+175
+00:10:06.758 --> 00:10:07.590
+Choice:
+
+176
+00:10:07.870 --> 00:10:20.179
+A modular core (patient, EHR, orders, results in one strongly consistent domain) plus separate services for scheduling, billing, pharmacy stock, imaging, telemedicine and integration.
+
+177
+00:10:20.459 --> 00:10:21.142
+Why:
+
+178
+00:10:21.422 --> 00:10:25.497
+Clinical data needs transactions across orders, results and notes.
+
+179
+00:10:25.777 --> 00:10:30.214
+Operational domains scale and change independently (Ch 34).
+
+180
+00:10:30.494 --> 00:10:31.774
+Clinical data model.
+
+181
+00:10:32.054 --> 00:10:32.886
+Choice:
+
+182
+00:10:33.166 --> 00:10:46.585
+FHIR R4 resources as the canonical model (Patient, Encounter, Observation, MedicationRequest, ServiceRequest, DiagnosticReport, Condition, AllergyIntolerance, DocumentReference, Consent).
+
+183
+00:10:46.865 --> 00:10:47.547
+Why:
+
+184
+00:10:47.827 --> 00:10:52.179
+International standard, used by ABDM for record exchange (VERIFY).
+
+185
+00:10:52.459 --> 00:10:55.979
+It avoids a custom model that needs translation everywhere.
+
+186
+00:10:57.329 --> 00:10:58.993
+Storage of clinical data.
+
+187
+00:10:59.273 --> 00:11:00.105
+Choice:
+
+188
+00:11:00.385 --> 00:11:08.321
+PostgreSQL behind a FHIR server (resources as versioned JSONB plus search indexes), with append-only history.
+
+189
+00:11:08.601 --> 00:11:09.284
+Why:
+
+190
+00:11:09.564 --> 00:11:14.428
+Transactions, versioning, and SQL for operations (Ch 05).
+
+191
+00:11:14.708 --> 00:11:15.711
+Integration.
+
+192
+00:11:15.991 --> 00:11:16.823
+Choice:
+
+193
+00:11:17.103 --> 00:11:25.956
+An integration engine for HL7 v2 (lab analysers, legacy systems) and FHIR, plus an event bus for internal events.
+
+194
+00:11:26.236 --> 00:11:26.919
+Why:
+
+195
+00:11:27.199 --> 00:11:32.276
+Hospitals are full of devices and vendor systems that speak HL7 v2.
+
+196
+00:11:32.556 --> 00:11:33.388
+Images.
+
+197
+00:11:33.668 --> 00:11:34.500
+Choice:
+
+198
+00:11:34.780 --> 00:11:38.193
+PACS or VNA with DICOM, on tiered object storage.
+
+199
+00:11:38.473 --> 00:11:39.156
+Why:
+
+200
+00:11:39.436 --> 00:11:42.679
+Images are huge and have their own standard and viewers.
+
+201
+00:11:42.959 --> 00:11:43.876
+Deployment.
+
+202
+00:11:44.156 --> 00:11:44.988
+Choice:
+
+203
+00:11:45.268 --> 00:11:53.823
+Private cloud or on-premises Kubernetes in each region, with a DR site; edge nodes in each hospital for downtime resilience.
+
+204
+00:11:54.103 --> 00:11:54.785
+Why:
+
+205
+00:11:55.065 --> 00:12:00.847
+Clinical systems must keep working when the WAN link fails; data residency (VERIFY).
+
+206
+00:12:02.197 --> 00:12:03.114
+Part 4.
+
+207
+00:12:03.394 --> 00:12:05.698
+How It Works, Patient Journeys End to End.
+
+208
+00:12:06.948 --> 00:12:09.657
+Journey 1: an OPD visit booked in the app.
+
+209
+00:12:09.937 --> 00:12:11.068
+Search and booking.
+
+210
+00:12:11.348 --> 00:12:15.124
+The patient searches by specialty, doctor or symptoms in the app.
+
+211
+00:12:15.404 --> 00:12:21.463
+Search finds doctors (OpenSearch index of doctors, specialties, languages and locations).
+
+212
+00:12:21.743 --> 00:12:23.919
+The scheduling service shows free slots.
+
+213
+00:12:24.199 --> 00:12:41.351
+Slots come from each doctor's roster templates (for example, Mon or Wed or Fri 10:00 to 13:00, 12-minute slots), minus leaves and blocks, plus overbooking allowance computed from predicted no-shows (§6.3).
+
+214
+00:12:42.701 --> 00:12:43.874
+Holding the slot.
+
+215
+00:12:44.154 --> 00:12:51.322
+The app holds the slot for 5 minutes (a hold record with a TTL), collects the fee if prepaid, and confirms.
+
+216
+00:12:51.602 --> 00:13:02.546
+Double booking is prevented by a unique constraint on (doctor, slot, sequence) and a conditional insert, exactly like inventory reservation (Ch 46).
+
+217
+00:13:02.826 --> 00:13:03.743
+Identity.
+
+218
+00:13:04.023 --> 00:13:14.029
+At first booking, the patient is created or matched in the Master Patient Index (MPI) using name, date of birth, gender, mobile and ABHA number if given.
+
+219
+00:13:14.309 --> 00:13:17.637
+The MPI returns a medical record number (MRN).
+
+220
+00:13:18.987 --> 00:13:26.389
+If a probable duplicate exists, the record is flagged for review rather than merged automatically (§6.1).
+
+221
+00:13:26.669 --> 00:13:27.629
+Reminders.
+
+222
+00:13:27.909 --> 00:13:38.299
+SMS or WhatsApp or push reminders go out 24 h and 2 h before (Ch 40), with a one-tap cancel that frees the slot for waitlisted patients.
+
+223
+00:13:38.579 --> 00:13:39.432
+Arrival.
+
+224
+00:13:39.712 --> 00:13:42.933
+The patient scans a QR at a kiosk or the front desk.
+
+225
+00:13:43.213 --> 00:13:47.352
+The queue service issues a token and puts the patient in the doctor's queue.
+
+226
+00:13:48.702 --> 00:13:57.790
+The queue order considers appointment time, arrival time and priority (elderly, pregnant, follow-up-with-reports), shown on waiting-room screens.
+
+227
+00:13:58.070 --> 00:14:02.337
+Expected wait is computed from the doctor's recent consultation times.
+
+228
+00:14:02.617 --> 00:14:03.918
+Pre-consultation.
+
+229
+00:14:04.198 --> 00:14:06.374
+A nurse records vitals on a tablet.
+
+230
+00:14:06.654 --> 00:14:10.729
+The vitals become FHIR Observations linked to today's Encounter.
+
+231
+00:14:11.009 --> 00:14:12.054
+Consultation.
+
+232
+00:14:12.334 --> 00:14:13.955
+The doctor opens the chart:
+
+233
+00:14:15.305 --> 00:14:20.127
+Summary: problems, allergies, current medications, recent results, past visits.
+
+234
+00:14:20.407 --> 00:14:34.380
+Documentation: the doctor writes a note (templates per specialty, voice dictation optional) and records diagnoses (coded, for example, ICD-10, with SNOMED CT where used; VERIFY coding standards adopted).
+
+235
+00:14:34.660 --> 00:14:37.881
+Orders: labs, imaging and prescriptions, through CPOE.
+
+236
+00:14:38.161 --> 00:14:44.753
+Safety checks at order time (CDS): drug, allergy, drug, drug interaction, duplicate therapy;.
+
+237
+00:14:46.103 --> 00:14:54.295
+dose range for age and weight, and renal adjustment if recent creatinine is available;. duplicate test within a time window.
+
+238
+00:14:54.575 --> 00:15:00.293
+Alerts are tiered (hard stop versus warning with override reason), to avoid alert fatigue.
+
+239
+00:15:00.573 --> 00:15:01.469
+Checkout.
+
+240
+00:15:01.749 --> 00:15:08.575
+The billing service turns orders into charges using the tariff master (item prices by payer, package rules).
+
+241
+00:15:09.925 --> 00:15:15.152
+The patient pays at the counter or in the app (UPI or card; Ch 45).
+
+242
+00:15:15.432 --> 00:15:19.059
+The e-prescription is sent to the pharmacy and to the patient's app.
+
+243
+00:15:19.339 --> 00:15:25.269
+A visit summary is shared, and pushed to the patient's ABDM-linked record if consented (§8).
+
+244
+00:15:25.549 --> 00:15:26.765
+Sample collection.
+
+245
+00:15:27.045 --> 00:15:29.499
+Lab orders appear in the phlebotomy worklist.
+
+246
+00:15:29.779 --> 00:15:34.771
+Barcoded labels are printed per sample container, and the collection time is scanned.
+
+247
+00:15:35.051 --> 00:15:35.925
+Results.
+
+248
+00:15:37.275 --> 00:15:49.094
+Analysers send results over HL7 v2 or ASTM to the LIS, which applies auto-verification rules: delta checks, reference ranges, instrument flags.
+
+249
+00:15:49.374 --> 00:15:51.742
+A pathologist validates the exceptions.
+
+250
+00:15:52.022 --> 00:15:57.355
+Validated results post to the EHR as Observations and DiagnosticReports.
+
+251
+00:15:57.635 --> 00:15:59.769
+The doctor and patient are notified.
+
+252
+00:16:00.049 --> 00:16:04.230
+Critical values trigger a phone call workflow with acknowledgement tracking.
+
+253
+00:16:05.580 --> 00:16:09.228
+Journey 2: an emergency patient who becomes an in-patient.
+
+254
+00:16:09.508 --> 00:16:10.361
+Arrival.
+
+255
+00:16:10.641 --> 00:16:15.911
+The patient arrives by ambulance, and pre-arrival details may come from the ambulance app.
+
+256
+00:16:16.191 --> 00:16:22.164
+Quick registration creates an unknown or minimal patient (temporary MRN) in seconds.
+
+257
+00:16:22.444 --> 00:16:26.412
+Identity is reconciled later by the MPI's merge workflow.
+
+258
+00:16:26.692 --> 00:16:27.545
+Triage.
+
+259
+00:16:27.825 --> 00:16:36.679
+A nurse assigns a triage level, for example, a 5-level scale such as ESI, per hospital protocol (VERIFY which scale is used).
+
+260
+00:16:36.959 --> 00:16:43.529
+The ED tracking board shows every patient's location, level, waiting time, pending orders and results.
+
+261
+00:16:44.879 --> 00:16:47.717
+Updates are pushed over WebSockets from ED events.
+
+262
+00:16:47.997 --> 00:16:48.999
+Early warning.
+
+263
+00:16:49.279 --> 00:16:54.741
+Vitals from monitors reach the device gateway, which converts them to FHIR Observations.
+
+264
+00:16:55.021 --> 00:17:01.997
+An early-warning score (for example, NEWS2; §6.4) is computed on every new vital set.
+
+265
+00:17:02.277 --> 00:17:06.799
+A rising score pages the responsible doctor through escalation rules.
+
+266
+00:17:07.079 --> 00:17:11.154
+Stat orders go to the lab and radiology with a priority flag.
+
+267
+00:17:12.504 --> 00:17:22.168
+Radiology's modality worklist (DICOM MWL) sends the patient's details to the CT scanner, so the images carry the correct identifiers.
+
+268
+00:17:22.448 --> 00:17:26.629
+Images go to PACS, and the radiologist reports in the RIS.
+
+269
+00:17:26.909 --> 00:17:31.453
+The report posts to the EHR, and a link opens the images in a web viewer.
+
+270
+00:17:31.733 --> 00:17:33.013
+Decision to admit.
+
+271
+00:17:33.293 --> 00:17:43.917
+A bed request is created with the needs: specialty and level (ward or HDU or ICU);. isolation, gender and equipment;. near nursing station or not.
+
+272
+00:17:45.267 --> 00:17:46.313
+Bed assignment.
+
+273
+00:17:46.593 --> 00:17:57.899
+The bed management service proposes beds using a constraint-based assignment (§6.2), considering beds that will be free after pending discharges and housekeeping.
+
+274
+00:17:58.179 --> 00:17:59.801
+The bed manager confirms.
+
+275
+00:18:00.081 --> 00:18:03.131
+ADT records the admission and transfer events.
+
+276
+00:18:03.411 --> 00:18:06.206
+Housekeeping and transport tasks are generated.
+
+277
+00:18:06.486 --> 00:18:07.553
+In-patient care:
+
+278
+00:18:07.833 --> 00:18:13.401
+Admission orders, often from an order set, for example, community-acquired pneumonia adult.
+
+279
+00:18:14.751 --> 00:18:20.809
+Medication orders: the pharmacist verifies them (clinical check), then dispenses (unit dose).
+
+280
+00:18:21.089 --> 00:18:26.060
+Bedside administration: nurses scan the patient wristband and the drug barcode.
+
+281
+00:18:26.340 --> 00:18:33.124
+The eMAR checks the five rights (patient, drug, dose, route, time) before recording administration.
+
+282
+00:18:33.404 --> 00:18:36.924
+Nursing: documentation, care plans and fluid balance.
+
+283
+00:18:37.204 --> 00:18:38.804
+Doctors: progress notes.
+
+284
+00:18:40.154 --> 00:18:41.477
+Billing during the stay.
+
+285
+00:18:41.757 --> 00:18:50.653
+Charges accumulate on the in-patient account (room rent per day by room category, drugs, consumables, tests, procedures, doctor visits).
+
+286
+00:18:50.933 --> 00:18:59.957
+If insured, a pre-authorisation request with diagnosis and estimated cost goes to the insurer or TPA (§4.4).
+
+287
+00:19:00.237 --> 00:19:02.498
+Deposits are tracked against the running bill.
+
+288
+00:19:02.778 --> 00:19:03.781
+Discharge.
+
+289
+00:19:05.131 --> 00:19:11.339
+The doctor writes the discharge summary: diagnoses, procedures, course, medications, follow-up.
+
+290
+00:19:11.619 --> 00:19:15.800
+Pharmacy reconciles medications, and nursing completes the checklist.
+
+291
+00:19:16.080 --> 00:19:20.731
+Billing produces the final bill, and the insurer approves the final claim amount.
+
+292
+00:19:21.011 --> 00:19:22.248
+The patient leaves.
+
+293
+00:19:22.528 --> 00:19:25.493
+The bed goes to housekeeping, then back to available.
+
+294
+00:19:25.773 --> 00:19:28.355
+The discharge event updates bed forecasts.
+
+295
+00:19:29.705 --> 00:19:37.235
+Discharge delay (from medically fit to left the bed) is a key metric, often dominated by billing and insurance steps.
+
+296
+00:19:38.585 --> 00:19:40.569
+Journey 3: a planned surgery.
+
+297
+00:19:40.849 --> 00:19:41.895
+Booking the case.
+
+298
+00:19:42.175 --> 00:19:49.471
+The surgeon books the case with procedure, duration estimate, surgeon, anaesthesia type, implants and special equipment.
+
+299
+00:19:49.751 --> 00:19:57.111
+Pre-operative assessment: tests, anaesthesia assessment, consent forms (e-signed), and pre-authorisation if insured.
+
+300
+00:19:57.391 --> 00:20:09.081
+OT scheduling assigns theatre, date and sequence (§6.5), checking the constraints: surgeon availability;. equipment conflicts (one C-arm shared by two theatres);.
+
+301
+00:20:10.431 --> 00:20:13.333
+implant availability, reserved in inventory;.
+
+302
+00:20:13.613 --> 00:20:16.045
+ICU bed after surgery, if needed.
+
+303
+00:20:16.325 --> 00:20:17.199
+On the day:
+
+304
+00:20:17.479 --> 00:20:23.282
+The surgical safety checklist (sign-in, time-out, sign-out) is recorded in the OT app.
+
+305
+00:20:23.562 --> 00:20:26.079
+Anaesthesia records capture device data.
+
+306
+00:20:26.359 --> 00:20:32.887
+Implants are scanned (lot and serial for traceability), and instruments are tracked through sterilisation cycles.
+
+307
+00:20:34.237 --> 00:20:40.659
+After surgery: the recovery room, then the ward or ICU, with the transfer recorded in ADT.
+
+308
+00:20:40.939 --> 00:20:46.613
+The billing package is applied (for example, a fixed-price package with inclusions and exclusions).
+
+309
+00:20:47.963 --> 00:20:50.054
+Journey 4: cashless insurance.
+
+310
+00:20:50.334 --> 00:20:57.331
+At admission, the insurance desk verifies the policy (payer API or portal) and captures eligibility.
+
+311
+00:20:57.611 --> 00:21:05.825
+Pre-authorisation request: diagnosis codes, planned procedure, estimated cost, clinical notes and investigation reports.
+
+312
+00:21:06.105 --> 00:21:16.259
+It goes by the payer's API or portal, or through the National Health Claims Exchange (NHCX, FHIR-based) where adopted (VERIFY status and scope).
+
+313
+00:21:16.539 --> 00:21:20.635
+The payer approves an amount, queries for more information, or rejects.
+
+314
+00:21:20.915 --> 00:21:24.329
+Queries become tasks for doctors and the insurance desk.
+
+315
+00:21:24.609 --> 00:21:27.787
+Response time is tracked, because it delays discharge.
+
+316
+00:21:29.137 --> 00:21:31.868
+Enhancements are requested if the stay extends.
+
+317
+00:21:32.148 --> 00:21:37.012
+Final bill: the claim is submitted with the itemised bill and discharge summary.
+
+318
+00:21:37.292 --> 00:21:42.412
+The payer deducts non-payable items (per policy), and the patient pays the difference.
+
+319
+00:21:42.692 --> 00:21:46.532
+Payment reconciliation: payer remittances are matched to claims.
+
+320
+00:21:46.812 --> 00:21:52.508
+Deductions are analysed by reason (§6.7) to reduce future denials.
+
+321
+00:21:53.858 --> 00:21:56.034
+Journey 5: a teleconsultation.
+
+322
+00:21:56.314 --> 00:22:03.546
+Booking and payment: the patient books a teleconsult slot (same scheduling engine, channel = video) and pays.
+
+323
+00:22:03.826 --> 00:22:04.615
+Joining:
+
+324
+00:22:04.895 --> 00:22:08.543
+10 minutes before, the patient joins a virtual waiting room.
+
+325
+00:22:08.823 --> 00:22:11.554
+The app checks camera, microphone and bandwidth.
+
+326
+00:22:11.834 --> 00:22:17.061
+The call: the doctor starts the call from the clinician workspace, with the chart on one side.
+
+327
+00:22:17.341 --> 00:22:31.399
+Video uses WebRTC: clients connect to a selective forwarding unit (SFU), through TURN relays when networks block peer connections;. bandwidth adapts through simulcast or SVC and congestion control.
+
+328
+00:22:32.749 --> 00:22:36.653
+On poor networks the call falls back to audio-only, then to chat.
+
+329
+00:22:36.933 --> 00:22:41.221
+Documentation: the doctor documents, prescribes and orders tests.
+
+330
+00:22:41.501 --> 00:22:55.091
+The e-prescription follows the Telemedicine Practice Guidelines (VERIFY): doctor registration number, restrictions on which drug categories can be prescribed remotely, and the patient's identity and consent recorded.
+
+331
+00:22:55.371 --> 00:23:00.811
+After the call: the prescription goes to the patient's app and optionally to a partner pharmacy.
+
+332
+00:23:01.091 --> 00:23:03.416
+Test orders create home-collection requests.
+
+333
+00:23:03.696 --> 00:23:05.275
+A follow-up is scheduled.
+
+334
+00:23:06.625 --> 00:23:09.611
+Recording: calls are normally not stored as video.
+
+335
+00:23:09.891 --> 00:23:16.825
+The clinical note is the record, and any recording requires explicit consent and a retention policy (VERIFY).
+
+336
+00:23:18.175 --> 00:23:21.545
+Journey 6: sharing records via ABDM (consent-based).
+
+337
+00:23:21.825 --> 00:23:31.191
+Linking: the patient links their ABHA number to the hospital's MRN, which makes the hospital a Health Information Provider (HIP) for that patient.
+
+338
+00:23:31.471 --> 00:23:36.612
+Request: another provider, a Health Information User (HIU), requests records.
+
+339
+00:23:36.892 --> 00:23:45.105
+The patient's consent manager app asks the patient to approve a consent artefact: purpose, date range, record types and expiry.
+
+340
+00:23:45.385 --> 00:23:49.908
+Delivery: on approval, the hospital's ABDM gateway receives the request.
+
+341
+00:23:50.188 --> 00:23:57.164
+It fetches the matching records (FHIR bundles), encrypts them for the requester, and sends them over the ABDM data flow.
+
+342
+00:23:57.444 --> 00:24:00.260
+It logs everything against the consent artefact.
+
+343
+00:24:01.610 --> 00:24:11.082
+The hospital never sends data without a valid consent artefact, and revocations stop further sharing (VERIFY exact protocol and specifications).
+
+344
+00:24:12.432 --> 00:24:13.392
+Part 5.
+
+345
+00:24:13.672 --> 00:24:15.208
+Core Subsystems in Depth.
+
+346
+00:24:16.458 --> 00:24:18.677
+Master Patient Index (MPI).
+
+347
+00:24:18.957 --> 00:24:23.351
+Purpose: one person, one MRN across all hospitals and clinics.
+
+348
+00:24:23.631 --> 00:24:26.639
+Duplicates cause missed allergies and split histories.
+
+349
+00:24:26.919 --> 00:24:30.418
+Wrong merges are worse, because they mix two people's records.
+
+350
+00:24:30.698 --> 00:24:42.879
+Data: demographics and identifiers (MRN per facility, enterprise ID, ABHA number, mobile, government IDs only where lawful);. addresses and aliases;. a match history.
+
+351
+00:24:44.229 --> 00:24:54.725
+Matching (§6.1) is probabilistic: auto-link above an upper threshold;. queue for human review in the grey zone;. new record below the lower threshold.
+
+352
+00:24:55.005 --> 00:24:58.867
+Merge and unmerge are first-class operations with full audit.
+
+353
+00:24:59.147 --> 00:25:04.779
+Downstream systems receive merge events and repoint their references (a FHIR Patient.link).
+
+354
+00:25:06.129 --> 00:25:08.497
+EHR and the clinical data store.
+
+355
+00:25:08.777 --> 00:25:09.523
+Model:
+
+356
+00:25:09.803 --> 00:25:10.977
+FHIR resources.
+
+357
+00:25:11.257 --> 00:25:12.217
+The main ones:
+
+358
+00:25:12.497 --> 00:25:15.889
+Patient, Encounter (visit or admission), EpisodeOfCare;.
+
+359
+00:25:16.169 --> 00:25:18.110
+Condition, AllergyIntolerance;.
+
+360
+00:25:18.390 --> 00:25:21.825
+Observation (vitals, labs), DiagnosticReport;.
+
+361
+00:25:22.105 --> 00:25:25.113
+MedicationRequest, MedicationAdministration;.
+
+362
+00:25:25.393 --> 00:25:27.697
+ServiceRequest (orders), Procedure;.
+
+363
+00:25:27.977 --> 00:25:31.177
+DocumentReference (notes, scanned documents), Consent.
+
+364
+00:25:32.527 --> 00:25:33.423
+Storage:
+
+365
+00:25:33.703 --> 00:25:42.364
+Each resource type is stored as versioned JSONB plus search parameter tables (patient, date, code, status) in PostgreSQL.
+
+366
+00:25:42.644 --> 00:25:47.060
+A FHIR server provides this (for example, HAPI FHIR JPA).
+
+367
+00:25:47.340 --> 00:25:50.903
+Every update creates a new version, and the history is immutable.
+
+368
+00:25:51.183 --> 00:25:56.260
+Amendments to signed notes are new versions with a reason, and the original remains visible.
+
+369
+00:25:56.540 --> 00:26:05.564
+The chart view is assembled by a read model, a per-patient summary projection (latest vitals, active problems, active meds, recent results):
+
+370
+00:26:06.914 --> 00:26:16.791
+it is updated from events, so opening a chart is one indexed read, not dozens of queries (Ch 15);. the source of truth remains the resource store.
+
+371
+00:26:17.071 --> 00:26:18.373
+Clinical documents:
+
+372
+00:26:18.653 --> 00:26:20.637
+Structured templates plus free text.
+
+373
+00:26:20.917 --> 00:26:29.941
+Scanned paper and external PDFs are stored in object storage, referenced by DocumentReference, and made searchable after OCR where useful.
+
+374
+00:26:30.221 --> 00:26:31.330
+Terminologies:
+
+375
+00:26:32.680 --> 00:26:48.467
+A terminology service (for example, Snowstorm for SNOMED CT, plus LOINC for lab tests, ICD-10 for diagnoses and billing, and a local drug master mapped to a national list where available; VERIFY licensing and national standards).
+
+376
+00:26:48.747 --> 00:26:52.309
+Codes make CDS rules, analytics and exchange possible.
+
+377
+00:26:53.659 --> 00:26:56.433
+Orders (CPOE) and clinical decision support.
+
+378
+00:26:56.713 --> 00:27:06.334
+Order lifecycle: draft, then signed, then (pharmacist or radiologist verification), then scheduled, then in progress, then completed or cancelled.
+
+379
+00:27:06.614 --> 00:27:10.497
+Order sets bundle evidence-based orders for common conditions.
+
+380
+00:27:10.777 --> 00:27:11.950
+CDS hooks:
+
+381
+00:27:12.230 --> 00:27:22.214
+At order-select and order-sign, CDS services evaluate: rules on the patient context (allergies, current meds, labs, weight, age, pregnancy);.
+
+382
+00:27:23.564 --> 00:27:30.924
+knowledge bases for interactions and dose ranges (commercial or national drug knowledge base; VERIFY licensing).
+
+383
+00:27:31.204 --> 00:27:36.196
+The response is cards: info, warning (override with reason), or hard stop.
+
+384
+00:27:36.476 --> 00:27:45.799
+Alert fatigue control: measure the override rate per rule, tune or retire noisy rules, and show only the highest-severity interaction per pair.
+
+385
+00:27:46.079 --> 00:27:53.652
+Asynchronous CDS: early-warning scores and sepsis screening run on the observation stream (§6.4);.
+
+386
+00:27:55.002 --> 00:28:00.271
+care-gap reminders (for example, diabetic foot exam overdue) run on schedules.
+
+387
+00:28:01.621 --> 00:28:03.285
+Laboratory (LIS).
+
+388
+00:28:03.565 --> 00:28:04.397
+Workflow:
+
+389
+00:28:04.677 --> 00:28:06.363
+Order, then sample planning.
+
+390
+00:28:06.643 --> 00:28:09.203
+Tests are grouped by container and sample type.
+
+391
+00:28:09.483 --> 00:28:14.261
+Labelling and collection: barcode labels are printed and the collection is scanned.
+
+392
+00:28:14.541 --> 00:28:16.461
+Transport and receipt at the lab.
+
+393
+00:28:16.741 --> 00:28:19.813
+Analysis: samples are loaded onto analysers.
+
+394
+00:28:20.093 --> 00:28:25.725
+Instruments query the LIS for the tests per barcode (host query), then return results.
+
+395
+00:28:27.075 --> 00:28:33.219
+Auto-verification (§6.6) releases normal, consistent results automatically.
+
+396
+00:28:33.499 --> 00:28:36.913
+The rest wait for technologist or pathologist review.
+
+397
+00:28:37.193 --> 00:28:42.889
+Reporting: the report posts to the EHR, and critical values trigger phone-call workflows.
+
+398
+00:28:43.169 --> 00:28:44.662
+Instrument interfaces:
+
+399
+00:28:44.942 --> 00:28:52.366
+HL7 v2 or ASTM or LIS2 over TCP or serial through the integration engine.
+
+400
+00:28:52.646 --> 00:28:53.734
+Quality control:
+
+401
+00:28:54.014 --> 00:28:55.678
+QC runs are recorded.
+
+402
+00:28:55.958 --> 00:29:02.486
+Levey, Jennings charts and Westgard rules detect analyser drift, and results are blocked if QC fails.
+
+403
+00:29:03.836 --> 00:29:11.708
+Sample tracking: every scan (collected, received, loaded, stored) is an event, so turnaround time can be measured per step.
+
+404
+00:29:13.058 --> 00:29:15.426
+Radiology (RIS or PACS).
+
+405
+00:29:15.706 --> 00:29:31.386
+Order to scan: the RIS schedules the modality slot;. the DICOM Modality Worklist gives the scanner patient and accession details;. images go to PACS via DICOM C-STORE (or DICOMweb STOW-RS);. the RIS tracks status.
+
+406
+00:29:31.666 --> 00:29:32.562
+Storage:
+
+407
+00:29:33.912 --> 00:29:47.651
+tiered: recent studies on fast storage for reading, older ones compressed (lossless) in object storage (a vendor-neutral archive), with lifecycle rules;. pre-fetching of prior studies when a patient is scheduled.
+
+408
+00:29:47.931 --> 00:30:00.176
+Viewing: radiologists use diagnostic workstations;. clinicians use a zero-footprint web viewer over DICOMweb (WADO-RS), streaming the frames needed rather than the whole study.
+
+409
+00:30:01.526 --> 00:30:12.001
+Reporting: structured templates and voice dictation;. reports are signed and posted as DiagnosticReports;. critical findings follow a communication workflow.
+
+410
+00:30:12.281 --> 00:30:20.238
+AI assist (optional): triage models, such as intracranial haemorrhage detection on CT, prioritise the worklist.
+
+411
+00:30:20.518 --> 00:30:27.451
+They are regulated as medical devices where applicable (VERIFY), and always sit under radiologist review.
+
+412
+00:30:28.801 --> 00:30:31.255
+Pharmacy and medication administration.
+
+413
+00:30:31.535 --> 00:30:37.849
+Formulary and drug master: brands mapped to generics, strengths, forms, prices and stock units.
+
+414
+00:30:38.129 --> 00:30:39.239
+In-patient flow:
+
+415
+00:30:39.519 --> 00:30:40.244
+Order.
+
+416
+00:30:40.524 --> 00:30:45.324
+Pharmacist verification: clinical checks, substitutions per formulary.
+
+417
+00:30:45.604 --> 00:30:54.265
+Dispensing: unit doses per ward per round, often by cart cycles. eMAR schedule is generated from the order frequency.
+
+418
+00:30:54.545 --> 00:30:56.935
+Barcode administration at the bedside.
+
+419
+00:30:58.285 --> 00:31:03.554
+Controlled drugs: double sign-off, a register, and stock reconciliation per shift.
+
+420
+00:31:03.834 --> 00:31:05.946
+Stock: batch and expiry tracking.
+
+421
+00:31:06.226 --> 00:31:08.871
+FEFO (first-expiry-first-out) picking.
+
+422
+00:31:09.151 --> 00:31:11.477
+Reorder points (§6.8).
+
+423
+00:31:11.757 --> 00:31:13.058
+Returns from wards.
+
+424
+00:31:14.408 --> 00:31:16.456
+Beds, ADT and patient flow.
+
+425
+00:31:16.736 --> 00:31:24.715
+ADT events are the heartbeat of the hospital: admit, transfer, discharge, leave of absence, and cancel versions of each.
+
+426
+00:31:24.995 --> 00:31:32.120
+They are published on the event bus so lab, pharmacy, diet, billing and housekeeping follow the patient automatically.
+
+427
+00:31:32.400 --> 00:31:39.355
+Bed states: available, then reserved, then occupied, then dirty (after discharge), then cleaning, then available.
+
+428
+00:31:39.635 --> 00:31:42.835
+Blocked (maintenance or isolation) is a separate state.
+
+429
+00:31:43.115 --> 00:31:54.891
+Patient-flow command centre: live census, expected discharges today, ED boarders, OT schedule, ICU capacity, and the bed demand forecast (§6.2).
+
+430
+00:31:56.241 --> 00:31:58.523
+Revenue cycle (billing and insurance).
+
+431
+00:31:58.803 --> 00:32:06.355
+Charge capture: every billable event (room day, order completed, drug dispensed, implant used) emits a charge event.
+
+432
+00:32:06.635 --> 00:32:18.518
+The billing service prices it with the tariff master, which holds: price by payer contract (cash, corporate, insurer, government scheme);. package definitions (inclusions, exclusions, caps).
+
+433
+00:32:18.798 --> 00:32:25.369
+Package logic: a surgery package may include room stay up to N days, standard drugs and consumables.
+
+434
+00:32:25.649 --> 00:32:31.387
+Items beyond it are billed separately, and the engine decides per charge line whether it is included.
+
+435
+00:32:32.737 --> 00:32:40.396
+Deposits, refunds and payment modes, using Ch 45 patterns (idempotent payments, ledger, reconciliation).
+
+436
+00:32:40.676 --> 00:32:44.964
+Claims: pre-auth, enhancement and final claim, with document bundles.
+
+437
+00:32:45.244 --> 00:32:47.868
+The claim status is tracked per payer SLA.
+
+438
+00:32:48.148 --> 00:32:51.988
+Denial analytics find root causes (§6.7).
+
+439
+00:32:52.268 --> 00:33:01.527
+Accounting: posting to the finance system (GL) with GST where applicable (VERIFY GST treatment of healthcare services and items).
+
+440
+00:33:02.877 --> 00:33:04.327
+Telemedicine platform.
+
+441
+00:33:04.607 --> 00:33:05.951
+Here is a quick table:
+
+442
+00:33:06.231 --> 00:33:07.575
+Component, and Role.
+
+443
+00:33:07.855 --> 00:33:09.071
+Signalling service:
+
+444
+00:33:09.351 --> 00:33:12.786
+WebSocket-based room management, join tokens, presence.
+
+445
+00:33:13.066 --> 00:33:14.239
+SFU cluster:
+
+446
+00:33:14.519 --> 00:33:15.991
+Forwards media streams.
+
+447
+00:33:16.271 --> 00:33:21.071
+Per call, 2 to 4 participants (patient, doctor, interpreter or family).
+
+448
+00:33:21.351 --> 00:33:22.397
+TURN servers:
+
+449
+00:33:22.677 --> 00:33:26.111
+Relay for NAT or firewall traversal, in-region.
+
+450
+00:33:26.391 --> 00:33:27.842
+Media quality service:
+
+451
+00:33:28.122 --> 00:33:34.373
+Collects WebRTC stats (packet loss, jitter, bitrate) for troubleshooting and quality dashboards.
+
+452
+00:33:34.653 --> 00:33:35.634
+Waiting room:
+
+453
+00:33:35.914 --> 00:33:38.410
+Patient queue per doctor, with device checks.
+
+454
+00:33:38.690 --> 00:33:39.927
+Clinical workspace:
+
+455
+00:33:40.207 --> 00:33:43.429
+Chart, notes, e-prescription, orders beside the video.
+
+456
+00:33:44.779 --> 00:33:45.717
+Capacity:
+
+457
+00:33:45.997 --> 00:33:52.547
+2,000 teleconsults per day at 12 minutes each, with a peak of ~250 concurrent calls.
+
+458
+00:33:52.827 --> 00:33:58.800
+A single SFU node handles hundreds of streams, so a small, regional cluster suffices.
+
+459
+00:33:59.080 --> 00:33:59.997
+Privacy:
+
+460
+00:34:00.277 --> 00:34:05.312
+Media is encrypted (DTLS-SRTP), and no recording by default.
+
+461
+00:34:05.592 --> 00:34:07.725
+Identity is verified at booking.
+
+462
+00:34:08.005 --> 00:34:12.208
+Consent is recorded in the encounter (VERIFY guideline requirements).
+
+463
+00:34:13.558 --> 00:34:14.902
+Integration engine.
+
+464
+00:34:15.182 --> 00:34:20.537
+Purpose: translate and route messages between systems that were never designed together.
+
+465
+00:34:20.817 --> 00:34:32.870
+Inbound: lab analysers (HL7 v2 ORU, ASTM);. bedside monitors, via a device gateway to Observations;. external labs;. insurer responses;.
+
+466
+00:34:33.150 --> 00:34:34.323
+ABDM requests.
+
+467
+00:34:35.673 --> 00:34:40.900
+Outbound: orders to external labs (HL7 v2 ORM or OML);.
+
+468
+00:34:41.180 --> 00:34:50.353
+ADT feeds to departmental systems (A01 admit, A02 transfer, A03 discharge, A08 update);.
+
+469
+00:34:50.633 --> 00:34:52.511
+FHIR APIs for partners.
+
+470
+00:34:52.791 --> 00:35:02.327
+Features: message transformation, code mapping, retries with dead-letter queues, replay, message tracking UI, and alerts on interface backlog.
+
+471
+00:35:02.607 --> 00:35:08.687
+It is the most common source of silent failures, so every interface has a heartbeat and a backlog alarm.
+
+472
+00:35:10.037 --> 00:35:10.975
+Part 6.
+
+473
+00:35:11.255 --> 00:35:12.471
+Algorithms Used.
+
+474
+00:35:13.721 --> 00:35:17.412
+Patient matching (MPI), probabilistic record linkage.
+
+475
+00:35:17.692 --> 00:35:20.508
+Blocking: don't compare every record with every other.
+
+476
+00:35:20.788 --> 00:35:30.495
+Compare only records sharing a blocking key, such as the first letters of the phonetically encoded surname plus birth year, the mobile number, or the ABHA number.
+
+477
+00:35:30.775 --> 00:35:33.527
+This cuts comparisons from billions to thousands.
+
+478
+00:35:33.807 --> 00:35:52.281
+Field comparisons: names with Jaro, Winkler similarity and phonetic codes (Double Metaphone), with Indian-name normalisation: initials, spelling variants, surname and given-name order, honorifics;. date of birth: exact, transposed day per month, or year ±1;.
+
+479
+00:35:53.631 --> 00:35:56.383
+gender, mobile (exact), and address tokens.
+
+480
+00:35:56.663 --> 00:35:58.818
+Scoring: the Fellegi, Sunter model.
+
+481
+00:35:59.098 --> 00:36:15.717
+Each field agreement adds log(m or u) and each disagreement adds log((1minus m)/(1minus u)), where: m = the probability that the fields agree if the records are the same person;. u = the probability that they agree by chance.
+
+482
+00:36:15.997 --> 00:36:19.346
+The weights are estimated from reviewed pairs (or with EM).
+
+483
+00:36:20.696 --> 00:36:26.243
+Thresholds: auto-link above the upper threshold, human review in between, new record below.
+
+484
+00:36:26.523 --> 00:36:31.963
+The thresholds are chosen by the cost of errors: a false merge is far worse than a false split.
+
+485
+00:36:32.243 --> 00:36:38.664
+Monitoring: the duplicate rate, the review queue size, and unmerges (each one is a near-miss safety event).
+
+486
+00:36:40.014 --> 00:36:42.297
+Bed assignment and demand forecasting.
+
+487
+00:36:42.577 --> 00:36:45.990
+Assignment is a constraint-satisfaction and scoring problem.
+
+488
+00:36:46.270 --> 00:36:51.539
+Hard constraints: gender (for shared rooms), isolation, level of care, equipment.
+
+489
+00:36:51.819 --> 00:37:01.846
+Soft preferences: ward specialty match, proximity to the nursing station for high-risk patients, keeping teams' patients together, and minimising transfers.
+
+490
+00:37:02.126 --> 00:37:05.667
+Method: score every feasible bed and propose the top 3.
+
+491
+00:37:05.947 --> 00:37:13.777
+For batch assignment (morning admissions), solve as a weighted bipartite matching (Hungarian algorithm or min-cost flow).
+
+492
+00:37:15.127 --> 00:37:37.719
+Forecasting: admissions by hour and day of week (seasonal time series such as SARIMA or Prophet or gradient-boosted models with calendar and epidemic features);. discharges from predicted length of stay per patient (a regression on diagnosis, age and procedures);. this yields expected free beds per ward over the next 24 to 72 h.
+
+493
+00:37:39.069 --> 00:37:40.029
+Queueing view:
+
+494
+00:37:40.309 --> 00:37:47.626
+ED boarding occurs when bed arrival rate times length of stay approaches capacity (Little's Law, Ch 31).
+
+495
+00:37:47.906 --> 00:37:56.205
+Occupancy beyond ~85 to 90% makes waits explode (a common planning heuristic; VERIFY for your context).
+
+496
+00:37:57.555 --> 00:37:59.667
+Appointment scheduling and overbooking.
+
+497
+00:37:59.947 --> 00:38:03.915
+Slot generation from roster templates, minus leaves and blocks.
+
+498
+00:38:04.195 --> 00:38:13.901
+No-show prediction: a logistic regression or gradient-boosted model on lead time, past no-shows, distance, weather, day and time, and payment status.
+
+499
+00:38:14.181 --> 00:38:19.621
+Overbooking: add extra bookings per session so that expected attendance about capacity.
+
+500
+00:38:19.901 --> 00:38:28.499
+Two limits: the expected overtime and waiting time must stay within policy;. no overbooking for procedures that need fixed resources.
+
+501
+00:38:29.849 --> 00:38:35.715
+Queue ordering on the day: a priority queue by (priority class, appointment time, arrival time).
+
+502
+00:38:35.995 --> 00:38:43.142
+Expected wait = queue position times a rolling average consultation time (by doctor and visit type).
+
+503
+00:38:44.492 --> 00:38:46.839
+Early warning scores and sepsis screening.
+
+504
+00:38:47.119 --> 00:39:04.335
+NEWS2-style scoring: points for respiratory rate, oxygen saturation, supplemental oxygen, systolic blood pressure, pulse, consciousness and temperature;. the total maps to the response level (routine, increased frequency, urgent review, emergency response).
+
+505
+00:39:04.615 --> 00:39:09.820
+The scoring table and responses must follow the clinically approved protocol (VERIFY).
+
+506
+00:39:10.100 --> 00:39:17.012
+Implementation: a stream processor consumes vital-sign Observations and recomputes the score per patient.
+
+507
+00:39:18.362 --> 00:39:24.591
+Escalations go out when the score crosses thresholds, with suppression windows to avoid repeated pages.
+
+508
+00:39:24.871 --> 00:39:29.159
+Missing vitals are handled explicitly: a stale value is not normal.
+
+509
+00:39:29.439 --> 00:39:36.970
+Sepsis screens: rule-based (for example, infection suspicion plus abnormal vitals or labs) or ML-based.
+
+510
+00:39:37.250 --> 00:39:41.645
+Always validated locally before activation, with alert burden measured.
+
+511
+00:39:42.995 --> 00:39:44.723
+Operating theatre scheduling.
+
+512
+00:39:45.003 --> 00:39:52.299
+Estimate case duration per surgeon and procedure from history (median plus spread), not from surgeon guesses alone.
+
+513
+00:39:52.579 --> 00:40:06.083
+Build daily schedules as a bin-packing and sequencing problem: fit cases into theatre blocks, minimising overtime and idle time;. respect surgeon, anaesthetist, equipment and post-op bed constraints.
+
+514
+00:40:06.363 --> 00:40:11.995
+Heuristics (longest-first, or first-fit decreasing) or integer programming for the weekly plan.
+
+515
+00:40:13.345 --> 00:40:19.830
+Day-of-surgery re-planning when a case runs long: move later cases, and notify the ward and patients.
+
+516
+00:40:21.180 --> 00:40:24.017
+Lab auto-verification and quality control.
+
+517
+00:40:24.297 --> 00:40:42.516
+Rules per test: within reference and critical limits;. no instrument flags;. delta check against the patient's previous result (a large change in a short time suggests a wrong sample or a real event);. consistency across tests (for example, calculated versus measured values).
+
+518
+00:40:42.796 --> 00:40:47.148
+Results passing all rules are released automatically, and the rest are held.
+
+519
+00:40:48.498 --> 00:40:53.511
+Westgard QC rules on control samples detect systematic and random error.
+
+520
+00:40:53.791 --> 00:41:00.213
+For example, one control beyond 3 SD, or two consecutive beyond 2 SD on the same side.
+
+521
+00:41:00.493 --> 00:41:02.989
+Patient runs are blocked when QC fails.
+
+522
+00:41:04.339 --> 00:41:06.216
+Claims and denial analytics.
+
+523
+00:41:06.496 --> 00:41:18.635
+Pre-submission checks: a rules engine checks completeness (documents per procedure), coding consistency (diagnosis versus procedure), and policy limits (room-rent caps, sub-limits).
+
+524
+00:41:18.915 --> 00:41:20.771
+This catches avoidable denials.
+
+525
+00:41:21.051 --> 00:41:28.496
+Denial analytics: classify deductions by reason (text classification of payer remarks, plus codes where provided).
+
+526
+00:41:28.776 --> 00:41:31.997
+Pareto analysis finds the top fixable causes.
+
+527
+00:41:32.277 --> 00:41:38.379
+Prediction (optional): the likely approved amount for a pre-auth, to set patient expectations early.
+
+528
+00:41:39.729 --> 00:41:40.667
+Inventory.
+
+529
+00:41:40.947 --> 00:41:51.486
+Reorder point = average daily usage times lead time + safety stock, where safety stock = z times σ(usage) times √(lead time).
+
+530
+00:41:51.766 --> 00:41:52.790
+Order quantity:
+
+531
+00:41:53.070 --> 00:41:58.382
+EOQ as a starting point, adjusted for supplier minimums, expiry and storage.
+
+532
+00:41:58.662 --> 00:42:06.641
+ABC analysis (by value) and VED analysis (vital or essential or desirable) set control intensity.
+
+533
+00:42:06.921 --> 00:42:08.905
+Vital items never stock out.
+
+534
+00:42:09.185 --> 00:42:10.571
+Expiry management:
+
+535
+00:42:10.851 --> 00:42:16.291
+FEFO picking, and alerts N days before expiry for redistribution between hospitals.
+
+536
+00:42:17.641 --> 00:42:20.009
+Access-anomaly detection (privacy).
+
+537
+00:42:20.289 --> 00:42:29.036
+Rules flag risky access: access to records of patients with no care relationship (not on the user's ward, clinic list or consult);.
+
+538
+00:42:29.316 --> 00:42:35.887
+VIP or employee records;. unusual volumes;. after-hours access from unusual locations.
+
+539
+00:42:36.167 --> 00:42:40.071
+Scoring: a baseline per role, with z-scores on access counts.
+
+540
+00:42:40.351 --> 00:42:43.017
+Flags go to a privacy officer's review queue.
+
+541
+00:42:44.367 --> 00:42:45.306
+Part 7.
+
+542
+00:42:45.586 --> 00:42:46.909
+Data Architecture.
+
+543
+00:42:48.159 --> 00:42:49.545
+Operational stores.
+
+544
+00:42:49.825 --> 00:42:51.169
+Here is a quick table:
+
+545
+00:42:51.449 --> 00:42:53.135
+Data, and Store, and Notes.
+
+546
+00:42:53.415 --> 00:42:55.207
+Clinical resources (FHIR).
+
+547
+00:42:55.487 --> 00:42:56.276
+Store:
+
+548
+00:42:56.556 --> 00:42:58.753
+PostgreSQL (FHIR server).
+
+549
+00:42:59.033 --> 00:42:59.844
+Notes:
+
+550
+00:43:00.124 --> 00:43:02.748
+Versioned, immutable history, search params.
+
+551
+00:43:03.028 --> 00:43:05.225
+Scheduling, ADT, billing, inventory.
+
+552
+00:43:05.505 --> 00:43:06.295
+Store:
+
+553
+00:43:06.575 --> 00:43:08.367
+PostgreSQL per service.
+
+554
+00:43:08.647 --> 00:43:09.457
+Notes:
+
+555
+00:43:09.737 --> 00:43:12.788
+Transactions, row-level security per facility.
+
+556
+00:43:13.068 --> 00:43:15.052
+Patient summaries (read model).
+
+557
+00:43:15.332 --> 00:43:16.121
+Store:
+
+558
+00:43:16.401 --> 00:43:18.151
+PostgreSQL or Redis.
+
+559
+00:43:18.431 --> 00:43:19.241
+Notes:
+
+560
+00:43:19.521 --> 00:43:20.737
+Rebuilt from events.
+
+561
+00:43:21.017 --> 00:43:23.940
+Search (doctors, patients for staff, documents).
+
+562
+00:43:24.220 --> 00:43:25.009
+Store:
+
+563
+00:43:25.289 --> 00:43:26.313
+OpenSearch.
+
+564
+00:43:26.593 --> 00:43:27.404
+Notes:
+
+565
+00:43:27.684 --> 00:43:31.631
+Patient search limited by access rules; no PHI in logs.
+
+566
+00:43:31.911 --> 00:43:32.743
+Images.
+
+567
+00:43:33.023 --> 00:43:33.812
+Store:
+
+568
+00:43:34.092 --> 00:43:36.417
+PACS + object storage (VNA).
+
+569
+00:43:36.697 --> 00:43:37.508
+Notes:
+
+570
+00:43:37.788 --> 00:43:39.601
+DICOM; lifecycle tiers.
+
+571
+00:43:40.951 --> 00:43:42.359
+Documents and scans.
+
+572
+00:43:42.639 --> 00:43:43.429
+Store:
+
+573
+00:43:43.709 --> 00:43:44.925
+Object storage.
+
+574
+00:43:45.205 --> 00:43:46.015
+Notes:
+
+575
+00:43:46.295 --> 00:43:48.493
+Encrypted, referenced from the EHR.
+
+576
+00:43:48.773 --> 00:43:51.269
+Sessions, rate limits, queues on screens.
+
+577
+00:43:51.549 --> 00:43:52.338
+Store:
+
+578
+00:43:52.618 --> 00:43:53.386
+Redis.
+
+579
+00:43:53.666 --> 00:43:54.477
+Notes:
+
+580
+00:43:54.757 --> 00:43:55.589
+Ephemeral.
+
+581
+00:43:55.869 --> 00:43:56.829
+Audit log.
+
+582
+00:43:57.109 --> 00:43:57.898
+Store:
+
+583
+00:43:58.178 --> 00:44:03.426
+Append-only store (partitioned PostgreSQL or a log store) + WORM archive.
+
+584
+00:44:03.706 --> 00:44:04.517
+Notes:
+
+585
+00:44:04.797 --> 00:44:07.655
+Tamper-evident (hash-chained), long retention.
+
+586
+00:44:09.005 --> 00:44:10.051
+Event streaming.
+
+587
+00:44:10.331 --> 00:44:24.219
+Kafka carries domain events: patient.registered, encounter.started, adt.admitted, order.signed, result.validated, medication.administered, bed.status.changed, charge.created, claim.status.changed.
+
+588
+00:44:24.499 --> 00:44:31.261
+Outbox pattern in each service, so events are published if and only if the transaction commits (Ch 15).
+
+589
+00:44:31.541 --> 00:44:36.917
+CDC (Debezium) from databases feeds the lake without touching application code.
+
+590
+00:44:38.267 --> 00:44:44.710
+Consumers: read models, billing, notifications, the early-warning processor, the command centre, the lake.
+
+591
+00:44:44.990 --> 00:44:48.915
+Topics with PHI are encrypted, with restricted ACLs.
+
+592
+00:44:49.195 --> 00:44:53.419
+Retention is short on the bus, and long-term history lives in the lake.
+
+593
+00:44:54.769 --> 00:44:56.241
+Data lake and warehouse.
+
+594
+00:44:56.521 --> 00:44:57.439
+Raw zone:
+
+595
+00:44:57.719 --> 00:45:05.143
+CDC and event data land in Apache Iceberg tables on object storage, partitioned by date and facility.
+
+596
+00:45:05.423 --> 00:45:15.108
+Cleaned zone: deduplicated and conformed: codes mapped through the terminology service;. patients linked by enterprise ID;. time zones normalised.
+
+597
+00:45:15.388 --> 00:45:20.273
+Warehouse and marts follow the Kimball approach (star schemas, Ch 21).
+
+598
+00:45:21.623 --> 00:45:30.071
+Facts: encounters, admissions, orders, results, medication administrations, charges, claims, bed-days, OT cases, appointments.
+
+599
+00:45:30.351 --> 00:45:38.266
+Dimensions: patient (with de-identified variants), doctor, department, facility, date, payer, diagnosis, procedure, drug.
+
+600
+00:45:38.546 --> 00:45:43.602
+Slowly changing dimensions (type 2) for doctor department and tariff versions.
+
+601
+00:45:43.882 --> 00:45:44.991
+Query engines:
+
+602
+00:45:45.271 --> 00:45:49.175
+Trino (or Spark SQL) over Iceberg for heavy analysis;.
+
+603
+00:45:50.525 --> 00:45:56.947
+a serving warehouse (ClickHouse, or a cloud warehouse if allowed by residency and policy) for dashboards;.
+
+604
+00:45:57.227 --> 00:46:01.536
+Superset or similar BI with row-level security by facility.
+
+605
+00:46:01.816 --> 00:46:17.923
+Typical outputs: operations: bed occupancy, average length of stay, discharge delay, OT utilisation, ED length of stay, lab TAT;. quality: infection rates, readmissions within 30 days, mortality indices, medication errors;.
+
+606
+00:46:19.273 --> 00:46:27.145
+finance: revenue per bed-day, denial rate by payer;. statutory: notifiable diseases, government scheme reports.
+
+607
+00:46:27.425 --> 00:46:46.518
+Research data: de-identified extracts in the OMOP Common Data Model, for approved studies, with ethics committee approval and data use agreements;. de-identification: remove direct identifiers, shift dates per patient, generalise rare attributes, and check k-anonymity risk before release.
+
+608
+00:46:47.868 --> 00:46:48.999
+ML platform.
+
+609
+00:46:49.279 --> 00:46:57.748
+Features are computed in the lake and served online for real-time uses (a feature store such as Feast, or simple precomputed tables).
+
+610
+00:46:58.028 --> 00:47:11.681
+Models: no-show prediction, length-of-stay prediction, bed demand forecasting, readmission risk, sepsis screening (with clinical validation), denial prediction, and radiology triage (vendor, regulated).
+
+611
+00:47:11.961 --> 00:47:21.412
+Governance: model cards, validation on local data, bias checks across groups;. silent mode (predictions logged but not shown) before go-live;.
+
+612
+00:47:22.762 --> 00:47:27.989
+monitoring for drift;. clinical owner sign-off, and the ability to switch off instantly.
+
+613
+00:47:29.339 --> 00:47:30.747
+Data flow diagram.
+
+614
+00:47:31.027 --> 00:47:32.371
+Here is the diagram.
+
+615
+00:47:36.221 --> 00:47:37.095
+Part 8.
+
+616
+00:47:37.375 --> 00:47:40.298
+Interoperability and India's Digital Health Stack.
+
+617
+00:47:41.548 --> 00:47:42.892
+Here is a quick table:
+
+618
+00:47:43.172 --> 00:47:45.263
+Standard or programme, and Used for.
+
+619
+00:47:45.543 --> 00:47:47.015
+HL7 v2:
+
+620
+00:47:47.295 --> 00:47:51.497
+Lab analysers, legacy departmental systems, ADT feeds.
+
+621
+00:47:51.777 --> 00:47:52.951
+FHIR R4:
+
+622
+00:47:53.231 --> 00:48:00.015
+Canonical clinical model; APIs for apps and partners; ABDM record exchange (VERIFY profiles).
+
+623
+00:48:00.295 --> 00:48:01.895
+DICOM or DICOMweb:
+
+624
+00:48:02.175 --> 00:48:04.393
+Imaging storage, worklists, viewers.
+
+625
+00:48:04.673 --> 00:48:06.679
+SNOMED CT, LOINC, ICD-10:
+
+626
+00:48:06.959 --> 00:48:13.103
+Clinical terms, lab tests, diagnoses and billing (VERIFY national licensing and adoption).
+
+627
+00:48:13.383 --> 00:48:14.705
+ABDM building blocks:
+
+628
+00:48:14.985 --> 00:48:25.204
+ABHA (patient ID), Health Facility Registry, Healthcare Professionals Registry, consent manager, health information exchange (VERIFY current specifications).
+
+629
+00:48:25.484 --> 00:48:26.572
+NHCX:
+
+630
+00:48:26.852 --> 00:48:31.289
+Standardised claims exchange with insurers (VERIFY adoption and scope).
+
+631
+00:48:32.639 --> 00:48:51.754
+Design implications: keep FHIR as the internal canonical model, so external exchange is mapping, not translation;. store consent artefacts and check them on every outbound share;. register the facility and professionals in the national registries;. be ready for patient-initiated record requests.
+
+632
+00:48:53.104 --> 00:48:54.000
+Part 9.
+
+633
+00:48:54.280 --> 00:48:55.965
+Tech Stack (reference choice).
+
+634
+00:48:57.215 --> 00:48:58.559
+Here is a quick table:
+
+635
+00:48:58.839 --> 00:49:01.271
+Layer, and Choice, and Alternatives, and Why.
+
+636
+00:49:01.551 --> 00:49:02.895
+Clinician front end.
+
+637
+00:49:03.175 --> 00:49:04.007
+Choice:
+
+638
+00:49:04.287 --> 00:49:08.725
+Web app (React or Angular) + tablet app; keyboard-heavy workflows.
+
+639
+00:49:09.005 --> 00:49:10.029
+Alternatives:
+
+640
+00:49:10.309 --> 00:49:11.546
+Native desktop.
+
+641
+00:49:11.826 --> 00:49:12.509
+Why:
+
+642
+00:49:12.789 --> 00:49:15.477
+Deployment ease; works on shared workstations.
+
+643
+00:49:15.757 --> 00:49:16.738
+Patient app.
+
+644
+00:49:17.018 --> 00:49:17.850
+Choice:
+
+645
+00:49:18.130 --> 00:49:22.461
+Android-first native or Flutter; PWA for low-end devices.
+
+646
+00:49:22.741 --> 00:49:23.765
+Alternatives:
+
+647
+00:49:24.045 --> 00:49:25.090
+React Native.
+
+648
+00:49:25.370 --> 00:49:26.053
+Why:
+
+649
+00:49:26.333 --> 00:49:27.719
+India's device mix.
+
+650
+00:49:27.999 --> 00:49:29.898
+API gateway and identity.
+
+651
+00:49:30.178 --> 00:49:31.010
+Choice:
+
+652
+00:49:31.290 --> 00:49:36.261
+Kong or Spring Cloud Gateway; Keycloak (OIDC, SMART on FHIR for app launch).
+
+653
+00:49:36.541 --> 00:49:37.565
+Alternatives:
+
+654
+00:49:37.845 --> 00:49:39.039
+Cloud IAM.
+
+655
+00:49:39.319 --> 00:49:40.002
+Why:
+
+656
+00:49:40.282 --> 00:49:42.714
+Standards-based SSO, role mapping.
+
+657
+00:49:42.994 --> 00:49:44.146
+Core services.
+
+658
+00:49:44.426 --> 00:49:45.258
+Choice:
+
+659
+00:49:45.538 --> 00:49:49.805
+Java 21 or Spring Boot microservices and modular core.
+
+660
+00:49:50.085 --> 00:49:51.109
+Alternatives:
+
+661
+00:49:51.389 --> 00:49:52.647
+Kotlin,.NET.
+
+662
+00:49:52.927 --> 00:49:53.610
+Why:
+
+663
+00:49:53.890 --> 00:49:56.557
+Team skills, ecosystem (Ch 16).
+
+664
+00:49:56.837 --> 00:49:57.882
+FHIR server.
+
+665
+00:49:58.162 --> 00:49:58.994
+Choice:
+
+666
+00:49:59.274 --> 00:50:02.367
+HAPI FHIR JPA server on PostgreSQL.
+
+667
+00:50:02.647 --> 00:50:03.671
+Alternatives:
+
+668
+00:50:03.951 --> 00:50:05.530
+Commercial FHIR servers.
+
+669
+00:50:05.810 --> 00:50:06.493
+Why:
+
+670
+00:50:06.773 --> 00:50:08.693
+Mature, open source, Java.
+
+671
+00:50:10.043 --> 00:50:11.173
+Databases.
+
+672
+00:50:11.453 --> 00:50:12.285
+Choice:
+
+673
+00:50:12.565 --> 00:50:16.427
+PostgreSQL 16 with streaming replication (Patroni).
+
+674
+00:50:16.707 --> 00:50:17.731
+Alternatives:
+
+675
+00:50:18.011 --> 00:50:19.781
+Oracle, SQL Server.
+
+676
+00:50:20.061 --> 00:50:20.744
+Why:
+
+677
+00:50:21.024 --> 00:50:23.093
+Reliability, cost, JSONB.
+
+678
+00:50:23.373 --> 00:50:24.099
+Cache.
+
+679
+00:50:24.379 --> 00:50:25.211
+Choice:
+
+680
+00:50:25.491 --> 00:50:26.259
+Redis.
+
+681
+00:50:26.539 --> 00:50:27.221
+Why:
+
+682
+00:50:27.501 --> 00:50:28.909
+Sessions, queue screens.
+
+683
+00:50:29.189 --> 00:50:29.957
+Search.
+
+684
+00:50:30.237 --> 00:50:31.069
+Choice:
+
+685
+00:50:31.349 --> 00:50:32.373
+OpenSearch.
+
+686
+00:50:32.653 --> 00:50:33.677
+Alternatives:
+
+687
+00:50:33.957 --> 00:50:35.045
+Elasticsearch.
+
+688
+00:50:35.325 --> 00:50:36.008
+Why:
+
+689
+00:50:36.288 --> 00:50:38.592
+Doctor and patient search, documents.
+
+690
+00:50:38.872 --> 00:50:39.768
+Messaging.
+
+691
+00:50:40.048 --> 00:50:40.880
+Choice:
+
+692
+00:50:41.160 --> 00:50:45.021
+Apache Kafka + Debezium CDC; Schema Registry.
+
+693
+00:50:45.301 --> 00:50:46.325
+Alternatives:
+
+694
+00:50:46.605 --> 00:50:48.547
+RabbitMQ for simple queues.
+
+695
+00:50:48.827 --> 00:50:49.509
+Why:
+
+696
+00:50:49.789 --> 00:50:52.541
+Durable event log, replay (Ch 14).
+
+697
+00:50:52.821 --> 00:50:54.059
+Stream processing.
+
+698
+00:50:54.339 --> 00:50:55.171
+Choice:
+
+699
+00:50:55.451 --> 00:50:57.456
+Kafka Streams or Apache Flink.
+
+700
+00:50:57.736 --> 00:50:58.419
+Why:
+
+701
+00:50:58.699 --> 00:51:00.981
+Early-warning scores, alerting windows.
+
+702
+00:51:02.331 --> 00:51:03.675
+Integration engine.
+
+703
+00:51:03.955 --> 00:51:04.787
+Choice:
+
+704
+00:51:05.067 --> 00:51:08.118
+Mirth Connect or NextGen Connect or Apache Camel.
+
+705
+00:51:08.398 --> 00:51:09.422
+Alternatives:
+
+706
+00:51:09.702 --> 00:51:10.918
+Commercial engines.
+
+707
+00:51:11.198 --> 00:51:11.881
+Why:
+
+708
+00:51:12.161 --> 00:51:14.955
+HL7 v2 tooling, mapping UI.
+
+709
+00:51:15.235 --> 00:51:16.025
+Imaging.
+
+710
+00:51:16.305 --> 00:51:17.137
+Choice:
+
+711
+00:51:17.417 --> 00:51:22.921
+Orthanc or dcm4chee PACS + OHIF web viewer; object storage VNA.
+
+712
+00:51:23.201 --> 00:51:24.225
+Alternatives:
+
+713
+00:51:24.505 --> 00:51:25.593
+Commercial PACS.
+
+714
+00:51:25.873 --> 00:51:26.555
+Why:
+
+715
+00:51:26.835 --> 00:51:28.713
+DICOM standards, web viewing.
+
+716
+00:51:28.993 --> 00:51:30.038
+Terminology.
+
+717
+00:51:30.318 --> 00:51:31.150
+Choice:
+
+718
+00:51:31.430 --> 00:51:34.971
+Snowstorm (SNOMED CT) + local code services.
+
+719
+00:51:35.251 --> 00:51:36.275
+Alternatives:
+
+720
+00:51:36.555 --> 00:51:37.409
+Commercial.
+
+721
+00:51:37.689 --> 00:51:38.371
+Why:
+
+722
+00:51:38.651 --> 00:51:40.635
+Codes for CDS and analytics.
+
+723
+00:51:40.915 --> 00:51:41.662
+Video.
+
+724
+00:51:41.942 --> 00:51:42.774
+Choice:
+
+725
+00:51:43.054 --> 00:51:48.409
+WebRTC with an SFU (LiveKit, mediasoup or Jitsi) + coturn TURN.
+
+726
+00:51:48.689 --> 00:51:49.713
+Alternatives:
+
+727
+00:51:49.993 --> 00:51:51.635
+Commercial video APIs.
+
+728
+00:51:51.915 --> 00:51:52.598
+Why:
+
+729
+00:51:52.878 --> 00:51:55.054
+Control over residency and cost.
+
+730
+00:51:55.334 --> 00:51:56.550
+Object storage.
+
+731
+00:51:56.830 --> 00:51:57.662
+Choice:
+
+732
+00:51:57.942 --> 00:52:01.483
+MinIO on-prem or cloud object storage (in-country).
+
+733
+00:52:01.763 --> 00:52:02.446
+Why:
+
+734
+00:52:02.726 --> 00:52:04.433
+Documents, images, lake.
+
+735
+00:52:05.783 --> 00:52:06.743
+Lakehouse.
+
+736
+00:52:07.023 --> 00:52:07.855
+Choice:
+
+737
+00:52:08.135 --> 00:52:10.609
+Apache Iceberg + Spark + Trino.
+
+738
+00:52:10.889 --> 00:52:11.913
+Alternatives:
+
+739
+00:52:12.193 --> 00:52:13.452
+Delta Lake, Hudi.
+
+740
+00:52:13.732 --> 00:52:14.415
+Why:
+
+741
+00:52:14.695 --> 00:52:17.169
+Open table formats, SQL at scale.
+
+742
+00:52:17.449 --> 00:52:18.601
+Serving warehouse.
+
+743
+00:52:18.881 --> 00:52:19.713
+Choice:
+
+744
+00:52:19.993 --> 00:52:23.044
+ClickHouse (on-prem) or an in-country cloud warehouse.
+
+745
+00:52:23.324 --> 00:52:24.348
+Alternatives:
+
+746
+00:52:24.628 --> 00:52:26.825
+Snowflake or BigQuery if permitted.
+
+747
+00:52:27.105 --> 00:52:27.788
+Why:
+
+748
+00:52:28.068 --> 00:52:29.284
+Fast dashboards.
+
+749
+00:52:29.564 --> 00:52:30.631
+Orchestration.
+
+750
+00:52:30.911 --> 00:52:31.743
+Choice:
+
+751
+00:52:32.023 --> 00:52:34.967
+Apache Airflow; dbt for transformations.
+
+752
+00:52:35.247 --> 00:52:36.271
+Alternatives:
+
+753
+00:52:36.551 --> 00:52:37.425
+Dagster.
+
+754
+00:52:37.705 --> 00:52:38.388
+Why:
+
+755
+00:52:38.668 --> 00:52:41.527
+Scheduled pipelines, tested SQL models.
+
+756
+00:52:41.807 --> 00:52:42.532
+BI.
+
+757
+00:52:42.812 --> 00:52:43.644
+Choice:
+
+758
+00:52:43.924 --> 00:52:45.225
+Apache Superset.
+
+759
+00:52:45.505 --> 00:52:46.529
+Alternatives:
+
+760
+00:52:46.809 --> 00:52:48.409
+Power BI, Metabase.
+
+761
+00:52:48.689 --> 00:52:49.372
+Why:
+
+762
+00:52:49.652 --> 00:52:51.892
+Row-level security, open source.
+
+763
+00:52:52.172 --> 00:52:52.919
+ML.
+
+764
+00:52:53.199 --> 00:52:54.031
+Choice:
+
+765
+00:52:54.311 --> 00:52:58.236
+MLflow, Python (scikit-learn, XGBoost), feature tables.
+
+766
+00:52:58.516 --> 00:52:59.540
+Alternatives:
+
+767
+00:52:59.820 --> 00:53:02.231
+SageMaker or Vertex (if permitted).
+
+768
+00:53:02.511 --> 00:53:03.193
+Why:
+
+769
+00:53:03.473 --> 00:53:05.201
+Tracking, reproducibility.
+
+770
+00:53:06.551 --> 00:53:07.490
+Platform.
+
+771
+00:53:07.770 --> 00:53:08.602
+Choice:
+
+772
+00:53:08.882 --> 00:53:14.791
+Kubernetes (on-prem OpenShift or Rancher, or in-country cloud), Terraform, Argo CD.
+
+773
+00:53:15.071 --> 00:53:16.095
+Alternatives:
+
+774
+00:53:16.375 --> 00:53:17.613
+VMs for PACS.
+
+775
+00:53:17.893 --> 00:53:18.575
+Why:
+
+776
+00:53:18.855 --> 00:53:21.266
+Standard deployment (Ch 26).
+
+777
+00:53:21.546 --> 00:53:22.634
+Observability.
+
+778
+00:53:22.914 --> 00:53:23.746
+Choice:
+
+779
+00:53:24.026 --> 00:53:31.130
+Prometheus, Grafana, Loki or OpenSearch logs, OpenTelemetry tracing; PHI scrubbing in logs.
+
+780
+00:53:31.410 --> 00:53:32.434
+Alternatives:
+
+781
+00:53:32.714 --> 00:53:34.015
+Commercial APM.
+
+782
+00:53:34.295 --> 00:53:34.978
+Why:
+
+783
+00:53:35.258 --> 00:53:36.538
+Ch 24.
+
+784
+00:53:36.818 --> 00:53:37.757
+Security.
+
+785
+00:53:38.037 --> 00:53:38.869
+Choice:
+
+786
+00:53:39.149 --> 00:53:43.437
+Vault or HSM for keys, WAF, MDM for devices, SIEM.
+
+787
+00:53:43.717 --> 00:53:44.399
+Why:
+
+788
+00:53:44.679 --> 00:53:45.981
+Ch 23.
+
+789
+00:53:47.331 --> 00:53:48.184
+Part 10.
+
+790
+00:53:48.464 --> 00:53:50.704
+Security, Privacy and Compliance.
+
+791
+00:53:51.954 --> 00:53:53.106
+Access control:
+
+792
+00:53:53.386 --> 00:54:02.730
+RBAC (doctor, nurse, pharmacist, billing, admin), plus relationship-based rules: care team membership, ward, consult, or the referring doctor;.
+
+793
+00:54:03.010 --> 00:54:09.645
+ABAC for sensitive categories (mental health, HIV, reproductive health), which get extra restrictions;.
+
+794
+00:54:09.925 --> 00:54:16.090
+Break-glass: emergency access outside the rules, with a reason, alerts and after-the-fact review.
+
+795
+00:54:17.440 --> 00:54:25.333
+Audit: every view, create, update, print and export of patient data is logged with user, patient, action, reason and time.
+
+796
+00:54:25.613 --> 00:54:32.120
+The log is tamper-evident (hash-chained, WORM archive) and regularly reviewed (§6.9).
+
+797
+00:54:32.400 --> 00:54:33.296
+Encryption:
+
+798
+00:54:33.576 --> 00:54:43.176
+TLS everywhere;. encryption at rest with keys in an HSM or KMS;. field-level encryption for especially sensitive identifiers.
+
+799
+00:54:44.526 --> 00:54:50.478
+Consent: consent records for treatment, data sharing (ABDM), research and teleconsultation.
+
+800
+00:54:50.758 --> 00:54:54.065
+They are checked by the consent service on every outbound share.
+
+801
+00:54:54.345 --> 00:54:55.710
+Data protection law:
+
+802
+00:54:55.990 --> 00:55:09.857
+DPDP Act 2023 obligations, including notice, consent, purpose limitation, data principal rights, breach notification and security safeguards (VERIFY the rules issued under the Act).
+
+803
+00:55:10.137 --> 00:55:17.070
+Also the clinical establishment rules and medical record retention requirements (VERIFY) (Ch 36).
+
+804
+00:55:18.420 --> 00:55:27.551
+Devices: managed tablets and workstations, auto-logout, no local PHI storage, and badge tap for quick login on shared terminals.
+
+805
+00:55:27.831 --> 00:55:29.345
+Medical device software:
+
+806
+00:55:29.625 --> 00:55:35.151
+CDS and AI features may fall under medical device regulation (VERIFY).
+
+807
+00:55:35.431 --> 00:55:37.756
+Validation and change control apply.
+
+808
+00:55:39.106 --> 00:55:40.109
+Part 11.
+
+809
+00:55:40.389 --> 00:55:43.461
+Reliability, Downtime and Disaster Recovery.
+
+810
+00:55:44.711 --> 00:56:00.327
+Clinical core availability: active-standby databases with synchronous replication within the region (RPO about 0);. automated failover with fencing (Ch 27);. a DR site in another zone or region within the country.
+
+811
+00:56:00.607 --> 00:56:11.039
+Hospital edge nodes: each hospital runs a local node with: a read-only replica of its active patients' records;. local printing of MARs and results;.
+
+812
+00:56:12.389 --> 00:56:17.957
+a downtime order-entry mode whose orders queue locally and sync when the WAN returns.
+
+813
+00:56:18.237 --> 00:56:23.122
+Paper downtime forms remain the last resort, and downtime drills are scheduled.
+
+814
+00:56:23.402 --> 00:56:24.810
+Graceful degradation:
+
+815
+00:56:25.090 --> 00:56:31.938
+If CDS is unavailable, orders proceed with a visible checks unavailable banner and pharmacist review.
+
+816
+00:56:32.218 --> 00:56:34.330
+If billing is down, charges queue.
+
+817
+00:56:35.680 --> 00:56:39.733
+If telemedicine video fails, it falls back to audio, then phone.
+
+818
+00:56:40.013 --> 00:56:44.557
+Interface monitoring: a heartbeat and backlog alarm on every interface.
+
+819
+00:56:44.837 --> 00:56:50.789
+A silent analyser interface means results aren't reaching charts, which is a patient safety risk.
+
+820
+00:56:51.069 --> 00:56:51.859
+Imaging:
+
+821
+00:56:52.139 --> 00:56:58.027
+PACS keeps recent studies on local storage at each hospital, with the central archive replicated.
+
+822
+00:56:58.307 --> 00:57:03.619
+Older studies are recalled from the archive on demand, with pre-fetching for scheduled patients.
+
+823
+00:57:03.899 --> 00:57:07.952
+Backups and restore drills for every store, with restore time measured.
+
+824
+00:57:09.302 --> 00:57:10.241
+Part 12.
+
+825
+00:57:10.521 --> 00:57:12.675
+Key Trade-offs (ADR summary).
+
+826
+00:57:13.925 --> 00:57:15.269
+Here is a quick table:
+
+827
+00:57:15.549 --> 00:57:18.259
+Decision, and Chosen, and Trade-off accepted.
+
+828
+00:57:18.539 --> 00:57:20.053
+Canonical clinical model.
+
+829
+00:57:20.333 --> 00:57:21.165
+Chosen:
+
+830
+00:57:21.445 --> 00:57:22.619
+FHIR R4.
+
+831
+00:57:22.899 --> 00:57:24.157
+Trade-off accepted:
+
+832
+00:57:24.437 --> 00:57:29.259
+Some performance cost and modelling learning curve; big gain in exchange and tooling.
+
+833
+00:57:29.539 --> 00:57:30.605
+Core structure.
+
+834
+00:57:30.885 --> 00:57:31.717
+Chosen:
+
+835
+00:57:31.997 --> 00:57:35.731
+Modular clinical core + separate operational services.
+
+836
+00:57:36.011 --> 00:57:37.269
+Trade-off accepted:
+
+837
+00:57:37.549 --> 00:57:41.859
+Core is larger, but clinical transactions stay simple and consistent.
+
+838
+00:57:42.139 --> 00:57:43.312
+Patient matching.
+
+839
+00:57:43.592 --> 00:57:44.424
+Chosen:
+
+840
+00:57:44.704 --> 00:57:47.584
+Probabilistic with human review in the grey zone.
+
+841
+00:57:47.864 --> 00:57:49.123
+Trade-off accepted:
+
+842
+00:57:49.403 --> 00:57:53.392
+Staff effort on review queues, to avoid dangerous auto-merges.
+
+843
+00:57:53.672 --> 00:57:54.547
+Alerts.
+
+844
+00:57:54.827 --> 00:57:55.659
+Chosen:
+
+845
+00:57:55.939 --> 00:57:58.243
+Tiered CDS with override tracking.
+
+846
+00:57:58.523 --> 00:57:59.781
+Trade-off accepted:
+
+847
+00:58:00.061 --> 00:58:03.368
+Some risk of missed warnings, to preserve clinician trust.
+
+848
+00:58:03.648 --> 00:58:04.565
+Deployment.
+
+849
+00:58:04.845 --> 00:58:05.677
+Chosen:
+
+850
+00:58:05.957 --> 00:58:08.005
+In-country, hospital edge nodes.
+
+851
+00:58:08.285 --> 00:58:09.544
+Trade-off accepted:
+
+852
+00:58:09.824 --> 00:58:14.667
+Higher ops cost; resilience to WAN loss and residency compliance.
+
+853
+00:58:16.017 --> 00:58:17.190
+Imaging storage.
+
+854
+00:58:17.470 --> 00:58:18.302
+Chosen:
+
+855
+00:58:18.582 --> 00:58:19.627
+Tiered VNA.
+
+856
+00:58:19.907 --> 00:58:21.166
+Trade-off accepted:
+
+857
+00:58:21.446 --> 00:58:23.409
+Retrieval delay for old studies.
+
+858
+00:58:23.689 --> 00:58:24.649
+Analytics.
+
+859
+00:58:24.929 --> 00:58:25.761
+Chosen:
+
+860
+00:58:26.041 --> 00:58:27.342
+Lakehouse + OMOP.
+
+861
+00:58:27.622 --> 00:58:28.881
+Trade-off accepted:
+
+862
+00:58:29.161 --> 00:58:33.555
+Pipeline complexity; one source for operations, quality and research.
+
+863
+00:58:34.905 --> 00:58:35.951
+Part 13.
+
+864
+00:58:36.231 --> 00:58:37.575
+Interview Q and A.
+
+865
+00:58:38.825 --> 00:58:39.657
+Beginner.
+
+866
+00:58:39.937 --> 00:58:40.961
+Question 1.
+
+867
+00:58:41.241 --> 00:58:44.675
+What are the main systems in a hospital, and how do they connect?
+
+868
+00:58:44.955 --> 00:58:46.321
+Thirty-second answer:
+
+869
+00:58:46.601 --> 00:59:10.110
+Patient administration (registration, ADT), scheduling, EHR with order entry, lab (LIS), radiology (RIS or PACS), pharmacy and eMAR, OT, billing and insurance, inventory, telemedicine and a patient app, connected by an integration engine (HL7 v2, FHIR) and an event bus, with ADT events telling every department where the patient is.
+
+870
+00:59:11.460 --> 00:59:12.463
+Question 2.
+
+871
+00:59:12.743 --> 00:59:15.175
+What happens when a doctor orders a blood test?
+
+872
+00:59:15.455 --> 00:59:16.820
+Thirty-second answer:
+
+873
+00:59:17.100 --> 00:59:37.452
+CPOE records a signed order with safety checks; the lab system plans samples and prints barcode labels; collection is scanned; analysers get tests by barcode and return results; auto-verification releases normal results; validated results post to the chart and notify the doctor, with critical values phoned.
+
+874
+00:59:38.802 --> 00:59:39.847
+Question 3.
+
+875
+00:59:40.127 --> 00:59:42.581
+How does a teleconsultation work technically?
+
+876
+00:59:42.861 --> 00:59:44.226
+Thirty-second answer:
+
+877
+00:59:44.506 --> 01:00:00.058
+Booking in the scheduling system, a virtual waiting room, WebRTC video through an SFU with TURN relays, adaptive bitrate and audio fallback; the doctor documents and e-prescribes in the same workspace; notes, not video, are the record.
+
+878
+01:00:01.408 --> 01:00:02.475
+Question 4.
+
+879
+01:00:02.755 --> 01:00:06.509
+Why is patient identity so important in hospital systems?
+
+880
+01:00:06.789 --> 01:00:08.155
+Thirty-second answer:
+
+881
+01:00:08.435 --> 01:00:15.261
+Duplicate records hide allergies and history; wrong merges mix two people's data, both can harm patients.
+
+882
+01:00:15.541 --> 01:00:23.755
+A master patient index with probabilistic matching, human review and audited merge or unmerge keeps one person to one record.
+
+883
+01:00:25.105 --> 01:00:26.107
+Intermediate.
+
+884
+01:00:26.387 --> 01:00:27.497
+Question 5.
+
+885
+01:00:27.777 --> 01:00:30.977
+Why use FHIR as the internal clinical data model?
+
+886
+01:00:31.257 --> 01:00:32.622
+Thirty-second answer:
+
+887
+01:00:32.902 --> 01:00:50.054
+It's an international standard with well-defined resources (Patient, Encounter, Observation, MedicationRequest...), versioning and search, used for national exchange (ABDM) and apps (SMART on FHIR), so exchange becomes mapping and the ecosystem of tools applies.
+
+888
+01:00:51.404 --> 01:00:52.513
+Question 6.
+
+889
+01:00:52.793 --> 01:00:56.313
+How does bedside medication administration prevent errors?
+
+890
+01:00:56.593 --> 01:00:57.959
+Thirty-second answer:
+
+891
+01:00:58.239 --> 01:01:12.660
+Pharmacist-verified orders generate an eMAR schedule; the nurse scans the wristband and the drug barcode; the system checks right patient, drug, dose, route and time before recording; exceptions need reasons.
+
+892
+01:01:14.010 --> 01:01:15.098
+Question 7.
+
+893
+01:01:15.378 --> 01:01:17.981
+How do you prevent double-booking of doctor slots?
+
+894
+01:01:18.261 --> 01:01:19.626
+Thirty-second answer:
+
+895
+01:01:19.906 --> 01:01:34.754
+Slots generated from roster templates; a short hold with TTL during checkout; a unique constraint on doctor-slot-sequence with a conditional insert; waitlist fill on cancellations; overbooking only by explicit policy.
+
+896
+01:01:36.104 --> 01:01:37.128
+Question 8.
+
+897
+01:01:37.408 --> 01:01:41.013
+What is an integration engine and why does a hospital need one?
+
+898
+01:01:41.293 --> 01:01:42.659
+Thirty-second answer:
+
+899
+01:01:42.939 --> 01:02:02.651
+It translates and routes messages (HL7 v2, ASTM, FHIR, DICOM metadata) between analysers, monitors, departmental systems, insurers and national platforms, with mapping, retries, replay and backlog monitoring, because hospitals run many systems that were never designed together.
+
+900
+01:02:04.001 --> 01:02:05.067
+Question 9.
+
+901
+01:02:05.347 --> 01:02:07.779
+How does cashless insurance work in the system?
+
+902
+01:02:08.059 --> 01:02:09.425
+Thirty-second answer:
+
+903
+01:02:09.705 --> 01:02:27.774
+Eligibility check at admission, a pre-authorisation request with diagnosis and estimate via payer API or claims exchange, queries turned into tasks, enhancements for longer stays, final claim with documents, remittance reconciliation and denial analysis.
+
+904
+01:02:29.124 --> 01:02:29.892
+Senior.
+
+905
+01:02:30.172 --> 01:02:31.217
+Question 10.
+
+906
+01:02:31.497 --> 01:02:33.396
+Design the master patient index.
+
+907
+01:02:33.676 --> 01:02:35.041
+Thirty-second answer:
+
+908
+01:02:35.321 --> 01:02:56.655
+Blocking keys to limit comparisons; field comparators (Jaro, Winkler and phonetic codes for names, DOB variants, mobile, ABHA); Fellegi, Sunter weights from reviewed pairs; auto-link above an upper threshold, human review in the grey zone, new record below; audited merge or unmerge events that downstream systems follow.
+
+909
+01:02:58.005 --> 01:02:59.135
+Question 11.
+
+910
+01:02:59.415 --> 01:03:03.042
+How would you implement early-warning alerts from bedside monitors?
+
+911
+01:03:03.322 --> 01:03:04.687
+Thirty-second answer:
+
+912
+01:03:04.967 --> 01:03:24.807
+Device gateway converts monitor data to Observations; a stream processor keeps per-patient state and computes the approved score (for example, NEWS2) on each vital set; threshold crossings trigger escalation with suppression windows; stale data is surfaced, not treated as normal; alert burden is measured.
+
+913
+01:03:26.157 --> 01:03:27.245
+Question 12.
+
+914
+01:03:27.525 --> 01:03:31.024
+How do you store and serve medical images at petabyte scale?
+
+915
+01:03:31.304 --> 01:03:32.669
+Thirty-second answer:
+
+916
+01:03:32.949 --> 01:03:51.253
+PACS for DICOM ingest and worklists, a vendor-neutral archive on tiered object storage with lossless compression and lifecycle rules, pre-fetching priors for scheduled patients, DICOMweb for zero-footprint viewing that streams only needed frames, and local caches per hospital.
+
+917
+01:03:52.603 --> 01:03:53.883
+Question 13.
+
+918
+01:03:54.163 --> 01:03:58.089
+How do you keep clinicians working when the network or data centre fails?
+
+919
+01:03:58.369 --> 01:03:59.734
+Thirty-second answer:
+
+920
+01:04:00.014 --> 01:04:15.267
+Hospital edge nodes with read-only replicas of active patients, local printing of MARs and results, a downtime order-entry mode that queues and syncs later, paper procedures as last resort, and scheduled downtime drills.
+
+921
+01:04:16.617 --> 01:04:17.812
+Question 14.
+
+922
+01:04:18.092 --> 01:04:20.929
+How do you design access control for patient records?
+
+923
+01:04:21.209 --> 01:04:22.575
+Thirty-second answer:
+
+924
+01:04:22.855 --> 01:04:40.647
+Roles plus care relationships (team, ward, consult) and sensitivity labels for special categories; break-glass with reason and review; every access audited in a tamper-evident log; anomaly detection on access patterns; minimum necessary in reports and exports.
+
+925
+01:04:41.997 --> 01:04:42.893
+Architect.
+
+926
+01:04:43.173 --> 01:04:44.367
+Question 15.
+
+927
+01:04:44.647 --> 01:04:47.293
+Design the data platform for a hospital chain.
+
+928
+01:04:47.573 --> 01:04:48.938
+Thirty-second answer:
+
+929
+01:04:49.218 --> 01:05:11.021
+Outbox events and CDC into Kafka; an Iceberg lakehouse with raw and conformed zones (codes mapped, patients linked); Kimball star-schema marts for operations, quality and finance; OMOP de-identified store for research; feature tables and an ML platform with governance; BI with facility-level row security; all in-country.
+
+930
+01:05:12.371 --> 01:05:13.565
+Question 16.
+
+931
+01:05:13.845 --> 01:05:16.917
+How would you introduce a sepsis prediction model safely?
+
+932
+01:05:17.197 --> 01:05:18.563
+Thirty-second answer:
+
+933
+01:05:18.843 --> 01:05:36.613
+Local validation on retrospective data, bias checks, silent mode with outcome comparison, a clinical owner and response protocol, measured alert burden and outcomes after go-live, drift monitoring and an off switch, treated as regulated clinical software where applicable.
+
+934
+01:05:37.963 --> 01:05:39.307
+Question 17.
+
+935
+01:05:39.587 --> 01:05:41.785
+How do you integrate a hospital with ABDM?
+
+936
+01:05:42.065 --> 01:05:43.430
+Thirty-second answer:
+
+937
+01:05:43.710 --> 01:06:04.147
+Register facility and professionals, link ABHA to MRNs with patient consent, act as HIP or HIU through an ABDM gateway, serve FHIR bundles only against valid consent artefacts (encrypted to the requester), honour revocations, and log every exchange, mapping from the internal FHIR model.
+
+938
+01:06:05.497 --> 01:06:06.671
+Question 18.
+
+939
+01:06:06.951 --> 01:06:10.001
+How would you reduce discharge delays across the chain?
+
+940
+01:06:10.281 --> 01:06:11.647
+Thirty-second answer:
+
+941
+01:06:11.927 --> 01:06:30.636
+Measure the time from medically-fit to bed-free by step, start discharge planning at admission (predicted LOS), run insurance and billing tasks in parallel with clinical steps, automate discharge summaries from structured data, trigger housekeeping on discharge events, and show a live discharge board.
+
+942
+01:06:31.986 --> 01:06:33.223
+Question 19.
+
+943
+01:06:33.503 --> 01:06:35.189
+Buy a commercial HIS or build?
+
+944
+01:06:35.469 --> 01:06:36.706
+How would you decide?
+
+945
+01:06:36.986 --> 01:06:38.351
+Thirty-second answer:
+
+946
+01:06:38.631 --> 01:06:56.871
+Compare total cost, clinical workflow fit, standards support (FHIR, HL7, DICOM, ABDM), vendor lock-in and data access, regulatory burden, and team capacity; many chains buy the clinical core and build patient apps, integration, data platform and analytics around it.
+
+947
+01:06:58.221 --> 01:06:59.331
+Question 20.
+
+948
+01:06:59.611 --> 01:07:04.240
+What are the top risks in hospital software, and how does the architecture address them?
+
+949
+01:07:04.520 --> 01:07:05.885
+Thirty-second answer:
+
+950
+01:07:06.165 --> 01:07:27.435
+Wrong-patient data (MPI, barcodes, delta checks), missed critical information (CDS, critical value workflows, early warnings), downtime (edge nodes, drills), privacy breaches (access rules, audit, anomaly detection), silent interface failures (heartbeats, backlogs) and unsafe AI (validation, silent mode, governance).
+
+951
+01:07:28.785 --> 01:07:29.830
+Part 14.
+
+952
+01:07:30.110 --> 01:07:30.878
+Summary.
+
+953
+01:07:32.128 --> 01:07:43.115
+A hospital runs on identity, events and records: one patient, one record (MPI); ADT events move every department; immutable, signed clinical data.
+
+954
+01:07:43.395 --> 01:07:49.709
+FHIR as the canonical model makes the EHR, apps and national exchange (ABDM) one language.
+
+955
+01:07:49.989 --> 01:07:52.101
+Safety is designed in at every step:
+
+956
+01:07:52.381 --> 01:08:00.872
+CDS at order time, barcode administration, delta checks and Westgard QC, early-warning streams, critical-value workflows.
+
+957
+01:08:02.222 --> 01:08:12.590
+Operations run on algorithms: probabilistic matching, bed assignment and forecasting, overbooking from no-show prediction, OT bin-packing, reorder points.
+
+958
+01:08:12.870 --> 01:08:23.195
+The data platform (events, then lakehouse, then marts, OMOP, ML) serves operations, quality, finance and research, with de-identification and governance.
+
+959
+01:08:23.475 --> 01:08:30.622
+Resilience is local: hospital edge nodes, downtime procedures and drills, because clinical care cannot pause.
+
+960
+01:08:31.972 --> 01:08:33.209
+Related chapters.
+
+961
+01:08:33.489 --> 01:08:47.377
+Ch 15, Event-Driven Architecture, Ch 21, Data at Scale, Ch 23, Security, Ch 27, Reliability and DR, Ch 36, Compliance, Ch 40, Notifications.
+
+962
+01:08:47.657 --> 01:08:48.852
+Next in this tab:
+
+963
+01:08:49.132 --> 01:08:51.009
+I05, Ride-Hailing.
+
+964
+01:08:52.359 --> 01:08:53.959
+That's the end of this chapter.
+
+965
+01:08:54.239 --> 01:09:00.277
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+966
+01:09:00.557 --> 01:09:02.007
+See you in the next chapter.
+

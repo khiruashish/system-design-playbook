@@ -1,0 +1,3050 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:02.827
+Distributed Cache.
+
+3
+00:00:03.107 --> 00:00:07.246
+Chapter 44, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:08.996 --> 00:00:09.956
+At a glance:
+
+5
+00:00:10.236 --> 00:00:11.409
+Chapter at a glance.
+
+6
+00:00:11.689 --> 00:00:12.692
+Reader bands:
+
+7
+00:00:12.972 --> 00:00:15.255
+B2, then B4, Prerequisites:
+
+8
+00:00:15.535 --> 00:00:24.921
+Ch 07 (using caches: patterns, invalidation, stampedes), Ch 10, Ch 11 (consistent hashing), What you will build:
+
+9
+00:00:25.201 --> 00:00:34.503
+The cache system itself, the platform's shared, Redis-compatible cache tier used by product cards, sessions, rate limits, feature stores and presence.
+
+10
+00:00:34.783 --> 00:00:48.735
+This is the design Memcached or Redis interview question: the server's data structures and eviction, its threading and protocol, partitioning and online resharding, replication and failover, and running it as a platform.
+
+11
+00:00:49.015 --> 00:00:54.881
+Ch 07 was about using a cache; this chapter is about building and operating one.
+
+12
+00:00:56.231 --> 00:00:58.066
+L1: eviction policies.
+
+13
+00:00:58.346 --> 00:01:10.037
+Four policies (exact LRU, Redis-style sampled LRU, decayed LFU, W-TinyLFU) ran over 2M requests on Zipf, scan-polluted and shifting traces.
+
+14
+00:01:10.317 --> 00:01:21.453
+W-TinyLFU beat LRU by 9.1 points at 10k slots (48.6% versus 39.5%) and resisted scans.
+
+15
+00:01:21.733 --> 00:01:31.823
+After an abrupt popularity shift, frequency history lost to LRU at larger sizes (66.3% versus 68.8%).
+
+16
+00:01:32.103 --> 00:01:36.711
+Sampled LRU stayed within 0.3 points of exact LRU.
+
+17
+00:01:38.061 --> 00:01:41.219
+L2: build a cache server, benchmark it like Redis.
+
+18
+00:01:41.499 --> 00:01:47.515
+A ~150-line RESP server with virtual threads, driven by the stock redis-benchmark.
+
+19
+00:01:47.795 --> 00:01:56.541
+It served ~50k ops per second without pipelining and ~260 to 410k with 16-deep pipelining.
+
+20
+00:01:56.821 --> 00:02:01.515
+The global lock showed only once pipelining removed the round-trip bottleneck.
+
+21
+00:02:01.795 --> 00:02:07.747
+Real Redis did ~2x better (0.6 to 0.84M pipelined).
+
+22
+00:02:08.027 --> 00:02:13.403
+It stored a key in 152 bytes; the JVM cache needed 212.
+
+23
+00:02:14.753 --> 00:02:17.697
+L3: live resharding of a real Redis Cluster.
+
+24
+00:02:17.977 --> 00:02:20.963
+A 4th master was added and rebalanced under load.
+
+25
+00:02:21.243 --> 00:02:24.273
+25% of keys moved, all to the new node.
+
+26
+00:02:24.553 --> 00:02:27.539
+Modulo hashing would have moved 75%.
+
+27
+00:02:27.819 --> 00:02:35.457
+A client that follows MOVED or ASK redirects had 0 errors (3,126 redirects followed).
+
+28
+00:02:35.737 --> 00:02:40.302
+A client with a stale slot map had 11,706 errors.
+
+29
+00:02:41.652 --> 00:02:44.276
+L4: what failover loses (real Redis).
+
+30
+00:02:44.556 --> 00:02:49.292
+The replica stalled for 300 ms and the primary was killed during the stall.
+
+31
+00:02:49.572 --> 00:02:56.505
+Asynchronous replication lost thousands of acknowledged writes (6,000 to 15,000 across runs).
+
+32
+00:02:56.785 --> 00:03:08.007
+With WAIT 1 100, 0 acknowledged writes were lost: the writes made during the stall were never confirmed, at up to ~200 ms extra latency for those batches.
+
+33
+00:03:08.287 --> 00:03:09.268
+Reading time:
+
+34
+00:03:09.548 --> 00:03:11.340
+110 min + code.
+
+35
+00:03:12.690 --> 00:03:13.543
+Part 1.
+
+36
+00:03:13.823 --> 00:03:15.743
+Introduction and Why It Matters.
+
+37
+00:03:16.993 --> 00:03:19.511
+A story: the cache that became a database.
+
+38
+00:03:19.791 --> 00:03:23.673
+The grocery platform's Redis started as a cache for product cards.
+
+39
+00:03:23.953 --> 00:03:36.135
+Over two years it also became: the session store, the cart, rate-limit counters (Ch 39), the feature store (Ch 43), presence (Ch 41) and a few temporary queues.
+
+40
+00:03:36.415 --> 00:03:37.119
+Then:
+
+41
+00:03:37.399 --> 00:03:39.319
+Memory ran out at 7 pm.
+
+42
+00:03:39.599 --> 00:03:46.489
+The eviction policy was allkeys-lru, so Redis evicted carts and sessions to make room for product cards.
+
+43
+00:03:46.769 --> 00:03:48.860
+Customers were logged out mid-checkout.
+
+44
+00:03:49.140 --> 00:03:53.705
+A catalogue export read every product once at midnight and flushed the hot set.
+
+45
+00:03:53.985 --> 00:03:56.887
+The database took the full morning load at 6 am.
+
+46
+00:03:58.237 --> 00:03:59.879
+Scaling out broke clients.
+
+47
+00:04:00.159 --> 00:04:05.514
+Adding shards to the client-side modulo-hash ring remapped 75% of keys.
+
+48
+00:04:05.794 --> 00:04:09.463
+The cache emptied, and so did the patience of the database team.
+
+49
+00:04:09.743 --> 00:04:11.322
+A failover lost carts.
+
+50
+00:04:11.602 --> 00:04:16.295
+The primary died; the replica, a few hundred milliseconds behind, was promoted.
+
+51
+00:04:16.575 --> 00:04:19.007
+Items customers had just added vanished.
+
+52
+00:04:19.287 --> 00:04:20.717
+One key melted a node.
+
+53
+00:04:20.997 --> 00:04:25.775
+A flash sale's product card was read 80k times a second from one shard.
+
+54
+00:04:27.125 --> 00:04:39.136
+The rebuild separated workloads into clusters by what they are allowed to lose, chose eviction per cluster, moved to hash-slot clustering with cluster-aware clients, and wrote down durability rules.
+
+55
+00:04:40.486 --> 00:04:41.169
+Quote:
+
+56
+00:04:41.449 --> 00:04:43.113
+The thesis of this chapter.
+
+57
+00:04:43.393 --> 00:04:54.294
+A distributed cache is a memory-bound, partitioned, replicated key-value server, and every design decision trades hit ratio, latency, capacity and durability.
+
+58
+00:04:54.574 --> 00:04:57.433
+Eviction decides hit ratio per byte (L1).
+
+59
+00:04:57.713 --> 00:05:02.705
+Threading and protocol decide throughput, and round trips dominate everything (L2).
+
+60
+00:05:02.985 --> 00:05:10.494
+Partitioning decides how painfully you scale: hash slots move only what must move, if clients follow redirects (L3).
+
+61
+00:05:10.774 --> 00:05:17.387
+Replication is asynchronous by default, so a cache is allowed to lose data, design so that it can (L4).
+
+62
+00:05:17.667 --> 00:05:22.425
+And the most important decision is organisational: what is allowed in the cache at all.
+
+63
+00:05:23.775 --> 00:05:26.079
+Where this lives in the grocery platform.
+
+64
+00:05:26.359 --> 00:05:27.703
+Here is a quick table:
+
+65
+00:05:27.983 --> 00:05:33.145
+Cluster, and Contents, and Eviction, and Loss tolerance, and Persistence. cache-catalog.
+
+66
+00:05:33.425 --> 00:05:34.300
+Contents:
+
+67
+00:05:34.580 --> 00:05:36.884
+Product cards, prices, search results.
+
+68
+00:05:37.164 --> 00:05:38.913
+Eviction: allkeys-lfu.
+
+69
+00:05:39.193 --> 00:05:40.303
+Loss tolerance:
+
+70
+00:05:40.583 --> 00:05:42.289
+Full (rebuild from DB).
+
+71
+00:05:42.569 --> 00:05:43.615
+Persistence:
+
+72
+00:05:43.895 --> 00:05:45.239
+None. cache-session.
+
+73
+00:05:45.519 --> 00:05:46.393
+Contents:
+
+74
+00:05:46.673 --> 00:05:49.020
+Sessions, carts (write-through to DB).
+
+75
+00:05:49.300 --> 00:05:52.137
+Eviction: noeviction (alert at 70%).
+
+76
+00:05:52.417 --> 00:05:53.527
+Loss tolerance:
+
+77
+00:05:53.807 --> 00:05:55.940
+Carts must be recoverable from DB.
+
+78
+00:05:56.220 --> 00:05:57.265
+Persistence:
+
+79
+00:05:57.545 --> 00:05:59.785
+AOF everysec. cache-ratelimit.
+
+80
+00:06:00.065 --> 00:06:00.940
+Contents:
+
+81
+00:06:01.220 --> 00:06:02.820
+GCRA state, counters.
+
+82
+00:06:03.100 --> 00:06:04.892
+Eviction: volatile-ttl.
+
+83
+00:06:05.172 --> 00:06:06.281
+Loss tolerance:
+
+84
+00:06:06.561 --> 00:06:08.460
+Brief loss acceptable (fallback).
+
+85
+00:06:08.740 --> 00:06:09.785
+Persistence:
+
+86
+00:06:10.065 --> 00:06:11.409
+None. cache-feature.
+
+87
+00:06:11.689 --> 00:06:12.564
+Contents:
+
+88
+00:06:12.844 --> 00:06:14.529
+Online features, presence.
+
+89
+00:06:14.809 --> 00:06:16.623
+Eviction: allkeys-lru.
+
+90
+00:06:16.903 --> 00:06:18.012
+Loss tolerance:
+
+91
+00:06:18.292 --> 00:06:19.828
+Rebuildable from streams.
+
+92
+00:06:20.108 --> 00:06:21.153
+Persistence:
+
+93
+00:06:21.433 --> 00:06:22.116
+None.
+
+94
+00:06:23.466 --> 00:06:24.789
+Learning objectives.
+
+95
+00:06:25.069 --> 00:06:26.967
+By the end you will be able to:
+
+96
+00:06:27.247 --> 00:06:33.071
+Design the cache server: data structures, memory accounting, eviction and expiry (L1).
+
+97
+00:06:33.351 --> 00:06:39.751
+Explain server threading and protocol performance: event loops, pipelining, I or O threads (L2).
+
+98
+00:06:40.031 --> 00:06:44.127
+Partition and reshard online with hash slots and redirects (L3).
+
+99
+00:06:44.407 --> 00:06:48.525
+Replicate and fail over, and state exactly what can be lost (L4).
+
+100
+00:06:49.875 --> 00:06:56.445
+Operate the cache as a platform: multi-tenancy, hot keys, big keys, observability and capacity.
+
+101
+00:06:57.795 --> 00:06:58.670
+Part 2.
+
+102
+00:06:58.950 --> 00:07:00.827
+Core Concepts, Beginner to Deep.
+
+103
+00:07:02.077 --> 00:07:04.339
+Intuition: a warehouse's front shelf.
+
+104
+00:07:04.619 --> 00:07:08.331
+The warehouse (database) has everything but is slow to fetch from.
+
+105
+00:07:08.611 --> 00:07:10.915
+The front shelf (cache) is small and fast.
+
+106
+00:07:11.195 --> 00:07:26.576
+The questions: what to put on the shelf and what to remove when it's full (eviction); how many clerks serve customers and how (threading); how to split the shelf across several counters (partitioning); what happens when a counter closes (replication and failover).
+
+107
+00:07:26.856 --> 00:07:30.483
+And one rule: nothing on the front shelf should be the only copy.
+
+108
+00:07:31.833 --> 00:07:32.793
+Requirements.
+
+109
+00:07:33.073 --> 00:07:33.926
+Functional.
+
+110
+00:07:34.206 --> 00:07:44.318
+GET or SET or DEL with TTLs; data structures (hashes, sorted sets, counters); atomic operations and scripts; pub or sub for invalidation.
+
+111
+00:07:44.598 --> 00:07:49.675
+Horizontal partitioning; online resharding; replicas and automatic failover.
+
+112
+00:07:49.955 --> 00:07:52.793
+Eviction policies per cluster; memory limits.
+
+113
+00:07:53.073 --> 00:07:54.182
+Non-functional.
+
+114
+00:07:54.462 --> 00:07:59.987
+Sub-millisecond p99 server latency; millions of ops per second per cluster.
+
+115
+00:08:00.267 --> 00:08:04.854
+Availability 99.95%+; failover in seconds.
+
+116
+00:08:06.204 --> 00:08:09.233
+Predictable memory: no surprise OOM kills.
+
+117
+00:08:09.513 --> 00:08:12.052
+Multi-tenant isolation between teams.
+
+118
+00:08:13.402 --> 00:08:14.447
+Estimation.
+
+119
+00:08:14.727 --> 00:08:16.071
+Here is a quick table:
+
+120
+00:08:16.351 --> 00:08:17.781
+Quantity, and Estimate.
+
+121
+00:08:18.061 --> 00:08:31.458
+Peak ops: ~1.5M ops per second across clusters (product cards ~600k, features ~500k, rate limits ~300k, sessions ~100k).
+
+122
+00:08:31.738 --> 00:08:43.322
+Per node: ~150 to 250k ops per second for simple commands per Redis process on modern cores without pipelining; far more with pipelining (L2).
+
+123
+00:08:43.602 --> 00:08:44.391
+Memory:
+
+124
+00:08:44.671 --> 00:09:05.109
+Product cards 2M times ~2 KB about 4 GB; features 10M keys times ~100 B about 1 GB; sessions 5M times ~1 KB about 5 GB; plus overhead (L2: ~90 B per key before the value) and fragmentation (~1.2x).
+
+125
+00:09:05.389 --> 00:09:06.797
+Nodes: catalog:
+
+126
+00:09:07.077 --> 00:09:10.554
+6 masters + replicas (throughput-bound); sessions:
+
+127
+00:09:10.834 --> 00:09:13.501
+3 masters + replicas (memory-bound).
+
+128
+00:09:14.851 --> 00:09:18.029
+The server: data structures, memory and expiry.
+
+129
+00:09:18.309 --> 00:09:27.205
+Main dictionary: a hash table with incremental rehashing (Redis moves a few buckets per operation, so resizing never pauses the server).
+
+130
+00:09:27.485 --> 00:09:33.608
+Compact encodings: small hashes, lists and sets stored as packed arrays (listpack) until they grow.
+
+131
+00:09:33.888 --> 00:09:37.109
+That's why many small hashes can be cheaper than many keys.
+
+132
+00:09:37.389 --> 00:09:43.427
+Memory accounting: every key costs overhead (dictionary entry, key object, value object).
+
+133
+00:09:43.707 --> 00:09:55.632
+L2 measured 152 B per key with 64-byte values in Redis, and 212 B in a naive JVM implementation (object headers, boxing).
+
+134
+00:09:55.912 --> 00:10:01.565
+With jemalloc, fragmentation adds 10 to 30%; active defragmentation helps.
+
+135
+00:10:02.915 --> 00:10:13.198
+Expiry: lazy (checked on access) plus active (a periodic job samples keys with TTLs and deletes expired ones, repeating while many are found).
+
+136
+00:10:13.478 --> 00:10:16.614
+Neither needs a global sorted list of expiry times.
+
+137
+00:10:16.894 --> 00:10:25.961
+Big keys: a 50 MB hash blocks the single thread when deleted or serialised; use UNLINK (background free) and cap value sizes.
+
+138
+00:10:27.311 --> 00:10:28.143
+Eviction.
+
+139
+00:10:28.423 --> 00:10:31.175
+When memory hits maxmemory, something must go.
+
+140
+00:10:31.455 --> 00:10:34.377
+L1 compared policies over 2M requests:
+
+141
+00:10:35.727 --> 00:10:37.071
+Here is a quick table:
+
+142
+00:10:37.351 --> 00:10:43.901
+Trace, and Size, and LRU, and Sampled LRU, and LFU (decayed), and W-TinyLFU.
+
+143
+00:10:44.181 --> 00:10:44.842
+Zipf.
+
+144
+00:10:45.122 --> 00:10:45.911
+Size:
+
+145
+00:10:46.191 --> 00:10:47.023
+10k.
+
+146
+00:10:47.303 --> 00:10:48.199
+LRU:
+
+147
+00:10:48.479 --> 00:10:50.293
+39.5%.
+
+148
+00:10:50.573 --> 00:10:51.789
+Sampled LRU:
+
+149
+00:10:52.069 --> 00:10:53.733
+39.2%.
+
+150
+00:10:54.013 --> 00:10:55.207
+LFU (decayed):
+
+151
+00:10:55.487 --> 00:10:57.322
+41.5%.
+
+152
+00:10:57.602 --> 00:10:59.031
+W-TinyLFU:
+
+153
+00:10:59.311 --> 00:11:01.039
+48.6%.
+
+154
+00:11:01.319 --> 00:11:01.981
+Zipf.
+
+155
+00:11:02.261 --> 00:11:03.050
+Size:
+
+156
+00:11:03.330 --> 00:11:04.461
+200k.
+
+157
+00:11:04.741 --> 00:11:05.637
+LRU:
+
+158
+00:11:05.917 --> 00:11:07.431
+70.4%.
+
+159
+00:11:07.711 --> 00:11:08.927
+Sampled LRU:
+
+160
+00:11:09.207 --> 00:11:10.786
+70.1%.
+
+161
+00:11:11.066 --> 00:11:12.261
+LFU (decayed):
+
+162
+00:11:12.541 --> 00:11:14.205
+71.1%.
+
+163
+00:11:14.485 --> 00:11:15.914
+W-TinyLFU:
+
+164
+00:11:16.194 --> 00:11:17.901
+71.2%.
+
+165
+00:11:18.181 --> 00:11:19.183
+Scan-polluted.
+
+166
+00:11:19.463 --> 00:11:20.253
+Size:
+
+167
+00:11:20.533 --> 00:11:21.365
+10k.
+
+168
+00:11:21.645 --> 00:11:22.541
+LRU:
+
+169
+00:11:22.821 --> 00:11:24.485
+34.3%.
+
+170
+00:11:24.765 --> 00:11:25.981
+Sampled LRU:
+
+171
+00:11:26.261 --> 00:11:28.053
+34.0%.
+
+172
+00:11:28.333 --> 00:11:29.527
+LFU (decayed):
+
+173
+00:11:29.807 --> 00:11:31.493
+36.3%.
+
+174
+00:11:31.773 --> 00:11:33.202
+W-TinyLFU:
+
+175
+00:11:33.482 --> 00:11:35.103
+43.4%.
+
+176
+00:11:35.383 --> 00:11:36.237
+Shifting.
+
+177
+00:11:36.517 --> 00:11:37.306
+Size:
+
+178
+00:11:37.586 --> 00:11:38.717
+200k.
+
+179
+00:11:38.997 --> 00:11:39.893
+LRU:
+
+180
+00:11:40.173 --> 00:11:41.922
+68.8%.
+
+181
+00:11:42.202 --> 00:11:43.418
+Sampled LRU:
+
+182
+00:11:43.698 --> 00:11:45.511
+68.5%.
+
+183
+00:11:45.791 --> 00:11:46.986
+LFU (decayed):
+
+184
+00:11:47.266 --> 00:11:49.143
+67.6%.
+
+185
+00:11:49.423 --> 00:11:50.853
+W-TinyLFU:
+
+186
+00:11:51.133 --> 00:11:52.882
+66.3%.
+
+187
+00:11:54.232 --> 00:12:00.824
+Frequency beats recency under skew and scans, especially at small cache sizes, where every slot matters.
+
+188
+00:12:01.104 --> 00:12:06.885
+W-TinyLFU's admission filter stops one-hit wonders from displacing hot keys.
+
+189
+00:12:07.165 --> 00:12:08.680
+Frequency is history.
+
+190
+00:12:08.960 --> 00:12:12.480
+When popularity shifts abruptly, frequency policies lag.
+
+191
+00:12:12.760 --> 00:12:19.928
+This is why Caffeine adapts its window size and Redis decays LFU counters over time (lfu-decay-time).
+
+192
+00:12:20.208 --> 00:12:34.309
+Sampled eviction (pick 5 random keys, evict the worst) is within 0.3 points of exact LRU and needs no linked list or per-access pointer updates, the reason Redis uses it (maxmemory-samples).
+
+193
+00:12:35.659 --> 00:12:48.374
+Policy per workload: allkeys-lfu for catalogue-like data; volatile- when only TTL'd keys may be evicted; noeviction for anything you can't lose (sessions), with alerts well before the limit.
+
+194
+00:12:49.724 --> 00:12:51.879
+Threading, protocol and pipelining.
+
+195
+00:12:52.159 --> 00:13:02.527
+Redis: a single-threaded event loop executes commands (no locks, deterministic atomicity), with I or O threads (Redis 6 plus) for socket reads or writes.
+
+196
+00:13:02.807 --> 00:13:05.751
+Memcached: multi-threaded with fine-grained locks.
+
+197
+00:13:06.031 --> 00:13:09.807
+Dragonfly or KeyDB: shared-nothing multi-threading.
+
+198
+00:13:10.087 --> 00:13:13.756
+The protocol (RESP) is simple text framing; parsing is cheap.
+
+199
+00:13:14.036 --> 00:13:15.423
+Round trips dominate.
+
+200
+00:13:15.703 --> 00:13:24.492
+L2's server did ~50k ops per second one command per round trip, and ~5 to 8x more with 16 commands pipelined.
+
+201
+00:13:24.772 --> 00:13:26.628
+The same is true for real Redis.
+
+202
+00:13:26.908 --> 00:13:31.559
+Batch with MGET, pipelines and Lua scripts (Ch 43 L3:
+
+203
+00:13:31.839 --> 00:13:36.532
+800 round trips, then 30 ms, 2, then 0.6 ms).
+
+204
+00:13:37.882 --> 00:13:40.186
+Locks matter only once round trips don't:
+
+205
+00:13:40.466 --> 00:13:43.346
+L2's global lock showed only with pipelining.
+
+206
+00:13:43.626 --> 00:13:46.783
+Slow commands block everyone in a single-threaded server:
+
+207
+00:13:47.063 --> 00:13:50.455
+KEYS, huge SMEMBERS, big DELs, long Lua scripts.
+
+208
+00:13:50.735 --> 00:13:53.743
+Disable or rename dangerous commands; use SCAN.
+
+209
+00:13:55.093 --> 00:13:56.779
+Partitioning and resharding.
+
+210
+00:13:57.059 --> 00:13:58.403
+Here is a quick table:
+
+211
+00:13:58.683 --> 00:14:01.904
+Scheme, and How, and Adding a node moves, and Used by.
+
+212
+00:14:02.184 --> 00:14:03.080
+Modulo.
+
+213
+00:14:03.360 --> 00:14:05.045
+How: hash(key) % N.
+
+214
+00:14:05.325 --> 00:14:08.952
+Adding a node moves: ~(N)/(N+1) of keys.
+
+215
+00:14:09.232 --> 00:14:10.149
+Used by:
+
+216
+00:14:10.429 --> 00:14:12.861
+Naive client-side sharding (avoid).
+
+217
+00:14:13.141 --> 00:14:15.125
+Consistent hashing + vnodes.
+
+218
+00:14:15.405 --> 00:14:16.067
+How:
+
+219
+00:14:16.347 --> 00:14:17.733
+Ring of virtual nodes.
+
+220
+00:14:18.013 --> 00:14:22.109
+Adding a node moves: ~1/(N+1), from all nodes.
+
+221
+00:14:22.389 --> 00:14:23.307
+Used by:
+
+222
+00:14:23.587 --> 00:14:26.744
+Memcached clients, Dynamo-style (Ch 11).
+
+223
+00:14:27.024 --> 00:14:28.048
+Hash slots.
+
+224
+00:14:28.328 --> 00:14:28.989
+How:
+
+225
+00:14:29.269 --> 00:14:34.432
+16,384 slots, then nodes; slots move explicitly.
+
+226
+00:14:34.712 --> 00:14:35.971
+Adding a node moves:
+
+227
+00:14:36.251 --> 00:14:37.829
+Only the slots you choose.
+
+228
+00:14:38.109 --> 00:14:39.027
+Used by:
+
+229
+00:14:39.307 --> 00:14:40.395
+Redis Cluster.
+
+230
+00:14:40.675 --> 00:14:41.720
+Proxy-based.
+
+231
+00:14:41.000 --> 00:14:42.661
+How:
+
+232
+00:14:42.941 --> 00:14:45.779
+Twemproxy or Envoy or Codis route requests.
+
+233
+00:14:46.059 --> 00:14:47.317
+Adding a node moves:
+
+234
+00:14:47.597 --> 00:14:48.451
+Depends.
+
+235
+00:14:48.731 --> 00:14:49.648
+Used by:
+
+236
+00:14:49.928 --> 00:14:51.080
+Simpler clients.
+
+237
+00:14:52.430 --> 00:14:56.441
+L3 added a fourth master to a real Redis Cluster under load:
+
+238
+00:14:56.721 --> 00:14:59.750
+25% of keys moved, all to the new node.
+
+239
+00:15:00.030 --> 00:15:04.275
+Modulo would have moved 75%, mostly between the old nodes.
+
+240
+00:15:04.555 --> 00:15:09.910
+Online migration protocol: while a slot migrates, the source still serves keys it has.
+
+241
+00:15:10.190 --> 00:15:14.670
+For keys already moved it answers ASK, try the target, once, with ASKING.
+
+242
+00:15:14.950 --> 00:15:20.411
+After the slot's ownership changes, requests get MOVED, telling clients to update their map.
+
+243
+00:15:20.691 --> 00:15:31.934
+The smart client in L3 followed 3,126 redirects with 0 errors; a client with a stale map failed 11,706 reads.
+
+244
+00:15:33.284 --> 00:15:41.732
+Hash tags (sku123) force related keys into the same slot, so multi-key commands and Lua scripts work in a cluster.
+
+245
+00:15:42.012 --> 00:15:48.433
+Clients must be cluster-aware (Lettuce, Jedis, redis-py cluster), or sit behind a proxy that is.
+
+246
+00:15:49.783 --> 00:15:51.490
+Replication and failover.
+
+247
+00:15:51.770 --> 00:15:59.002
+Asynchronous replication: the primary acknowledges writes before replicas receive them, streaming a replication log.
+
+248
+00:15:59.282 --> 00:16:03.741
+Replicas that fall behind resync partially (backlog) or fully (snapshot).
+
+249
+00:16:04.021 --> 00:16:04.938
+Failover:
+
+250
+00:16:05.218 --> 00:16:12.279
+Sentinel (for non-cluster setups) or cluster nodes detect a failed primary by timeout and promote a replica.
+
+251
+00:16:12.559 --> 00:16:15.354
+The promoted replica may lack the latest writes.
+
+252
+00:16:15.634 --> 00:16:20.861
+L4, with a 300 ms replica stall, lost thousands of acknowledged writes.
+
+253
+00:16:22.211 --> 00:16:26.413
+WAIT n timeout makes the client wait until n replicas have the write.
+
+254
+00:16:26.693 --> 00:16:33.563
+In L4 it lost 0 acknowledged writes, because writes during the stall were never confirmed, and the client knew.
+
+255
+00:16:33.843 --> 00:16:42.824
+That's synchronous-ish replication at the cost of latency, but not consensus: a promotion can still pick a replica without the write when several exist.
+
+256
+00:16:43.104 --> 00:16:49.397
+Split brain: a partitioned old primary may keep accepting writes until min-replicas-to-write stops it.
+
+257
+00:16:49.677 --> 00:16:51.747
+Those writes are lost when it rejoins.
+
+258
+00:16:52.027 --> 00:16:53.072
+Persistence:
+
+259
+00:16:53.352 --> 00:17:01.629
+RDB snapshots and AOF (append-only file, fsync every second) protect against restarts, not against failover gaps.
+
+260
+00:17:02.979 --> 00:17:05.369
+The honest rule: a cache may lose data.
+
+261
+00:17:05.649 --> 00:17:14.481
+Anything that must not be lost lives in a database, with the cache as a rebuildable copy (write-through or write-behind with a durable source).
+
+262
+00:17:14.761 --> 00:17:18.601
+Stronger guarantees need a consensus-based store (Ch 12).
+
+263
+00:17:19.951 --> 00:17:21.487
+Hot keys and big keys.
+
+264
+00:17:21.767 --> 00:17:41.009
+Hot keys concentrate on one slot and node: client-side near-caches (Ch 38 L3), read replicas with replica reads, key replication (card:X1..8 read at random, Ch 07), and server-side client tracking (Redis 6 invalidation-based client caching).
+
+265
+00:17:41.289 --> 00:17:46.409
+Detection: redis-cli --hotkeys (with LFU), sampling proxies, per-slot metrics.
+
+266
+00:17:46.689 --> 00:17:53.281
+Big keys: split large collections, cap sizes, use UNLINK, find them with --bigkeys or MEMORY USAGE.
+
+267
+00:17:54.631 --> 00:17:56.594
+Multi-tenancy and governance.
+
+268
+00:17:56.874 --> 00:18:02.783
+Separate clusters by loss tolerance and eviction policy (§1.2), not by team.
+
+269
+00:18:03.063 --> 00:18:09.101
+A shared cluster with allkeys-lru will evict someone's session to cache someone else's product card.
+
+270
+00:18:09.381 --> 00:18:17.807
+Key naming conventions with owner prefixes, mandatory TTLs on cache clusters, and per-tenant memory budgets watched in dashboards.
+
+271
+00:18:18.087 --> 00:18:23.549
+ACLs per service (Redis 6 ACL users, command restrictions, key patterns).
+
+272
+00:18:23.829 --> 00:18:27.349
+Change control on dangerous commands and configuration.
+
+273
+00:18:28.699 --> 00:18:29.872
+Operating the tier.
+
+274
+00:18:30.152 --> 00:18:42.355
+Metrics: ops per second, latency (server and client), hit ratio per key prefix, evictions, expirations, memory and fragmentation, replication lag, connected clients, slow log.
+
+275
+00:18:42.635 --> 00:18:53.515
+Capacity: plan for memory at peak plus headroom for fork-based snapshots (copy-on-write can need up to 2x memory during BGSAVE under heavy writes) and resharding.
+
+276
+00:18:53.795 --> 00:18:56.781
+Upgrades: rolling, replicas first, then failover.
+
+277
+00:18:58.131 --> 00:18:59.987
+Managed versus self-hosted:
+
+278
+00:19:00.267 --> 00:19:10.870
+ElastiCache or MemoryDB or Azure Cache handle failover and patching; MemoryDB adds a durable transaction log for primary-grade durability.
+
+279
+00:19:12.220 --> 00:19:13.351
+Interview framing.
+
+280
+00:19:13.631 --> 00:19:32.831
+Start from requirements and loss tolerance, then: the server's hash table and memory; eviction (LRU versus LFU versus admission) with numbers; threading and pipelining; partitioning with hash slots and live migration (MOVED or ASK); replication, failover and what is lost; hot keys.
+
+281
+00:19:33.111 --> 00:19:42.305
+Staff-level signals: separating clusters by durability, noeviction for non-rebuildable data, and saying clearly that a cache is not a database.
+
+282
+00:19:43.655 --> 00:19:44.551
+Part 3.
+
+283
+00:19:44.831 --> 00:19:46.559
+Architecture and Diagrams.
+
+284
+00:19:47.809 --> 00:19:48.855
+Component view.
+
+285
+00:19:49.135 --> 00:19:50.479
+Here is the diagram.
+
+286
+00:19:54.329 --> 00:19:57.017
+Sequence: happy path, a key mid-migration.
+
+287
+00:19:57.297 --> 00:20:00.091
+The sequence diagram walks through it step by step.
+
+288
+00:20:00.371 --> 00:20:01.267
+C to A:
+
+289
+00:20:01.547 --> 00:20:05.579
+GET card sku 42 (slot 7438).
+
+290
+00:20:05.859 --> 00:20:06.713
+A to C:
+
+291
+00:20:06.993 --> 00:20:11.451
+ASK 7438 target B, key already moved.
+
+292
+00:20:11.731 --> 00:20:12.670
+C to B:
+
+293
+00:20:12.950 --> 00:20:13.846
+ASKING.
+
+294
+00:20:14.126 --> 00:20:15.065
+C to B:
+
+295
+00:20:15.345 --> 00:20:16.817
+GET card sku 42.
+
+296
+00:20:17.097 --> 00:20:18.547
+B to C: value.
+
+297
+00:20:18.827 --> 00:20:19.723
+C to A:
+
+298
+00:20:20.003 --> 00:20:24.121
+GET card sku 99 (slot 7438).
+
+299
+00:20:24.401 --> 00:20:25.254
+A to C:
+
+300
+00:20:25.534 --> 00:20:28.499
+MOVED 7438 target B.
+
+301
+00:20:28.779 --> 00:20:33.515
+C to C: update slot map, 7438 to B.
+
+302
+00:20:33.795 --> 00:20:34.734
+C to B:
+
+303
+00:20:35.014 --> 00:20:36.507
+GET card sku 99.
+
+304
+00:20:36.787 --> 00:20:38.238
+B to C: value.
+
+305
+00:20:42.088 --> 00:20:45.800
+Sequence: failure path, failover loses acknowledged writes.
+
+306
+00:20:46.080 --> 00:20:48.875
+The sequence diagram walks through it step by step.
+
+307
+00:20:49.155 --> 00:20:50.072
+C to P:
+
+308
+00:20:50.352 --> 00:20:53.232
+SET cart 881 with new item.
+
+309
+00:20:53.512 --> 00:20:54.451
+P to C:
+
+310
+00:20:54.731 --> 00:20:55.499
+OK.
+
+311
+00:20:55.779 --> 00:20:58.531
+P to R: replicate, but replica is stalled.
+
+312
+00:20:58.811 --> 00:21:00.325
+P to P: crashes.
+
+313
+00:21:00.605 --> 00:21:03.037
+R to R: resumes and is promoted.
+
+314
+00:21:03.317 --> 00:21:04.256
+C to R:
+
+315
+00:21:04.536 --> 00:21:06.243
+GET cart 881.
+
+316
+00:21:06.523 --> 00:21:08.912
+R to C: old cart without the item.
+
+317
+00:21:12.762 --> 00:21:14.490
+State: a shard's lifecycle.
+
+318
+00:21:14.770 --> 00:21:16.114
+Here is the diagram.
+
+319
+00:21:19.964 --> 00:21:20.881
+Part 4.
+
+320
+00:21:21.161 --> 00:21:22.783
+Design Document Excerpt:
+
+321
+00:21:23.063 --> 00:21:24.492
+Platform Cache v2.
+
+322
+00:21:25.742 --> 00:21:26.489
+Note:
+
+323
+00:21:26.769 --> 00:21:29.926
+Design Document (excerpt), Platform Cache v2.
+
+324
+00:21:30.206 --> 00:21:31.102
+Status:
+
+325
+00:21:31.382 --> 00:21:32.662
+Accepted, Authors:
+
+326
+00:21:32.942 --> 00:21:34.905
+Data platform team, Reviewers:
+
+327
+00:21:35.185 --> 00:21:38.235
+Checkout, Catalog, Personalisation, SRE.
+
+328
+00:21:38.515 --> 00:21:55.241
+Context, One shared Redis with allkeys-lru evicted sessions and carts; scans flushed the hot set; modulo client sharding remapped 75% of keys on scale-out; failover lost acknowledged cart writes; hot keys saturated single shards.
+
+329
+00:21:55.521 --> 00:22:14.273
+Decision, Clusters by loss tolerance; eviction per cluster; Redis Cluster (hash slots) with cluster-aware clients; replicas with automatic failover; carts write-through to PostgreSQL with WAIT 1 for the cache copy; hot-key near-caches; governance (TTLs, prefixes, ACLs, budgets).
+
+330
+00:22:15.623 --> 00:22:28.764
+Related ADRs, ADR-300 Four clusters by loss tolerance (catalog, session, ratelimit, feature); ADR-301 Eviction: catalog allkeys-lfu, session noeviction,
+
+331
+00:22:29.044 --> 00:22:53.172
+ratelimit volatile-ttl (L1); ADR-302 Pipelining or MGET mandatory for multi-key reads (L2); ADR-303 Redis Cluster + Lettuce; resharding runbook (L3); ADR-304 Durability: sessions or carts in PostgreSQL, cache rebuildable; WAIT 1 50 on cart writes (L4); ADR-305 Hot keys:
+
+332
+00:22:53.452 --> 00:22:56.759
+Caffeine near-cache + key replication; big-key limits.
+
+333
+00:22:57.039 --> 00:22:57.999
+Requirements.
+
+334
+00:22:58.279 --> 00:23:04.935
+R1 p99 1 ms server-side, 3 ms client-side for single-key operations.
+
+335
+00:23:05.215 --> 00:23:09.332
+R2 No loss of carts or sessions on any single-node failure.
+
+336
+00:23:10.682 --> 00:23:15.695
+R3 Scale out by one shard without a hit-ratio drop of more than 5 points.
+
+337
+00:23:15.975 --> 00:23:20.391
+R4 Catalogue hit ratio ≥ 90% at peak.
+
+338
+00:23:20.671 --> 00:23:22.762
+R5 No cross-tenant evictions.
+
+339
+00:23:23.042 --> 00:23:24.450
+Decisions in detail.
+
+340
+00:23:24.730 --> 00:23:26.863
+Clusters (ADR-300).
+
+341
+00:23:27.143 --> 00:23:30.322
+Separate endpoints, separate memory budgets and alerts.
+
+342
+00:23:30.602 --> 00:23:32.949
+Eviction (ADR-301).
+
+343
+00:23:33.229 --> 00:23:41.613
+LFU for catalog with lfu-decay-time 1; session cluster alerts at 70% memory, pages at 85%.
+
+344
+00:23:42.963 --> 00:23:46.312
+Clients (ADR-302 or 303).
+
+345
+00:23:46.592 --> 00:23:53.504
+Lettuce cluster client, topology refresh on MOVED and every 60 s; pipelining via async API.
+
+346
+00:23:53.784 --> 00:23:56.344
+Durability (ADR-304).
+
+347
+00:23:56.624 --> 00:23:57.413
+Carts:
+
+348
+00:23:57.693 --> 00:24:06.056
+PostgreSQL is the source of truth; cache updated after commit; WAIT for session writes; AOF everysec on the session cluster.
+
+349
+00:24:06.336 --> 00:24:08.832
+Hot keys (ADR-305).
+
+350
+00:24:09.112 --> 00:24:15.107
+1 to 5 s near-cache for read-mostly hot keys; replicate flash-sale keys times 8.
+
+351
+00:24:15.387 --> 00:24:16.411
+Consequences.
+
+352
+00:24:16.691 --> 00:24:23.709
+More clusters to run; client configuration standards to enforce; slightly higher write latency on sessions.
+
+353
+00:24:23.989 --> 00:24:29.963
+In return: no cross-tenant evictions, painless scale-out, and clear rules about what may be lost.
+
+354
+00:24:31.313 --> 00:24:32.273
+Part 5.
+
+355
+00:24:32.553 --> 00:24:34.537
+Hands-On Code, Level Ladder.
+
+356
+00:24:35.787 --> 00:24:36.555
+Info:
+
+357
+00:24:36.835 --> 00:24:37.923
+What's real here.
+
+358
+00:24:38.203 --> 00:24:40.699
+All four labs are JDK 21.
+
+359
+00:24:40.979 --> 00:24:43.432
+L2, L4 use real Redis 7:
+
+360
+00:24:43.712 --> 00:25:00.437
+L2 benchmarks a hand-written server and real Redis with the stock redis-benchmark; L3 creates a real 3-node Redis Cluster and reshards it live with redis-cli --cluster; L4 runs a real primary or replica pair and uses kill -STOP/-KILL.
+
+361
+00:25:00.717 --> 00:25:06.264
+Timings and loss counts vary between runs on the 2-CPU sandbox; the patterns don't.
+
+362
+00:25:06.544 --> 00:25:10.832
+L1 is a deterministic simulation of four eviction policies.
+
+363
+00:25:12.182 --> 00:25:18.113
+L2 needs Redis 7 on port 6390 and redis-benchmark on the PATH.
+
+364
+00:25:18.393 --> 00:25:25.390
+L3 creates its own cluster (ports 7001 to 7004) with cluster-setup.sh.
+
+365
+00:25:25.670 --> 00:25:34.694
+L4 starts and kills its own Redis processes on ports 6391 to 6392 (Linux).
+
+366
+00:25:34.974 --> 00:25:39.091
+Run every lab with -Dstdout.encoding=UTF-8.
+
+367
+00:25:40.441 --> 00:25:42.233
+L1, Eviction policies.
+
+368
+00:25:42.513 --> 00:25:43.452
+Requirement:
+
+369
+00:25:43.732 --> 00:25:47.551
+With a fixed amount of memory, keep the keys that will be asked for again.
+
+370
+00:25:47.831 --> 00:25:54.145
+Four eviction policies, implemented from scratch, replay the same three traces at three cache sizes.
+
+371
+00:25:55.495 --> 00:25:58.461
+Here is the Java code, EvictionL1.java.
+
+372
+00:25:58.741 --> 00:26:02.943
+It runs to 181 lines; the full listing is in the chapter.
+
+373
+00:26:03.223 --> 00:26:10.541
+EvictionL1.java, run with: java EvictionL1.java (JDK 21, no dependencies).
+
+374
+00:26:10.821 --> 00:26:12.293
+WHICH KEY DO YOU THROW AWAY?
+
+375
+00:26:12.573 --> 00:26:16.541
+A cache server's hit ratio is decided by its eviction policy.
+
+376
+00:26:16.821 --> 00:26:23.882
+Four policies, implemented. here, replay the same three request traces (fixed seed) at several cache sizes:
+
+377
+00:26:26.732 --> 00:26:27.649
+On screen:
+
+378
+00:26:27.929 --> 00:26:39.001
+Hit ratio (%), 2,000,000 requests over 1,000,000 keys per trace. trace cache size LRU sampled LRU LFU (decayed) W-TinyLFU.
+
+379
+00:26:39.281 --> 00:26:47.729
+ZIPF 10,000 39.5% 39.2% 41.5% 48.6%.
+
+380
+00:26:48.009 --> 00:26:56.735
+ZIPF 50,000 55.0% 54.7% 56.5% 60.2%.
+
+381
+00:26:57.015 --> 00:27:05.527
+ZIPF 200,000 70.4% 70.1% 71.1% 71.2%.
+
+382
+00:27:05.807 --> 00:27:14.447
+SCAN 10,000 34.3% 34.0% 36.3% 43.4%.
+
+383
+00:27:14.727 --> 00:27:23.537
+SCAN 50,000 47.7% 47.4% 49.4% 53.3%.
+
+384
+00:27:23.817 --> 00:27:32.479
+SCAN 200,000 60.7% 60.5% 62.1% 62.2%.
+
+385
+00:27:32.759 --> 00:27:41.057
+SHIFT 10,000 39.4% 39.1% 41.4% 46.4%.
+
+386
+00:27:41.337 --> 00:27:50.020
+SHIFT 50,000 54.7% 54.4% 56.2% 55.2%.
+
+387
+00:27:50.300 --> 00:27:59.580
+SHIFT 200,000 68.8% 68.5% 67.6% 66.3%.
+
+388
+00:27:59.860 --> 00:28:01.375
+The rest is in the chapter.
+
+389
+00:28:04.225 --> 00:28:05.078
+Reading it:
+
+390
+00:28:05.358 --> 00:28:16.131
+Small caches reward cleverness: at 10,000 slots W-TinyLFU beats LRU by 9.1 points on Zipf and 9.1 on the scan trace.
+
+391
+00:28:16.411 --> 00:28:19.697
+At 200,000 slots every policy converges.
+
+392
+00:28:19.977 --> 00:28:25.993
+Scans: the 200,000 cold keys cost LRU ~5 points at 10k slots.
+
+393
+00:28:26.273 --> 00:28:30.305
+W-TinyLFU's admission filter refuses most of them.
+
+394
+00:28:30.585 --> 00:28:35.491
+Shifts: frequency history is a liability when popularity changes abruptly.
+
+395
+00:28:35.771 --> 00:28:47.569
+At 200k slots, LFU (67.6%) and W-TinyLFU (66.3%) fall behind LRU (68.8%).
+
+396
+00:28:48.919 --> 00:28:57.431
+Sampled LRU (5 samples) is within 0.3 points of exact LRU everywhere, with no global list to maintain.
+
+397
+00:28:58.781 --> 00:29:01.853
+L2, Build a cache server, benchmark it like Redis.
+
+398
+00:29:02.133 --> 00:29:03.071
+Requirement:
+
+399
+00:29:03.351 --> 00:29:08.919
+Understand what makes a cache server fast by building one and measuring it against the real thing.
+
+400
+00:29:09.199 --> 00:29:18.885
+A minimal RESP server with GET, SET with EX, DEL and PING, TTL expiry and sampled eviction, on virtual threads with two storage engines.
+
+401
+00:29:19.165 --> 00:29:24.754
+It is driven by the stock redis-benchmark, and then compared with Redis 7 on memory per key.
+
+402
+00:29:26.104 --> 00:29:29.069
+Here is the Java code, MiniCacheL2.java.
+
+403
+00:29:29.349 --> 00:29:33.360
+It runs to 210 lines; the full listing is in the chapter.
+
+404
+00:29:33.640 --> 00:29:44.840
+MiniCacheL2.java, run with (Redis 7 on:6390 and redis-benchmark on the PATH): java -Xmx2g MiniCacheL2.java.
+
+405
+00:29:45.120 --> 00:29:48.213
+BUILD A CACHE SERVER, THEN BENCHMARK IT LIKE REDIS.
+
+406
+00:29:48.493 --> 00:29:53.507
+A ~150-line cache server that speaks enough of Redis's protocol.
+
+407
+00:29:53.787 --> 00:29:56.304
+(RESP) for real Redis tools to talk to it:
+
+408
+00:29:56.584 --> 00:30:01.768
+GET, SET key value EX seconds, DEL, PING, CONFIG GET (answered empty).
+
+409
+00:30:04.618 --> 00:30:24.245
+On screen: redis-benchmark -t set,get -n 200000 -c 50 -r 100000 -d 64 (2-CPU sandbox: server and. benchmark share the CPUs). server SET per second GET per second SET per second pipeline 16 GET per second pipeline 16.
+
+410
+00:30:24.525 --> 00:30:37.730
+MiniCache, global lock 45,882 52,165 258,398 322,061.
+
+411
+00:30:38.010 --> 00:30:52.239
+MiniCache, striped (ConcurrentHashMap) 51,033 51,894 331,675 407,332.
+
+412
+00:30:52.519 --> 00:31:07.687
+Redis 7.0 (single-threaded event loop) 101,112 90,992 621,118 840,336.
+
+413
+00:31:07.967 --> 00:31:12.469
+Memory for 500,000 keys times 64-byte values:
+
+414
+00:31:12.749 --> 00:31:16.909
+MiniCache (JVM heap) 212 bytes per key, Redis.
+
+415
+00:31:17.189 --> 00:31:27.066
+152 bytes per key. then one request per round trip, both MiniCache engines are bound by syscalls and. context switches, not by the map.
+
+416
+00:31:27.346 --> 00:31:28.861
+The rest is in the chapter.
+
+417
+00:31:31.711 --> 00:31:32.564
+Reading it:
+
+418
+00:31:32.844 --> 00:31:44.961
+Without pipelining, both MiniCache engines do ~45 to 55k ops per second and the lock barely matters: every command pays a round trip, a syscall and a context switch.
+
+419
+00:31:45.241 --> 00:31:53.263
+With 16-deep pipelining, throughput multiplies about 5 to 8x, and the global lock now costs something against the striped map.
+
+420
+00:31:53.543 --> 00:31:58.364
+Numbers vary between runs because the benchmark and servers share 2 CPUs.
+
+421
+00:31:58.644 --> 00:32:07.711
+Redis does roughly twice as well in both modes: no locks, an event loop doing far less work per command, and I or O threads not even enabled.
+
+422
+00:32:09.061 --> 00:32:09.850
+Memory:
+
+423
+00:32:10.130 --> 00:32:18.343
+152 bytes per key in Redis versus 212 in the JVM map, for the same 64-byte values.
+
+424
+00:32:19.693 --> 00:32:22.637
+L3, Live resharding of a real Redis Cluster.
+
+425
+00:32:22.917 --> 00:32:23.856
+Requirement:
+
+426
+00:32:24.136 --> 00:32:34.525
+Add capacity to the cache cluster during the day, without errors and without emptying the cache. cluster-setup.sh creates a 3-master Redis Cluster and a spare node.
+
+427
+00:32:34.805 --> 00:32:41.781
+The lab loads 30,000 keys, then adds the spare as a 4th master and rebalances with redis-cli --cluster.
+
+428
+00:32:42.061 --> 00:32:48.099
+Meanwhile two clients read continuously: one with a static slot map, one that follows redirects.
+
+429
+00:32:49.449 --> 00:32:52.265
+Here is the shell code, cluster-setup.sh.
+
+430
+00:32:52.545 --> 00:32:58.774
+It runs to 19 lines; the full listing is in the chapter. !/usr or bin or env bash.
+
+431
+00:32:59.054 --> 00:33:13.667
+Fresh 3-master Redis Cluster on 7001 to 7003 plus an empty node on 7004 (no replicas; lab only). daemonize yes --cluster-node-timeout 2000 /dev or null).
+
+432
+00:33:16.517 --> 00:33:19.440
+Here is the Java code, ClusterL3.java.
+
+433
+00:33:19.720 --> 00:33:23.901
+It runs to 189 lines; the full listing is in the chapter.
+
+434
+00:33:24.181 --> 00:33:35.573
+ClusterL3.java, run with:./cluster-setup.sh and and java ClusterL3.java (JDK 21; redis-server or redis-cli 7 on the PATH).
+
+435
+00:33:35.853 --> 00:33:39.629
+SCALING A REAL REDIS CLUSTER OUT, WHILE IT SERVES TRAFFIC.
+
+436
+00:33:39.909 --> 00:33:46.245
+A 3-master Redis Cluster (16,384 hash slots, key, then slot by.
+
+437
+00:33:46.525 --> 00:33:53.757
+CRC16(key) mod 16384) holds 30,000 product-card keys.
+
+438
+00:33:54.037 --> 00:33:57.792
+We add a 4th master and let redis-cli --cluster rebalance move.
+
+439
+00:34:00.642 --> 00:34:01.559
+On screen:
+
+440
+00:34:01.839 --> 00:34:05.103
+3-master Redis Cluster, 30,000 keys loaded.
+
+441
+00:34:05.383 --> 00:34:08.285
+Adding a 4th master and rebalancing. live...
+
+442
+00:34:08.565 --> 00:34:10.549
+Rebalance took 7.7 s.
+
+443
+00:34:10.829 --> 00:34:16.653
+Reads during the whole run: client successful MOVED handled ASK handled errors misses.
+
+444
+00:34:16.933 --> 00:34:25.743
+NAIVE (static slot map) 129,995 0 0 11,706 0.
+
+445
+00:34:26.023 --> 00:34:34.962
+SMART (follows MOVED and ASK) 140,737 3,126 1 0 0.
+
+446
+00:34:35.242 --> 00:34:37.482
+Keys per master after rebalancing:
+
+447
+00:34:37.762 --> 00:34:45.293
+127.0.0.1:7001 7,492 keys ██████████████████.
+
+448
+00:34:45.573 --> 00:34:53.189
+127.0.0.1:7002 7,481 keys ██████████████████.
+
+449
+00:34:53.469 --> 00:35:00.423
+127.0.0.1:7003 7,500 keys ██████████████████.
+
+450
+00:35:00.703 --> 00:35:02.218
+The rest is in the chapter.
+
+451
+00:35:05.068 --> 00:35:05.921
+Reading it:
+
+452
+00:35:06.201 --> 00:35:16.847
+Movement: exactly the keys in the slots handed to the new node moved (7,527, 25%), and nothing moved between the old nodes.
+
+453
+00:35:17.127 --> 00:35:18.727
+The key counts end up even.
+
+454
+00:35:19.007 --> 00:35:28.116
+Modulo comparison: hash % 3, then hash % 4 would have moved 22,496 keys (75%).
+
+455
+00:35:28.396 --> 00:35:31.425
+For a cache, that's a mass miss storm onto the database.
+
+456
+00:35:32.775 --> 00:35:40.477
+Clients: the smart client followed 3,126 MOVED and 1 ASK redirect and never failed.
+
+457
+00:35:40.757 --> 00:35:47.690
+The static client failed 11,706 reads, one for every read of a key whose slot had moved.
+
+458
+00:35:47.970 --> 00:35:51.191
+No reads were misses: the data travels with the slots.
+
+459
+00:35:52.541 --> 00:35:54.419
+L4, What failover loses.
+
+460
+00:35:54.699 --> 00:35:55.637
+Requirement:
+
+461
+00:35:55.917 --> 00:36:00.525
+Know exactly which acknowledged writes can disappear when the cache primary dies.
+
+462
+00:36:00.805 --> 00:36:02.597
+A real primary and replica.
+
+463
+00:36:02.877 --> 00:36:09.491
+The client writes pipelined batches while the replica is stalled with SIGSTOP and the primary is killed with SIGKILL.
+
+464
+00:36:09.771 --> 00:36:15.531
+Then the replica is resumed, promoted, and checked against every write the client believed was done.
+
+465
+00:36:16.881 --> 00:36:20.017
+Here is the Java code, FailoverL4.java.
+
+466
+00:36:20.297 --> 00:36:24.542
+It runs to 131 lines; the full listing is in the chapter.
+
+467
+00:36:24.822 --> 00:36:35.510
+FailoverL4.java, run with: java FailoverL4.java (JDK 21; redis-server 7 on the PATH; Linux, uses kill -STOP/-KILL).
+
+468
+00:36:35.790 --> 00:36:37.326
+WHAT A CACHE FAILOVER LOSES.
+
+469
+00:36:37.606 --> 00:36:47.377
+Real Redis: a primary (:6391) and a replica (:6392) with the default ASYNCHRONOUS. replication.
+
+470
+00:36:47.657 --> 00:36:54.014
+A client writes session or cart keys in pipelined batches of 50 and records every write the primary.
+
+471
+00:36:56.864 --> 00:36:57.781
+On screen:
+
+472
+00:36:58.061 --> 00:37:05.357
+Primary:6391, then replica:6392 (async replication).
+
+473
+00:37:05.637 --> 00:37:16.304
+Replica stalls 300 ms, primary is. killed during the stall. write mode writes sent acknowledged lost (acked batch p50 batch max. but. missing).
+
+474
+00:37:16.584 --> 00:37:30.109
+ASYNC (reply OK = done) 327,150 327,100 6,000 0.16 ms 25.02 ms.
+
+475
+00:37:30.389 --> 00:37:52.341
+WAIT 1 100 after each batch 170,800 170,650 0 0.23 ms 201.06 ms. then asynchronous replication acknowledges a write before any replica has it, so a. failover during replica lag. silently discards acknowledged writes.
+
+476
+00:37:52.621 --> 00:37:56.440
+WAIT makes the client find out: batches. written during the stall.
+
+477
+00:37:56.720 --> 00:37:58.235
+The rest is in the chapter.
+
+478
+00:38:01.085 --> 00:38:01.938
+Reading it:
+
+479
+00:38:02.218 --> 00:38:07.039
+ASYNC: the primary acknowledged writes during the replica's 300 ms stall.
+
+480
+00:38:07.319 --> 00:38:09.410
+When it died, those writes died with it.
+
+481
+00:38:09.690 --> 00:38:15.151
+The run above lost 6,000 acknowledged writes; other runs lost up to 15,000.
+
+482
+00:38:15.431 --> 00:38:24.839
+WAIT 1 100: batches written during the stall got 0 replica confirmations within 100 ms, so the client never counted them as done.
+
+483
+00:38:25.119 --> 00:38:27.125
+0 acknowledged writes were lost.
+
+484
+00:38:27.405 --> 00:38:34.551
+The cost: those batches waited ~100 to 200 ms, and every batch pays one extra round trip.
+
+485
+00:38:35.901 --> 00:38:37.693
+The lesson isn't always WAIT.
+
+486
+00:38:37.973 --> 00:38:44.949
+It's that asynchronous replication makes a cache a lossy store, so anything that must survive lives in the database.
+
+487
+00:38:46.299 --> 00:38:47.238
+Part 6.
+
+488
+00:38:47.518 --> 00:38:48.798
+Production Concerns.
+
+489
+00:38:50.048 --> 00:38:51.200
+Failure modes.
+
+490
+00:38:51.480 --> 00:38:52.824
+Here is a quick table:
+
+491
+00:38:53.104 --> 00:38:55.387
+Failure, and Symptom, and Mitigation.
+
+492
+00:38:55.667 --> 00:38:57.139
+Wrong eviction policy.
+
+493
+00:38:57.419 --> 00:38:58.229
+Symptom:
+
+494
+00:38:58.509 --> 00:39:00.856
+Hot set flushed by scans (L1).
+
+495
+00:39:01.136 --> 00:39:02.139
+Mitigation:
+
+496
+00:39:02.419 --> 00:39:04.936
+LFU or admission for catalogue data.
+
+497
+00:39:05.216 --> 00:39:06.987
+Shared cluster, mixed data.
+
+498
+00:39:07.267 --> 00:39:08.077
+Symptom:
+
+499
+00:39:08.357 --> 00:39:10.533
+Sessions evicted for product cards.
+
+500
+00:39:10.813 --> 00:39:11.816
+Mitigation:
+
+501
+00:39:12.096 --> 00:39:14.400
+Clusters by loss tolerance, noeviction.
+
+502
+00:39:14.680 --> 00:39:16.173
+Round-trip-heavy clients.
+
+503
+00:39:16.453 --> 00:39:17.264
+Symptom:
+
+504
+00:39:17.544 --> 00:39:19.293
+Latency blow-up (L2).
+
+505
+00:39:19.573 --> 00:39:20.576
+Mitigation:
+
+506
+00:39:20.856 --> 00:39:22.627
+Pipelining, MGET, scripts.
+
+507
+00:39:22.907 --> 00:39:24.123
+Modulo sharding.
+
+508
+00:39:24.403 --> 00:39:25.213
+Symptom:
+
+509
+00:39:25.493 --> 00:39:27.541
+Mass remap on scale-out (L3).
+
+510
+00:39:27.821 --> 00:39:28.824
+Mitigation:
+
+511
+00:39:29.104 --> 00:39:31.045
+Hash slots or consistent hashing.
+
+512
+00:39:31.325 --> 00:39:32.904
+Stale client topology.
+
+513
+00:39:33.184 --> 00:39:33.995
+Symptom:
+
+514
+00:39:34.275 --> 00:39:36.344
+Errors during resharding (L3).
+
+515
+00:39:36.624 --> 00:39:37.627
+Mitigation:
+
+516
+00:39:37.907 --> 00:39:40.893
+Cluster-aware clients following MOVED or ASK.
+
+517
+00:39:41.173 --> 00:39:42.944
+Async replication failover.
+
+518
+00:39:43.224 --> 00:39:44.035
+Symptom:
+
+519
+00:39:44.315 --> 00:39:46.491
+Lost acknowledged writes (L4).
+
+520
+00:39:46.771 --> 00:39:47.773
+Mitigation:
+
+521
+00:39:48.053 --> 00:39:51.168
+Source of truth elsewhere, WAIT, min-replicas-to-write.
+
+522
+00:39:52.518 --> 00:39:53.457
+Hot key.
+
+523
+00:39:53.737 --> 00:39:54.547
+Symptom:
+
+524
+00:39:54.827 --> 00:39:56.299
+One node saturated.
+
+525
+00:39:56.579 --> 00:39:57.582
+Mitigation:
+
+526
+00:39:57.862 --> 00:40:00.635
+Near-cache, key replication, replica reads.
+
+527
+00:40:00.915 --> 00:40:02.473
+Big key or slow command.
+
+528
+00:40:02.753 --> 00:40:03.563
+Symptom:
+
+529
+00:40:03.843 --> 00:40:05.486
+Server-wide latency spike.
+
+530
+00:40:05.766 --> 00:40:06.769
+Mitigation:
+
+531
+00:40:07.049 --> 00:40:09.609
+Limits, UNLINK, SCAN, renamed commands.
+
+532
+00:40:09.889 --> 00:40:11.339
+Fork during snapshot.
+
+533
+00:40:11.619 --> 00:40:12.430
+Symptom:
+
+534
+00:40:12.710 --> 00:40:14.033
+Memory spike, OOM.
+
+535
+00:40:14.313 --> 00:40:15.315
+Mitigation:
+
+536
+00:40:15.595 --> 00:40:17.707
+Headroom, snapshots on replicas.
+
+537
+00:40:19.057 --> 00:40:20.145
+Observability.
+
+538
+00:40:20.425 --> 00:40:26.143
+Hit ratio per key prefix (client-side metrics), evictions and expirations per second.
+
+539
+00:40:26.423 --> 00:40:30.241
+Latency histograms (LATENCY, client timers), slow log.
+
+540
+00:40:30.521 --> 00:40:34.916
+Memory used versus maxmemory, fragmentation ratio, big keys.
+
+541
+00:40:35.196 --> 00:40:40.529
+Replication lag and link status; failover events; cluster state and open slots.
+
+542
+00:40:40.809 --> 00:40:43.220
+Top keys per shard (hot-key detection).
+
+543
+00:40:44.570 --> 00:40:45.509
+Security.
+
+544
+00:40:45.789 --> 00:40:54.002
+No cache exposed to the internet; TLS in transit; ACL users per service with key patterns and command restrictions.
+
+545
+00:40:54.282 --> 00:40:58.527
+Disable or rename FLUSHALL, KEYS, CONFIG for application users.
+
+546
+00:40:58.807 --> 00:41:03.757
+Don't store secrets or unencrypted personal data you wouldn't store in the database.
+
+547
+00:41:05.107 --> 00:41:06.003
+Performance.
+
+548
+00:41:06.283 --> 00:41:11.957
+Pipelining and batching first (L2); then key design (small hashes, compact encodings).
+
+549
+00:41:12.237 --> 00:41:19.213
+I or O threads for high connection counts; connection pooling or multiplexing clients (Lettuce multiplexes).
+
+550
+00:41:19.493 --> 00:41:22.928
+Keep values small; compress large payloads client-side.
+
+551
+00:41:24.278 --> 00:41:25.003
+Cost.
+
+552
+00:41:25.283 --> 00:41:32.537
+Memory is the cost driver: compact encodings, TTLs on everything cacheable, and not caching what isn't read.
+
+553
+00:41:32.817 --> 00:41:40.753
+Right-size by hit ratio per GB: the marginal gigabyte buys little on a flattened hit curve (Ch 38 L3).
+
+554
+00:41:41.033 --> 00:41:45.406
+Managed services trade a premium for operations (Ch 35).
+
+555
+00:41:46.756 --> 00:41:47.695
+Part 7.
+
+556
+00:41:47.975 --> 00:41:49.681
+Anti-Patterns and Pitfalls.
+
+557
+00:41:50.931 --> 00:41:51.849
+Watch out:
+
+558
+00:41:52.129 --> 00:41:52.769
+1.
+
+559
+00:41:53.049 --> 00:41:54.841
+The cache as the only copy.
+
+560
+00:41:55.121 --> 00:41:57.915
+Failover loses acknowledged writes (L4).
+
+561
+00:41:59.265 --> 00:42:00.183
+Watch out:
+
+562
+00:42:00.463 --> 00:42:01.167
+2.
+
+563
+00:42:01.447 --> 00:42:03.025
+One cluster for everything.
+
+564
+00:42:03.305 --> 00:42:06.356
+Eviction policies and loss tolerance differ by data.
+
+565
+00:42:07.706 --> 00:42:08.623
+Watch out:
+
+566
+00:42:08.903 --> 00:42:09.650
+3.
+
+567
+00:42:09.930 --> 00:42:11.850
+LRU for scan-heavy workloads.
+
+568
+00:42:12.130 --> 00:42:14.647
+One export flushes the hot set (L1).
+
+569
+00:42:15.997 --> 00:42:16.915
+Watch out:
+
+570
+00:42:17.195 --> 00:42:17.899
+4.
+
+571
+00:42:18.179 --> 00:42:19.693
+One command per round trip.
+
+572
+00:42:19.973 --> 00:42:22.960
+The network, not the server, is the bottleneck (L2).
+
+573
+00:42:24.310 --> 00:42:25.227
+Watch out:
+
+574
+00:42:25.507 --> 00:42:26.275
+5.
+
+575
+00:42:26.555 --> 00:42:27.771
+Modulo sharding.
+
+576
+00:42:28.051 --> 00:42:30.398
+Scale-out remaps most keys (L3:
+
+577
+00:42:30.678 --> 00:42:32.086
+75%).
+
+578
+00:42:33.436 --> 00:42:34.353
+Watch out:
+
+579
+00:42:34.633 --> 00:42:35.380
+6.
+
+580
+00:42:35.660 --> 00:42:37.089
+Cluster-unaware clients.
+
+581
+00:42:37.369 --> 00:42:39.844
+Every resharding becomes errors (L3).
+
+582
+00:42:41.194 --> 00:42:42.111
+Watch out:
+
+583
+00:42:42.391 --> 00:42:43.138
+7.
+
+584
+00:42:43.418 --> 00:42:44.613
+KEYS in production.
+
+585
+00:42:44.893 --> 00:42:46.215
+Blocks the single thread.
+
+586
+00:42:47.565 --> 00:42:48.483
+Watch out:
+
+587
+00:42:48.763 --> 00:42:49.445
+8.
+
+588
+00:42:49.725 --> 00:42:50.664
+Big keys.
+
+589
+00:42:50.944 --> 00:42:53.845
+Deleting or serialising them stalls the server.
+
+590
+00:42:55.195 --> 00:42:56.113
+Watch out:
+
+591
+00:42:56.393 --> 00:42:57.139
+9.
+
+592
+00:42:57.419 --> 00:42:58.507
+No TTLs.
+
+593
+00:42:58.787 --> 00:43:01.177
+Memory fills with data nobody reads.
+
+594
+00:43:02.527 --> 00:43:03.444
+Watch out:
+
+595
+00:43:03.724 --> 00:43:05.815
+10. allkeys- eviction on sessions.
+
+596
+00:43:06.095 --> 00:43:08.399
+Users logged out under memory pressure.
+
+597
+00:43:09.749 --> 00:43:10.666
+Watch out:
+
+598
+00:43:10.946 --> 00:43:11.778
+11.
+
+599
+00:43:12.058 --> 00:43:13.935
+No memory headroom for forks.
+
+600
+00:43:14.215 --> 00:43:15.858
+Snapshots trigger OOM.
+
+601
+00:43:17.208 --> 00:43:18.125
+Watch out:
+
+602
+00:43:18.405 --> 00:43:19.195
+12.
+
+603
+00:43:19.475 --> 00:43:20.797
+Ignoring hot keys.
+
+604
+00:43:21.077 --> 00:43:23.083
+Sharding doesn't spread one key's load.
+
+605
+00:43:24.433 --> 00:43:25.307
+Part 8.
+
+606
+00:43:25.587 --> 00:43:26.931
+Interview Q and A.
+
+607
+00:43:28.181 --> 00:43:29.013
+Beginner.
+
+608
+00:43:29.293 --> 00:43:30.317
+Question 1.
+
+609
+00:43:30.597 --> 00:43:33.371
+Design a distributed cache, the main components?
+
+610
+00:43:33.651 --> 00:43:35.016
+Thirty-second answer:
+
+611
+00:43:35.296 --> 00:43:56.181
+Cache servers holding a hash table in memory with TTLs and an eviction policy; a partitioning scheme (hash slots or consistent hashing) so keys spread across nodes; replicas per shard with automatic failover; cluster-aware clients or a proxy for routing; and monitoring of hit ratio, latency, memory and replication lag.
+
+612
+00:43:57.531 --> 00:43:58.534
+Question 2.
+
+613
+00:43:58.814 --> 00:44:00.243
+LRU or LFU?
+
+614
+00:44:00.523 --> 00:44:01.889
+Thirty-second answer:
+
+615
+00:44:02.169 --> 00:44:07.865
+LRU adapts quickly to changing popularity but is fooled by scans and one-hit wonders.
+
+616
+00:44:08.145 --> 00:44:13.734
+LFU keeps frequently used keys but lags when popularity shifts unless counts decay.
+
+617
+00:44:14.014 --> 00:44:24.233
+Admission-based policies like W-TinyLFU combine a recency window with frequency-based admission and usually win, especially for small caches.
+
+618
+00:44:25.583 --> 00:44:26.628
+Question 3.
+
+619
+00:44:26.908 --> 00:44:29.873
+How do TTLs expire without scanning everything?
+
+620
+00:44:30.153 --> 00:44:31.519
+Thirty-second answer:
+
+621
+00:44:31.799 --> 00:44:43.724
+Lazily, check expiry when a key is accessed, plus actively: a periodic task samples keys with TTLs, deletes the expired ones and repeats while a high fraction is expired.
+
+622
+00:44:44.004 --> 00:44:51.385
+No global ordered structure is needed, and memory from rarely accessed expired keys is reclaimed probabilistically.
+
+623
+00:44:52.735 --> 00:44:53.802
+Question 4.
+
+624
+00:44:54.082 --> 00:44:57.005
+Why is Redis single-threaded, and is that a problem?
+
+625
+00:44:57.285 --> 00:44:58.650
+Thirty-second answer:
+
+626
+00:44:58.930 --> 00:45:07.783
+Command execution on one thread avoids locks and makes each command atomic; the bottleneck is usually network round trips, not CPU.
+
+627
+00:45:08.063 --> 00:45:19.455
+It's a problem for slow commands (which block everyone) and for using many cores in one process, solved by running more shards, I or O threads, or multi-threaded alternatives.
+
+628
+00:45:20.805 --> 00:45:21.808
+Intermediate.
+
+629
+00:45:22.088 --> 00:45:23.197
+Question 5.
+
+630
+00:45:23.477 --> 00:45:26.848
+How do you partition a cache, and what happens when you add a node?
+
+631
+00:45:27.128 --> 00:45:28.493
+Thirty-second answer:
+
+632
+00:45:28.773 --> 00:45:31.781
+Avoid modulo hashing, which remaps most keys.
+
+633
+00:45:32.061 --> 00:45:39.357
+Use consistent hashing with virtual nodes ( about 1/(N+1) of keys move) or hash slots (Redis Cluster:
+
+634
+00:45:39.637 --> 00:45:45.803
+16,384 slots mapped to nodes; you move only chosen slots, gradually).
+
+635
+00:45:46.083 --> 00:45:50.200
+Clients must route by the current map and follow redirects during moves.
+
+636
+00:45:51.550 --> 00:45:52.659
+Question 6.
+
+637
+00:45:52.939 --> 00:45:54.518
+What are MOVED and ASK?
+
+638
+00:45:54.798 --> 00:45:56.163
+Thirty-second answer:
+
+639
+00:45:56.443 --> 00:45:57.958
+Redis Cluster redirects.
+
+640
+00:45:58.238 --> 00:46:03.422
+MOVED means the slot now lives on another node: update your slot map and retry there.
+
+641
+00:46:03.702 --> 00:46:12.747
+ASK means the slot is being migrated and this key is already on the target: retry once on the target with ASKING, but don't update the map.
+
+642
+00:46:13.027 --> 00:46:15.801
+Cluster-aware clients handle both transparently.
+
+643
+00:46:17.151 --> 00:46:18.239
+Question 7.
+
+644
+00:46:18.519 --> 00:46:21.697
+How do you make cache operations fast from the client side?
+
+645
+00:46:21.977 --> 00:46:23.343
+Thirty-second answer:
+
+646
+00:46:23.623 --> 00:46:38.065
+Minimise round trips: pipelining, MGET or HMGET, Lua scripts for read-modify-write; multiplexed connections; keep values small; co-locate clients with the cache (same AZ); near-cache hot keys in process.
+
+647
+00:46:39.415 --> 00:46:40.439
+Question 8.
+
+648
+00:46:40.719 --> 00:46:42.746
+How does replication work in Redis?
+
+649
+00:46:43.026 --> 00:46:44.391
+Thirty-second answer:
+
+650
+00:46:44.671 --> 00:46:51.882
+Asynchronous: the primary streams its command log to replicas, acknowledging clients before replicas apply writes.
+
+651
+00:46:52.162 --> 00:46:58.989
+New or far-behind replicas get a snapshot plus the backlog; short disconnections resume from the backlog.
+
+652
+00:46:59.269 --> 00:47:01.957
+Replicas can serve reads (possibly stale).
+
+653
+00:47:03.307 --> 00:47:04.373
+Question 9.
+
+654
+00:47:04.653 --> 00:47:06.509
+What eviction policy for sessions?
+
+655
+00:47:06.789 --> 00:47:08.155
+Thirty-second answer:
+
+656
+00:47:08.435 --> 00:47:21.875
+None, noeviction, with memory alerts well before the limit, a dedicated cluster, TTLs for idle sessions, and ideally a durable source (database) so a failover or restart doesn't log everyone out.
+
+657
+00:47:22.155 --> 00:47:24.523
+Eviction is for data that can be rebuilt.
+
+658
+00:47:25.873 --> 00:47:26.641
+Senior.
+
+659
+00:47:26.921 --> 00:47:27.966
+Question 10.
+
+660
+00:47:28.246 --> 00:47:31.681
+What can you lose when a cache primary fails, and how do you limit it?
+
+661
+00:47:31.961 --> 00:47:33.326
+Thirty-second answer:
+
+662
+00:47:33.606 --> 00:47:42.907
+With asynchronous replication, any write acknowledged but not yet replicated to the promoted replica, plus writes accepted by a partitioned old primary.
+
+663
+00:47:43.187 --> 00:47:57.822
+Limit it with WAIT (clients know which writes are replicated), min-replicas-to-write (primary stops accepting writes without replicas), AOF for restarts, and, most importantly, keeping the truth in a database so the cache can be rebuilt.
+
+664
+00:47:59.172 --> 00:48:00.303
+Question 11.
+
+665
+00:48:00.583 --> 00:48:03.484
+How do you handle a hot key that saturates one shard?
+
+666
+00:48:03.764 --> 00:48:05.129
+Thirty-second answer:
+
+667
+00:48:05.409 --> 00:48:19.404
+Detect it (hotkeys, per-slot metrics), then: near-cache in each client for a second or two; replicate the key under N suffixes and read one at random; allow replica reads for it; or use server-assisted client caching.
+
+668
+00:48:19.684 --> 00:48:21.391
+Pre-warm known campaign keys.
+
+669
+00:48:22.741 --> 00:48:23.829
+Question 12.
+
+670
+00:48:24.109 --> 00:48:26.434
+How would you reshard a live cluster safely?
+
+671
+00:48:26.714 --> 00:48:28.079
+Thirty-second answer:
+
+672
+00:48:28.359 --> 00:48:48.669
+Add the new node, move slots incrementally (a few at a time) with key migration, relying on ASK during and MOVED after; verify all clients are cluster-aware first; throttle migration to protect latency; watch hit ratio and latency; avoid big keys that block migration; do it off-peak with a rollback plan.
+
+673
+00:48:50.019 --> 00:48:51.299
+Question 13.
+
+674
+00:48:51.579 --> 00:48:53.691
+How do you estimate memory for a cache?
+
+675
+00:48:53.971 --> 00:48:55.336
+Thirty-second answer:
+
+676
+00:48:55.616 --> 00:49:07.221
+Keys times (key size + value size + per-key overhead), times a fragmentation factor, plus replication buffers, client buffers, and headroom for snapshots (copy-on-write).
+
+677
+00:49:07.501 --> 00:49:10.253
+Measure overhead empirically for your encodings.
+
+678
+00:49:11.603 --> 00:49:12.798
+Question 14.
+
+679
+00:49:13.078 --> 00:49:15.894
+How do you protect a shared cache from one bad tenant?
+
+680
+00:49:16.174 --> 00:49:17.539
+Thirty-second answer:
+
+681
+00:49:17.819 --> 00:49:32.582
+Separate clusters for different loss tolerances; within a cluster, key prefixes per owner, ACLs restricting commands and key patterns, memory budgets with alerts, mandatory TTLs, slow-command limits, and client-side rate limits.
+
+682
+00:49:33.932 --> 00:49:34.828
+Architect.
+
+683
+00:49:35.108 --> 00:49:36.303
+Question 15.
+
+684
+00:49:36.583 --> 00:49:40.487
+Design the caching platform for a national grocery app end to end.
+
+685
+00:49:40.767 --> 00:49:42.132
+Thirty-second answer:
+
+686
+00:49:42.412 --> 00:50:02.828
+Four clusters by loss tolerance (catalog LFU, sessions noeviction + durable source, rate limits volatile-ttl, features LRU); Redis Cluster with replicas and automatic failover; cluster-aware clients with pipelining; near-caches for hot keys; carts and sessions backed by PostgreSQL; ACLs,
+
+687
+00:50:03.108 --> 00:50:11.983
+TTLs and budgets; dashboards for hit ratio, latency, memory and lag; resharding and failover runbooks tested in game days.
+
+688
+00:50:13.333 --> 00:50:14.527
+Question 16.
+
+689
+00:50:14.807 --> 00:50:18.391
+Redis versus Memcached versus an in-process cache, when each?
+
+690
+00:50:18.671 --> 00:50:20.037
+Thirty-second answer:
+
+691
+00:50:20.317 --> 00:50:29.938
+In-process (Caffeine) for the hottest, read-mostly data with short TTLs, no network hop, but per-pod duplication and invalidation fan-out.
+
+692
+00:50:30.218 --> 00:50:34.229
+Memcached for simple, huge, multi-threaded key-value caching.
+
+693
+00:50:34.509 --> 00:50:40.183
+Redis when you need data structures, atomic scripts, pub or sub, replication and clustering.
+
+694
+00:50:40.463 --> 00:50:41.999
+Often all three in layers.
+
+695
+00:50:43.349 --> 00:50:44.693
+Question 17.
+
+696
+00:50:44.973 --> 00:50:47.917
+When should a cache become a primary datastore, if ever?
+
+697
+00:50:48.197 --> 00:50:49.563
+Thirty-second answer:
+
+698
+00:50:49.843 --> 00:51:05.309
+Only with a durable, consensus- or log-backed engine designed for it (for example, MemoryDB's multi-AZ transaction log, or a real database with an in-memory engine), clear durability SLOs, backups and recovery tests.
+
+699
+00:51:05.589 --> 00:51:10.901
+Plain Redis with async replication should hold only rebuildable or loss-tolerant data.
+
+700
+00:51:12.251 --> 00:51:13.425
+Question 18.
+
+701
+00:51:13.705 --> 00:51:15.667
+How do you do cache capacity planning?
+
+702
+00:51:15.947 --> 00:51:17.313
+Thirty-second answer:
+
+703
+00:51:17.593 --> 00:51:32.611
+Measure the hit-ratio curve against memory from real traces (simulate with key samples), choose the knee, add overhead and headroom, and size by the larger of memory and throughput needs; revisit with traffic growth and eviction metrics.
+
+704
+00:51:33.961 --> 00:51:35.199
+Question 19.
+
+705
+00:51:35.479 --> 00:51:37.676
+How do you run caches across regions?
+
+706
+00:51:37.956 --> 00:51:39.321
+Thirty-second answer:
+
+707
+00:51:39.601 --> 00:51:50.524
+Keep caches regional and rebuildable from regional or replicated sources; invalidate via events that cross regions; avoid synchronous cross-region cache replication.
+
+708
+00:51:50.804 --> 00:51:58.953
+For global data, active-active databases or CRDT-based caches (Redis Enterprise) exist, but add complexity.
+
+709
+00:52:00.303 --> 00:52:01.413
+Question 20.
+
+710
+00:52:01.693 --> 00:52:04.295
+What would you monitor and alert on for the cache tier?
+
+711
+00:52:04.575 --> 00:52:05.941
+Thirty-second answer:
+
+712
+00:52:06.221 --> 00:52:16.119
+Page on: latency SLO burn, memory above thresholds on noeviction clusters, failover events, replication link down, cluster state not OK.
+
+713
+00:52:16.399 --> 00:52:24.314
+Ticket on: hit-ratio drops per prefix, eviction spikes, fragmentation, big keys, slow log entries, connection count growth.
+
+714
+00:52:25.664 --> 00:52:26.560
+Part 9.
+
+715
+00:52:26.840 --> 00:52:28.248
+Summary and Practice.
+
+716
+00:52:29.498 --> 00:52:30.586
+Key takeaways.
+
+717
+00:52:30.866 --> 00:52:35.495
+Separate clusters by what they may lose; noeviction for non-rebuildable data.
+
+718
+00:52:35.775 --> 00:52:41.599
+Eviction matters: admission + frequency for skew and scans; recency for shifts (L1).
+
+719
+00:52:41.879 --> 00:52:46.210
+Round trips dominate throughput and latency; pipeline and batch (L2).
+
+720
+00:52:46.490 --> 00:52:50.927
+Hash slots + cluster-aware clients make scale-out routine (L3).
+
+721
+00:52:51.207 --> 00:52:56.647
+Async replication loses acknowledged writes on failover; keep truth elsewhere (L4).
+
+722
+00:52:57.997 --> 00:53:00.984
+Hot keys and big keys need specific handling.
+
+723
+00:53:02.334 --> 00:53:03.657
+Decision cheat sheet.
+
+724
+00:53:03.937 --> 00:53:05.281
+Here is a quick table:
+
+725
+00:53:05.561 --> 00:53:06.734
+Need, and Choice.
+
+726
+00:53:07.014 --> 00:53:13.499
+Catalogue-like cache: allkeys-lfu (or W-TinyLFU in process), TTL + jitter.
+
+727
+00:53:13.779 --> 00:53:15.081
+Sessions or carts:
+
+728
+00:53:15.361 --> 00:53:19.179
+Database truth, noeviction cluster, WAIT for replicated writes.
+
+729
+00:53:19.459 --> 00:53:20.419
+Partitioning:
+
+730
+00:53:20.699 --> 00:53:24.091
+Redis Cluster hash slots, hash tags for related keys.
+
+731
+00:53:24.371 --> 00:53:25.225
+Clients:
+
+732
+00:53:25.505 --> 00:53:28.406
+Cluster-aware, pipelining, topology refresh.
+
+733
+00:53:28.686 --> 00:53:29.625
+Hot keys:
+
+734
+00:53:29.905 --> 00:53:32.678
+Near-cache, key replication, replica reads.
+
+735
+00:53:32.958 --> 00:53:33.875
+Failover:
+
+736
+00:53:34.155 --> 00:53:37.718
+Replicas + automatic promotion; min-replicas-to-write.
+
+737
+00:53:39.068 --> 00:53:40.199
+Exercises.
+
+738
+00:53:40.479 --> 00:53:46.473
+(B2) In L1, add ARC or 2Q and compare with W-TinyLFU on the SCAN trace.
+
+739
+00:53:46.753 --> 00:53:55.436
+(B3) In L2, add I or O batching (read all available commands, then write all replies) and measure the non-pipelined throughput.
+
+740
+00:53:55.716 --> 00:54:00.601
+(B3) In L3, run a naive client that refreshes its map every second.
+
+741
+00:54:00.881 --> 00:54:02.311
+How many errors remain?
+
+742
+00:54:02.591 --> 00:54:08.799
+(B4) In L4, add a second replica and WAIT 1: kill the primary and promote the other replica.
+
+743
+00:54:09.079 --> 00:54:10.679
+What does WAIT guarantee now?
+
+744
+00:54:10.959 --> 00:54:17.337
+(B4) Design the key schema and memory budget for the session cluster at 5M active sessions.
+
+745
+00:54:18.687 --> 00:54:19.690
+Further reading.
+
+746
+00:54:19.970 --> 00:54:26.882
+Redis documentation: eviction policies, cluster specification, replication, WAIT, client-side caching.
+
+747
+00:54:27.162 --> 00:54:29.978
+Einziger, Friedman and Manes, TinyLFU:
+
+748
+00:54:30.258 --> 00:54:34.141
+A Highly Efficient Cache Admission Policy (2017).
+
+749
+00:54:34.421 --> 00:54:35.594
+Nishtala et al.
+
+750
+00:54:35.874 --> 00:54:39.565
+Scaling Memcache at Facebook (NSDI 2013).
+
+751
+00:54:39.845 --> 00:54:42.298
+Caffeine wiki: design and efficiency.
+
+752
+00:54:42.578 --> 00:54:48.509
+AWS MemoryDB and ElastiCache documentation on durability and failover.
+
+753
+00:54:49.859 --> 00:54:51.096
+Related chapters.
+
+754
+00:54:51.376 --> 00:54:55.067
+Ch 07, Caching: application-side patterns.
+
+755
+00:54:55.347 --> 00:54:59.165
+Ch 10, Replication: async replication and failover.
+
+756
+00:54:59.445 --> 00:55:03.115
+Ch 11, Partitioning and Sharding: consistent hashing.
+
+757
+00:55:03.395 --> 00:55:07.469
+Ch 38, URL Shortener: hot keys and near-caches.
+
+758
+00:55:07.749 --> 00:55:12.336
+Ch 39, Distributed Rate Limiter: a cache-backed control plane.
+
+759
+00:55:12.616 --> 00:55:17.245
+Ch 43, Home Feed and Recommendations: feature-store fan-out.
+
+760
+00:55:18.595 --> 00:55:20.195
+That's the end of this chapter.
+
+761
+00:55:20.475 --> 00:55:26.513
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+762
+00:55:26.793 --> 00:55:28.243
+See you in the next chapter.
+

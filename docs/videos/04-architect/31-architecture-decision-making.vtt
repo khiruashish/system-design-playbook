@@ -1,0 +1,3334 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.057
+Architecture Decision Making.
+
+2
+00:00:02.337 --> 00:00:06.475
+Chapter 31, from the Architect part of the System Design Playbook.
+
+3
+00:00:08.225 --> 00:00:09.185
+At a glance:
+
+4
+00:00:09.465 --> 00:00:10.639
+Chapter at a glance.
+
+5
+00:00:10.919 --> 00:00:11.921
+Reader bands:
+
+6
+00:00:12.201 --> 00:00:14.591
+B3, then B4, Prerequisites:
+
+7
+00:00:14.871 --> 00:00:20.716
+Ch 01, Ch 02, Ch 25, Ch 29, What you will build:
+
+8
+00:00:20.996 --> 00:00:25.903
+The architect's core skill, making, recording, quantifying and governing decisions.
+
+9
+00:00:26.183 --> 00:00:41.799
+Four runnable labs turn decision-making from opinion into evidence: a weighted trade-off matrix with sensitivity analysis, executable architecture fitness functions, a queueing-based SLO decision, and a Monte Carlo decision under uncertainty.
+
+10
+00:00:43.149 --> 00:00:45.858
+L1: trade-off matrix + sensitivity.
+
+11
+00:00:46.138 --> 00:00:54.714
+A Modular Monolith scored 4.57 versus Serverless 3.64 versus Microservices 2.86.
+
+12
+00:00:54.994 --> 00:01:08.477
+Sensitivity showed the choice is robust: tripling the scalability weight didn't flip it; only scalability could flip it at all, at an extreme weight about 8.75, and then to Serverless, not Microservices.
+
+13
+00:01:08.757 --> 00:01:10.421
+L2: fitness functions.
+
+14
+00:01:10.701 --> 00:01:25.591
+An eroded dependency graph failed the build with three named violations, an upward layer dependency, a domain, then infrastructure leak, and the cycle OrderService, then Order, then Pricing, then OrderService; the fixed graph passed.
+
+15
+00:01:26.941 --> 00:01:28.989
+L3: decide with queueing math.
+
+16
+00:01:29.269 --> 00:01:43.861
+At 800 req per second against a 300 ms p99 SLO, the sequential call chain summed to 334 ms (breach); the parallel fan-out took the max, 111 ms (meets).
+
+17
+00:01:44.141 --> 00:01:54.381
+The queueing cliff showed p99 going 196 ms, then 16 s as utilization rose from 0.5 to 0.99.
+
+18
+00:01:54.661 --> 00:01:55.536
+L4:
+
+19
+00:01:55.816 --> 00:01:57.928
+Monte Carlo under uncertainty.
+
+20
+00:01:58.208 --> 00:02:22.272
+The point estimate at the likely volume said serverless is cheaper ($23k versus $28k); 200,000 trials over the skewed demand distribution said VMs win in expectation ($29.6k versus $35.9k) and in 64% of futures, with a break-even at ~147M requests per month.
+
+21
+00:02:22.552 --> 00:02:23.533
+Reading time:
+
+22
+00:02:23.813 --> 00:02:25.605
+110 min + code.
+
+23
+00:02:26.955 --> 00:02:27.809
+Part 1.
+
+24
+00:02:28.089 --> 00:02:30.009
+Introduction and Why It Matters.
+
+25
+00:02:31.259 --> 00:02:33.883
+A story: the decision nobody could explain.
+
+26
+00:02:34.163 --> 00:02:40.136
+Two years into the grocery platform, a new principal engineer asked a simple question in her first week:
+
+27
+00:02:40.416 --> 00:02:45.045
+Why are we running 26 microservices with a team of 18 engineers?
+
+28
+00:02:45.325 --> 00:02:46.584
+Nobody could answer.
+
+29
+00:02:46.864 --> 00:02:49.851
+The decision had been made in a meeting three years earlier.
+
+30
+00:02:50.131 --> 00:02:51.731
+The people in the room had left.
+
+31
+00:02:52.011 --> 00:02:59.819
+There was a Confluence page titled Target Architecture with a box diagram and the sentence microservices for scalability.
+
+32
+00:03:00.099 --> 00:03:01.421
+There was no record of:
+
+33
+00:03:02.771 --> 00:03:04.713
+What problem the decision was solving.
+
+34
+00:03:04.993 --> 00:03:05.974
+Was it scale?
+
+35
+00:03:06.254 --> 00:03:07.363
+Team autonomy?
+
+36
+00:03:07.643 --> 00:03:10.054
+A reaction to a painful monolith release?
+
+37
+00:03:10.334 --> 00:03:14.238
+Nobody knew, so nobody could tell whether the problem still existed.
+
+38
+00:03:14.518 --> 00:03:16.225
+What alternatives were considered.
+
+39
+00:03:16.505 --> 00:03:19.235
+Had anyone evaluated a modular monolith?
+
+40
+00:03:19.515 --> 00:03:21.329
+If so, why was it rejected?
+
+41
+00:03:21.609 --> 00:03:23.230
+What trade-offs were accepted.
+
+42
+00:03:23.510 --> 00:03:38.209
+The operational cost of 26 services, distributed tracing, 26 pipelines, network failure modes, eventual consistency, was being paid every day, but nobody had ever written down that it was the price of some benefit.
+
+43
+00:03:39.559 --> 00:03:41.095
+What would make the decision wrong.
+
+44
+00:03:41.375 --> 00:03:42.825
+No trigger to revisit.
+
+45
+00:03:43.105 --> 00:03:53.303
+The platform had never exceeded 400 requests or second, far below anything that needed independent scaling, but the decision stood because it was never reopened.
+
+46
+00:03:53.583 --> 00:03:56.036
+Whether the architecture still matched the decision.
+
+47
+00:03:56.316 --> 00:04:06.215
+Several independent services had grown synchronous call chains and shared a database, so the platform had the costs of microservices and the coupling of a monolith.
+
+48
+00:04:07.565 --> 00:04:11.298
+The principal engineer's first act was not to redesign anything.
+
+49
+00:04:11.578 --> 00:04:20.005
+It was to reconstruct the decision, context, options, criteria, trade-offs, and write it down as an Architecture Decision Record.
+
+50
+00:04:20.285 --> 00:04:29.074
+That exercise alone revealed that the original drivers no longer held, and it gave the team a principled basis for consolidating services.
+
+51
+00:04:29.354 --> 00:04:34.965
+This chapter is about making decisions that can be explained, quantified, governed, and revisited.
+
+52
+00:04:36.315 --> 00:04:36.997
+Quote:
+
+53
+00:04:37.277 --> 00:04:38.941
+The thesis of this chapter.
+
+54
+00:04:39.221 --> 00:04:43.125
+Architecture is the set of decisions that are expensive to change.
+
+55
+00:04:43.405 --> 00:05:04.269
+The architect's job is not to have the best opinions, it is to make those decisions explicitly (with options and criteria), quantitatively where possible (capacity, latency, cost, probability), recorded (ADRs), governed (fitness functions that keep the system true to them), and revisitable (with a stated trigger that would reopen them).
+
+56
+00:05:04.549 --> 00:05:08.581
+An undocumented decision is an accident waiting to be inherited.
+
+57
+00:05:09.931 --> 00:05:12.235
+Where this lives in the grocery platform.
+
+58
+00:05:12.515 --> 00:05:13.859
+Here is a quick table:
+
+59
+00:05:14.139 --> 00:05:17.553
+Decision practice, and Grocery platform usage, and Lab.
+
+60
+00:05:17.833 --> 00:05:19.753
+Quality-attribute-driven trade-offs.
+
+61
+00:05:20.033 --> 00:05:21.654
+Grocery platform usage:
+
+62
+00:05:21.934 --> 00:05:25.774
+Every style or technology choice scored against weighted drivers.
+
+63
+00:05:26.054 --> 00:05:26.737
+Lab:
+
+64
+00:05:27.017 --> 00:05:27.849
+L1.
+
+65
+00:05:28.129 --> 00:05:29.707
+Sensitivity analysis.
+
+66
+00:05:29.987 --> 00:05:31.609
+Grocery platform usage:
+
+67
+00:05:31.889 --> 00:05:34.662
+Every scored decision states which weight would flip it.
+
+68
+00:05:34.942 --> 00:05:35.625
+Lab:
+
+69
+00:05:35.905 --> 00:05:36.737
+L1.
+
+70
+00:05:37.017 --> 00:05:37.742
+ADRs.
+
+71
+00:05:38.022 --> 00:05:39.643
+Grocery platform usage:
+
+72
+00:05:39.923 --> 00:05:44.489
+One ADR per significant decision, in the repo, reviewed like code.
+
+73
+00:05:44.769 --> 00:05:46.625
+Lab: §2.4.
+
+74
+00:05:46.905 --> 00:05:48.099
+Fitness functions.
+
+75
+00:05:48.379 --> 00:05:50.001
+Grocery platform usage:
+
+76
+00:05:50.281 --> 00:05:54.761
+Layering, cycles, latency budgets, dependency rules checked in CI.
+
+77
+00:05:55.041 --> 00:05:55.723
+Lab:
+
+78
+00:05:56.003 --> 00:05:56.835
+L2.
+
+79
+00:05:57.115 --> 00:05:58.651
+Quantitative validation.
+
+80
+00:05:58.931 --> 00:06:00.553
+Grocery platform usage:
+
+81
+00:06:00.833 --> 00:06:04.523
+Capacity or latency models before committing to a design.
+
+82
+00:06:04.803 --> 00:06:05.486
+Lab:
+
+83
+00:06:05.766 --> 00:06:06.619
+L3.
+
+84
+00:06:06.899 --> 00:06:08.670
+Decisions under uncertainty.
+
+85
+00:06:08.950 --> 00:06:10.571
+Grocery platform usage:
+
+86
+00:06:10.851 --> 00:06:15.331
+Cost or demand ranges modeled with Monte Carlo, not single numbers.
+
+87
+00:06:15.611 --> 00:06:16.294
+Lab:
+
+88
+00:06:16.574 --> 00:06:17.449
+L4.
+
+89
+00:06:18.799 --> 00:06:20.121
+Review and governance.
+
+90
+00:06:20.401 --> 00:06:22.023
+Grocery platform usage:
+
+91
+00:06:22.303 --> 00:06:26.612
+Lightweight ARB for one-way doors; teams decide two-way doors.
+
+92
+00:06:26.892 --> 00:06:28.684
+Lab: §2.8.
+
+93
+00:06:30.034 --> 00:06:31.357
+Learning objectives.
+
+94
+00:06:31.637 --> 00:06:33.535
+By the end you will be able to:
+
+95
+00:06:33.815 --> 00:06:40.855
+Frame a decision by its drivers (quality attributes, constraints, context) rather than by technology preference.
+
+96
+00:06:41.135 --> 00:06:47.855
+Score options transparently and run a sensitivity analysis that shows how robust the choice is (L1).
+
+97
+00:06:48.135 --> 00:06:54.023
+Write an ADR that a future engineer can use to understand, challenge, and revisit the decision.
+
+98
+00:06:54.303 --> 00:07:01.471
+Turn architectural rules into executable fitness functions that fail the build when the architecture erodes (L2).
+
+99
+00:07:02.821 --> 00:07:07.835
+Validate a design quantitatively against an SLO using queueing math (L3).
+
+100
+00:07:08.115 --> 00:07:13.427
+Decide under uncertainty with distributions rather than point estimates (L4).
+
+101
+00:07:13.707 --> 00:07:17.653
+Distinguish one-way from two-way doors and govern each appropriately.
+
+102
+00:07:19.003 --> 00:07:19.878
+Part 2.
+
+103
+00:07:20.158 --> 00:07:22.035
+Core Concepts, Beginner to Deep.
+
+104
+00:07:23.285 --> 00:07:26.187
+Intuition: what makes a decision architectural.
+
+105
+00:07:26.467 --> 00:07:29.325
+Not every technical decision is architectural.
+
+106
+00:07:29.605 --> 00:07:37.584
+A useful test: a decision is architectural if it is expensive to reverse and affects quality attributes across the system.
+
+107
+00:07:37.864 --> 00:07:43.773
+Choosing a variable name is not; choosing between a shared database and database-per-service is.
+
+108
+00:07:44.053 --> 00:07:53.461
+Choosing a logging library is borderline; choosing synchronous versus event-driven integration between bounded contexts is squarely architectural.
+
+109
+00:07:54.811 --> 00:07:59.057
+This matters because architectural decisions deserve a different process.
+
+110
+00:07:59.337 --> 00:08:05.822
+Cheap, reversible decisions should be made quickly by the people closest to the work, slowing them down is waste.
+
+111
+00:08:06.102 --> 00:08:15.339
+Expensive, irreversible decisions deserve options, analysis, evidence and a written record, rushing them is how you get §1.1.
+
+112
+00:08:15.619 --> 00:08:24.323
+Amazon's framing is useful: one-way doors (hard or impossible to walk back through) versus two-way doors (you can walk back cheaply).
+
+113
+00:08:24.603 --> 00:08:29.958
+Most decisions are two-way doors; the architect's skill is recognizing the few that aren't.
+
+114
+00:08:31.308 --> 00:08:34.081
+Quality attributes and architectural drivers.
+
+115
+00:08:34.361 --> 00:08:40.313
+Architecture is shaped far more by quality attributes (the -ilities) than by functional requirements.
+
+116
+00:08:40.593 --> 00:08:59.537
+Two systems with identical features, customers can place grocery orders, can have completely different architectures depending on whether they must handle 10 or 10,000 orders per second, 99.5% or 99.99% availability, a team of 5 or 500.
+
+117
+00:08:59.817 --> 00:09:21.535
+The standard set (ISO or IEC 25010 plus the usual operational ones): performance (latency, throughput), scalability, availability, reliability, security, modifiability or evolvability, testability, deployability, operability, observability, cost, time-to-market, and team fit (can the team you actually have build and run it?).
+
+118
+00:09:22.885 --> 00:09:26.661
+Three rules make quality attributes useful rather than decorative:
+
+119
+00:09:26.941 --> 00:09:28.221
+Make them measurable.
+
+120
+00:09:28.501 --> 00:09:35.285
+Fast is not a requirement; p99 300 ms at 800 req per second is (L3).
+
+121
+00:09:35.565 --> 00:09:45.741
+The SEI's quality attribute scenario format forces this: source, then stimulus, then artifact, then environment, then response, then response measure.
+
+122
+00:09:46.021 --> 00:09:46.895
+Example:
+
+123
+00:09:47.175 --> 00:09:59.847
+When 800 req per second of checkout traffic (stimulus) arrive at peak (environment), the checkout API (artifact) responds (response) with p99 300 ms (measure).
+
+124
+00:10:01.197 --> 00:10:02.392
+Prioritize them.
+
+125
+00:10:02.672 --> 00:10:03.696
+They conflict.
+
+126
+00:10:03.976 --> 00:10:14.728
+Maximum availability costs consistency (CAP, Ch 12); maximum security costs usability; maximum evolvability costs time-to-market today.
+
+127
+00:10:15.008 --> 00:10:18.528
+Weighting them (L1) is how you make the conflict explicit.
+
+128
+00:10:18.808 --> 00:10:20.749
+Include constraints and context.
+
+129
+00:10:21.029 --> 00:10:29.179
+Constraints are non-negotiable (regulatory data residency, a mandated cloud, a fixed budget, a team that knows Java).
+
+130
+00:10:29.459 --> 00:10:37.544
+Context includes the stage of the business, a startup searching for product-market fit should weight time-to-market far above scalability.
+
+131
+00:10:38.894 --> 00:10:42.307
+The decision process: options, criteria, trade-offs.
+
+132
+00:10:42.587 --> 00:10:45.425
+A repeatable process for significant decisions:
+
+133
+00:10:45.705 --> 00:10:47.539
+State the problem and drivers.
+
+134
+00:10:47.819 --> 00:10:49.270
+What forces are at work?
+
+135
+00:10:49.550 --> 00:10:52.814
+What quality attributes matter most, and what are the constraints?
+
+136
+00:10:53.094 --> 00:10:54.843
+Generate at least three options.
+
+137
+00:10:55.123 --> 00:10:58.131
+Always include do nothing or keep the current approach.
+
+138
+00:10:58.411 --> 00:11:02.443
+Two options is a false binary; one option is a rationalization.
+
+139
+00:11:02.723 --> 00:11:05.411
+Define criteria and weights before scoring.
+
+140
+00:11:05.691 --> 00:11:10.747
+If you score first and weight second, you will (unconsciously) pick weights that crown your favorite.
+
+141
+00:11:12.097 --> 00:11:22.359
+Score each option against each criterion, ideally with several people scoring independently and then discussing divergences, which is where the real insights are.
+
+142
+00:11:22.639 --> 00:11:25.028
+Run a sensitivity analysis (L1).
+
+143
+00:11:25.308 --> 00:11:27.036
+Which weights would flip the outcome?
+
+144
+00:11:27.316 --> 00:11:33.311
+If a small, plausible change flips the winner, the decision is fragile and you need more information.
+
+145
+00:11:33.591 --> 00:11:37.281
+If only an extreme change flips it, the decision is robust.
+
+146
+00:11:37.561 --> 00:11:48.697
+Validate quantitatively where a criterion is measurable, capacity, latency, cost (L3, L4), rather than trusting a 1-to-5 score for something you can calculate.
+
+147
+00:11:50.047 --> 00:11:52.799
+Decide, record, and state the revisit trigger.
+
+148
+00:11:53.079 --> 00:11:54.167
+We choose X.
+
+149
+00:11:54.447 --> 00:11:56.239
+We would revisit if Y happens.
+
+150
+00:11:56.519 --> 00:11:58.034
+(§2.4).
+
+151
+00:11:58.314 --> 00:12:01.578
+The weighted matrix is not a machine that produces truth.
+
+152
+00:12:01.858 --> 00:12:05.207
+Its value is that it makes reasoning visible and arguable.
+
+153
+00:12:05.487 --> 00:12:15.130
+When two senior engineers disagree, the matrix shows where they disagree, usually on a weight (a values disagreement) or a score (a facts disagreement).
+
+154
+00:12:15.410 --> 00:12:22.770
+Facts disagreements can be settled with evidence; values disagreements must be settled by whoever owns the business priority.
+
+155
+00:12:24.120 --> 00:12:26.765
+Architecture Decision Records (ADRs).
+
+156
+00:12:27.045 --> 00:12:31.397
+An ADR is a short document capturing one significant decision.
+
+157
+00:12:31.677 --> 00:12:35.261
+Michael Nygard's original format remains the most common:
+
+158
+00:12:36.611 --> 00:12:38.190
+Here is the MARKDOWN code.
+
+159
+00:12:38.470 --> 00:12:42.182
+It runs to 33 lines; the full listing is in the chapter.
+
+160
+00:12:42.462 --> 00:12:43.977
+ADR-042:
+
+161
+00:12:44.257 --> 00:12:46.838
+Use a modular monolith for the order domain.
+
+162
+00:12:49.688 --> 00:12:51.736
+What makes ADRs work in practice:
+
+163
+00:12:52.016 --> 00:12:57.477
+Keep them in the repo, next to the code (docs or adr/), reviewed through pull requests.
+
+164
+00:12:57.757 --> 00:13:02.515
+A wiki page nobody reviews rots; a file in the repo gets diffed and linked.
+
+165
+00:13:02.795 --> 00:13:04.843
+Keep them short, one or two pages.
+
+166
+00:13:05.123 --> 00:13:07.939
+The goal is the reasoning, not a design document.
+
+167
+00:13:08.219 --> 00:13:09.733
+Immutable once accepted.
+
+168
+00:13:10.013 --> 00:13:14.259
+You don't edit history; you write a new ADR that supersedes the old one.
+
+169
+00:13:14.539 --> 00:13:18.421
+The chain of superseded ADRs is the architecture's history.
+
+170
+00:13:19.771 --> 00:13:21.841
+Record rejected options and why.
+
+171
+00:13:22.121 --> 00:13:30.057
+This is the section future engineers value most, it stops them re-proposing something already evaluated without new information.
+
+172
+00:13:30.337 --> 00:13:31.894
+Include the revisit trigger.
+
+173
+00:13:32.174 --> 00:13:35.737
+This single line is what would have prevented §1.1.
+
+174
+00:13:36.017 --> 00:13:39.281
+Write ADRs for decisions not to do something too.
+
+175
+00:13:39.561 --> 00:13:43.635
+We will not introduce Kafka yet is a decision with consequences.
+
+176
+00:13:44.985 --> 00:14:01.135
+Variants exist, MADR (Markdown ADR) adds explicit decision drivers and pros or cons per option; Y-statements compress an ADR to one sentence (In the context of X, facing Y, we decided Z to achieve Q, accepting D).
+
+177
+00:14:01.415 --> 00:14:03.655
+The format matters far less than the habit.
+
+178
+00:14:05.005 --> 00:14:06.306
+Evaluation methods:
+
+179
+00:14:06.586 --> 00:14:08.463
+ATAM and its lightweight cousins.
+
+180
+00:14:08.743 --> 00:14:26.450
+The Architecture Tradeoff Analysis Method (ATAM) from the SEI is the heavyweight, systematic approach: stakeholders build a utility tree (quality attributes, then refined attributes, then concrete scenarios, each rated by business importance and technical difficulty),
+
+181
+00:14:26.730 --> 00:14:43.946
+architects walk through how the architecture handles the high-priority scenarios, and the team identifies sensitivity points (a decision that strongly affects one quality attribute), trade-off points (a decision that affects several attributes in opposite directions), and risks.
+
+182
+00:14:44.226 --> 00:14:51.778
+Full ATAM takes days and many stakeholders, appropriate for a bank's core ledger replacement, excessive for most decisions.
+
+183
+00:14:52.058 --> 00:14:53.445
+Useful lighter methods:
+
+184
+00:14:54.795 --> 00:15:05.952
+Lightweight ATAM or mini-QAW, a 2 to 4 hour workshop: agree the top 5 quality attribute scenarios, walk the candidate architecture through each, list risks.
+
+185
+00:15:06.232 --> 00:15:10.947
+Decision matrix + sensitivity (L1), for choosing among a few options.
+
+186
+00:15:11.227 --> 00:15:14.448
+Pre-mortem, It's a year from now and this decision failed.
+
+187
+00:15:14.728 --> 00:15:15.411
+Why?
+
+188
+00:15:15.691 --> 00:15:19.723
+Surfaces risks people are reluctant to raise in a normal review.
+
+189
+00:15:20.003 --> 00:15:28.472
+Architecture spike or prototype, when a score is really a guess, spend a few days building the riskiest part to turn the guess into evidence.
+
+190
+00:15:29.822 --> 00:15:36.755
+Risk storming, everyone marks risks on the architecture diagram independently, then the team discusses clusters.
+
+191
+00:15:37.035 --> 00:15:48.961
+The key concepts transfer regardless of method: sensitivity points and trade-off points are the parts of the architecture to watch hardest, because that's where small changes have big consequences.
+
+192
+00:15:50.311 --> 00:15:51.996
+Quantitative decision-making.
+
+193
+00:15:52.276 --> 00:15:55.860
+Where a criterion can be computed, compute it rather than score it.
+
+194
+00:15:56.140 --> 00:16:00.663
+The architect's quantitative toolkit, most of which appears earlier in this handbook:
+
+195
+00:16:00.943 --> 00:16:08.303
+Back-of-the-envelope estimation (Ch 02), storage, bandwidth, QPS, order-of-magnitude feasibility.
+
+196
+00:16:08.583 --> 00:16:16.903
+Latency budgets, sequential calls add; parallel calls take the max; every hop adds network time and serialization (L3).
+
+197
+00:16:18.253 --> 00:16:26.850
+Queueing theory, Little's Law (L = λW) and the M or M or 1 response time R = S / (1 minus ρ).
+
+198
+00:16:27.130 --> 00:16:32.634
+The most important consequence for architects: latency is non-linear in utilization.
+
+199
+00:16:32.914 --> 00:16:39.378
+At ρ = 0.5 you have headroom; at ρ = 0.9 you're on the cliff (L3:
+
+200
+00:16:39.658 --> 00:16:46.229
+196 ms, then 1,484 ms for a 35 ms service).
+
+201
+00:16:46.509 --> 00:16:52.546
+This is why capacity targets are typically 50 to 70% utilization, not 90%.
+
+202
+00:16:52.826 --> 00:16:59.823
+Universal Scalability Law (Ch 25), contention and coherency limit how far adding nodes helps.
+
+203
+00:17:01.173 --> 00:17:19.029
+Availability math, serial dependencies multiply availabilities (three 99.9% services in series about 99.7%); redundancy improves them (two independent 99% replicas about 99.99%).
+
+204
+00:17:19.309 --> 00:17:23.789
+Cost models, fixed versus variable cost, break-even points (L4).
+
+205
+00:17:24.069 --> 00:17:32.432
+Monte Carlo simulation, when inputs are uncertain, sample them from distributions and look at the distribution of outcomes (L4).
+
+206
+00:17:32.712 --> 00:17:38.429
+L3's lesson generalizes: the numbers often settle arguments that adjectives cannot.
+
+207
+00:17:38.709 --> 00:17:52.747
+Async is more scalable is an opinion; the sequential chain's p99 is 334 ms against a 300 ms SLO; the parallel fan-out's is 111 ms is a decision.
+
+208
+00:17:54.097 --> 00:17:55.761
+Deciding under uncertainty.
+
+209
+00:17:56.041 --> 00:18:05.790
+Almost every architectural decision is made with uncertain inputs, future traffic, future team size, future product direction, vendor pricing changes.
+
+210
+00:18:06.070 --> 00:18:07.286
+Three disciplines:
+
+211
+00:18:07.566 --> 00:18:09.273
+Use ranges, not points.
+
+212
+00:18:09.553 --> 00:18:13.307
+Ask for pessimistic or likely or optimistic estimates.
+
+213
+00:18:13.587 --> 00:18:16.211
+A single number hides both the spread and the skew.
+
+214
+00:18:17.561 --> 00:18:18.521
+Beware skew.
+
+215
+00:18:18.801 --> 00:18:24.049
+Demand forecasts are usually right-skewed, a long tail of what if it takes off scenarios.
+
+216
+00:18:24.329 --> 00:18:32.351
+When the cost function is non-linear or has different slopes for different options, plugging in the most likely value can pick the wrong option.
+
+217
+00:18:32.631 --> 00:18:38.604
+L4 shows exactly this: the point estimate chose serverless; the distribution chose VMs.
+
+218
+00:18:38.884 --> 00:18:41.359
+Prefer options that keep options open.
+
+219
+00:18:41.639 --> 00:18:45.201
+Under high uncertainty, the value of reversibility rises.
+
+220
+00:18:45.481 --> 00:18:50.985
+A slightly more expensive choice that is easy to change can beat a cheaper choice that locks you in.
+
+221
+00:18:51.265 --> 00:18:58.455
+This is real-options thinking: flexibility has a quantifiable value, and it is highest when uncertainty is highest.
+
+222
+00:18:59.805 --> 00:19:20.583
+Related practices: last responsible moment (defer irreversible decisions until you have more information, but not so late that you've lost options by default), and decision triggers (commit now, but state the observable condition that would make you switch, L4's migrate at ~147M requests per month).
+
+223
+00:19:21.933 --> 00:19:25.112
+Governance: fitness functions, reviews, and who decides.
+
+224
+00:19:25.392 --> 00:19:27.653
+A decision that isn't enforced decays.
+
+225
+00:19:27.933 --> 00:19:29.768
+Two complementary mechanisms:
+
+226
+00:19:30.048 --> 00:19:41.824
+Fitness functions (from Building Evolutionary Architectures, Ford or Parsons or Kua) are automated checks that measure how well the system satisfies an architectural characteristic.
+
+227
+00:19:42.104 --> 00:19:45.112
+They turn a whiteboard rule into a CI gate (L2):
+
+228
+00:19:46.462 --> 00:19:47.806
+Here is a quick table:
+
+229
+00:19:48.086 --> 00:19:49.899
+Kind, and Example, and Tooling.
+
+230
+00:19:50.179 --> 00:19:52.099
+Structural (atomic, static).
+
+231
+00:19:52.379 --> 00:19:53.254
+Example:
+
+232
+00:19:53.534 --> 00:19:57.331
+Domain must not depend on infrastructure; no module cycles.
+
+233
+00:19:57.611 --> 00:19:58.422
+Tooling:
+
+234
+00:19:58.702 --> 00:20:01.731
+ArchUnit, jQAssistant, dependency-cruiser.
+
+235
+00:20:02.011 --> 00:20:03.355
+Performance (triggered).
+
+236
+00:20:03.635 --> 00:20:04.510
+Example:
+
+237
+00:20:04.790 --> 00:20:09.057
+Checkout p99 300 ms under the load-test profile.
+
+238
+00:20:09.337 --> 00:20:10.147
+Tooling:
+
+239
+00:20:10.427 --> 00:20:14.033
+Gatling or k6 in CI, compared against a budget.
+
+240
+00:20:14.313 --> 00:20:16.083
+Operational (continuous).
+
+241
+00:20:16.363 --> 00:20:17.238
+Example:
+
+242
+00:20:17.518 --> 00:20:19.801
+Error-budget burn rate below threshold.
+
+243
+00:20:20.081 --> 00:20:20.891
+Tooling:
+
+244
+00:20:21.171 --> 00:20:23.667
+SLO monitoring (Ch 24).
+
+245
+00:20:23.947 --> 00:20:24.886
+Security.
+
+246
+00:20:25.166 --> 00:20:26.041
+Example:
+
+247
+00:20:26.321 --> 00:20:30.289
+No critical CVEs in dependencies; no secrets in code.
+
+248
+00:20:30.569 --> 00:20:31.379
+Tooling:
+
+249
+00:20:31.659 --> 00:20:33.451
+SCA or secret scanners.
+
+250
+00:20:33.731 --> 00:20:34.627
+Holistic.
+
+251
+00:20:34.907 --> 00:20:35.782
+Example:
+
+252
+00:20:36.062 --> 00:20:40.841
+Chaos experiment: losing recommendations doesn't breach checkout SLO.
+
+253
+00:20:41.121 --> 00:20:41.931
+Tooling:
+
+254
+00:20:42.211 --> 00:20:44.110
+Ch 27 game days.
+
+255
+00:20:45.460 --> 00:20:48.361
+Review processes handle what can't be automated.
+
+256
+00:20:48.641 --> 00:20:57.729
+The failure mode to avoid is the heavyweight Architecture Review Board that every change must queue for, it becomes a bottleneck and teams route around it.
+
+257
+00:20:58.009 --> 00:20:59.033
+Better patterns:
+
+258
+00:20:59.313 --> 00:21:10.129
+Architecture advice process, anyone can make an architectural decision, but they must seek advice from those affected and from people with expertise, and record it in an ADR.
+
+259
+00:21:10.409 --> 00:21:12.095
+The decider stays accountable.
+
+260
+00:21:13.445 --> 00:21:27.034
+Tiered review, two-way-door decisions are made by teams; one-way-door or cross-cutting decisions (a new datastore technology, a new integration style, anything touching the security boundary) get a lightweight review.
+
+261
+00:21:27.314 --> 00:21:37.341
+Paved road or golden path, make the recommended choice the easiest choice (templates, platform defaults), so governance happens by default rather than by gate.
+
+262
+00:21:37.621 --> 00:21:48.202
+Technology radar, publish Adopt or Trial or Assess or Hold for technologies, so teams know which choices need no justification and which need an ADR.
+
+263
+00:21:49.552 --> 00:21:52.048
+Cognitive traps in architecture decisions.
+
+264
+00:21:52.328 --> 00:21:55.293
+Architects are human and the same biases recur:
+
+265
+00:21:55.573 --> 00:22:01.888
+Résumé-driven development, choosing technology because it's interesting to learn, not because it fits.
+
+266
+00:22:02.168 --> 00:22:06.093
+Counter: the team-fit and operability criteria in the matrix.
+
+267
+00:22:06.373 --> 00:22:09.787
+Hype or cargo cult, Netflix does microservices.
+
+268
+00:22:10.067 --> 00:22:12.413
+Netflix has problems of a scale you don't.
+
+269
+00:22:12.693 --> 00:22:14.421
+Counter: context drivers.
+
+270
+00:22:14.701 --> 00:22:18.691
+Sunk cost, keeping a decision because of the effort already invested.
+
+271
+00:22:18.971 --> 00:22:22.107
+Counter: revisit triggers evaluated on current facts.
+
+272
+00:22:23.457 --> 00:22:28.641
+Anchoring, the first option presented becomes the reference everything else is compared to.
+
+273
+00:22:28.921 --> 00:22:32.398
+Counter: generate options independently before discussing.
+
+274
+00:22:32.678 --> 00:22:39.803
+Confirmation bias or HiPPO, weighting criteria to favor the option the highest-paid person prefers.
+
+275
+00:22:40.083 --> 00:22:44.969
+Counter: weights before scores; independent scoring; sensitivity analysis.
+
+276
+00:22:45.249 --> 00:22:50.774
+Analysis paralysis, refusing to decide until uncertainty is gone (it never goes).
+
+277
+00:22:51.054 --> 00:22:55.747
+Counter: two-way doors decided fast; time-boxed spikes; decision triggers.
+
+278
+00:22:57.097 --> 00:22:59.188
+Point-estimate fallacy, L4.
+
+279
+00:23:00.538 --> 00:23:02.287
+Technical debt as a decision.
+
+280
+00:23:02.567 --> 00:23:15.154
+Technical debt is best understood as a decision to trade future cost for present speed, and like financial debt, it's fine when taken deliberately and serviced, disastrous when accumulated accidentally.
+
+281
+00:23:15.434 --> 00:23:31.967
+Martin Fowler's quadrant separates deliberate versus inadvertent and prudent versus reckless: we must ship now and will clean up after launch (deliberate, prudent) is a legitimate architectural decision and deserves an ADR with a repayment trigger; what's layering?
+
+282
+00:23:32.247 --> 00:23:37.197
+(inadvertent, reckless) is erosion that fitness functions exist to catch (L2).
+
+283
+00:23:38.547 --> 00:23:51.219
+Making debt a first-class decision means recording the shortcut, its expected cost (interest), and its repayment trigger, and tracking it like any other backlog item rather than letting it silently compound.
+
+284
+00:23:52.569 --> 00:23:53.465
+Part 3.
+
+285
+00:23:53.745 --> 00:23:55.473
+Architecture and Diagrams.
+
+286
+00:23:56.723 --> 00:23:59.133
+Component view: the decision lifecycle.
+
+287
+00:23:59.413 --> 00:24:00.757
+Here is the diagram.
+
+288
+00:24:04.607 --> 00:24:08.917
+Sequence: happy path, a significant decision through the advice process.
+
+289
+00:24:09.197 --> 00:24:11.991
+The sequence diagram walks through it step by step.
+
+290
+00:24:12.271 --> 00:24:16.495
+Team to Team: frame drivers, 3 options, criteria + weights.
+
+291
+00:24:16.775 --> 00:24:20.210
+Team to Affected: seek advice - impact on your services?
+
+292
+00:24:20.490 --> 00:24:24.501
+Team to Experts: seek advice - risks, prior art, sensitivity?
+
+293
+00:24:24.781 --> 00:24:27.597
+Affected to Team: concerns and constraints.
+
+294
+00:24:27.877 --> 00:24:31.205
+Experts to Team: sensitivity points, a missed option.
+
+295
+00:24:31.485 --> 00:24:32.573
+Team to Repo:
+
+296
+00:24:32.853 --> 00:24:37.055
+PR with ADR - decision, rejected options, revisit trigger.
+
+297
+00:24:37.335 --> 00:24:39.725
+Repo to Team: merged after review.
+
+298
+00:24:40.005 --> 00:24:43.823
+Team to CI: add fitness functions that enforce the decision.
+
+299
+00:24:44.103 --> 00:24:47.474
+CI to Team: future changes checked automatically.
+
+300
+00:24:51.324 --> 00:24:55.889
+Sequence: failure path, architecture erosion caught by a fitness function.
+
+301
+00:24:56.169 --> 00:24:58.964
+The sequence diagram walks through it step by step.
+
+302
+00:24:59.244 --> 00:25:04.215
+Dev to PR: domain class calls the HTTP payment client directly.
+
+303
+00:25:04.495 --> 00:25:06.031
+PR to CI: build.
+
+304
+00:25:06.311 --> 00:25:07.292
+CI to CI:
+
+305
+00:25:07.572 --> 00:25:11.007
+F3 domain purity - domain depends on infrastructure.
+
+306
+00:25:11.287 --> 00:25:12.460
+CI to PR:
+
+307
+00:25:12.740 --> 00:25:14.895
+FAIL - names the offending dependency.
+
+308
+00:25:15.175 --> 00:25:19.057
+PR to Dev: blocked, link to ADR-043.
+
+309
+00:25:19.337 --> 00:25:23.881
+Dev to PR: introduce a port in domain, adapter in infrastructure.
+
+310
+00:25:24.161 --> 00:25:25.697
+PR to CI: build.
+
+311
+00:25:25.977 --> 00:25:27.151
+CI to PR:
+
+312
+00:25:27.431 --> 00:25:28.177
+PASS.
+
+313
+00:25:32.027 --> 00:25:33.969
+State: an ADR's lifecycle.
+
+314
+00:25:34.249 --> 00:25:35.593
+Here is the diagram.
+
+315
+00:25:39.443 --> 00:25:40.360
+Part 4.
+
+316
+00:25:40.640 --> 00:25:42.261
+Design Document Excerpt:
+
+317
+00:25:42.541 --> 00:25:44.888
+Grocery Architecture Decision Process.
+
+318
+00:25:46.138 --> 00:25:46.885
+Note:
+
+319
+00:25:47.165 --> 00:25:52.306
+Design Document (excerpt), Architecture Decision Process v1.0.
+
+320
+00:25:52.586 --> 00:25:53.482
+Status:
+
+321
+00:25:53.762 --> 00:25:55.042
+Accepted, Authors:
+
+322
+00:25:55.322 --> 00:25:57.135
+Principal Engineers, Reviewers:
+
+323
+00:25:57.415 --> 00:25:59.869
+Engineering leadership, squad tech leads.
+
+324
+00:26:00.149 --> 00:26:12.778
+Context, The platform's founding decisions (26 microservices, shared DB for several) were undocumented; their drivers no longer held; nobody could say what would justify changing them.
+
+325
+00:26:13.058 --> 00:26:17.730
+Architectural rules existed only on diagrams and eroded silently.
+
+326
+00:26:19.080 --> 00:26:30.195
+Decision, Every significant decision gets an ADR in the repo with options, weighted criteria, sensitivity, quantitative evidence where measurable, and a revisit trigger.
+
+327
+00:26:30.475 --> 00:26:33.803
+Rules that can be checked become fitness functions in CI.
+
+328
+00:26:34.083 --> 00:26:36.771
+Decisions use an advice process, not a gate.
+
+329
+00:26:38.121 --> 00:27:04.659
+Related ADRs, ADR-170 ADRs in-repo, immutable, supersede-don't-edit; ADR-171 Decision matrix with weights before scores + sensitivity analysis; ADR-172 Quantitative validation for performance or cost criteria; ADR-173 Monte Carlo for decisions with uncertain inputs; ADR-174 Fitness functions
+
+330
+00:27:04.939 --> 00:27:18.742
+(ArchUnit) for layering, cycles, domain purity; ADR-175 Advice process + tiered review (one-way doors only); ADR-176 Quarterly review of revisit triggers.
+
+331
+00:27:19.022 --> 00:27:19.982
+Requirements.
+
+332
+00:27:20.262 --> 00:27:21.798
+R1, Explainable.
+
+333
+00:27:22.078 --> 00:27:27.646
+Any engineer can find, for any significant decision, why it was made and what was rejected.
+
+334
+00:27:28.996 --> 00:27:30.681
+R2, Robustness known.
+
+335
+00:27:30.961 --> 00:27:35.740
+Every scored decision states which assumption, if changed, would flip it (L1).
+
+336
+00:27:36.020 --> 00:27:38.281
+R3, Evidence over adjectives.
+
+337
+00:27:38.561 --> 00:27:44.129
+Performance, capacity and cost claims are backed by a model or measurement (L3, L4).
+
+338
+00:27:44.409 --> 00:27:45.817
+R4, Enforced.
+
+339
+00:27:46.097 --> 00:27:50.833
+Structural decisions are enforced by fitness functions that fail the build (L2).
+
+340
+00:27:51.113 --> 00:27:52.628
+R5, Revisitable.
+
+341
+00:27:52.908 --> 00:27:56.876
+Every ADR has an observable revisit trigger, reviewed quarterly.
+
+342
+00:27:58.226 --> 00:28:00.317
+R6, Fast for two-way doors.
+
+343
+00:28:00.597 --> 00:28:04.117
+Reversible decisions are made by teams without review.
+
+344
+00:28:04.397 --> 00:28:05.805
+Decisions in detail.
+
+345
+00:28:06.085 --> 00:28:17.562
+ADRs in-repo (ADR-170). docs or adr or NNNN-title.md, MADR format, reviewed by PR; accepted ADRs are immutable.
+
+346
+00:28:17.842 --> 00:28:21.447
+Matrix + sensitivity (ADR-171).
+
+347
+00:28:21.727 --> 00:28:29.343
+Criteria and weights agreed first; ≥3 people score independently; sensitivity table attached.
+
+348
+00:28:29.623 --> 00:28:30.434
+(L1.).
+
+349
+00:28:31.784 --> 00:28:35.240
+Quantitative validation (ADR-172).
+
+350
+00:28:35.520 --> 00:28:39.744
+Latency budgets and capacity via queueing models before committing.
+
+351
+00:28:40.024 --> 00:28:40.941
+(L3.).
+
+352
+00:28:41.221 --> 00:28:43.995
+Uncertainty (ADR-173).
+
+353
+00:28:44.275 --> 00:28:51.272
+Demand or cost ranges as distributions; decisions report expected value, spread, and break-even.
+
+354
+00:28:51.552 --> 00:28:52.448
+(L4.).
+
+355
+00:28:52.728 --> 00:28:55.779
+Fitness functions (ADR-174).
+
+356
+00:28:56.059 --> 00:29:00.539
+Layering, no cycles, domain purity, latency budget checks in CI.
+
+357
+00:29:00.819 --> 00:29:01.672
+(L2.).
+
+358
+00:29:01.952 --> 00:29:04.939
+Advice process (ADR-175).
+
+359
+00:29:05.219 --> 00:29:10.000
+Decider seeks advice from affected teams and the guild; one-way doors get a 30-minute review.
+
+360
+00:29:12.350 --> 00:29:15.102
+Trigger review (ADR-176).
+
+361
+00:29:15.382 --> 00:29:20.395
+Each quarter, check every Accepted ADR's revisit trigger against current metrics.
+
+362
+00:29:20.675 --> 00:29:21.699
+Consequences.
+
+363
+00:29:21.979 --> 00:29:25.606
+A modest writing cost per decision and some CI investment.
+
+364
+00:29:25.886 --> 00:29:39.113
+In return: decisions survive staff turnover, fragile decisions are identified before commitment, erosion is caught at PR time, and decisions are reopened when, and only when, their conditions change.
+
+365
+00:29:39.393 --> 00:29:48.822
+The first application of this process (reconstructing the microservices decision) led to ADR-042 consolidating the order domain.
+
+366
+00:29:50.172 --> 00:29:51.132
+Part 5.
+
+367
+00:29:51.412 --> 00:29:53.396
+Hands-On Code, Level Ladder.
+
+368
+00:29:54.646 --> 00:29:55.414
+Info:
+
+369
+00:29:55.694 --> 00:29:56.782
+What's real here.
+
+370
+00:29:57.062 --> 00:30:05.510
+All four labs are self-contained JDK 21 programs with deterministic output (fixed seeds, no timing dependence).
+
+371
+00:30:05.790 --> 00:30:27.422
+They implement the mechanisms behind the practices: weighted scoring and one-at-a-time sensitivity (L1), graph-based architecture conformance (L2, ArchUnit does the same on real bytecode), M or M or 1 queueing latency budgets (L3), and Monte Carlo simulation over a triangular demand distribution (L4).
+
+372
+00:30:27.702 --> 00:30:33.633
+Cost and capacity parameters are illustrative but internally consistent; plug in your own numbers.
+
+373
+00:30:34.983 --> 00:30:38.588
+L1, Weighted trade-off matrix with sensitivity analysis.
+
+374
+00:30:38.868 --> 00:30:39.807
+Requirement:
+
+375
+00:30:40.087 --> 00:30:45.420
+Choose the architecture style for the next phase, and tell us how confident we should be in that choice.
+
+376
+00:30:45.700 --> 00:30:50.820
+Three candidate styles are scored 1 to 5 against six weighted quality attributes.
+
+377
+00:30:51.100 --> 00:31:00.700
+The program computes the weighted ranking, pushes the scalability weight to see if the winner flips, then sweeps every weight one at a time to find each one's flip point.
+
+378
+00:31:02.050 --> 00:31:05.037
+Here is the Java code, DecisionL1.java.
+
+379
+00:31:05.317 --> 00:31:09.477
+It runs to 111 lines; the full listing is in the chapter.
+
+380
+00:31:09.757 --> 00:31:17.053
+DecisionL1.java, run with: java DecisionL1.java (JDK 21, no dependencies).
+
+381
+00:31:17.333 --> 00:31:21.194
+A WEIGHTED TRADE-OFF DECISION MATRIX with SENSITIVITY ANALYSIS.
+
+382
+00:31:21.474 --> 00:31:25.741
+The grocery platform must pick an architecture style. for its next phase.
+
+383
+00:31:26.021 --> 00:31:32.058
+Three candidates are scored 1..5 against weighted quality attributes; we compute the ranking, then.
+
+384
+00:31:34.908 --> 00:31:35.825
+On screen:
+
+385
+00:31:36.105 --> 00:31:41.161
+Weighted decision matrix, architecture style for the grocery platform's next phase.
+
+386
+00:31:41.441 --> 00:31:59.617
+Criteria or weights: time-to-market=3 scalability=2 operability=2. cost-at-current-scale=2 team-fit=3 evolvability=2. option raw scores (ttm or scale or ops or cost or team or evolve) weighted.
+
+387
+00:31:59.897 --> 00:32:04.804
+Modular Monolith 5, 3, 5, 5, 5, 4 4.57.
+
+388
+00:32:05.084 --> 00:32:09.265
+Microservices 2, 5, 2, 2, 2, 5 2.86.
+
+389
+00:32:09.545 --> 00:32:15.241
+Serverless (FaaS) 4, 5, 3, 4, 3, 3 3.64. then base winner:
+
+390
+00:32:15.521 --> 00:32:21.260
+Modular Monolith (4.57). sensitivity A, scalability weight 2, then 6:
+
+391
+00:32:21.540 --> 00:32:23.652
+Modular Monolith 4.22.
+
+392
+00:32:23.932 --> 00:32:26.151
+Microservices 3.33.
+
+393
+00:32:26.431 --> 00:32:27.945
+The rest is in the chapter.
+
+394
+00:32:30.795 --> 00:32:31.649
+Reading it:
+
+395
+00:32:31.929 --> 00:32:41.998
+The Modular Monolith wins at 4.57 because this team, at this stage, weights time-to-market and team-fit highest, and the monolith scores 5 on both.
+
+396
+00:32:42.278 --> 00:32:47.249
+Sensitivity A: tripling the scalability weight (2, then 6) doesn't change the winner.
+
+397
+00:32:47.529 --> 00:32:51.433
+Only at 9 does it flip, and to Serverless, not Microservices.
+
+398
+00:32:51.713 --> 00:32:57.302
+That second fact is a surprise a monolith versus microservices framing would have missed.
+
+399
+00:32:58.652 --> 00:33:04.113
+Sensitivity B: five of six criteria can't flip the winner anywhere in 0, 12.
+
+400
+00:33:04.393 --> 00:33:13.268
+Only scalability can, at about 8.75, that is, valuing scalability roughly as much as every other criterion combined.
+
+401
+00:33:13.548 --> 00:33:14.977
+That's a robust decision.
+
+402
+00:33:15.257 --> 00:33:27.225
+The ADR therefore records not just monolith but monolith, robust to normal weight disagreement; revisit if scalability becomes the dominant driver, a quantified revisit trigger.
+
+403
+00:33:28.575 --> 00:33:30.922
+L2, Architecture fitness functions.
+
+404
+00:33:31.202 --> 00:33:32.141
+Requirement:
+
+405
+00:33:32.421 --> 00:33:35.301
+Our layered architecture exists on a diagram.
+
+406
+00:33:35.581 --> 00:33:38.930
+Make it impossible to violate without the build noticing.
+
+407
+00:33:39.210 --> 00:33:50.986
+The module dependency graph is checked by three fitness functions, layering (dependencies only point down), no cycles, and domain purity (domain never depends on infrastructure).
+
+408
+00:33:51.266 --> 00:33:53.869
+First on an eroded graph, then on the fixed one.
+
+409
+00:33:55.219 --> 00:33:58.056
+Here is the Java code, FitnessL2.java.
+
+410
+00:33:58.336 --> 00:34:02.581
+It runs to 131 lines; the full listing is in the chapter.
+
+411
+00:34:02.861 --> 00:34:09.923
+FitnessL2.java, run with: java FitnessL2.java (JDK 21, no dependencies).
+
+412
+00:34:10.203 --> 00:34:26.224
+ARCHITECTURE FITNESS FUNCTIONS (the core idea of evolutionary architecture): an architectural rule you can no longer. only draw on a whiteboard, but EXECUTE as a test in CI, so the architecture can't silently erode as the code changes.
+
+413
+00:34:29.074 --> 00:34:29.991
+On screen:
+
+414
+00:34:30.271 --> 00:34:34.239
+Architecture fitness functions on the module dependency graph.
+
+415
+00:34:34.519 --> 00:34:38.189
+(api, then application, then domain, then infrastructure).
+
+416
+00:34:38.469 --> 00:34:40.495
+BEFORE (architecture has eroded):
+
+417
+00:34:40.775 --> 00:34:45.490
+F3 domain purity Order (domain) depends on PaymentGatewayHttp.
+
+418
+00:34:45.770 --> 00:34:46.858
+(infrastructure).
+
+419
+00:34:47.138 --> 00:34:52.151
+F1 layering Pricing (domain), then OrderService (application) points UP a layer.
+
+420
+00:34:52.431 --> 00:34:59.941
+F2 no cycles OrderService, then Order, then Pricing, then OrderService. then 3 violation(s): build FAILS.
+
+421
+00:35:00.221 --> 00:35:07.901
+AFTER (fixed: infra wired by the application layer, domain pure): all fitness functions PASS, architecture conforms.
+
+422
+00:35:08.181 --> 00:35:09.695
+The rest is in the chapter.
+
+423
+00:35:12.545 --> 00:35:13.399
+Reading it:
+
+424
+00:35:13.679 --> 00:35:17.263
+The eroded graph fails the build with three named violations:
+
+425
+00:35:17.543 --> 00:35:32.689
+Order (domain) reaching PaymentGatewayHttp (infrastructure), Pricing (domain) depending up on OrderService (application), and the cycle OrderService, then Order, then Pricing, then OrderService that upward dependency created.
+
+426
+00:35:32.969 --> 00:35:38.281
+Erosion usually looks like this, one convenient shortcut produces several violations.
+
+427
+00:35:38.561 --> 00:35:47.713
+The fix follows hexagonal architecture (Ch 34): the domain defines what it needs; the application layer wires in infrastructure.
+
+428
+00:35:47.993 --> 00:35:49.444
+The fixed graph passes.
+
+429
+00:35:50.794 --> 00:35:56.511
+In production, ArchUnit runs exactly these rules against real bytecode in a unit test:
+
+430
+00:35:57.861 --> 00:35:59.909
+Here is the Java code, VERIFY:
+
+431
+00:36:00.189 --> 00:36:04.285
+ArchUnit equivalent (needs the archunit-junit5 dependency).
+
+432
+00:36:04.565 --> 00:36:08.107
+It runs to 19 lines; the full listing is in the chapter.
+
+433
+00:36:10.957 --> 00:36:15.031
+L3, Deciding with queueing math: does the design meet the SLO?
+
+434
+00:36:15.311 --> 00:36:16.250
+Requirement:
+
+435
+00:36:16.530 --> 00:36:18.258
+Checkout calls four services.
+
+436
+00:36:18.538 --> 00:36:25.813
+Will it meet a 300 ms p99 at 800 req per second, sequentially, or only if we fan out?
+
+437
+00:36:26.093 --> 00:36:35.479
+Each service is modeled as an M or M or 1 queue: its p99 depends on its service time and its utilization ρ at the target load.
+
+438
+00:36:35.759 --> 00:36:39.194
+Sequential calls add; parallel calls take the maximum.
+
+439
+00:36:40.544 --> 00:36:43.403
+Here is the Java code, BudgetL3.java.
+
+440
+00:36:43.683 --> 00:36:47.267
+It runs to 91 lines; the full listing is in the chapter.
+
+441
+00:36:47.547 --> 00:36:54.629
+BudgetL3.java, run with: java BudgetL3.java (JDK 21, no dependencies).
+
+442
+00:36:54.909 --> 00:37:00.840
+A QUANTITATIVE architecture decision: does the design meet the latency SLO at target load?
+
+443
+00:37:01.120 --> 00:37:06.411
+Architects argue sync versus. async with adjectives; here we DECIDE it with numbers.
+
+444
+00:37:06.691 --> 00:37:09.869
+Checkout needs data from 4 downstream services.
+
+445
+00:37:10.149 --> 00:37:11.216
+We compare two.
+
+446
+00:37:14.066 --> 00:37:14.983
+On screen:
+
+447
+00:37:15.263 --> 00:37:22.538
+Decision: which checkout design meets a 300 ms p99 SLO at 800 req per second?
+
+448
+00:37:22.818 --> 00:37:48.866
+Four downstream. services. service svc(ms) cap(r per second) ρ p99(ms). catalog 20 2000 0.40 81.3. inventory 35 2500 0.32 110.8. pricing 15 3000 0.27 40.1. promotions 25 2000 0.40 101.7.
+
+449
+00:37:49.146 --> 00:37:56.762
+A) SEQUENTIAL end-to-end p99 = sum = 333.9 ms, then BREACHES SLO.
+
+450
+00:37:57.042 --> 00:38:04.274
+B) PARALLEL end-to-end p99 = max = 110.8 ms, then MEETS SLO.
+
+451
+00:38:04.554 --> 00:38:05.471
+Bottleneck:
+
+452
+00:38:05.751 --> 00:38:12.450
+'catalog' (capacity 2000 r per second), headroom at 800 r per second = 60%.
+
+453
+00:38:12.730 --> 00:38:13.605
+Beyond.
+
+454
+00:38:13.885 --> 00:38:15.399
+The rest is in the chapter.
+
+455
+00:38:18.249 --> 00:38:19.103
+Reading it:
+
+456
+00:38:19.383 --> 00:38:20.321
+Sequential:
+
+457
+00:38:20.601 --> 00:38:29.711
+334 ms, breaches the 300 ms SLO, even though no single service is slow; the budget is spent by addition.
+
+458
+00:38:29.991 --> 00:38:30.844
+Parallel:
+
+459
+00:38:31.124 --> 00:38:37.055
+111 ms, meets it, because end-to-end latency is the slowest call, not the sum.
+
+460
+00:38:37.335 --> 00:38:41.004
+The debate sync chain versus fan-out is settled by arithmetic.
+
+461
+00:38:41.284 --> 00:38:46.383
+Every service's p99 is well above its raw service time (inventory:
+
+462
+00:38:46.663 --> 00:38:55.793
+35 ms, then 111 ms at ρ = 0.32), queueing delay is part of latency even at modest load.
+
+463
+00:38:57.143 --> 00:39:13.719
+The cliff: the same 35 ms service goes from 196 ms at ρ = 0.5 to 679 ms at 0.8, 1.5 s at 0.9, and 16 s at 0.99.
+
+464
+00:39:13.999 --> 00:39:28.506
+No design survives a saturated dependency, so the second architectural decision is capacity headroom (target utilization ~50 to 70%, autoscaling on it, Ch 25, Ch 26).
+
+465
+00:39:28.786 --> 00:39:39.154
+The M or M or 1 model is an approximation (real services aren't exponential); its job is to compare designs and locate cliffs before building.
+
+466
+00:39:39.434 --> 00:39:43.423
+A load test (a performance fitness function) verifies afterward.
+
+467
+00:39:44.773 --> 00:39:46.949
+L4, Decision under uncertainty:
+
+468
+00:39:47.229 --> 00:39:48.317
+Monte Carlo.
+
+469
+00:39:48.597 --> 00:39:49.536
+Requirement:
+
+470
+00:39:49.816 --> 00:39:52.589
+Serverless or our own VMs for the new service?
+
+471
+00:39:52.869 --> 00:39:57.968
+Traffic next year could be anywhere from 40M to 400M requests a month.
+
+472
+00:39:58.248 --> 00:40:01.576
+Serverless costs a fixed price per request (no ceiling).
+
+473
+00:40:01.856 --> 00:40:08.853
+VMs cost a fleet sized for peak, with a 6-VM multi-AZ floor and a much lower marginal cost.
+
+474
+00:40:09.133 --> 00:40:16.579
+Demand is a right-skewed triangular distribution (40M or 120M likely or 400M).
+
+475
+00:40:16.859 --> 00:40:21.723
+We compare the naive point estimate with 200,000 Monte Carlo trials.
+
+476
+00:40:23.073 --> 00:40:26.401
+Here is the Java code, MonteCarloL4.java.
+
+477
+00:40:26.681 --> 00:40:30.755
+It runs to 118 lines; the full listing is in the chapter.
+
+478
+00:40:31.035 --> 00:40:39.355
+MonteCarloL4.java, run with: java MonteCarloL4.java (JDK 21, no dependencies).
+
+479
+00:40:39.635 --> 00:40:41.491
+A DECISION UNDER UNCERTAINTY.
+
+480
+00:40:41.771 --> 00:40:45.291
+We must choose the compute model for a new service for the next year:
+
+481
+00:40:45.571 --> 00:40:47.491
+A) SERVERLESS, pay per request.
+
+482
+00:40:47.771 --> 00:40:52.059
+Cheap at low volume, but cost grows linearly with usage (no ceiling).
+
+483
+00:40:54.909 --> 00:40:55.827
+On screen:
+
+484
+00:40:56.107 --> 00:40:57.749
+Decision under uncertainty:
+
+485
+00:40:58.029 --> 00:41:00.739
+Serverless versus owned VMs for next year.
+
+486
+00:41:01.019 --> 00:41:02.341
+Monthly volume is.
+
+487
+00:41:02.621 --> 00:41:03.581
+UNCERTAIN.
+
+488
+00:41:03.861 --> 00:41:11.093
+(triangular: pessimistic 40M, likely 120M, optimistic 400M requests per month).
+
+489
+00:41:11.373 --> 00:41:21.912
+Naive point estimate at the 'likely' 120M per month: serverless $23,040 versus VMs $28,080, then.
+
+490
+00:41:22.192 --> 00:41:23.387
+SERVERLESS cheaper.
+
+491
+00:41:23.667 --> 00:41:48.563
+Monte Carlo (200,000 trials over the uncertain volume): option mean $ p10 $ p90 $. serverless $35,895 $18,051 $57,582. owned VMs $29,594 $28,080 $32,760.
+
+492
+00:41:48.843 --> 00:42:03.477
+P(serverless cheaper) = 36% P(VMs cheaper) = 64%. break-even volume about 147M requests per month (below, then serverless wins, above, then VMs.
+
+493
+00:42:03.757 --> 00:42:05.272
+The rest is in the chapter.
+
+494
+00:42:08.122 --> 00:42:08.975
+Reading it:
+
+495
+00:42:09.255 --> 00:42:12.114
+The point estimate and the distribution disagree.
+
+496
+00:42:12.394 --> 00:42:19.519
+At the likely 120M per month, serverless looks cheaper ($23k versus $28k).
+
+497
+00:42:19.799 --> 00:42:30.957
+Across all plausible futures, VMs are cheaper in expectation ($29.6k versus $35.9k) and in 64% of trials.
+
+498
+00:42:32.307 --> 00:42:43.037
+Why: the demand distribution is right-skewed, the mean (~187M) is well above the mode (120M), and the options have different slopes.
+
+499
+00:42:43.317 --> 00:42:57.355
+Serverless is cheaper below the ~147M break-even and increasingly expensive above it, with no ceiling (p90 $57.6k versus VMs' $32.8k).
+
+500
+00:42:57.635 --> 00:43:01.795
+Plugging in the mode ignored exactly the region where the decision flips.
+
+501
+00:43:02.075 --> 00:43:15.920
+The honest ADR offers either VMs or serverless now with a pre-agreed migration trigger at ~147M per month, and, for the second, designs the functions to keep the exit cost low.
+
+502
+00:43:16.200 --> 00:43:20.253
+The single-number comparison is the one option that isn't defensible.
+
+503
+00:43:21.603 --> 00:43:31.203
+This generalizes to every decision with uncertain inputs and non-linear or differently-sloped outcomes: capacity, cost, vendor pricing, headcount.
+
+504
+00:43:32.553 --> 00:43:33.492
+Part 6.
+
+505
+00:43:33.772 --> 00:43:35.052
+Production Concerns.
+
+506
+00:43:36.302 --> 00:43:39.139
+Failure modes of architectural decision-making.
+
+507
+00:43:39.419 --> 00:43:40.763
+Here is a quick table:
+
+508
+00:43:41.043 --> 00:43:43.326
+Failure, and Symptom, and Mitigation.
+
+509
+00:43:43.606 --> 00:43:45.099
+Undocumented decisions.
+
+510
+00:43:45.379 --> 00:43:46.190
+Symptom:
+
+511
+00:43:46.470 --> 00:43:51.099
+Nobody can explain why (§1.1); re-litigated repeatedly.
+
+512
+00:43:51.379 --> 00:43:52.382
+Mitigation:
+
+513
+00:43:52.662 --> 00:43:55.414
+ADRs in repo with rejected options.
+
+514
+00:43:55.694 --> 00:43:56.974
+Fragile decisions.
+
+515
+00:43:57.254 --> 00:43:58.065
+Symptom:
+
+516
+00:43:58.345 --> 00:44:01.267
+Choice flips when someone disagrees slightly on a weight.
+
+517
+00:44:01.547 --> 00:44:02.550
+Mitigation:
+
+518
+00:44:02.830 --> 00:44:05.774
+Sensitivity analysis before committing (L1).
+
+519
+00:44:06.054 --> 00:44:07.569
+Adjective-driven design.
+
+520
+00:44:07.849 --> 00:44:08.659
+Symptom:
+
+521
+00:44:08.939 --> 00:44:12.438
+Scalable, fast with no numbers; SLO breached in prod.
+
+522
+00:44:12.718 --> 00:44:13.721
+Mitigation:
+
+523
+00:44:14.001 --> 00:44:16.113
+Quantitative validation (L3).
+
+524
+00:44:16.393 --> 00:44:17.843
+Point-estimate decisions.
+
+525
+00:44:18.123 --> 00:44:18.934
+Symptom:
+
+526
+00:44:19.214 --> 00:44:22.371
+Cost overruns when demand deviates from the forecast.
+
+527
+00:44:22.651 --> 00:44:23.654
+Mitigation:
+
+528
+00:44:23.934 --> 00:44:27.881
+Distributions + Monte Carlo + break-even (L4).
+
+529
+00:44:28.161 --> 00:44:29.590
+Architecture erosion.
+
+530
+00:44:29.870 --> 00:44:30.681
+Symptom:
+
+531
+00:44:30.961 --> 00:44:34.011
+Diagram says layered; code says big ball of mud.
+
+532
+00:44:34.291 --> 00:44:35.294
+Mitigation:
+
+533
+00:44:35.574 --> 00:44:37.771
+Fitness functions in CI (L2).
+
+534
+00:44:39.121 --> 00:44:40.935
+Decisions never revisited.
+
+535
+00:44:41.215 --> 00:44:42.025
+Symptom:
+
+536
+00:44:42.305 --> 00:44:45.953
+Drivers changed, decision stands (§1.1).
+
+537
+00:44:46.233 --> 00:44:47.236
+Mitigation:
+
+538
+00:44:47.516 --> 00:44:49.585
+Revisit triggers + quarterly review.
+
+539
+00:44:49.865 --> 00:44:51.209
+Governance bottleneck.
+
+540
+00:44:51.489 --> 00:44:52.300
+Symptom:
+
+541
+00:44:52.580 --> 00:44:54.863
+ARB queue; teams route around it.
+
+542
+00:44:55.143 --> 00:44:56.145
+Mitigation:
+
+543
+00:44:56.425 --> 00:44:59.177
+Advice process; tiered review; paved roads.
+
+544
+00:44:59.457 --> 00:45:00.887
+Analysis paralysis.
+
+545
+00:45:01.167 --> 00:45:01.977
+Symptom:
+
+546
+00:45:02.257 --> 00:45:03.751
+Two-way doors take weeks.
+
+547
+00:45:04.031 --> 00:45:05.033
+Mitigation:
+
+548
+00:45:05.313 --> 00:45:08.684
+Decide reversible choices fast; time-box spikes.
+
+549
+00:45:10.034 --> 00:45:12.914
+Observability of decisions (Ch 24).
+
+550
+00:45:13.194 --> 00:45:26.293
+Revisit triggers should be metrics you already collect, req per second, p99, cost per month, deploy frequency, change-coupling between modules, so the quarterly review is a dashboard, not an investigation.
+
+551
+00:45:26.573 --> 00:45:33.719
+Track fitness-function results over time: the count of suppressed violations is a leading indicator of erosion.
+
+552
+00:45:33.999 --> 00:45:49.999
+For decisions made under uncertainty, track the actual value of the uncertain input (for example, monthly request volume) against the distribution you assumed; when reality exits your pessimistic or optimistic range, the decision needs revisiting.
+
+553
+00:45:51.349 --> 00:45:52.288
+Security.
+
+554
+00:45:52.568 --> 00:46:04.557
+Treat the security boundary as a one-way door: new trust boundaries, new data stores holding PII, new third-party integrations always get a reviewed ADR (Ch 23).
+
+555
+00:46:04.837 --> 00:46:13.563
+Add security fitness functions: dependency CVE thresholds, no secrets in code, authz annotations required on controllers.
+
+556
+00:46:13.843 --> 00:46:22.888
+ADRs themselves may contain sensitive reasoning (threat models, vendor contracts), keep those in an access-controlled repo or redact.
+
+557
+00:46:24.238 --> 00:46:26.286
+Performance of the decision process.
+
+558
+00:46:26.566 --> 00:46:35.398
+Time-box: a two-way door should be decided in hours; a significant ADR in days; an ATAM-style evaluation in a week or two.
+
+559
+00:46:35.678 --> 00:46:43.913
+Use spikes to replace the most uncertain score with evidence, a two-day prototype is cheap compared with a wrong one-way-door decision.
+
+560
+00:46:44.193 --> 00:46:49.611
+Reuse: a published technology radar and decision templates remove repeated debates.
+
+561
+00:46:50.961 --> 00:46:51.687
+Cost.
+
+562
+00:46:51.967 --> 00:47:00.841
+The cost of a decision includes total cost of ownership: build, run, operate, train, hire, and exit (the cost of reversing it later).
+
+563
+00:47:01.121 --> 00:47:04.919
+Exit cost is what makes a door one-way; estimate it explicitly.
+
+564
+00:47:05.199 --> 00:47:06.841
+Weight operability honestly.
+
+565
+00:47:07.121 --> 00:47:19.857
+The §1.1 platform's 26 services cost roughly 30% of engineering capacity in overhead, a cost that never appeared in the original decision because it wasn't a criterion.
+
+566
+00:47:21.207 --> 00:47:22.146
+Part 7.
+
+567
+00:47:22.426 --> 00:47:24.133
+Anti-Patterns and Pitfalls.
+
+568
+00:47:25.383 --> 00:47:26.300
+Watch out:
+
+569
+00:47:26.580 --> 00:47:27.220
+1.
+
+570
+00:47:27.500 --> 00:47:29.164
+The undocumented decision.
+
+571
+00:47:29.444 --> 00:47:35.353
+A significant, expensive-to-reverse decision with no record of context, options or trade-offs.
+
+572
+00:47:35.633 --> 00:47:40.775
+It will be misunderstood, re-litigated or blindly preserved (§1.1).
+
+573
+00:47:41.055 --> 00:47:42.207
+Write the ADR.
+
+574
+00:47:43.557 --> 00:47:44.474
+Watch out:
+
+575
+00:47:44.754 --> 00:47:45.458
+2.
+
+576
+00:47:45.738 --> 00:47:47.807
+One option presented as a decision.
+
+577
+00:47:48.087 --> 00:47:52.653
+If only one option was considered, it's a rationalization, not a decision.
+
+578
+00:47:52.933 --> 00:47:56.026
+Always include at least three, including the status quo.
+
+579
+00:47:57.376 --> 00:47:58.293
+Watch out:
+
+580
+00:47:58.573 --> 00:47:59.320
+3.
+
+581
+00:47:59.600 --> 00:48:01.307
+Weights chosen after scores.
+
+582
+00:48:01.587 --> 00:48:05.533
+Adjusting weights once you've seen the scores lets you crown any favorite.
+
+583
+00:48:05.813 --> 00:48:08.181
+Agree weights first; score independently.
+
+584
+00:48:09.531 --> 00:48:10.449
+Watch out:
+
+585
+00:48:10.729 --> 00:48:11.433
+4.
+
+586
+00:48:11.713 --> 00:48:13.462
+No sensitivity analysis.
+
+587
+00:48:13.742 --> 00:48:18.414
+A matrix without sensitivity hides whether the winner is robust or a coin-flip.
+
+588
+00:48:18.694 --> 00:48:21.382
+Always ask which weight flips it, and how far?
+
+589
+00:48:21.662 --> 00:48:22.494
+(L1).
+
+590
+00:48:23.844 --> 00:48:24.761
+Watch out:
+
+591
+00:48:25.041 --> 00:48:25.809
+5.
+
+592
+00:48:26.089 --> 00:48:27.903
+Scoring what you could calculate.
+
+593
+00:48:28.183 --> 00:48:29.313
+Giving performance:
+
+594
+00:48:29.593 --> 00:48:33.092
+4 or 5 to a design whose latency you could have modeled.
+
+595
+00:48:33.372 --> 00:48:34.716
+Compute it (L3).
+
+596
+00:48:36.066 --> 00:48:36.983
+Watch out:
+
+597
+00:48:37.263 --> 00:48:38.010
+6.
+
+598
+00:48:38.290 --> 00:48:39.805
+The single-number forecast.
+
+599
+00:48:40.085 --> 00:48:43.327
+Choosing based on the most likely value of a skewed input.
+
+600
+00:48:43.607 --> 00:48:46.594
+The distribution can reverse the decision (L4).
+
+601
+00:48:47.944 --> 00:48:48.861
+Watch out:
+
+602
+00:48:49.141 --> 00:48:49.888
+7.
+
+603
+00:48:50.168 --> 00:48:51.939
+Diagram-only architecture.
+
+604
+00:48:52.219 --> 00:48:55.931
+Rules that live only on a whiteboard erode with every PR.
+
+605
+00:48:56.211 --> 00:48:58.344
+Make them fitness functions (L2).
+
+606
+00:48:59.694 --> 00:49:00.611
+Watch out:
+
+607
+00:49:00.891 --> 00:49:01.574
+8.
+
+608
+00:49:01.854 --> 00:49:03.689
+Editing accepted ADRs.
+
+609
+00:49:03.969 --> 00:49:07.595
+Rewriting history destroys the record of why things changed.
+
+610
+00:49:07.875 --> 00:49:09.795
+Supersede with a new ADR.
+
+611
+00:49:11.145 --> 00:49:12.063
+Watch out:
+
+612
+00:49:12.343 --> 00:49:13.089
+9.
+
+613
+00:49:13.369 --> 00:49:14.649
+No revisit trigger.
+
+614
+00:49:14.929 --> 00:49:21.820
+Decisions without a reopen condition either never get revisited (sunk cost) or get re-debated constantly.
+
+615
+00:49:22.100 --> 00:49:23.807
+State the observable trigger.
+
+616
+00:49:25.157 --> 00:49:26.074
+Watch out:
+
+617
+00:49:26.354 --> 00:49:27.058
+10.
+
+618
+00:49:27.338 --> 00:49:29.898
+Treating every decision as a one-way door.
+
+619
+00:49:30.178 --> 00:49:36.173
+Heavy review for reversible choices creates bottlenecks and teaches teams to bypass governance.
+
+620
+00:49:36.453 --> 00:49:38.202
+Fast lane for two-way doors.
+
+621
+00:49:39.552 --> 00:49:40.469
+Watch out:
+
+622
+00:49:40.749 --> 00:49:41.581
+11.
+
+623
+00:49:41.861 --> 00:49:44.315
+Résumé-driven or hype-driven choices.
+
+624
+00:49:44.595 --> 00:49:48.435
+Everyone uses Kubernetes or Kafka or microservices.
+
+625
+00:49:48.715 --> 00:49:54.539
+Your context, scale and team decide, make team-fit and operability explicit criteria.
+
+626
+00:49:55.889 --> 00:49:56.806
+Watch out:
+
+627
+00:49:57.086 --> 00:49:57.875
+12.
+
+628
+00:49:58.155 --> 00:49:59.841
+The Ivory-tower architect.
+
+629
+00:50:00.121 --> 00:50:04.473
+Decisions made far from the code, by people who won't operate the result.
+
+630
+00:50:04.753 --> 00:50:09.681
+Use the advice process: the people accountable for running it decide, with advice.
+
+631
+00:50:11.031 --> 00:50:11.905
+Part 8.
+
+632
+00:50:12.185 --> 00:50:13.529
+Interview Q and A.
+
+633
+00:50:14.779 --> 00:50:15.611
+Beginner.
+
+634
+00:50:15.891 --> 00:50:16.915
+Question 1.
+
+635
+00:50:17.195 --> 00:50:20.374
+What is an Architecture Decision Record, and why write one?
+
+636
+00:50:20.654 --> 00:50:22.019
+Thirty-second answer:
+
+637
+00:50:22.299 --> 00:50:38.001
+An ADR is a short document recording one significant architectural decision: the context and drivers, the decision, the options considered and why they were rejected, the consequences (good and bad), and ideally what would make you revisit it.
+
+638
+00:50:38.281 --> 00:50:54.473
+You write it because architectural decisions are expensive to reverse and outlive the people who made them, without a record, future engineers either blindly preserve a decision whose reasons no longer hold or re-litigate it without knowing what was already evaluated.
+
+639
+00:50:55.823 --> 00:50:56.825
+Question 2.
+
+640
+00:50:57.105 --> 00:51:00.497
+What are quality attributes and why do they drive architecture?
+
+641
+00:51:00.777 --> 00:51:02.143
+Thirty-second answer:
+
+642
+00:51:02.423 --> 00:51:12.215
+Quality attributes are the non-functional properties, performance, scalability, availability, security, modifiability, operability, cost, time-to-market.
+
+643
+00:51:12.495 --> 00:51:29.412
+They drive architecture more than features do: two systems with identical features can need completely different architectures if one serves 10 req per second at 99.5% and the other 10,000 req per second at 99.99%.
+
+644
+00:51:29.692 --> 00:51:34.791
+They also conflict, so prioritizing them is the core of architectural trade-offs.
+
+645
+00:51:36.141 --> 00:51:37.186
+Question 3.
+
+646
+00:51:37.466 --> 00:51:40.687
+What is a one-way door versus a two-way door decision?
+
+647
+00:51:40.967 --> 00:51:42.333
+Thirty-second answer:
+
+648
+00:51:42.613 --> 00:51:53.834
+A one-way door is a decision that's very expensive or impossible to reverse, choosing a primary database, a data model shared across teams, a public API contract.
+
+649
+00:51:54.114 --> 00:52:01.239
+A two-way door is cheap to reverse, a library choice behind an interface, a config value, an internal endpoint.
+
+650
+00:52:01.519 --> 00:52:09.178
+One-way doors deserve analysis, options and an ADR; two-way doors should be made quickly by the team closest to the work.
+
+651
+00:52:10.528 --> 00:52:11.595
+Question 4.
+
+652
+00:52:11.875 --> 00:52:14.115
+Why should you consider at least three options?
+
+653
+00:52:14.395 --> 00:52:15.760
+Thirty-second answer:
+
+654
+00:52:16.040 --> 00:52:21.864
+Because with one option you're rationalizing, and with two you're in a false binary that hides alternatives.
+
+655
+00:52:22.144 --> 00:52:32.640
+Three or more, always including keep what we have, forces you to articulate criteria, surfaces hybrid solutions, and gives the decision matrix something meaningful to compare.
+
+656
+00:52:32.920 --> 00:52:38.573
+The status quo is especially important because change has costs that the new option must beat.
+
+657
+00:52:39.923 --> 00:52:40.926
+Intermediate.
+
+658
+00:52:41.206 --> 00:52:42.315
+Question 5.
+
+659
+00:52:42.595 --> 00:52:46.286
+How do you run a weighted decision matrix without it becoming theatre?
+
+660
+00:52:46.566 --> 00:52:47.931
+Thirty-second answer:
+
+661
+00:52:48.211 --> 00:53:02.483
+Agree criteria and weights before anyone scores; have several people score independently; discuss divergent scores (that's where facts are missing); calculate; then run a sensitivity analysis to see how robust the winner is.
+
+662
+00:53:02.763 --> 00:53:11.702
+Treat the matrix as a tool for making reasoning visible and arguable, not as an oracle, and replace any score you could calculate with the calculation.
+
+663
+00:53:13.052 --> 00:53:14.161
+Question 6.
+
+664
+00:53:14.441 --> 00:53:17.385
+What is sensitivity analysis and what does it tell you?
+
+665
+00:53:17.665 --> 00:53:19.031
+Thirty-second answer:
+
+666
+00:53:19.311 --> 00:53:24.793
+You vary the inputs, usually the weights, sometimes the scores, and see whether the winner changes.
+
+667
+00:53:25.073 --> 00:53:31.580
+If a small, plausible change flips it, the decision is fragile and you need more information before committing.
+
+668
+00:53:31.860 --> 00:53:35.551
+If only an extreme change flips it, the decision is robust.
+
+669
+00:53:35.831 --> 00:53:41.527
+It also tells you which assumptions actually matter, so you know what to monitor as a revisit trigger.
+
+670
+00:53:42.877 --> 00:53:43.965
+Question 7.
+
+671
+00:53:44.245 --> 00:53:46.293
+What is an architecture fitness function?
+
+672
+00:53:46.573 --> 00:53:47.938
+Thirty-second answer:
+
+673
+00:53:48.218 --> 00:54:05.050
+An automated check that measures whether the system still satisfies an architectural characteristic, for example the domain layer must not depend on infrastructure, no dependency cycles between modules, or checkout p99 300 ms under the load profile.
+
+674
+00:54:05.330 --> 00:54:12.733
+Running them in CI means architectural rules are enforced on every change instead of living only on a diagram.
+
+675
+00:54:14.083 --> 00:54:15.107
+Question 8.
+
+676
+00:54:15.387 --> 00:54:18.011
+How do you make a performance requirement testable?
+
+677
+00:54:18.291 --> 00:54:19.656
+Thirty-second answer:
+
+678
+00:54:19.936 --> 00:54:26.891
+Use a quality-attribute scenario: source, stimulus, artifact, environment, response, and a response measure.
+
+679
+00:54:27.171 --> 00:54:37.432
+Under 800 req per second of peak checkout traffic, the checkout API responds with p99 300 ms and 0.1% errors.
+
+680
+00:54:37.712 --> 00:54:44.752
+Then you can model it before building (L3) and verify it in a load test afterward (a performance fitness function).
+
+681
+00:54:46.102 --> 00:54:47.169
+Question 9.
+
+682
+00:54:47.449 --> 00:54:50.627
+How does technical debt relate to architecture decisions?
+
+683
+00:54:50.907 --> 00:54:52.273
+Thirty-second answer:
+
+684
+00:54:52.553 --> 00:55:04.009
+Deliberate technical debt is an architecture decision, trading future cost for present speed, and deserves the same treatment: record it, estimate its interest, and set a repayment trigger.
+
+685
+00:55:04.289 --> 00:55:08.897
+Inadvertent debt is architecture erosion, which fitness functions help catch.
+
+686
+00:55:09.177 --> 00:55:14.233
+The problem isn't debt; it's unrecorded, unserviced debt that compounds silently.
+
+687
+00:55:15.583 --> 00:55:16.351
+Senior.
+
+688
+00:55:16.631 --> 00:55:17.676
+Question 10.
+
+689
+00:55:17.956 --> 00:55:22.287
+Monolith, modular monolith, or microservices, how would you decide?
+
+690
+00:55:22.567 --> 00:55:23.932
+Thirty-second answer:
+
+691
+00:55:24.212 --> 00:55:25.791
+By drivers, not fashion.
+
+692
+00:55:26.071 --> 00:55:29.377
+Key questions: how many teams need independent deploys?
+
+693
+00:55:29.657 --> 00:55:33.903
+Do components have genuinely different scaling or availability needs?
+
+694
+00:55:34.183 --> 00:55:39.388
+How much operational maturity (observability, CI or CD, on-call) exists?
+
+695
+00:55:39.668 --> 00:55:41.033
+What's the business stage?
+
+696
+00:55:41.313 --> 00:55:53.196
+For most organizations under ~50 engineers without divergent scaling needs, a modular monolith with enforced boundaries wins; extract services where a real driver exists.
+
+697
+00:55:53.476 --> 00:55:57.935
+I'd make this a weighted matrix with sensitivity, and state the revisit trigger.
+
+698
+00:55:59.285 --> 00:56:00.415
+Question 11.
+
+699
+00:56:00.695 --> 00:56:03.810
+How do you use queueing theory in architecture decisions?
+
+700
+00:56:04.090 --> 00:56:05.455
+Thirty-second answer:
+
+701
+00:56:05.735 --> 00:56:08.722
+To predict latency and capacity before building.
+
+702
+00:56:09.002 --> 00:56:09.919
+Key facts:
+
+703
+00:56:10.199 --> 00:56:25.175
+Little's Law (concurrency = throughput times latency), and M or M or 1 response time R = S/(1minus ρ), latency grows non-linearly with utilization and goes vertical near 100%.
+
+704
+00:56:25.455 --> 00:56:37.786
+Practically: sequential calls add latencies, parallel calls take the max, and each service needs headroom (target ~50 to 70% utilization) or its tail latency explodes.
+
+705
+00:56:39.136 --> 00:56:40.224
+Question 12.
+
+706
+00:56:40.504 --> 00:56:44.088
+How do you decide when inputs like future traffic are uncertain?
+
+707
+00:56:44.368 --> 00:56:45.733
+Thirty-second answer:
+
+708
+00:56:46.013 --> 00:56:56.211
+Estimate ranges (pessimistic or likely or optimistic), model them as distributions, and run a Monte Carlo over the decision's cost or performance model.
+
+709
+00:56:56.491 --> 00:57:03.403
+Report expected value, spread (p10 or p90), probability each option wins, and break-even points.
+
+710
+00:57:03.683 --> 00:57:10.595
+Prefer reversible options when uncertainty is high, and set a decision trigger tied to the uncertain variable.
+
+711
+00:57:11.945 --> 00:57:13.225
+Question 13.
+
+712
+00:57:13.505 --> 00:57:17.729
+How do you govern architecture across many teams without becoming a bottleneck?
+
+713
+00:57:18.009 --> 00:57:19.374
+Thirty-second answer:
+
+714
+00:57:19.654 --> 00:57:34.353
+Replace gates with an advice process and automation: teams make decisions (two-way doors freely), seek advice from affected teams and experts for significant ones, and record ADRs; one-way doors get a lightweight review.
+
+715
+00:57:34.633 --> 00:57:46.409
+Enforce what can be automated with fitness functions, make the recommended path the easiest via paved roads and templates, and publish a technology radar so common choices need no debate.
+
+716
+00:57:47.759 --> 00:57:48.953
+Question 14.
+
+717
+00:57:49.233 --> 00:57:50.961
+What makes a good revisit trigger?
+
+718
+00:57:51.241 --> 00:57:52.607
+Thirty-second answer:
+
+719
+00:57:52.887 --> 00:57:59.927
+It's observable, specific, and tied to the assumption the decision depends on, ideally a metric you already collect.
+
+720
+00:58:00.207 --> 00:58:16.079
+Revisit when sustained load exceeds 1,500 req per second, when monthly volume passes 147M requests, when a module needs an independent release cadence, when the scalability weight exceeds ~8.75.
+
+721
+00:58:16.359 --> 00:58:19.153
+Vague triggers like when it stops scaling are useless.
+
+722
+00:58:20.503 --> 00:58:21.399
+Architect.
+
+723
+00:58:21.679 --> 00:58:22.874
+Question 15.
+
+724
+00:58:23.154 --> 00:58:27.165
+You inherit a system whose major decisions were never documented.
+
+725
+00:58:27.445 --> 00:58:28.447
+What do you do?
+
+726
+00:58:28.727 --> 00:58:30.093
+Thirty-second answer:
+
+727
+00:58:30.373 --> 00:58:32.357
+Reconstruct before redesigning.
+
+728
+00:58:32.637 --> 00:58:46.525
+For each major decision, recover the context (interview people, read history, look at the metrics of the time), list the options that plausibly existed, infer the drivers, and write retroactive ADRs marked as such.
+
+729
+00:58:46.805 --> 00:58:51.626
+Then check each against current drivers, often you'll find the reasons no longer hold.
+
+730
+00:58:51.906 --> 00:58:57.922
+Only then propose changes, as new ADRs with options, sensitivity and revisit triggers.
+
+731
+00:58:59.272 --> 00:59:00.467
+Question 16.
+
+732
+00:59:00.747 --> 00:59:04.117
+Explain sensitivity points and trade-off points (ATAM).
+
+733
+00:59:04.397 --> 00:59:05.763
+Thirty-second answer:
+
+734
+00:59:06.043 --> 00:59:15.920
+A sensitivity point is an architectural decision that strongly affects one quality attribute, for example, a connection-pool size that governs tail latency.
+
+735
+00:59:16.200 --> 00:59:28.957
+A trade-off point is a decision that affects several attributes in opposite directions, for example, synchronous replication improves durability (RPO 0) but hurts latency and availability.
+
+736
+00:59:29.237 --> 00:59:34.165
+Trade-off points are where architects earn their keep, because every choice there costs something.
+
+737
+00:59:35.515 --> 00:59:36.859
+Question 17.
+
+738
+00:59:37.139 --> 00:59:40.382
+How do you estimate and weigh the exit cost of a decision?
+
+739
+00:59:40.662 --> 00:59:42.027
+Thirty-second answer:
+
+740
+00:59:42.307 --> 00:59:51.331
+Estimate what it would cost to reverse: data migration, rewriting integrations, retraining, contract penalties, dual-running during transition.
+
+741
+00:59:51.611 --> 00:59:55.089
+High exit cost is what makes a decision a one-way door.
+
+742
+00:59:55.369 --> 01:00:06.291
+Under uncertainty, weight reversibility highly, a slightly more expensive but reversible choice can dominate, because flexibility has option value that grows with uncertainty.
+
+743
+01:00:07.641 --> 01:00:08.815
+Question 18.
+
+744
+01:00:09.095 --> 01:00:13.681
+How do you handle a strong disagreement between two senior engineers on a decision?
+
+745
+01:00:13.961 --> 01:00:15.327
+Thirty-second answer:
+
+746
+01:00:15.607 --> 01:00:17.292
+Make the disagreement precise.
+
+747
+01:00:17.572 --> 01:00:26.212
+Put both options in a matrix; find whether they differ on weights (a values or priority disagreement) or scores (a factual disagreement).
+
+748
+01:00:26.492 --> 01:00:30.567
+Factual disagreements get evidence, a spike, a model, a measurement.
+
+749
+01:00:30.847 --> 01:00:35.263
+Priority disagreements get escalated to whoever owns the business priority.
+
+750
+01:00:35.543 --> 01:00:41.943
+Run sensitivity: if the decision is robust across both people's weights, the disagreement doesn't matter.
+
+751
+01:00:42.223 --> 01:00:44.292
+Record the dissent in the ADR.
+
+752
+01:00:45.642 --> 01:00:46.879
+Question 19.
+
+753
+01:00:47.159 --> 01:00:50.530
+What fitness functions would you put on a modular monolith?
+
+754
+01:00:50.810 --> 01:00:52.175
+Thirty-second answer:
+
+755
+01:00:52.455 --> 01:01:06.855
+Structural: module boundaries (modules talk only through published APIs), no cycles between modules, domain purity (no framework or IO dependencies in domain), no cross-module database table access.
+
+756
+01:01:07.135 --> 01:01:11.274
+Operational: build time and test time budgets, deploy frequency.
+
+757
+01:01:11.554 --> 01:01:16.909
+Performance: p99 latency budgets per critical endpoint under a load profile.
+
+758
+01:01:17.189 --> 01:01:24.762
+Coupling metrics: change-coupling between modules (co-changed files) as an early warning of a boundary in the wrong place.
+
+759
+01:01:26.112 --> 01:01:27.221
+Question 20.
+
+760
+01:01:27.501 --> 01:01:31.704
+What distinguishes a senior engineer's decision-making from an architect's?
+
+761
+01:01:31.984 --> 01:01:33.349
+Thirty-second answer:
+
+762
+01:01:33.629 --> 01:01:36.061
+Scope, time horizon, and explicitness.
+
+763
+01:01:36.341 --> 01:01:42.891
+A senior engineer makes excellent decisions within a component, mostly two-way doors, often intuitively.
+
+764
+01:01:43.171 --> 01:01:59.683
+An architect makes and facilitates decisions across components and teams, for the long term, deliberately, framing drivers, surfacing options others didn't see, quantifying, recording, enforcing through fitness functions, and designing for reversibility.
+
+765
+01:01:59.963 --> 01:02:06.085
+And increasingly, the architect's job is to help others decide well rather than to decide everything.
+
+766
+01:02:07.435 --> 01:02:08.331
+Part 9.
+
+767
+01:02:08.611 --> 01:02:10.019
+Summary and Practice.
+
+768
+01:02:11.269 --> 01:02:12.357
+Key takeaways.
+
+769
+01:02:12.637 --> 01:02:16.541
+Architecture is the set of decisions that are expensive to change.
+
+770
+01:02:16.821 --> 01:02:22.645
+Distinguish one-way from two-way doors and apply process proportionately (§2.1).
+
+771
+01:02:22.925 --> 01:02:25.251
+Quality attributes drive architecture.
+
+772
+01:02:25.531 --> 01:02:32.101
+Make them measurable, prioritize them, and include constraints and business context (§2.2).
+
+773
+01:02:32.381 --> 01:02:34.963
+Options, criteria, weights, then scores.
+
+774
+01:02:35.243 --> 01:02:42.048
+At least three options including the status quo; weights before scores; independent scoring (§2.3).
+
+775
+01:02:42.328 --> 01:02:48.451
+Sensitivity analysis tells you if a decision is robust and yields the revisit trigger (L1).
+
+776
+01:02:49.801 --> 01:02:57.715
+Record decisions as ADRs, in the repo, immutable, with rejected options and a revisit trigger (§2.4).
+
+777
+01:02:57.995 --> 01:03:03.435
+Enforce decisions with fitness functions so architecture can't silently erode (L2).
+
+778
+01:03:03.715 --> 01:03:05.379
+Compute what you can compute.
+
+779
+01:03:05.659 --> 01:03:10.225
+Latency budgets and queueing math settle arguments adjectives can't (L3).
+
+780
+01:03:10.505 --> 01:03:13.171
+Decide under uncertainty with distributions.
+
+781
+01:03:13.451 --> 01:03:17.291
+Skew and tails can reverse a point-estimate decision (L4).
+
+782
+01:03:18.641 --> 01:03:25.255
+Govern with an advice process, paved roads and automation, not a bottleneck board (§2.8).
+
+783
+01:03:26.605 --> 01:03:27.927
+Decision cheat sheet.
+
+784
+01:03:28.207 --> 01:03:29.551
+Here is a quick table:
+
+785
+01:03:29.831 --> 01:03:31.495
+Situation, and Approach.
+
+786
+01:03:31.775 --> 01:03:33.589
+Reversible, local decision:
+
+787
+01:03:33.869 --> 01:03:36.578
+Team decides quickly; no ADR needed.
+
+788
+01:03:36.858 --> 01:03:39.397
+Expensive-to-reverse or cross-team decision:
+
+789
+01:03:39.677 --> 01:03:45.949
+ADR with ≥3 options, weighted criteria, sensitivity, revisit trigger.
+
+790
+01:03:46.229 --> 01:03:47.487
+Scores disagree:
+
+791
+01:03:47.767 --> 01:03:50.263
+Facts: gather evidence (spike, model).
+
+792
+01:03:50.543 --> 01:03:52.378
+Weights: business owner decides.
+
+793
+01:03:52.658 --> 01:03:54.450
+Performance or capacity claim:
+
+794
+01:03:54.730 --> 01:03:58.741
+Model it: latency budget + queueing (L3), then load-test.
+
+795
+01:03:59.021 --> 01:04:01.111
+Uncertain inputs (demand, price):
+
+796
+01:04:01.391 --> 01:04:07.578
+Ranges, then Monte Carlo, then expected value, p10 or p90, break-even (L4).
+
+797
+01:04:07.858 --> 01:04:10.077
+Rule that must hold as code changes:
+
+798
+01:04:10.357 --> 01:04:12.447
+Fitness function in CI (L2).
+
+799
+01:04:13.797 --> 01:04:15.483
+Decision's drivers changed:
+
+800
+01:04:15.763 --> 01:04:17.875
+New ADR superseding the old one.
+
+801
+01:04:18.155 --> 01:04:20.352
+High uncertainty, similar options:
+
+802
+01:04:20.632 --> 01:04:23.448
+Prefer the more reversible option; set a trigger.
+
+803
+01:04:24.798 --> 01:04:25.929
+Exercises.
+
+804
+01:04:26.209 --> 01:04:28.897
+(B3) Take a real decision from your system.
+
+805
+01:04:29.177 --> 01:04:37.369
+Write the ADR retroactively: context, three options (incl. status quo), weighted criteria, and a revisit trigger.
+
+806
+01:04:37.649 --> 01:04:45.243
+(B3) Extend L1 to vary two weights simultaneously (a 2-D grid) and print the region where each option wins.
+
+807
+01:04:45.523 --> 01:04:47.273
+Is the base point near a boundary?
+
+808
+01:04:47.553 --> 01:04:55.297
+(B3) Add a fourth fitness function to L2: the api layer may only depend on the application layer (no skipping layers).
+
+809
+01:04:55.577 --> 01:04:57.561
+Construct a graph that violates it.
+
+810
+01:04:58.911 --> 01:05:07.615
+(B4) Extend L3 with a third design: parallel fan-out with a 150 ms timeout and a cached fallback for promotions.
+
+811
+01:05:07.895 --> 01:05:11.607
+How does p99 change, and what does it cost in freshness?
+
+812
+01:05:11.887 --> 01:05:20.569
+(B4) Change L4's demand distribution to lognormal and add uncertainty to the serverless price (±20%).
+
+813
+01:05:20.849 --> 01:05:22.279
+Does the decision change?
+
+814
+01:05:22.559 --> 01:05:23.988
+What's the new break-even?
+
+815
+01:05:25.338 --> 01:05:26.341
+Further reading.
+
+816
+01:05:26.621 --> 01:05:34.365
+Michael Nygard, Documenting Architecture Decisions (2011), the original ADR post; MADR templates.
+
+817
+01:05:34.645 --> 01:05:40.789
+Neal Ford, Rebecca Parsons, Patrick Kua, Building Evolutionary Architectures, fitness functions.
+
+818
+01:05:41.069 --> 01:05:47.319
+Len Bass, Paul Clements, Rick Kazman, Software Architecture in Practice, quality attributes, ATAM.
+
+819
+01:05:47.599 --> 01:05:53.381
+Mark Richards and Neal Ford, Fundamentals of Software Architecture and Software Architecture:
+
+820
+01:05:53.661 --> 01:05:55.858
+The Hard Parts, trade-off analysis.
+
+821
+01:05:57.208 --> 01:06:02.477
+Andrew Harmel-Law, Facilitating Software Architecture, the architecture advice process.
+
+822
+01:06:02.757 --> 01:06:08.219
+Douglas Hubbard, How to Measure Anything, Monte Carlo and calibrated estimates for decisions.
+
+823
+01:06:08.499 --> 01:06:12.573
+ArchUnit documentation, structural fitness functions for Java.
+
+824
+01:06:13.923 --> 01:06:15.161
+Related chapters.
+
+825
+01:06:15.441 --> 01:06:20.305
+Ch 01, What System Design Is: trade-offs as the core of design.
+
+826
+01:06:20.585 --> 01:06:25.577
+Ch 02, Back-of-the-Envelope Estimation: the quantitative foundation.
+
+827
+01:06:25.857 --> 01:06:31.147
+Ch 16, Microservices Architecture: the decision L1 analyzes.
+
+828
+01:06:31.427 --> 01:06:35.929
+Ch 25, Performance Engineering: queueing, USL, capacity.
+
+829
+01:06:36.209 --> 01:06:42.331
+Ch 29, Testing Distributed Systems: fitness functions are tests for architecture.
+
+830
+01:06:42.611 --> 01:06:48.862
+Ch 30, Multi-Tenancy and SaaS Architecture: pool versus silo as a worked trade-off.
+
+831
+01:06:50.212 --> 01:06:51.812
+That's the end of this chapter.
+
+832
+01:06:52.092 --> 01:06:58.129
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+833
+01:06:58.409 --> 01:06:59.860
+See you in the next chapter.
+

@@ -1,0 +1,2666 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.441
+Flipkart-Style Sale-Day E-Commerce.
+
+2
+00:00:02.721 --> 00:00:07.627
+Chapter I02, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:09.377 --> 00:00:10.337
+At a glance:
+
+4
+00:00:10.617 --> 00:00:11.791
+Chapter at a glance.
+
+5
+00:00:12.071 --> 00:00:12.881
+Sector:
+
+6
+00:00:13.161 --> 00:00:15.977
+E-commerce (India, festive sales), Reader bands:
+
+7
+00:00:16.257 --> 00:00:18.305
+B1, then B4, Builds on:
+
+8
+00:00:18.585 --> 00:00:24.153
+Ch 02, Ch 45, Ch 46, Ch 49, I01.
+
+9
+00:00:24.433 --> 00:00:32.945
+What you get: the design of an Indian e-commerce platform for its biggest days: a multi-day festive sale with midnight deal unlocks.
+
+10
+00:00:33.225 --> 00:00:45.279
+It covers what is specific to India: cash on delivery and parcels returned undelivered;. pincode serviceability;. bank offers and no-cost EMI;. slow networks and low-end phones;.
+
+11
+00:00:46.629 --> 00:00:54.863
+vernacular shoppers;. reseller rings on limited deals;. the operating model of a sale: readiness, war rooms and change freezes.
+
+12
+00:00:55.143 --> 00:01:02.439
+The waiting room and hot-SKU reservation are in Ch 46, and payment routing is in Ch 45.
+
+13
+00:01:02.719 --> 00:01:05.621
+This chapter builds on them rather than repeating them.
+
+14
+00:01:05.901 --> 00:01:07.159
+What the labs measured:
+
+15
+00:01:08.509 --> 00:01:21.885
+L1 (deal unlock): with a million phones whose clocks are wrong, polling the origin every 2 s costs 102M requests and gets only 37% of shoppers within 1 s of the unlock.
+
+16
+00:01:22.165 --> 00:01:24.000
+Trusting the phone clock is worse:
+
+17
+00:01:24.280 --> 00:01:29.485
+17.5% tap early and 12% are late by more than 5 s.
+
+18
+00:01:29.765 --> 00:01:38.512
+Syncing from the server's clock gets 96.6%, and a millisecond re-sync at Tminus 10 s gets 100%.
+
+19
+00:01:38.792 --> 00:01:48.968
+L2 (COD policy, illustrative economics): turning off COD loses a third of orders, and is the worst policy once new-customer value counts.
+
+20
+00:01:49.248 --> 00:01:58.869
+OTP confirmation for medium-risk orders cuts parcels returned undelivered (RTO) by half and gives the best result on both measures.
+
+21
+00:02:00.219 --> 00:02:09.883
+L3 (page weight, real compression): a 40-product listing is 65 KB of full JSON and 1.5 KB trimmed and gzipped.
+
+22
+00:02:10.163 --> 00:02:19.955
+On 2G that is 8.0 s versus 2.9 s on a new connection, and 5.9 s versus 0.8 s on a reused one.
+
+23
+00:02:20.235 --> 00:02:23.201
+Connection setup dominates once payloads are small.
+
+24
+00:02:23.481 --> 00:02:32.953
+L4 (reseller rings): per-account and exact-address limits let a 400-account ring take 800 and 778 deal units.
+
+25
+00:02:33.233 --> 00:02:48.998
+A normalised tower or flat or pincode key cuts that to 24, the theoretical minimum of 2 per drop point, while blocking 82 genuine buyers against an unavoidable floor of 82 (same household or the drop point itself).
+
+26
+00:02:49.278 --> 00:02:52.137
+Fuzzy text similarity is worse on both counts.
+
+27
+00:02:53.487 --> 00:02:54.468
+Reading time:
+
+28
+00:02:54.748 --> 00:02:55.644
+80 min.
+
+29
+00:02:56.994 --> 00:02:57.741
+Warning:
+
+30
+00:02:58.021 --> 00:02:59.898
+What this chapter is, and isn't.
+
+31
+00:03:00.178 --> 00:03:09.949
+This is a design in the style of a large Indian e-commerce platform during festive sales, based on public talks, engineering blogs and news coverage.
+
+32
+00:03:10.229 --> 00:03:13.535
+It is not a description of Flipkart's internal systems.
+
+33
+00:03:13.815 --> 00:03:19.469
+Business numbers (COD share, RTO rates, costs, network profiles) are illustrative.
+
+34
+00:03:19.749 --> 00:03:22.373
+Regulatory statements are marked VERIFY.
+
+35
+00:03:23.723 --> 00:03:24.576
+Part 1.
+
+36
+00:03:24.856 --> 00:03:26.776
+Introduction and Why It Matters.
+
+37
+00:03:28.026 --> 00:03:31.973
+A story: midnight, and the phone that thought it was 11:58.
+
+38
+00:03:32.253 --> 00:03:42.471
+The sale's headline deal, a phone at 9,999 rupeeswith 5,000 units, unlocks at 12:00:00.
+
+39
+00:03:42.751 --> 00:03:43.861
+The early taps.
+
+40
+00:03:44.141 --> 00:03:51.671
+At 11:59:58 the origin receives 40,000 Buy requests from phones whose clocks run fast.
+
+41
+00:03:51.951 --> 00:04:00.207
+They are rejected, the apps retry, and the retries land at 12:00:00, exactly when the real demand arrives.
+
+42
+00:04:00.487 --> 00:04:01.639
+The late shoppers.
+
+43
+00:04:01.919 --> 00:04:03.690
+Some shoppers' phones run slow.
+
+44
+00:04:03.970 --> 00:04:08.919
+Their Buy button appears at 12:00:40, after the units have gone.
+
+45
+00:04:09.199 --> 00:04:10.181
+The complaints.
+
+46
+00:04:10.461 --> 00:04:12.999
+Social media fills with the sale was rigged.
+
+47
+00:04:14.349 --> 00:04:15.181
+The ring.
+
+48
+00:04:15.461 --> 00:04:22.971
+A reseller ring with 400 accounts ships 800 units to a dozen flats, with each address typed a different way.
+
+49
+00:04:23.251 --> 00:04:24.232
+The returns.
+
+50
+00:04:24.512 --> 00:04:32.875
+Three days later, 18% of the cash-on-delivery orders in some regions come back undelivered, and the reverse shipping eats the margin.
+
+51
+00:04:33.155 --> 00:04:35.352
+None of this is a database problem.
+
+52
+00:04:35.632 --> 00:04:40.752
+It is time, trust, networks and money, and in India each of these has its own shape.
+
+53
+00:04:42.102 --> 00:04:42.785
+Quote:
+
+54
+00:04:43.065 --> 00:04:44.729
+The thesis of this chapter.
+
+55
+00:04:45.009 --> 00:04:48.721
+An Indian sale day is won before it starts and at the edges.
+
+56
+00:04:49.001 --> 00:04:52.755
+Synchronise clients to server time instead of polling (L1).
+
+57
+00:04:53.035 --> 00:04:56.662
+Price the risk of cash on delivery instead of banning it (L2).
+
+58
+00:04:56.942 --> 00:05:00.078
+Design for 2G and cold connections (L3).
+
+59
+00:05:00.358 --> 00:05:03.835
+Enforce deal limits on the real delivery address (L4).
+
+60
+00:05:04.115 --> 00:05:10.281
+Behind all of that: the capacity, waiting room and reservation machinery of Ch 46.
+
+61
+00:05:11.631 --> 00:05:13.103
+What's specific to India.
+
+62
+00:05:13.383 --> 00:05:14.727
+Here is a quick table:
+
+63
+00:05:15.007 --> 00:05:17.375
+Factor, and Effect on design, and Where.
+
+64
+00:05:17.655 --> 00:05:23.329
+Cash on delivery is still widely used, especially outside metros (VERIFY current share).
+
+65
+00:05:23.609 --> 00:05:24.804
+Effect on design:
+
+66
+00:05:25.084 --> 00:05:30.076
+Parcels returned undelivered (RTO), cash reconciliation, risk scoring.
+
+67
+00:05:30.356 --> 00:05:38.399
+Where: §2.5, L2. ~19,000 plus pincodes with very different courier coverage (VERIFY count).
+
+68
+00:05:38.679 --> 00:05:39.873
+Effect on design:
+
+69
+00:05:40.153 --> 00:05:42.500
+Serviceability, promise by pincode.
+
+70
+00:05:42.780 --> 00:05:43.441
+Where:
+
+71
+00:05:43.721 --> 00:05:45.023
+Ch 01.
+
+72
+00:05:45.303 --> 00:05:49.313
+Slow and variable mobile networks; entry-level Android phones.
+
+73
+00:05:49.593 --> 00:05:50.788
+Effect on design:
+
+74
+00:05:51.068 --> 00:05:53.713
+Payload budgets, fewer connections, lite apps.
+
+75
+00:05:53.993 --> 00:05:56.276
+Where: §2.6, L3.
+
+76
+00:05:56.556 --> 00:05:57.708
+Many languages.
+
+77
+00:05:57.988 --> 00:05:59.183
+Effect on design:
+
+78
+00:05:59.463 --> 00:06:02.151
+Vernacular UI and search, transliteration.
+
+79
+00:06:02.431 --> 00:06:04.265
+Where: §2.7.
+
+80
+00:06:04.545 --> 00:06:06.700
+UPI, cards, EMI, bank offers.
+
+81
+00:06:06.980 --> 00:06:08.175
+Effect on design:
+
+82
+00:06:08.455 --> 00:06:10.993
+Payment mix, offer eligibility at checkout.
+
+83
+00:06:11.273 --> 00:06:14.153
+Where: §2.8, Ch 45.
+
+84
+00:06:15.503 --> 00:06:17.274
+Festive season concentration.
+
+85
+00:06:17.554 --> 00:06:18.749
+Effect on design:
+
+86
+00:06:19.029 --> 00:06:21.610
+A large share of annual sales in a few days.
+
+87
+00:06:21.890 --> 00:06:23.661
+Where: §2.9.
+
+88
+00:06:23.941 --> 00:06:26.287
+Consumer-protection and e-commerce rules.
+
+89
+00:06:26.567 --> 00:06:27.762
+Effect on design:
+
+90
+00:06:28.042 --> 00:06:33.546
+Display of seller details, country of origin, flash-sale rules (VERIFY current rules).
+
+91
+00:06:33.826 --> 00:06:35.725
+Where: §6.5.
+
+92
+00:06:37.075 --> 00:06:38.397
+Learning objectives.
+
+93
+00:06:38.677 --> 00:06:40.576
+By the end you will be able to:
+
+94
+00:06:40.856 --> 00:06:43.885
+Design a sale-day architecture and readiness plan.
+
+95
+00:06:44.165 --> 00:06:47.451
+Synchronise millions of clients to a deal unlock fairly.
+
+96
+00:06:47.731 --> 00:06:52.296
+Decide COD eligibility with risk and economics, not blanket rules.
+
+97
+00:06:52.576 --> 00:06:55.520
+Budget payloads and connections for slow networks.
+
+98
+00:06:55.800 --> 00:07:00.195
+Enforce purchase limits against reseller rings without blocking households.
+
+99
+00:07:01.545 --> 00:07:02.419
+Part 2.
+
+100
+00:07:02.699 --> 00:07:04.577
+Core Concepts, Beginner to Deep.
+
+101
+00:07:05.827 --> 00:07:09.197
+Intuition: a festival market that opens at midnight.
+
+102
+00:07:09.477 --> 00:07:15.301
+Imagine a market where every shop opens at the stroke of midnight and the best items go in seconds.
+
+103
+00:07:15.581 --> 00:07:17.459
+Some shoppers' watches are wrong.
+
+104
+00:07:17.739 --> 00:07:19.317
+Some came on slow buses.
+
+105
+00:07:19.597 --> 00:07:22.648
+Some pay in cash at their door and change their minds.
+
+106
+00:07:22.928 --> 00:07:27.301
+And a few professional buyers send twenty cousins to queue for the same item.
+
+107
+00:07:27.581 --> 00:07:39.123
+A good market organiser fixes all of these before midnight: one clock everyone trusts, a door that admits people in order, clear rules on cash, and limits per household, not per person.
+
+108
+00:07:40.473 --> 00:07:42.073
+Requirements and estimates.
+
+109
+00:07:42.353 --> 00:07:43.697
+Here is a quick table:
+
+110
+00:07:43.977 --> 00:07:45.278
+Type, and Requirement.
+
+111
+00:07:45.558 --> 00:07:46.433
+Functional:
+
+112
+00:07:46.713 --> 00:08:00.345
+Deal pages with countdowns; sale-only prices and bank offers; limited-quantity deals with per-customer limits; cart; checkout with UPI, cards, EMI, wallets and COD; order tracking; returns.
+
+113
+00:08:00.625 --> 00:08:01.883
+Scale (assumptions):
+
+114
+00:08:02.163 --> 00:08:14.110
+100M app opens on day 1; at peak minutes, ~1M concurrent shoppers on the deal page; ~10 to 20 times normal checkout rate (VERIFY with your own history).
+
+115
+00:08:14.390 --> 00:08:15.307
+Latency:
+
+116
+00:08:15.587 --> 00:08:27.235
+Deal page usable within 3 s on a slow 3G connection; Buy button enabled within ±1 s of unlock for ≥ 99% of shoppers.
+
+117
+00:08:27.515 --> 00:08:28.390
+Fairness:
+
+118
+00:08:28.670 --> 00:08:35.262
+First to tap is first served (within network variance); per-customer limits enforced on the delivery household.
+
+119
+00:08:35.542 --> 00:08:36.459
+Correctness:
+
+120
+00:08:36.739 --> 00:08:42.201
+No overselling deal units (Ch 46); the bank offer shown is the one applied.
+
+121
+00:08:43.551 --> 00:08:45.620
+Estimation (Ch 02):
+
+122
+00:08:45.900 --> 00:09:00.044
+1M shoppers tapping Buy within ~2 seconds of unlock gives ~500k requests per second for a few seconds at the origin (L1: ~580 to 680k in the peak second).
+
+123
+00:09:00.324 --> 00:09:10.927
+That is why the tap must be admitted through a waiting room and reserved against sharded stock (Ch 46), and why nothing else may hit the origin at that second (L1).
+
+124
+00:09:12.277 --> 00:09:13.685
+Architecture overview.
+
+125
+00:09:13.965 --> 00:09:15.309
+Here is a quick table:
+
+126
+00:09:15.589 --> 00:09:17.679
+Component, and Role on sale day.
+
+127
+00:09:17.959 --> 00:09:19.261
+Edge or CDN:
+
+128
+00:09:19.541 --> 00:09:23.978
+Static assets, deal pages, and the edge-cached time endpoint (L1).
+
+129
+00:09:24.258 --> 00:09:25.303
+Deal service:
+
+130
+00:09:25.583 --> 00:09:29.871
+Deal definitions, unlock times, quantity pools, per-customer limits.
+
+131
+00:09:30.151 --> 00:09:31.197
+Time service:
+
+132
+00:09:31.477 --> 00:09:33.930
+Millisecond server time served from the edge.
+
+133
+00:09:34.210 --> 00:09:35.789
+Waiting room and admission:
+
+134
+00:09:36.069 --> 00:09:40.037
+Fair entry to checkout at a sustainable rate (Ch 46).
+
+135
+00:09:40.317 --> 00:09:41.831
+Inventory reservation:
+
+136
+00:09:42.111 --> 00:09:46.037
+Bucketed deal stock, holds with a TTL (Ch 46).
+
+137
+00:09:46.317 --> 00:09:47.853
+Pricing and offers engine:
+
+138
+00:09:48.133 --> 00:09:53.338
+Sale prices, bank instant discounts, EMI plans, coupons (Ch 49).
+
+139
+00:09:53.618 --> 00:09:54.962
+Checkout and payments:
+
+140
+00:09:55.242 --> 00:09:59.679
+UPI, cards, EMI, wallets, COD; gateway routing (Ch 45).
+
+141
+00:09:59.959 --> 00:10:01.069
+Risk and abuse:
+
+142
+00:10:01.349 --> 00:10:05.701
+Reseller detection (L4), COD risk (L2), payment fraud.
+
+143
+00:10:07.051 --> 00:10:08.629
+Serviceability and promise:
+
+144
+00:10:08.909 --> 00:10:13.667
+Pincode coverage, delivery dates (Ch 01, I01 L3).
+
+145
+00:10:13.947 --> 00:10:15.333
+Order and logistics:
+
+146
+00:10:15.613 --> 00:10:19.709
+Manifests, courier allocation, returns, cash reconciliation.
+
+147
+00:10:19.989 --> 00:10:21.099
+Notifications:
+
+148
+00:10:21.379 --> 00:10:25.496
+Sale reminders, order updates, with priority lanes (Ch 40).
+
+149
+00:10:26.846 --> 00:10:28.979
+Unlocking a deal on a million phones.
+
+150
+00:10:29.259 --> 00:10:33.377
+Polling the origin to ask is it live? is the worst option (L1):
+
+151
+00:10:33.657 --> 00:10:42.147
+102M requests in five minutes, and still only 37% of shoppers ready within a second, because of the poll interval.
+
+152
+00:10:42.427 --> 00:10:46.950
+The phone's own clock is wrong for a meaningful minority (L1's assumption:
+
+153
+00:10:47.230 --> 00:10:49.641
+30% are off by more than a second).
+
+154
+00:10:49.921 --> 00:10:58.241
+So 17.5% tap early (rejected, then retried at the worst moment), and 12% are more than 5 s late.
+
+155
+00:10:58.521 --> 00:11:00.377
+That is the rigged sale complaint.
+
+156
+00:11:00.657 --> 00:11:02.129
+Sync from the server once.
+
+157
+00:11:03.479 --> 00:11:13.377
+On page load, compute offset = serverTime minus localTime, using the response's Date header or a time field, and correct for half the round trip.
+
+158
+00:11:13.657 --> 00:11:20.569
+The Date header has one-second resolution, which gives 96.6% within ±1 s.
+
+159
+00:11:20.849 --> 00:11:28.743
+Re-sync at Tminus 10 s from an edge-cached, millisecond-precision time endpoint (measure the round trip, use its midpoint).
+
+160
+00:11:29.023 --> 00:11:32.329
+That gives 100% within ±1 s.
+
+161
+00:11:32.609 --> 00:11:33.441
+Also:
+
+162
+00:11:34.791 --> 00:11:37.821
+Pre-fetch the deal page and assets before unlock.
+
+163
+00:11:38.101 --> 00:11:39.615
+Enable the button locally.
+
+164
+00:11:39.895 --> 00:11:46.637
+The server still checks the time authoritatively on the Buy request, and rejects early taps without penalising them.
+
+165
+00:11:46.917 --> 00:11:54.042
+The unavoidable part is the Buy spike itself (~0.6M requests per second in the peak second).
+
+166
+00:11:54.322 --> 00:11:57.053
+It goes to the waiting room, not straight to checkout.
+
+167
+00:11:58.403 --> 00:12:00.280
+Cash on delivery and RTO.
+
+168
+00:12:00.560 --> 00:12:03.077
+COD lets the customer pay at the door.
+
+169
+00:12:03.357 --> 00:12:08.115
+It widens reach (new customers, customers without cards, low trust), but adds:
+
+170
+00:12:08.395 --> 00:12:15.797
+RTO: the parcel is refused or undeliverable and travels back, so you pay both shipping legs and make no sale.
+
+171
+00:12:16.077 --> 00:12:21.005
+Cash handling and reconciliation (Ch 45 §2.7).
+
+172
+00:12:21.285 --> 00:12:24.379
+The risk model scores each order's chance of RTO.
+
+173
+00:12:24.659 --> 00:12:32.552
+Illustrative features: pincode tier, whether the customer is new, their past RTO history, order value, and time to delivery.
+
+174
+00:12:32.832 --> 00:12:34.091
+Actions by score:
+
+175
+00:12:34.371 --> 00:12:35.309
+Low risk:
+
+176
+00:12:35.589 --> 00:12:37.147
+COD offered normally.
+
+177
+00:12:38.497 --> 00:12:39.542
+Medium risk:
+
+178
+00:12:39.822 --> 00:12:46.307
+COD with confirmation, by OTP or IVR before dispatch, or a small partial prepayment.
+
+179
+00:12:46.587 --> 00:12:48.337
+High risk: prepaid only.
+
+180
+00:12:48.617 --> 00:12:51.305
+L2 findings (illustrative economics):
+
+181
+00:12:51.585 --> 00:12:59.478
+Blocking COD entirely keeps only 68% of orders and is worst once the future value of new customers counts.
+
+182
+00:12:59.758 --> 00:13:05.539
+Aggressive blocking (P3, P4) raises this order's profit but gives up future value.
+
+183
+00:13:06.889 --> 00:13:13.481
+The best policy blocks only very high risk and confirms the middle band (P5): best on both measures.
+
+184
+00:13:13.761 --> 00:13:22.679
+Operations matter too: a promise that slips raises refusals, and delivery attempt scheduling and customer calls reduce RTO.
+
+185
+00:13:22.959 --> 00:13:25.924
+Measure RTO by pincode, courier and seller.
+
+186
+00:13:27.274 --> 00:13:29.471
+Slow networks and entry-level phones.
+
+187
+00:13:29.751 --> 00:13:31.394
+Budget the payload per screen.
+
+188
+00:13:31.674 --> 00:13:32.975
+L3's list view:
+
+189
+00:13:33.255 --> 00:13:40.317
+65 KB of full JSON shrinks to 1.5 KB when trimmed to the rendered fields and gzipped.
+
+190
+00:13:40.597 --> 00:13:43.519
+On 2G the connection costs more than the bytes.
+
+191
+00:13:43.799 --> 00:13:54.210
+A new HTTPS connection costs 3 round trips of DNS, TCP and TLS, which is 2.1 s at 700 ms RTT.
+
+192
+00:13:54.490 --> 00:14:04.175
+Reusing connections, limiting the number of origins, and HTTP or 2 or HTTP or 3 multiplexing matter as much as compression.
+
+193
+00:14:04.455 --> 00:14:10.493
+Trimmed + gzip took 2.9 s on a new connection and 0.8 s on a reused one.
+
+194
+00:14:11.843 --> 00:14:20.419
+Images dominate real pages: list thumbnails in modern formats at the rendered size, lazy loading, and low-quality placeholders.
+
+195
+00:14:20.699 --> 00:14:24.688
+Lite apps and PWAs for low-end phones and slow networks.
+
+196
+00:14:24.968 --> 00:14:31.496
+Flipkart publicly launched a PWA, Flipkart Lite, in 2015 (VERIFY details).
+
+197
+00:14:31.776 --> 00:14:37.813
+Offline-tolerant cart and retries with idempotency keys, because connections drop mid-checkout.
+
+198
+00:14:39.163 --> 00:14:40.507
+Vernacular shoppers.
+
+199
+00:14:40.787 --> 00:14:47.251
+UI localisation for many Indian languages, with content from the catalog in multiple languages.
+
+200
+00:14:47.531 --> 00:15:03.190
+Search: handle transliteration (mobail / मोबाइल, then mobile), mixed-script queries and voice input;. query understanding maps them to the same catalog (Ch 22, Ch 42);. measure search success per language.
+
+201
+00:15:04.540 --> 00:15:09.191
+Keep font and layout budgets in mind for complex scripts on low-end phones.
+
+202
+00:15:10.541 --> 00:15:13.271
+Bank offers, EMI and the price at checkout.
+
+203
+00:15:13.551 --> 00:15:22.810
+Sale prices often come with bank instant discounts (for example, 10% off with specific cards, up to a cap) and no-cost EMI.
+
+204
+00:15:23.090 --> 00:15:29.319
+In no-cost EMI, the interest is funded as a discount (VERIFY accounting and disclosure rules).
+
+205
+00:15:29.599 --> 00:15:37.685
+Eligibility is only known at payment time, from the card BIN or UPI app, bank, EMI tenure and cap usage.
+
+206
+00:15:37.965 --> 00:15:51.959
+So the checkout must: show the estimated offer early;. recompute exactly when the instrument is chosen;. reserve the bank's offer budget atomically (per-bank daily caps are the budget-pacing problem of Ch 49);.
+
+207
+00:15:53.309 --> 00:15:55.059
+release it on payment failure.
+
+208
+00:15:55.339 --> 00:16:04.235
+Price integrity: the order stores the price, each discount line and who funds it (seller, platform, bank) for settlement and invoicing (GST).
+
+209
+00:16:05.585 --> 00:16:07.761
+Reseller rings and purchase limits.
+
+210
+00:16:08.041 --> 00:16:15.123
+Limited deals (2 per customer) attract rings: many accounts, cards and phones, but few real delivery points.
+
+211
+00:16:15.403 --> 00:16:16.278
+L4:
+
+212
+00:16:16.558 --> 00:16:19.843
+Per-account limits give the ring everything, 800 units.
+
+213
+00:16:20.123 --> 00:16:26.011
+Exact-address matching gives it 778, because the ring types each address differently.
+
+214
+00:16:26.291 --> 00:16:34.035
+Normalising to tower + flat + pincode gives it exactly 24, which is 2 per drop point, the minimum possible.
+
+215
+00:16:35.385 --> 00:16:39.716
+It blocks 82 genuine buyers, exactly the unavoidable cases:
+
+216
+00:16:39.996 --> 00:16:45.500
+79 second buyers in the same household, and 3 who live in the drop-point flats.
+
+217
+00:16:45.780 --> 00:16:47.700
+Fuzzy text similarity is worse:
+
+218
+00:16:47.980 --> 00:16:59.735
+Flat 1102 and Flat 1103 look 80% similar, so it merged neighbours (2,034 blocked) and still let 202 units through.
+
+219
+00:17:00.015 --> 00:17:03.833
+Parse structure first; use fuzzy matching only on leftovers.
+
+220
+00:17:04.113 --> 00:17:10.023
+Combine signals: device, payment instrument, phone number, address, and graph links between accounts.
+
+221
+00:17:10.303 --> 00:17:13.929
+Enforce at checkout (reservation) and again before dispatch.
+
+222
+00:17:14.209 --> 00:17:18.369
+Communicate household limits clearly so genuine families understand.
+
+223
+00:17:19.719 --> 00:17:22.023
+Readiness: running a sale like a launch.
+
+224
+00:17:22.303 --> 00:17:23.647
+Here is a quick table:
+
+225
+00:17:23.927 --> 00:17:25.207
+When, and Activity.
+
+226
+00:17:25.487 --> 00:17:26.767
+Tminus 8 weeks:
+
+227
+00:17:27.047 --> 00:17:32.573
+Capacity plan from forecasts; dependency limits (banks, gateways, couriers, SMS).
+
+228
+00:17:32.853 --> 00:17:34.133
+Tminus 6 weeks:
+
+229
+00:17:34.413 --> 00:17:40.002
+Full-journey load tests at 1.5 times forecast; chaos drills on critical paths.
+
+230
+00:17:40.282 --> 00:17:41.519
+Tminus 4 weeks:
+
+231
+00:17:41.799 --> 00:17:47.111
+Degradation switches built and tested (recommendations, reviews, search suggestions).
+
+232
+00:17:47.391 --> 00:17:48.629
+Tminus 2 weeks:
+
+233
+00:17:48.909 --> 00:17:53.517
+Change freeze on critical services; on-call rosters; war room plan.
+
+234
+00:17:53.797 --> 00:17:54.970
+Tminus 1 day:
+
+235
+00:17:55.250 --> 00:18:00.199
+Pre-scale; warm caches; verify time sync, waiting room and deal configs.
+
+236
+00:18:00.479 --> 00:18:01.226
+Sale:
+
+237
+00:18:01.506 --> 00:18:05.367
+War room with journey dashboards; decision owners; comms templates.
+
+238
+00:18:05.647 --> 00:18:06.885
+T+1 week:
+
+239
+00:18:07.165 --> 00:18:12.007
+Retrospective: forecast versus actuals, incidents, RTO, abuse.
+
+240
+00:18:13.357 --> 00:18:23.149
+The pattern is constant preparation over heroics: known limits, rehearsed switches, one decision owner per journey (Ch 27, Ch 37).
+
+241
+00:18:24.499 --> 00:18:26.163
+Dependencies you don't own.
+
+242
+00:18:26.443 --> 00:18:35.083
+Payment gateways and banks, UPI apps, SMS or OTP providers, couriers are each rate-limited and can fail on sale day.
+
+243
+00:18:35.363 --> 00:18:37.113
+Agree peak volumes in advance.
+
+244
+00:18:37.393 --> 00:18:40.657
+Route across providers (Ch 45 L4).
+
+245
+00:18:40.937 --> 00:18:46.739
+Degrade gracefully, for example, allow the order with a delayed OTP, or queue confirmations.
+
+246
+00:18:47.019 --> 00:18:52.523
+Watch a per-dependency success rate on the war-room dashboard, with pre-agreed switch-over thresholds.
+
+247
+00:18:53.873 --> 00:18:54.769
+Part 3.
+
+248
+00:18:55.049 --> 00:18:56.777
+Architecture and Diagrams.
+
+249
+00:18:58.027 --> 00:18:59.073
+Component view.
+
+250
+00:18:59.353 --> 00:19:00.697
+Here is the diagram.
+
+251
+00:19:04.547 --> 00:19:07.107
+Sequence: a fair deal unlock (happy path).
+
+252
+00:19:07.387 --> 00:19:10.181
+The sequence diagram walks through it step by step.
+
+253
+00:19:10.461 --> 00:19:13.811
+P to D: open deal page at 11:57.
+
+254
+00:19:14.091 --> 00:19:19.723
+D to P: page, assets, unlock at 12:00:00, server time.
+
+255
+00:19:20.003 --> 00:19:22.392
+P to P: offset from server time.
+
+256
+00:19:22.672 --> 00:19:27.173
+P to E: re-sync at 11:59:50, measure RTT.
+
+257
+00:19:27.453 --> 00:19:29.523
+E to P: time in milliseconds.
+
+258
+00:19:29.803 --> 00:19:34.859
+P to P: enable Buy at 12:00:00 server time.
+
+259
+00:19:35.139 --> 00:19:36.803
+P to W: tap Buy.
+
+260
+00:19:37.083 --> 00:19:41.413
+W to P: ticket, position 41,203.
+
+261
+00:19:41.693 --> 00:19:44.381
+W to C: admit at sustainable rate.
+
+262
+00:19:44.661 --> 00:19:47.435
+C to P: reserved, pay within 10 minutes.
+
+263
+00:19:51.285 --> 00:19:54.805
+Sequence: a risky COD order (failure path handled).
+
+264
+00:19:55.085 --> 00:19:57.879
+The sequence diagram walks through it step by step.
+
+265
+00:19:58.159 --> 00:20:00.677
+U to C: place order, pay by COD.
+
+266
+00:20:00.957 --> 00:20:02.621
+C to R: score order.
+
+267
+00:20:02.901 --> 00:20:03.818
+R to C:
+
+268
+00:20:04.098 --> 00:20:06.573
+RTO risk 22 percent - confirm.
+
+269
+00:20:06.853 --> 00:20:10.607
+C to U: order placed, confirm by OTP to dispatch.
+
+270
+00:20:10.887 --> 00:20:12.893
+C to O: send confirmation.
+
+271
+00:20:13.173 --> 00:20:15.711
+O to C: no response in 12 hours.
+
+272
+00:20:15.991 --> 00:20:19.682
+C to U: reminder, offer UPI with a small discount.
+
+273
+00:20:19.962 --> 00:20:21.647
+U to C: no response.
+
+274
+00:20:21.927 --> 00:20:24.103
+C to L: cancel before dispatch.
+
+275
+00:20:27.953 --> 00:20:29.575
+State: a COD order.
+
+276
+00:20:29.855 --> 00:20:31.199
+Here is the diagram.
+
+277
+00:20:35.049 --> 00:20:35.966
+Part 4.
+
+278
+00:20:36.246 --> 00:20:37.889
+Design Document Excerpt.
+
+279
+00:20:39.139 --> 00:20:39.885
+Note:
+
+280
+00:20:40.165 --> 00:20:44.112
+Design Document (excerpt), COD Eligibility Service.
+
+281
+00:20:44.392 --> 00:20:49.768
+Context, RTO on COD orders varies by region, customer and value.
+
+282
+00:20:50.048 --> 00:20:58.304
+The current rule turns off COD above 5,000 rupeeseverywhere, which loses genuine orders and misses risky low-value ones.
+
+283
+00:20:58.584 --> 00:21:02.829
+Decision, Score every COD-eligible order for RTO risk.
+
+284
+00:21:03.109 --> 00:21:13.968
+Offer plain COD below 12%, COD with OTP or IVR confirmation from 12% to 40%, and prepaid only above 40%.
+
+285
+00:21:14.248 --> 00:21:16.552
+Review thresholds monthly per region.
+
+286
+00:21:16.832 --> 00:21:29.909
+Related ADRs, ADR-I02 to 1 time sync for deal unlocks; ADR-I02 to 2 household-level deal limits; ADR-I02 to 3 payload budgets per screen.
+
+287
+00:21:30.189 --> 00:21:31.149
+Requirements.
+
+288
+00:21:32.499 --> 00:21:33.331
+R1:
+
+289
+00:21:33.611 --> 00:21:41.441
+The decision is made in at most 30 ms at checkout, and falls back to COD with confirmation if the model is unavailable.
+
+290
+00:21:41.721 --> 00:21:42.553
+R2:
+
+291
+00:21:42.833 --> 00:21:49.467
+The RTO rate on COD orders is reduced without losing more than 5% of COD orders.
+
+292
+00:21:49.747 --> 00:21:50.601
+R3:
+
+293
+00:21:50.881 --> 00:21:55.617
+The decision and its reasons are logged for customer support and fairness audits.
+
+294
+00:21:55.897 --> 00:21:56.793
+R4:
+
+295
+00:21:57.073 --> 00:22:02.171
+Thresholds are configurable per region and category, with a shadow mode for changes.
+
+296
+00:22:03.521 --> 00:22:04.396
+R5:
+
+297
+00:22:04.676 --> 00:22:09.241
+No protected attributes are used as features (VERIFY applicable rules).
+
+298
+00:22:09.521 --> 00:22:10.929
+Decisions in detail.
+
+299
+00:22:11.209 --> 00:22:12.916
+Three bands, not a binary.
+
+300
+00:22:13.196 --> 00:22:16.417
+L2 shows confirmation beats blocking for the middle band.
+
+301
+00:22:16.697 --> 00:22:23.524
+Future value included in evaluation: blocking new customers costs more than this order's margin (L2).
+
+302
+00:22:23.804 --> 00:22:26.833
+Shadow mode for two weeks before any threshold change.
+
+303
+00:22:27.113 --> 00:22:31.081
+Fail open to confirmation, not to plain COD or blocking.
+
+304
+00:22:32.431 --> 00:22:33.455
+Consequences.
+
+305
+00:22:33.735 --> 00:22:36.466
+Confirmation adds a step for some customers.
+
+306
+00:22:36.746 --> 00:22:42.421
+The model needs monitoring for drift, especially at sale time, when the customer mix changes.
+
+307
+00:22:43.771 --> 00:22:44.731
+Part 5.
+
+308
+00:22:45.011 --> 00:22:46.995
+Hands-On Code, Level Ladder.
+
+309
+00:22:48.245 --> 00:22:49.013
+Info:
+
+310
+00:22:49.293 --> 00:22:50.381
+What's real here.
+
+311
+00:22:50.661 --> 00:22:54.607
+L3 measures real serialised and gzip-compressed payloads.
+
+312
+00:22:54.887 --> 00:22:59.794
+L4 runs real address parsing and matching on synthetic Indian addresses.
+
+313
+00:23:00.074 --> 00:23:04.575
+L1 and L2 are simulations whose assumptions are stated in the code.
+
+314
+00:23:04.855 --> 00:23:07.949
+The economics and network profiles are illustrative.
+
+315
+00:23:09.299 --> 00:23:12.093
+L1, A fair deal unlock on a million phones.
+
+316
+00:23:12.373 --> 00:23:13.312
+Requirement:
+
+317
+00:23:13.592 --> 00:23:20.803
+Every shopper sees the Buy button within a second of 12:00:00, without flooding the origin.
+
+318
+00:23:22.153 --> 00:23:25.246
+Here is the Java code, DealUnlockL1.java.
+
+319
+00:23:25.526 --> 00:23:29.238
+It runs to 86 lines; the full listing is in the chapter.
+
+320
+00:23:29.518 --> 00:23:33.422
+L1, Deal unlocks at 12:00:00.
+
+321
+00:23:33.702 --> 00:23:39.569
+A million phones must start the deal at the same moment, but phone clocks are. wrong (some by minutes).
+
+322
+00:23:39.849 --> 00:23:49.449
+Compare four client strategies: how much load hits the origin before and at unlock, and how. many shoppers are ready within 1 s of the true unlock.
+
+323
+00:23:49.729 --> 00:23:53.185
+Clock-skew distribution is an assumption (VERIFY with your.
+
+324
+00:23:56.035 --> 00:23:56.952
+On screen:
+
+325
+00:23:57.232 --> 00:24:02.139
+1,000,000 shoppers on the deal page during the last 300 s; phone clocks:
+
+326
+00:24:02.419 --> 00:24:17.416
+70% within ~1. s, 22% off by ~15 s, 8% by ~2 min. strategy origin reqs peak origin per second early taps within ±1 s late 5 s.
+
+327
+00:24:17.696 --> 00:24:34.315
+S1 poll the origin every 2 s 101,959,847 870,823 0.0% 37.3% 0.0%.
+
+328
+00:24:34.595 --> 00:24:46.307
+S2 timer on the phone's clock 1,000,000 375,953 17.5% 70.4% 12.0%.
+
+329
+00:24:46.587 --> 00:24:59.280
+S3 offset from server Date on page load 2,000,000 680,923 0.0% 96.6% 0.0%.
+
+330
+00:24:59.560 --> 00:25:19.592
+S4 S3 + ms-precision re-sync at Tminus 10 s 2,000,000 582,100 0.0% 100.0% 0.0%. origin reqs or peak: requests reaching the origin from arrival until 10 s after unlock.
+
+331
+00:25:19.872 --> 00:25:22.496
+(edge-cached polls excluded). early taps:
+
+332
+00:25:22.776 --> 00:25:34.104
+'Buy' requests sent before the true unlock (rejected, and often retried). within ±1 s: shoppers whose app shows the Buy button within 1 s of the true unlock.
+
+333
+00:25:34.384 --> 00:25:35.899
+The rest is in the chapter.
+
+334
+00:25:38.749 --> 00:25:39.602
+Reading it:
+
+335
+00:25:39.882 --> 00:25:49.546
+S1, polling the origin, costs 102M requests in five minutes, and still only 37% of shoppers are ready within a second.
+
+336
+00:25:49.826 --> 00:25:52.151
+The 2-second poll interval spreads them out.
+
+337
+00:25:52.431 --> 00:26:03.674
+S2, the phone's clock: only one request each, but 17.5% tap early, get rejected and retry into the peak, and 12% are more than 5 s late.
+
+338
+00:26:03.954 --> 00:26:08.327
+With this skew distribution (an assumption), that is the rigged sale complaint.
+
+339
+00:26:09.677 --> 00:26:17.251
+S3, an offset from the server Date on page load, reaches 96.6% within ±1 s.
+
+340
+00:26:17.531 --> 00:26:21.840
+The rest is the header's one-second resolution plus network asymmetry.
+
+341
+00:26:22.120 --> 00:26:27.389
+S4 adds a millisecond re-sync at Tminus 10 s and reaches 100%.
+
+342
+00:26:27.669 --> 00:26:33.045
+The Buy taps themselves always peak at ~0.6M per second in one second.
+
+343
+00:26:33.325 --> 00:26:37.443
+That is the demand, and it goes to the waiting room (Ch 46).
+
+344
+00:26:37.723 --> 00:26:43.632
+The peak differs between S3 and S4 only because of how the taps fall into one-second buckets.
+
+345
+00:26:44.982 --> 00:26:47.009
+L2, Who gets cash on delivery?
+
+346
+00:26:47.289 --> 00:26:48.227
+Requirement:
+
+347
+00:26:48.507 --> 00:26:54.225
+Cut returned undelivered parcels (RTO) without losing the customers COD brings in.
+
+348
+00:26:55.575 --> 00:26:58.732
+Here is the Java code, CodPolicyL2.java.
+
+349
+00:26:59.012 --> 00:27:02.639
+It runs to 84 lines; the full listing is in the chapter.
+
+350
+00:27:02.919 --> 00:27:11.623
+L2, Cash on delivery (COD) and return to origin (RTO): the customer refuses the parcel at the door and it. travels back.
+
+351
+00:27:11.903 --> 00:27:13.887
+Which orders should be offered COD?
+
+352
+00:27:14.167 --> 00:27:18.796
+Compare policies on 300,000 simulated orders with a risk model.
+
+353
+00:27:19.076 --> 00:27:25.945
+All rates, costs and behaviours are ILLUSTRATIVE assumptions (VERIFY against your own data before using the numbers).
+
+354
+00:27:28.795 --> 00:27:29.713
+On screen:
+
+355
+00:27:29.993 --> 00:27:53.715
+300,000 orders; contribution margin 18%; forward shipping 45, rupeesreturn 40, rupeesCOD. handling 15 rupees;. a successfully delivered NEW customer is worth 250 rupeesof future margin (all. illustrative). policy orders kept RTO parcels this order ₹L ₹ per order incl. future ₹L.
+
+356
+00:27:53.995 --> 00:28:06.006
+P1 COD for everyone 300,000 32,290 189.0 63.0 417.7.
+
+357
+00:28:06.286 --> 00:28:17.145
+P2 no COD at all 203,982 0 183.5 61.2 361.5.
+
+358
+00:28:17.425 --> 00:28:32.337
+P3 block COD if risk 25% 275,533 18,364 194.8 64.9 410.3.
+
+359
+00:28:32.617 --> 00:28:50.174
+P4 block 25%, OTP-confirm COD at 12 to 25% 265,392 12,453 196.5 65.5 408.6.
+
+360
+00:28:50.454 --> 00:29:07.798
+P5 block 40%, OTP-confirm COD at 12 to 40% 277,199 16,337 198.1 66.0 419.8.
+
+361
+00:29:08.078 --> 00:29:16.035
+OTP-confirm: the customer confirms by OTP or IVR before dispatch; assumed to cut RTO risk.
+
+362
+00:29:16.315 --> 00:29:17.830
+The rest is in the chapter.
+
+363
+00:29:20.680 --> 00:29:23.261
+Reading it (all economics are illustrative):
+
+364
+00:29:23.541 --> 00:29:27.723
+No COD at all (P2) keeps only 68% of orders.
+
+365
+00:29:28.003 --> 00:29:42.509
+It ends slightly below COD-for-everyone on this order's profit, and is clearly the worst once new-customer value counts (361.5 lakh rupees versus 417.7 lakh rupees).
+
+366
+00:29:42.789 --> 00:29:49.509
+Blocking above 25% (P3, P4) raises this order's profit but gives up future value.
+
+367
+00:29:49.789 --> 00:29:57.235
+Blocking only above 40% and confirming the 12 to 40% band (P5) is best on both measures:
+
+368
+00:29:57.515 --> 00:30:04.768
+198.1 lakh rupees now and 419.8 lakh rupees with future value.
+
+369
+00:30:05.048 --> 00:30:12.429
+It also halves RTO parcels (32,290, then 16,337).
+
+370
+00:30:13.779 --> 00:30:22.910
+The lesson is the method, not the thresholds: evaluate COD policy on both horizons, and prefer confirmation to blocking for the middle band.
+
+371
+00:30:23.190 --> 00:30:28.502
+The first version of this lab assumed a 12% margin and 55 rupeesshipping.
+
+372
+00:30:28.782 --> 00:30:35.545
+There, no COD policy was profitable at all, because the margin on a median order barely covered shipping.
+
+373
+00:30:35.825 --> 00:30:41.649
+That is a reminder that the conclusion depends on unit economics you must take from your own data.
+
+374
+00:30:42.999 --> 00:30:45.175
+L3, The sale page on 2G.
+
+375
+00:30:45.455 --> 00:30:46.393
+Requirement:
+
+376
+00:30:46.673 --> 00:30:50.876
+The deal list loads in under 3 s on a congested 3G connection.
+
+377
+00:30:52.226 --> 00:30:55.149
+Here is the Java code, PayloadL3.java.
+
+378
+00:30:55.429 --> 00:30:59.781
+It runs to 135 lines; the full listing is in the chapter.
+
+379
+00:31:00.061 --> 00:31:02.919
+L3, The sale page on a slow phone network.
+
+380
+00:31:03.199 --> 00:31:16.426
+Build a real product-listing response (40 products), measure its REAL. size as full JSON, trimmed JSON (only fields the list view renders) and gzip-compressed, then estimate load time on.
+
+381
+00:31:16.706 --> 00:31:23.191
+2G or 3G or 4G profiles with TCP slow start (initial window 10 segments).
+
+382
+00:31:23.471 --> 00:31:26.053
+Network profiles are assumptions (VERIFY).
+
+383
+00:31:28.903 --> 00:31:29.820
+On screen:
+
+384
+00:31:30.100 --> 00:32:10.627
+40-product listing response, sizes measured; times = new HTTPS connection + transfer. with slow start. payload bytes 2G or EDGE 3G congested 4G busy (sale evening) 4G good. full JSON 64,963 8.00 s 2.76 s 0.78 s 0.31 s. full JSON + gzip 13,904 3.91 s 1.68 s 0.52 s 0.21 s. trimmed JSON 6,699 3.34 s
+
+385
+00:32:10.907 --> 00:33:01.675
+1.53 s 0.50 s 0.20 s. trimmed + gzip 1,502 2.92 s 1.43 s 0.48 s 0.20 s. trimmed + gzip -9 1,481 2.92 s 1.43 s 0.48 s 0.20 s. same, on an already-open connection (no DNS or TCP or TLS setup, window already grown): full JSON 64,963 5.90 s 1.65 s 0.29 s 0.08 s. full JSON + gzip 13,904 1.81 s 0.63 s 0.16 s 0.06 s.
+
+386
+00:33:01.955 --> 00:33:03.469
+The rest is in the chapter.
+
+387
+00:33:06.319 --> 00:33:07.173
+Reading it:
+
+388
+00:33:07.453 --> 00:33:23.623
+Real sizes: full JSON is 65 KB;. gzip alone reduces it to 13.9 KB;. trimming to the six fields the list renders reduces it to 6.7 KB;. trimming plus gzip gives 1.5 KB.
+
+389
+00:33:23.903 --> 00:33:26.591
+Maximum gzip level adds almost nothing.
+
+390
+00:33:27.941 --> 00:33:34.981
+On 2G with a new connection, full JSON takes 8.0 s and trimmed + gzip 2.9 s.
+
+391
+00:33:35.261 --> 00:33:44.093
+Of that 2.9 s, about 2.1 s is DNS + TCP + TLS setup, three 700 ms round trips.
+
+392
+00:33:44.373 --> 00:33:48.597
+On an already-open connection the same payload takes 0.8 s.
+
+393
+00:33:48.877 --> 00:33:55.640
+Once payloads are small, connections matter more than bytes: reuse connections, keep few origins, and pre-connect.
+
+394
+00:33:55.920 --> 00:33:58.992
+The requirement: congested 3G, new connection:
+
+395
+00:33:59.272 --> 00:34:02.941
+1.43 s for trimmed + gzip, which meets it;.
+
+396
+00:34:04.291 --> 00:34:06.062
+full JSON on 3G:
+
+397
+00:34:06.342 --> 00:34:11.995
+2.76 s, which barely meets it;. full JSON on 2G misses badly.
+
+398
+00:34:12.275 --> 00:34:13.875
+Images are not included.
+
+399
+00:34:14.155 --> 00:34:19.446
+Budget them separately: thumbnails at the rendered size, in modern formats, lazy-loaded.
+
+400
+00:34:19.726 --> 00:34:25.849
+The network profiles and the slow-start model are simplifications (VERIFY with real-user measurements).
+
+401
+00:34:27.199 --> 00:34:30.121
+L4, Reseller rings versus purchase limits.
+
+402
+00:34:30.401 --> 00:34:31.340
+Requirement:
+
+403
+00:34:31.620 --> 00:34:34.095
+2 units per customer means per household.
+
+404
+00:34:34.375 --> 00:34:36.188
+Don't block neighbours or families.
+
+405
+00:34:37.538 --> 00:34:40.567
+Here is the Java code, ResellerL4.java.
+
+406
+00:34:40.847 --> 00:34:45.199
+It runs to 159 lines; the full listing is in the chapter.
+
+407
+00:34:45.479 --> 00:34:47.783
+L4, Reseller rings on deal day.
+
+408
+00:34:48.063 --> 00:34:57.578
+The deal allows 2 units per customer; a ring uses 400 accounts that ship to 12 real. drop points, each address written many different ways.
+
+409
+00:34:57.858 --> 00:35:02.039
+Genuine buyers include neighbours in the same apartment. complexes.
+
+410
+00:35:02.319 --> 00:35:08.783
+Compare per-account, exact-address, normalised-address and fuzzy (token-similarity) limits: how many deal.
+
+411
+00:35:11.633 --> 00:35:13.191
+On screen: deal limit:
+
+412
+00:35:13.471 --> 00:35:19.401
+2 units per customer; ring = 400 accounts times 2 units, then 12 drop points;.
+
+413
+00:35:19.681 --> 00:35:58.545
+20,000 genuine buyers (1,500 in the same 6 complexes). limit keyed on units to ring genuine buyers blocked keys. account 800 0 20,400. exact address string 778 7 20,382. normalised address (tower, flat, pincode) 24 82 19,930. fuzzy: normalised + token similarity ≥ 0.8 202 2034 18,067. floor on 'genuine blocked' for any address-based limit:
+
+414
+00:35:58.825 --> 00:36:08.297
+79 buyers share a flat with an. earlier genuine buyer (same household). and 3 genuine buyers live in a flat the ring uses as a drop point.
+
+415
+00:36:08.577 --> 00:36:10.091
+The rest is in the chapter.
+
+416
+00:36:12.941 --> 00:36:13.795
+Reading it:
+
+417
+00:36:14.075 --> 00:36:17.061
+Per-account limits give the ring all 800 units.
+
+418
+00:36:17.341 --> 00:36:23.336
+Exact address strings give it 778, because the ring typed each drop point differently:
+
+419
+00:36:23.616 --> 00:36:27.264
+Twr-6 to 1102, Flat No.
+
+420
+00:36:27.544 --> 00:36:35.011
+1102, T6, Wing 6 to 1102, plus C or o names and landmarks.
+
+421
+00:36:36.361 --> 00:36:45.342
+A normalised tower + flat + pincode key gives the ring 24 units, exactly 2 per drop point, which is the minimum possible.
+
+422
+00:36:45.622 --> 00:36:49.526
+It blocks 82 genuine buyers, and all of them are unavoidable:
+
+423
+00:36:49.806 --> 00:36:55.310
+79 second buyers in the same household, and 3 who live in the drop-point flats.
+
+424
+00:36:55.590 --> 00:37:05.105
+The first version of the parser missed the T6 form, which left the tower unknown and merged flats across towers (388 wrongly blocked).
+
+425
+00:37:05.385 --> 00:37:10.377
+The fix was to parse more forms and fall back to the full text when parsing fails.
+
+426
+00:37:11.727 --> 00:37:14.564
+Fuzzy word similarity is worse on both counts:
+
+427
+00:37:14.844 --> 00:37:19.431
+202 units to the ring and 2,034 genuine buyers blocked.
+
+428
+00:37:19.711 --> 00:37:31.956
+Flat 1102, Tower 6 and Flat 1103, Tower 6 share most words, so neighbours merge, while landmark and C or o noise splits the ring's own variants.
+
+429
+00:37:32.236 --> 00:37:36.332
+Parse structure first, and use fuzzy matching only on what can't be parsed.
+
+430
+00:37:37.682 --> 00:37:38.621
+Part 6.
+
+431
+00:37:38.901 --> 00:37:40.181
+Production Concerns.
+
+432
+00:37:41.431 --> 00:37:42.583
+Failure modes.
+
+433
+00:37:42.863 --> 00:37:44.207
+Here is a quick table:
+
+434
+00:37:44.487 --> 00:37:46.663
+Failure, and Effect, and Mitigation.
+
+435
+00:37:46.943 --> 00:37:48.137
+Client clock skew.
+
+436
+00:37:48.417 --> 00:37:49.207
+Effect:
+
+437
+00:37:49.487 --> 00:37:51.599
+Early and late taps, rigged complaints.
+
+438
+00:37:51.879 --> 00:37:52.881
+Mitigation:
+
+439
+00:37:53.161 --> 00:37:55.743
+Server-time sync + re-sync (L1).
+
+440
+00:37:56.023 --> 00:37:57.047
+Buy spike.
+
+441
+00:37:57.327 --> 00:37:58.116
+Effect:
+
+442
+00:37:58.396 --> 00:37:59.633
+Checkout overload.
+
+443
+00:37:59.913 --> 00:38:00.916
+Mitigation:
+
+444
+00:38:01.196 --> 00:38:04.588
+Waiting room, bucketed reservation (Ch 46).
+
+445
+00:38:04.868 --> 00:38:06.681
+Gateway or bank degraded.
+
+446
+00:38:06.961 --> 00:38:07.751
+Effect:
+
+447
+00:38:08.031 --> 00:38:09.140
+Payment failures.
+
+448
+00:38:09.420 --> 00:38:10.423
+Mitigation:
+
+449
+00:38:10.703 --> 00:38:13.988
+Routing and health-based switching (Ch 45).
+
+450
+00:38:14.268 --> 00:38:16.871
+OTP or SMS provider throttled.
+
+451
+00:38:17.151 --> 00:38:17.940
+Effect:
+
+452
+00:38:18.220 --> 00:38:20.652
+Logins and COD confirmations fail.
+
+453
+00:38:20.932 --> 00:38:21.935
+Mitigation:
+
+454
+00:38:22.215 --> 00:38:25.863
+Multiple providers, WhatsApp or IVR fallback, queueing.
+
+455
+00:38:26.143 --> 00:38:27.209
+Reseller ring.
+
+456
+00:38:27.489 --> 00:38:28.279
+Effect:
+
+457
+00:38:28.559 --> 00:38:30.351
+Genuine customers miss deals.
+
+458
+00:38:30.631 --> 00:38:31.633
+Mitigation:
+
+459
+00:38:31.913 --> 00:38:35.284
+Household keys (L4), device and payment graph.
+
+460
+00:38:35.564 --> 00:38:36.759
+RTO surge.
+
+461
+00:38:37.039 --> 00:38:37.828
+Effect:
+
+462
+00:38:38.108 --> 00:38:39.132
+Margin loss.
+
+463
+00:38:39.412 --> 00:38:40.415
+Mitigation:
+
+464
+00:38:40.695 --> 00:38:43.212
+Risk bands (L2), promise accuracy.
+
+465
+00:38:44.562 --> 00:38:45.650
+Observability.
+
+466
+00:38:45.930 --> 00:39:02.101
+The war-room dashboards show: journey success rates: browse, add to cart, checkout, payment by method and bank;. waiting-room depth and admission rate;. deal units remaining;. time-sync error from clients (reported by the app);. payload sizes by screen;.
+
+467
+00:39:02.381 --> 00:39:05.751
+RTO and COD confirmation rates by region;.
+
+468
+00:39:07.101 --> 00:39:08.829
+limit hits and abuse blocks.
+
+469
+00:39:10.179 --> 00:39:11.545
+Security and abuse.
+
+470
+00:39:11.825 --> 00:39:19.249
+Bot traffic on deal pages is handled by device attestation, behavioural checks and rate limits (Ch 39).
+
+471
+00:39:19.529 --> 00:39:23.497
+Account takeover spikes around sales need step-up authentication.
+
+472
+00:39:23.777 --> 00:39:27.702
+Promo and bank-offer abuse is handled by per-instrument caps.
+
+473
+00:39:29.052 --> 00:39:30.396
+Performance and cost.
+
+474
+00:39:30.676 --> 00:39:35.369
+Pre-scaling and reserved capacity for the sale window (Ch 35).
+
+475
+00:39:35.649 --> 00:39:40.193
+Payload budgets (L3) reduce CDN egress as well as latency.
+
+476
+00:39:40.473 --> 00:39:44.505
+RTO is a logistics cost line to track per region (L2).
+
+477
+00:39:45.855 --> 00:39:46.751
+Compliance.
+
+478
+00:39:47.031 --> 00:40:00.962
+E-commerce rules on seller information display, country of origin, grievance officers, and restrictions on certain flash-sale practices (VERIFY the current Consumer Protection (E-Commerce) Rules and amendments).
+
+479
+00:40:01.242 --> 00:40:03.269
+Invoicing with GST per seller.
+
+480
+00:40:03.549 --> 00:40:09.202
+Payment data rules (RBI tokenisation for cards; VERIFY) (Ch 36).
+
+481
+00:40:10.552 --> 00:40:11.491
+Part 7.
+
+482
+00:40:11.771 --> 00:40:13.477
+Anti-Patterns and Pitfalls.
+
+483
+00:40:14.727 --> 00:40:15.645
+Watch out:
+
+484
+00:40:15.925 --> 00:40:16.565
+1.
+
+485
+00:40:16.845 --> 00:40:18.935
+Polling the origin for deal status.
+
+486
+00:40:19.215 --> 00:40:22.074
+It costs 100M requests for nothing (L1).
+
+487
+00:40:23.424 --> 00:40:24.341
+Watch out:
+
+488
+00:40:24.621 --> 00:40:25.325
+2.
+
+489
+00:40:25.605 --> 00:40:26.992
+Trusting the phone's clock.
+
+490
+00:40:27.272 --> 00:40:29.128
+Early and late taps (L1).
+
+491
+00:40:30.478 --> 00:40:31.395
+Watch out:
+
+492
+00:40:31.675 --> 00:40:32.422
+3.
+
+493
+00:40:32.702 --> 00:40:34.750
+Rejecting early taps with a penalty.
+
+494
+00:40:35.030 --> 00:40:37.163
+It punishes clock skew, not cheating.
+
+495
+00:40:38.513 --> 00:40:39.431
+Watch out:
+
+496
+00:40:39.711 --> 00:40:40.415
+4.
+
+497
+00:40:40.695 --> 00:40:42.956
+Turning off COD to cut RTO.
+
+498
+00:40:43.236 --> 00:40:45.455
+It loses a third of orders (L2).
+
+499
+00:40:46.805 --> 00:40:47.722
+Watch out:
+
+500
+00:40:48.002 --> 00:40:48.770
+5.
+
+501
+00:40:49.050 --> 00:40:52.335
+Judging COD policy on this order's profit only.
+
+502
+00:40:52.615 --> 00:40:55.111
+It ignores new-customer value (L2).
+
+503
+00:40:56.461 --> 00:40:57.379
+Watch out:
+
+504
+00:40:57.659 --> 00:40:58.405
+6.
+
+505
+00:40:58.685 --> 00:41:01.224
+Shipping full product JSON to list views.
+
+506
+00:41:01.504 --> 00:41:03.083
+Payload bloat (L3).
+
+507
+00:41:04.433 --> 00:41:05.350
+Watch out:
+
+508
+00:41:05.630 --> 00:41:06.377
+7.
+
+509
+00:41:06.657 --> 00:41:08.833
+Many origins per screen on 2G.
+
+510
+00:41:09.113 --> 00:41:11.395
+Connection setup dominates (L3).
+
+511
+00:41:12.745 --> 00:41:13.663
+Watch out:
+
+512
+00:41:13.943 --> 00:41:14.625
+8.
+
+513
+00:41:14.905 --> 00:41:16.313
+Per-account deal limits.
+
+514
+00:41:16.593 --> 00:41:18.023
+Rings win (L4).
+
+515
+00:41:19.373 --> 00:41:20.290
+Watch out:
+
+516
+00:41:20.570 --> 00:41:21.317
+9.
+
+517
+00:41:21.597 --> 00:41:23.815
+Fuzzy address matching as the main key.
+
+518
+00:41:24.095 --> 00:41:25.866
+It blocks neighbours (L4).
+
+519
+00:41:27.216 --> 00:41:28.133
+Watch out:
+
+520
+00:41:28.413 --> 00:41:29.117
+10.
+
+521
+00:41:29.397 --> 00:41:32.448
+Estimating bank offers without reserving the budget.
+
+522
+00:41:32.728 --> 00:41:33.944
+Caps are overspent.
+
+523
+00:41:35.294 --> 00:41:36.211
+Watch out:
+
+524
+00:41:36.491 --> 00:41:37.323
+11.
+
+525
+00:41:37.603 --> 00:41:39.075
+Changes during the sale.
+
+526
+00:41:39.355 --> 00:41:40.998
+Freeze critical services.
+
+527
+00:41:42.348 --> 00:41:43.265
+Watch out:
+
+528
+00:41:43.545 --> 00:41:44.335
+12.
+
+529
+00:41:44.615 --> 00:41:48.647
+Unagreed peak volumes with banks, SMS providers and couriers.
+
+530
+00:41:48.927 --> 00:41:50.591
+Dependencies fail first.
+
+531
+00:41:51.941 --> 00:41:52.815
+Part 8.
+
+532
+00:41:53.095 --> 00:41:54.439
+Interview Q and A.
+
+533
+00:41:55.689 --> 00:41:56.521
+Beginner.
+
+534
+00:41:56.801 --> 00:41:57.825
+Question 1.
+
+535
+00:41:58.105 --> 00:42:01.391
+What makes a big Indian sale day different from a normal day?
+
+536
+00:42:01.671 --> 00:42:03.036
+Thirty-second answer:
+
+537
+00:42:03.316 --> 00:42:19.657
+Traffic spikes of an order of magnitude or more concentrated at deal unlocks, limited-quantity deals, heavy COD and slow networks outside metros, bank offers and EMI at checkout, and dependencies (banks, SMS, couriers) that also peak.
+
+538
+00:42:21.007 --> 00:42:22.010
+Question 2.
+
+539
+00:42:22.290 --> 00:42:26.151
+How would you show a countdown that ends at the same moment for everyone?
+
+540
+00:42:26.431 --> 00:42:27.797
+Thirty-second answer:
+
+541
+00:42:28.077 --> 00:42:39.469
+Send the unlock time and server time with the page, compute the phone's clock offset, re-sync precisely shortly before unlock, and let the server check the time again on the Buy request.
+
+542
+00:42:40.819 --> 00:42:41.864
+Question 3.
+
+543
+00:42:42.144 --> 00:42:44.299
+What is RTO and why does it matter?
+
+544
+00:42:44.579 --> 00:42:45.944
+Thirty-second answer:
+
+545
+00:42:46.224 --> 00:42:57.488
+Return to origin, the parcel isn't delivered (refused or unreachable) and comes back; you pay shipping both ways and make no sale, so it's a major cost for COD orders.
+
+546
+00:42:58.838 --> 00:42:59.905
+Question 4.
+
+547
+00:43:00.185 --> 00:43:02.553
+How would you keep the app usable on 2G?
+
+548
+00:43:02.833 --> 00:43:04.198
+Thirty-second answer:
+
+549
+00:43:04.478 --> 00:43:15.038
+Send only what the screen renders, compress, reuse connections and limit origins, right-size images, cache aggressively, and consider a lite app or PWA.
+
+550
+00:43:16.388 --> 00:43:17.391
+Intermediate.
+
+551
+00:43:17.671 --> 00:43:18.780
+Question 5.
+
+552
+00:43:19.060 --> 00:43:22.409
+Design the deal-unlock flow for a million concurrent shoppers.
+
+553
+00:43:22.689 --> 00:43:24.055
+Thirty-second answer:
+
+554
+00:43:24.335 --> 00:43:45.433
+Deal pages and assets from the CDN before unlock; server-time sync on load and a millisecond re-sync from an edge time endpoint at Tminus 10 s; local enable at unlock; Buy goes to a waiting room that admits to checkout at a sustainable rate; the server rechecks time and per-customer limits; bucketed stock reservation.
+
+555
+00:43:46.783 --> 00:43:47.893
+Question 6.
+
+556
+00:43:48.173 --> 00:43:51.181
+How do you decide whether to offer COD on an order?
+
+557
+00:43:51.461 --> 00:43:52.826
+Thirty-second answer:
+
+558
+00:43:53.106 --> 00:44:11.303
+Score RTO risk from features like region, customer history and value; offer plain COD at low risk, COD with OTP or IVR confirmation in the middle, prepaid-only at high risk; evaluate policies on this order's margin and on new-customer value.
+
+559
+00:44:12.653 --> 00:44:13.741
+Question 7.
+
+560
+00:44:14.021 --> 00:44:16.624
+How are bank offers applied correctly at checkout?
+
+561
+00:44:16.904 --> 00:44:18.269
+Thirty-second answer:
+
+562
+00:44:18.549 --> 00:44:34.699
+Show an estimate early, recompute when the payment instrument is known (card BIN, bank, EMI tenure), reserve the offer budget atomically against daily caps, release on failure, and store each discount line with its funder for settlement and invoicing.
+
+563
+00:44:36.049 --> 00:44:37.073
+Question 8.
+
+564
+00:44:37.353 --> 00:44:39.806
+How do you support shoppers in many languages?
+
+565
+00:44:40.086 --> 00:44:41.451
+Thirty-second answer:
+
+566
+00:44:41.731 --> 00:44:51.779
+Localised UI and catalog content, search that handles transliteration, mixed scripts and voice mapping to the same catalog, and success metrics per language.
+
+567
+00:44:53.129 --> 00:44:54.196
+Question 9.
+
+568
+00:44:54.476 --> 00:44:57.399
+How would you prepare external dependencies for a sale?
+
+569
+00:44:57.679 --> 00:44:59.044
+Thirty-second answer:
+
+570
+00:44:59.324 --> 00:45:15.516
+Agree peak volumes with banks, gateways, SMS providers and couriers; route across providers; build fallbacks (IVR or WhatsApp OTP, delayed confirmations); watch per-dependency success on the war-room dashboard with switch thresholds.
+
+571
+00:45:16.866 --> 00:45:17.634
+Senior.
+
+572
+00:45:17.914 --> 00:45:18.959
+Question 10.
+
+573
+00:45:19.239 --> 00:45:20.925
+A deal says '2 per customer'.
+
+574
+00:45:21.205 --> 00:45:24.554
+How do you stop reseller rings without blocking families?
+
+575
+00:45:24.834 --> 00:45:26.199
+Thirty-second answer:
+
+576
+00:45:26.479 --> 00:45:43.930
+Enforce limits on the delivery household, not the account: normalise addresses into structured keys (tower, flat, pincode) and combine with device, payment and phone signals; use fuzzy matching only for unparsed leftovers; explain household limits to customers.
+
+577
+00:45:45.280 --> 00:45:46.411
+Question 11.
+
+578
+00:45:46.691 --> 00:45:51.043
+Why does trusting the phone clock produce complaints even when servers are fine?
+
+579
+00:45:51.323 --> 00:45:52.688
+Thirty-second answer:
+
+580
+00:45:52.968 --> 00:46:03.229
+A minority of phones are seconds to minutes off: fast ones tap early and get rejected, slow ones see the button after stock is gone; to users the sale looks rigged.
+
+581
+00:46:03.509 --> 00:46:06.069
+Server-time sync removes almost all of it.
+
+582
+00:46:07.419 --> 00:46:08.507
+Question 12.
+
+583
+00:46:08.787 --> 00:46:12.819
+On a slow network, what matters more: payload size or connections?
+
+584
+00:46:13.099 --> 00:46:14.465
+Thirty-second answer:
+
+585
+00:46:14.745 --> 00:46:33.305
+Both, but once payloads are trimmed and compressed, connection setup dominates, a new HTTPS connection costs several round trips (2 plus s on 2G); reuse connections, reduce origins, use HTTP or 2 or HTTP or 3, and pre-connect before the user needs it.
+
+586
+00:46:34.655 --> 00:46:35.935
+Question 13.
+
+587
+00:46:36.215 --> 00:46:39.287
+How do you reduce RTO beyond blocking COD?
+
+588
+00:46:39.567 --> 00:46:40.932
+Thirty-second answer:
+
+589
+00:46:41.212 --> 00:46:57.191
+Confirmation for medium-risk orders, accurate promises (late deliveries get refused), better addresses (validation, geocoding), delivery attempt scheduling and customer calls, incentives to prepay, and courier or pincode performance management.
+
+590
+00:46:58.541 --> 00:46:59.735
+Question 14.
+
+591
+00:47:00.015 --> 00:47:01.914
+What does your sale-day war room look at?
+
+592
+00:47:02.194 --> 00:47:03.559
+Thirty-second answer:
+
+593
+00:47:03.839 --> 00:47:18.517
+Journey success rates, waiting-room depth and admission, deal inventory, payment success by method, bank and gateway, dependency health, error budgets, and abuse or limit hits, with a named decision owner per journey and pre-agreed switches.
+
+594
+00:47:19.867 --> 00:47:20.763
+Architect.
+
+595
+00:47:21.043 --> 00:47:22.237
+Question 15.
+
+596
+00:47:22.517 --> 00:47:25.333
+Plan the engineering readiness for a festive sale.
+
+597
+00:47:25.613 --> 00:47:26.979
+Thirty-second answer:
+
+598
+00:47:27.259 --> 00:47:43.088
+Forecast journeys and dependency peaks, capacity plan with headroom, full-journey load and chaos tests, degradation switches, change freeze, pre-scaling and cache warming, war room with owners and comms, then a retrospective feeding next year's forecast.
+
+599
+00:47:44.438 --> 00:47:45.633
+Question 16.
+
+600
+00:47:45.913 --> 00:47:50.073
+How would you evaluate a proposal to stop offering COD nationally?
+
+601
+00:47:50.353 --> 00:47:51.718
+Thirty-second answer:
+
+602
+00:47:51.998 --> 00:48:09.577
+Model the whole economics: orders lost (not every COD customer prepays), RTO saved, and the lifetime value of new customers who only start with COD; compare with targeted risk bands; pilot by region with shadow scoring before any national change.
+
+603
+00:48:10.927 --> 00:48:12.271
+Question 17.
+
+604
+00:48:12.551 --> 00:48:14.940
+How do you make limited deals perceived as fair?
+
+605
+00:48:15.220 --> 00:48:16.585
+Thirty-second answer:
+
+606
+00:48:16.865 --> 00:48:31.415
+Synchronised unlocks, first-come order via a waiting room, household limits against rings, clear communication (position in queue, sold-out quickly), post-sale transparency on units, and no penalties for honest early taps.
+
+607
+00:48:32.765 --> 00:48:33.938
+Question 18.
+
+608
+00:48:34.218 --> 00:48:39.402
+How would you architect for entry-level phones and slow networks across the whole platform?
+
+609
+00:48:39.682 --> 00:48:41.047
+Thirty-second answer:
+
+610
+00:48:41.327 --> 00:48:59.951
+Per-screen payload and request budgets enforced in CI, BFFs shaping responses per client, image pipeline with device-aware variants, connection reuse and few origins, offline-tolerant flows with idempotency, and a lite client; measure real-user performance by network type.
+
+611
+00:49:01.301 --> 00:49:02.539
+Question 19.
+
+612
+00:49:02.819 --> 00:49:06.979
+What regulatory and trust constraints shape Indian e-commerce design?
+
+613
+00:49:07.259 --> 00:49:08.624
+Thirty-second answer:
+
+614
+00:49:08.904 --> 00:49:26.163
+Consumer-protection e-commerce rules on disclosures and certain flash-sale practices, grievance redressal, GST invoicing per seller, RBI rules for card data and payment aggregators, and personal-data protection, all to be checked against current text (VERIFY).
+
+615
+00:49:27.513 --> 00:49:28.622
+Question 20.
+
+616
+00:49:28.902 --> 00:49:34.043
+Compare the design priorities of an Indian sale-day platform with a global marketplace.
+
+617
+00:49:34.323 --> 00:49:35.689
+Thirty-second answer:
+
+618
+00:49:35.969 --> 00:49:55.126
+Both need cells, reservation and resilience; the Indian sale adds extreme synchronised spikes, COD or RTO economics, slow-network design, household-level limits, bank-offer complexity and vernacular reach, so edge, client and risk design matter as much as back-end scale.
+
+619
+00:49:56.476 --> 00:49:57.372
+Part 9.
+
+620
+00:49:57.652 --> 00:49:59.060
+Summary and Practice.
+
+621
+00:50:00.310 --> 00:50:01.398
+Key takeaways.
+
+622
+00:50:01.678 --> 00:50:05.091
+Sync clients to server time and re-sync before unlock.
+
+623
+00:50:05.371 --> 00:50:07.462
+Never poll the origin (L1).
+
+624
+00:50:07.742 --> 00:50:13.054
+Price COD risk with bands and confirmation, and count new-customer value (L2).
+
+625
+00:50:13.334 --> 00:50:15.915
+Budget payloads and connections for 2G.
+
+626
+00:50:16.195 --> 00:50:19.246
+Setup round trips dominate small payloads (L3).
+
+627
+00:50:19.526 --> 00:50:24.774
+Enforce limits on structured household keys, not accounts or fuzzy text (L4).
+
+628
+00:50:26.124 --> 00:50:31.500
+Sale days are won by readiness: capacity, dependencies, switches, freeze, war room.
+
+629
+00:50:32.850 --> 00:50:33.831
+Cheat sheet.
+
+630
+00:50:34.111 --> 00:50:35.455
+Here is a quick table:
+
+631
+00:50:35.735 --> 00:50:37.122
+Problem, and Pattern.
+
+632
+00:50:37.402 --> 00:50:38.405
+Deal unlock:
+
+633
+00:50:38.685 --> 00:50:43.122
+Server-time offset + millisecond re-sync; authoritative server check.
+
+634
+00:50:43.402 --> 00:50:44.426
+Buy spike:
+
+635
+00:50:44.706 --> 00:50:48.375
+Waiting room + bucketed reservation (Ch 46).
+
+636
+00:50:48.655 --> 00:50:49.743
+COD risk:
+
+637
+00:50:50.023 --> 00:50:51.026
+Risk bands:
+
+638
+00:50:51.306 --> 00:50:53.546
+COD, COD + OTP, prepaid only.
+
+639
+00:50:53.826 --> 00:50:54.957
+Slow networks:
+
+640
+00:50:55.237 --> 00:50:59.354
+Trim + compress, reuse connections, few origins, lite client.
+
+641
+00:50:59.634 --> 00:51:00.615
+Resellers:
+
+642
+00:51:00.895 --> 00:51:05.546
+Normalised tower or flat or pincode key + device or payment graph.
+
+643
+00:51:05.826 --> 00:51:06.893
+Bank offers:
+
+644
+00:51:07.173 --> 00:51:10.351
+Recompute at instrument choice, reserve cap budget.
+
+645
+00:51:11.701 --> 00:51:12.832
+Exercises.
+
+646
+00:51:13.112 --> 00:51:18.957
+(B1) Estimate origin requests if 1M shoppers poll every 5 s for 10 minutes.
+
+647
+00:51:19.237 --> 00:51:23.525
+(B2) Add a partial prepayment of 99 rupees option to L2.
+
+648
+00:51:23.805 --> 00:51:26.003
+Where does it beat OTP confirmation?
+
+649
+00:51:26.283 --> 00:51:32.021
+(B3) Add a 5 KB thumbnail per product to L3 and recompute the 2G times.
+
+650
+00:51:32.301 --> 00:51:36.952
+(B3) Extend L4 so the ring also rotates phone numbers and cards.
+
+651
+00:51:37.232 --> 00:51:38.704
+Which signal catches it?
+
+652
+00:51:38.984 --> 00:51:45.661
+(B4) Write the war-room runbook for UPI success rate drops by 20% at 12:01.
+
+653
+00:51:47.011 --> 00:51:48.014
+Further reading.
+
+654
+00:51:48.294 --> 00:51:53.499
+Flipkart engineering blog posts on sale readiness and Flipkart Lite (VERIFY titles).
+
+655
+00:51:53.779 --> 00:52:00.691
+Research and industry reports on COD and RTO in Indian e-commerce (VERIFY sources and dates).
+
+656
+00:52:00.971 --> 00:52:08.310
+Web performance guidance on HTTP or 2, HTTP or 3 and TLS 1.3 round trips.
+
+657
+00:52:08.590 --> 00:52:15.395
+The Consumer Protection (E-Commerce) Rules, 2020 and later amendments (VERIFY current text).
+
+658
+00:52:16.745 --> 00:52:17.983
+Related chapters.
+
+659
+00:52:18.263 --> 00:52:29.740
+Ch 46, Checkout and Inventory Reservation, Ch 45, Payments, Ch 49, Pricing and Promotions, I01, Amazon-Style Marketplace.
+
+660
+00:52:30.020 --> 00:52:34.287
+Full system walkthrough (journeys, algorithms, data platform, tech stack):
+
+661
+00:52:34.567 --> 00:52:36.465
+I02b, How It Works.
+
+662
+00:52:36.745 --> 00:52:37.940
+Next in this tab:
+
+663
+00:52:38.220 --> 00:52:41.271
+I03, Core Banking and UPI Payments.
+
+664
+00:52:42.621 --> 00:52:44.221
+That's the end of this chapter.
+
+665
+00:52:44.501 --> 00:52:50.538
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+666
+00:52:50.818 --> 00:52:52.269
+See you in the next chapter.
+

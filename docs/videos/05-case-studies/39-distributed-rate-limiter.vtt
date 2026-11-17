@@ -1,0 +1,3542 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:01.310
+Case Study:
+
+2
+00:00:01.590 --> 00:00:03.126
+Distributed Rate Limiter.
+
+3
+00:00:03.406 --> 00:00:07.651
+Chapter 39, from the Case Studies part of the System Design Playbook.
+
+4
+00:00:09.401 --> 00:00:10.361
+At a glance:
+
+5
+00:00:10.641 --> 00:00:11.815
+Chapter at a glance.
+
+6
+00:00:12.095 --> 00:00:13.097
+Reader bands:
+
+7
+00:00:13.377 --> 00:00:15.660
+B2, then B4, Prerequisites:
+
+8
+00:00:15.940 --> 00:00:22.319
+Ch 08, Ch 18 (rate-limiting algorithms), Ch 23, What you will build:
+
+9
+00:00:22.599 --> 00:00:25.137
+The grocery platform's rate-limiting service.
+
+10
+00:00:25.417 --> 00:00:36.233
+It sets per-customer limits at the gateway, enforces partner API contracts, protects OTP against SMS-pumping fraud, and paces calls to outbound vendors.
+
+11
+00:00:36.513 --> 00:00:39.948
+Ch 18 compared the algorithms on one client.
+
+12
+00:00:40.228 --> 00:00:48.185
+This chapter designs the system: millions of keys, many gateway nodes, two regions, adversaries, and the limiter's own failures.
+
+13
+00:00:49.535 --> 00:00:51.818
+L1: state per key (real Redis).
+
+14
+00:00:52.098 --> 00:01:01.869
+An exact sliding-window log for 100,000 users took 987 bytes per key, ~9.9 GB at 10M keys.
+
+15
+00:01:02.149 --> 00:01:09.914
+GCRA took 90 bytes, one integer, and made exactly the token bucket's decisions (0 of 2.2M differ).
+
+16
+00:01:10.194 --> 00:01:23.869
+On bursty traffic the sliding-window counter disagreed with the exact log on 4.3% of decisions and let a key reach 108 requests in a true 60-second window against a limit of 60.
+
+17
+00:01:25.219 --> 00:01:28.824
+L2: one global limit from 8 nodes (real Redis Lua).
+
+18
+00:01:29.104 --> 00:01:35.696
+A partner with a 1,000 req per second contract sent 900 req per second, skewed onto one node.
+
+19
+00:01:35.976 --> 00:01:40.840
+Local per-node limits rejected 4,093 in-contract requests.
+
+20
+00:01:41.120 --> 00:01:45.301
+A central GCRA rejected 0, at 1 Redis call per request.
+
+21
+00:01:45.581 --> 00:01:54.968
+Adaptive token leasing rejected 0 with 0.17 calls per request, and still held the cap at 2,000 req per second offered.
+
+22
+00:01:56.318 --> 00:01:57.171
+L3:
+
+23
+00:01:57.451 --> 00:01:59.201
+OTP SMS pumping.
+
+24
+00:01:59.481 --> 00:02:11.043
+Per-IP limits sent 47,175 attack SMS and locked out 57.5% of real users, who share carrier CGNAT addresses.
+
+25
+00:02:11.323 --> 00:02:18.299
+Per-phone limits blocked no real users but let 59,199 attack SMS through.
+
+26
+00:02:18.579 --> 00:02:33.449
+Per-destination-range budgets plus attestation cut the attack to 79 SMS (356 rupeesinstead of 266,396 rupees), with 3 real users affected.
+
+27
+00:02:34.799 --> 00:02:36.761
+L4: regions and failures.
+
+28
+00:02:37.041 --> 00:02:46.791
+A static 500 or 500 split between regions refused 99,370 in-contract requests when the partner's traffic moved.
+
+29
+00:02:47.071 --> 00:02:50.527
+Rebalancing every 10 s refused 914.
+
+30
+00:02:50.807 --> 00:02:58.188
+A central limiter admitted 1,468 per second against a 1,000 contract during a partition.
+
+31
+00:02:58.468 --> 00:03:18.137
+With the limiter's Redis down for 2 minutes, failing open sent 2,059 attack SMS (9,265 rupees), failing closed refused 3,955 real logins, and a local fallback allowed 30 attack SMS and refused 16 real logins.
+
+32
+00:03:18.417 --> 00:03:19.399
+Reading time:
+
+33
+00:03:19.679 --> 00:03:21.300
+100 min + code.
+
+34
+00:03:22.650 --> 00:03:23.503
+Part 1.
+
+35
+00:03:23.783 --> 00:03:25.703
+Introduction and Why It Matters.
+
+36
+00:03:26.953 --> 00:03:29.407
+A story: the limiter that locked out Jio.
+
+37
+00:03:29.687 --> 00:03:40.737
+The grocery platform had rate limiting from day one: a Redis token bucket at the gateway (Ch 08), keyed by IP address, 10 OTP requests per hour.
+
+38
+00:03:41.017 --> 00:03:42.276
+Then, in one month:
+
+39
+00:03:42.556 --> 00:03:44.327
+Real customers were locked out.
+
+40
+00:03:44.607 --> 00:03:49.300
+On a Sunday morning, thousands of customers on one mobile carrier couldn't log in.
+
+41
+00:03:49.580 --> 00:03:58.583
+Carrier-grade NAT puts thousands of phones behind one public IP, and the per-IP OTP limit treated them as one abusive client.
+
+42
+00:03:59.933 --> 00:04:03.901
+An SMS-pumping attack cost 18 lakh rupees in a weekend.
+
+43
+00:04:04.181 --> 00:04:09.962
+Fraudsters triggered OTPs to international number ranges where they shared the termination fees.
+
+44
+00:04:10.242 --> 00:04:16.407
+They used thousands of residential-proxy IPs and never sent more than two OTPs to any number.
+
+45
+00:04:16.687 --> 00:04:19.098
+No per-IP or per-phone limit fired.
+
+46
+00:04:19.378 --> 00:04:22.578
+A logistics partner was throttled inside its contract.
+
+47
+00:04:22.858 --> 00:04:33.717
+Its 1,000 req per second limit was enforced as 125 req per second on each of 8 gateway nodes, and the partner's traffic arrived mostly on one node.
+
+48
+00:04:33.997 --> 00:04:38.861
+The partner escalated; the account manager doubled the limit to make the complaints stop.
+
+49
+00:04:40.211 --> 00:04:41.875
+The limiter took down login.
+
+50
+00:04:42.155 --> 00:04:44.245
+Redis for rate limits had a failover.
+
+51
+00:04:44.525 --> 00:04:50.328
+The gateway was configured to fail closed, so for 90 seconds nobody could request an OTP.
+
+52
+00:04:50.608 --> 00:04:52.421
+The SMS vendor throttled us.
+
+53
+00:04:52.701 --> 00:04:56.029
+The vendor's contract was 500 SMS per second.
+
+54
+00:04:56.309 --> 00:05:06.912
+During a campaign, notification workers across three services collectively sent 1,200 per second, and the vendor dropped messages, including OTPs.
+
+55
+00:05:07.192 --> 00:05:11.864
+Each of these is a system design failure of the limiter, not an algorithm choice.
+
+56
+00:05:12.144 --> 00:05:19.760
+The rebuilt limiter, designed here, starts from what each limit protects, who it limits, where it's enforced, and what happens when it breaks.
+
+57
+00:05:21.110 --> 00:05:21.793
+Quote:
+
+58
+00:05:22.073 --> 00:05:23.737
+The thesis of this chapter.
+
+59
+00:05:24.017 --> 00:05:39.654
+A rate limiter is several different controls sharing one mechanism: abuse prevention (fraud, scraping, credential stuffing), fairness (one customer can't starve others), contracts (partner quotas), and protection of our capacity and of vendors'.
+
+60
+00:05:39.934 --> 00:05:52.563
+Each needs the right key (L3), the right accuracy and state size (L1), the right enforcement topology for many nodes and regions (L2, L4), and an explicit failure mode (L4).
+
+61
+00:05:52.843 --> 00:05:57.238
+The algorithm, token bucket, GCRA, sliding window, is the easy part.
+
+62
+00:05:58.588 --> 00:06:00.892
+Where this lives in the grocery platform.
+
+63
+00:06:01.172 --> 00:06:02.537
+Here is a quick table:
+
+64
+00:06:02.817 --> 00:06:06.871
+Limit, and Protects, and Key, and Typical rule, and On limiter failure.
+
+65
+00:06:07.151 --> 00:06:08.473
+Customer API.
+
+66
+00:06:08.753 --> 00:06:09.607
+Protects:
+
+67
+00:06:09.887 --> 00:06:11.231
+Fairness, capacity.
+
+68
+00:06:11.511 --> 00:06:12.172
+Key:
+
+69
+00:06:12.452 --> 00:06:15.033
+User id (fallback: device, IP).
+
+70
+00:06:15.313 --> 00:06:16.359
+Typical rule:
+
+71
+00:06:16.639 --> 00:06:18.665
+20 req per second, burst 40.
+
+72
+00:06:18.945 --> 00:06:20.161
+On limiter failure:
+
+73
+00:06:20.441 --> 00:06:22.276
+Fail open, local fallback.
+
+74
+00:06:22.556 --> 00:06:24.284
+Search or catalog scraping.
+
+75
+00:06:24.564 --> 00:06:25.417
+Protects:
+
+76
+00:06:25.697 --> 00:06:26.935
+Data, capacity.
+
+77
+00:06:27.215 --> 00:06:27.876
+Key:
+
+78
+00:06:28.156 --> 00:06:30.119
+Device + IP + ASN.
+
+79
+00:06:30.399 --> 00:06:31.444
+Typical rule:
+
+80
+00:06:31.724 --> 00:06:32.620
+Adaptive.
+
+81
+00:06:32.900 --> 00:06:34.116
+On limiter failure:
+
+82
+00:06:34.396 --> 00:06:35.441
+Fail open.
+
+83
+00:06:35.721 --> 00:06:36.873
+OTP send.
+
+84
+00:06:37.153 --> 00:06:38.007
+Protects:
+
+85
+00:06:38.287 --> 00:06:40.356
+Fraud (SMS cost), abuse.
+
+86
+00:06:40.636 --> 00:06:41.297
+Key:
+
+87
+00:06:41.577 --> 00:06:44.713
+Phone, destination range, device, IP (loose).
+
+88
+00:06:44.993 --> 00:06:46.039
+Typical rule:
+
+89
+00:06:46.319 --> 00:06:49.028
+3 or 10 min per phone; range budgets.
+
+90
+00:06:49.308 --> 00:06:50.524
+On limiter failure:
+
+91
+00:06:50.804 --> 00:06:53.023
+Local fallback, never fully open.
+
+92
+00:06:53.303 --> 00:06:54.476
+Login verify.
+
+93
+00:06:54.756 --> 00:06:55.609
+Protects:
+
+94
+00:06:55.889 --> 00:06:57.148
+Credential stuffing.
+
+95
+00:06:57.428 --> 00:06:58.089
+Key:
+
+96
+00:06:58.369 --> 00:07:01.271
+Phone + device; global failure ratio.
+
+97
+00:07:01.551 --> 00:07:02.596
+Typical rule:
+
+98
+00:07:02.876 --> 00:07:04.540
+5 failed or 15 min.
+
+99
+00:07:04.820 --> 00:07:06.036
+On limiter failure:
+
+100
+00:07:06.316 --> 00:07:07.788
+Fail closed per phone.
+
+101
+00:07:08.068 --> 00:07:09.391
+Partner API.
+
+102
+00:07:09.671 --> 00:07:10.524
+Protects:
+
+103
+00:07:10.804 --> 00:07:11.700
+Contract.
+
+104
+00:07:11.980 --> 00:07:12.641
+Key:
+
+105
+00:07:12.921 --> 00:07:13.988
+API key.
+
+106
+00:07:14.268 --> 00:07:15.313
+Typical rule:
+
+107
+00:07:15.593 --> 00:07:17.620
+1,000 req per second global.
+
+108
+00:07:17.900 --> 00:07:19.116
+On limiter failure:
+
+109
+00:07:19.396 --> 00:07:21.295
+Fail open (paid customer).
+
+110
+00:07:22.645 --> 00:07:25.269
+Vendor egress (SMS, Razorpay, ERP).
+
+111
+00:07:25.549 --> 00:07:26.402
+Protects:
+
+112
+00:07:26.682 --> 00:07:27.855
+Vendor contract.
+
+113
+00:07:28.135 --> 00:07:28.797
+Key:
+
+114
+00:07:29.077 --> 00:07:30.101
+Vendor account.
+
+115
+00:07:30.381 --> 00:07:31.426
+Typical rule:
+
+116
+00:07:31.706 --> 00:07:33.711
+500 SMS per second.
+
+117
+00:07:33.991 --> 00:07:35.207
+On limiter failure:
+
+118
+00:07:35.487 --> 00:07:37.258
+Queue and shape (leaky bucket).
+
+119
+00:07:38.608 --> 00:07:39.931
+Learning objectives.
+
+120
+00:07:40.211 --> 00:07:42.088
+By the end you will be able to:
+
+121
+00:07:42.368 --> 00:07:49.963
+Specify limits by what they protect, choosing keys that attackers can't cheaply rotate and customers don't share (L3).
+
+122
+00:07:50.243 --> 00:07:53.357
+Choose the state representation for millions of keys:
+
+123
+00:07:53.637 --> 00:07:57.285
+GCRA, token bucket, sliding counter or log (L1).
+
+124
+00:07:57.565 --> 00:08:03.880
+Enforce a global limit across many nodes: central store, local splits, or token leasing (L2).
+
+125
+00:08:04.160 --> 00:08:08.085
+Span regions and decide failure behaviour per limit (L4).
+
+126
+00:08:09.435 --> 00:08:15.942
+Design the limiter service: rule configuration, headers, observability, and the tiers where limits apply.
+
+127
+00:08:17.292 --> 00:08:18.167
+Part 2.
+
+128
+00:08:18.447 --> 00:08:20.345
+Core Concepts, Beginner to Deep.
+
+129
+00:08:21.595 --> 00:08:24.219
+Intuition: turnstiles with different jobs.
+
+130
+00:08:24.499 --> 00:08:39.945
+A stadium has turnstiles at each gate (per-node limits), a total capacity (a global limit), a rule of four tickets per buyer (per-customer quota), and guards watching for touts buying hundreds of tickets through many friends (abuse detection).
+
+131
+00:08:40.225 --> 00:08:44.235
+They all limit rate, but they answer different questions and fail differently.
+
+132
+00:08:44.515 --> 00:08:51.022
+A turnstile jam at one gate shouldn't close the stadium; a broken ticket scanner shouldn't let the touts in free.
+
+133
+00:08:52.372 --> 00:08:53.332
+Requirements.
+
+134
+00:08:53.612 --> 00:08:54.465
+Functional.
+
+135
+00:08:54.745 --> 00:09:04.900
+Evaluate a request against one or more rules (key, algorithm, rate, burst, window) and return allow or deny plus remaining quota and retry-after.
+
+136
+00:09:05.180 --> 00:09:09.745
+Rules configured per route, per client class, per partner, without redeploying.
+
+137
+00:09:10.025 --> 00:09:16.788
+Support rate limits (per second or minute), quotas (per day per month) and budgets (per destination range per hour).
+
+138
+00:09:17.068 --> 00:09:21.783
+Shadow mode: evaluate new rules and log what they would do, without enforcing.
+
+139
+00:09:23.133 --> 00:09:24.242
+Non-functional.
+
+140
+00:09:24.522 --> 00:09:33.802
+Latency: under 1 ms p99 added at the gateway, and never a network round-trip per request on hot paths if avoidable (L2).
+
+141
+00:09:34.082 --> 00:09:34.829
+Scale:
+
+142
+00:09:35.109 --> 00:09:40.890
+150k req per second at the gateway at sale peaks; 10M+ active keys.
+
+143
+00:09:41.170 --> 00:09:45.607
+Accuracy: contracts within a few percent; fraud budgets as hard caps.
+
+144
+00:09:45.887 --> 00:09:53.482
+Availability: the limiter must never be the reason the platform is down; failure behaviour is explicit per rule (L4).
+
+145
+00:09:53.762 --> 00:09:56.663
+Multi-region: two regions, active-active.
+
+146
+00:09:58.013 --> 00:09:59.059
+Estimation.
+
+147
+00:09:59.339 --> 00:10:00.704
+Here is a quick table:
+
+148
+00:10:00.984 --> 00:10:02.413
+Quantity, and Estimate.
+
+149
+00:10:02.693 --> 00:10:04.293
+Gateway requests at peak:
+
+150
+00:10:04.573 --> 00:10:13.107
+150k req per second; 1 to 3 rules evaluated each, then up to ~450k rule checks per second.
+
+151
+00:10:13.387 --> 00:10:21.600
+Active keys: ~5M customers per day + devices + IPs + partners + phones about 10M keys.
+
+152
+00:10:21.880 --> 00:10:23.117
+State with GCRA:
+
+153
+00:10:23.397 --> 00:10:29.456
+10M times ~90 B about 0.9 GB (L1), a small Redis cluster.
+
+154
+00:10:29.736 --> 00:10:31.165
+State with exact logs:
+
+155
+00:10:31.445 --> 00:10:37.568
+10M times ~1 KB about ~10 GB, and write amplification per request.
+
+156
+00:10:37.848 --> 00:10:39.149
+Central store load:
+
+157
+00:10:39.429 --> 00:10:50.971
+450k Lua calls per second, several Redis shards, ~20 to 40 µs each on localhost (L2), 0.5 to 1 ms across AZs.
+
+158
+00:10:51.251 --> 00:10:57.779
+OTP sends: ~120k or hour normal; attack traffic of the same order (L3).
+
+159
+00:10:59.129 --> 00:11:00.878
+The estimates point at the design.
+
+160
+00:11:01.158 --> 00:11:04.401
+GCRA state is small, so storage is not the problem.
+
+161
+00:11:04.681 --> 00:11:20.425
+One store call per rule per request is expensive at 450k per second and across AZs, so hot-path limits should be local or leased (L2), and exact central checks reserved for low-volume, high-value rules like OTP.
+
+162
+00:11:21.775 --> 00:11:24.313
+Choosing the key: who are you actually limiting?
+
+163
+00:11:24.593 --> 00:11:26.577
+The key decides who shares a bucket.
+
+164
+00:11:26.857 --> 00:11:29.716
+L3 shows how badly the obvious key can fail:
+
+165
+00:11:31.066 --> 00:11:32.431
+Here is a quick table:
+
+166
+00:11:32.711 --> 00:11:37.063
+Policy, and Attack SMS, and Attack cost, and Real users blocked.
+
+167
+00:11:37.343 --> 00:11:39.029
+Per IP, 10 or hour.
+
+168
+00:11:39.309 --> 00:11:40.503
+Attack SMS:
+
+169
+00:11:40.783 --> 00:11:43.535
+47,175.
+
+170
+00:11:43.815 --> 00:11:44.882
+Attack cost:
+
+171
+00:11:45.162 --> 00:11:48.149
+212,288 rupees.
+
+172
+00:11:48.429 --> 00:11:49.773
+Real users blocked:
+
+173
+00:11:50.053 --> 00:11:51.930
+57.5%.
+
+174
+00:11:52.210 --> 00:11:54.813
+Per phone, 3 or 10 min and 5 or hour.
+
+175
+00:11:55.093 --> 00:11:56.287
+Attack SMS:
+
+176
+00:11:56.567 --> 00:11:59.106
+59,199.
+
+177
+00:11:59.386 --> 00:12:00.453
+Attack cost:
+
+178
+00:12:00.733 --> 00:12:04.445
+266,396 rupees.
+
+179
+00:12:04.725 --> 00:12:06.069
+Real users blocked:
+
+180
+00:12:06.349 --> 00:12:07.415
+0%.
+
+181
+00:12:07.695 --> 00:12:12.239
+Per phone + per IP 60 or hour + per device 5 or hour.
+
+182
+00:12:12.519 --> 00:12:13.714
+Attack SMS:
+
+183
+00:12:13.994 --> 00:12:16.533
+59,199.
+
+184
+00:12:16.813 --> 00:12:17.879
+Attack cost:
+
+185
+00:12:18.159 --> 00:12:21.871
+266,396 rupees.
+
+186
+00:12:22.151 --> 00:12:23.495
+Real users blocked:
+
+187
+00:12:23.775 --> 00:12:25.439
+48.1%.
+
+188
+00:12:25.719 --> 00:12:30.391
+Per phone + per destination-range budget + attestation, then challenge.
+
+189
+00:12:30.671 --> 00:12:31.866
+Attack SMS:
+
+190
+00:12:32.146 --> 00:12:33.170
+79.
+
+191
+00:12:33.450 --> 00:12:34.517
+Attack cost:
+
+192
+00:12:34.797 --> 00:12:36.589
+356 rupees.
+
+193
+00:12:36.869 --> 00:12:38.213
+Real users blocked:
+
+194
+00:12:38.493 --> 00:12:39.495
+3 users.
+
+195
+00:12:40.845 --> 00:12:42.851
+IP addresses are shared and cheap.
+
+196
+00:12:43.131 --> 00:12:48.912
+Carrier CGNAT puts hundreds or thousands of real customers behind one IPv4 address.
+
+197
+00:12:49.192 --> 00:12:53.139
+Residential-proxy networks give attackers thousands of addresses.
+
+198
+00:12:53.419 --> 00:12:56.320
+Per-IP limits hurt customers more than attackers.
+
+199
+00:12:56.600 --> 00:13:01.272
+Use them loosely, and per ASN or subnet for clearly abusive networks.
+
+200
+00:13:01.552 --> 00:13:07.611
+Device fingerprints are cheap to rotate unless backed by attestation (Play Integrity, App Attest).
+
+201
+00:13:07.891 --> 00:13:14.973
+Phone numbers are the right key against repeated OTPs to one number, but a pump spreads across thousands of numbers.
+
+202
+00:13:16.323 --> 00:13:18.499
+Key on what the attacker must concentrate.
+
+203
+00:13:18.779 --> 00:13:22.769
+An SMS pump earns only from certain destination ranges.
+
+204
+00:13:23.049 --> 00:13:28.617
+Budget those ranges, with limits learned from normal traffic, and the attack has nowhere to hide.
+
+205
+00:13:28.897 --> 00:13:35.318
+Expect the attacker to adapt: add a per-country and a global international budget, and alert on anomalies.
+
+206
+00:13:35.598 --> 00:13:37.006
+Spend friction on risk.
+
+207
+00:13:37.286 --> 00:13:44.390
+Attestation failures and unusual ranges get a challenge, not a block, so the few real users there still get through.
+
+208
+00:13:45.740 --> 00:13:52.951
+For authenticated APIs, the user id is the natural key: stable, not shared, and costly to multiply.
+
+209
+00:13:53.231 --> 00:14:02.148
+Limit anonymous endpoints (OTP, search, catalog) with layered keys, and treat the limit as a fraud control with costs on both sides.
+
+210
+00:14:03.498 --> 00:14:04.287
+State:
+
+211
+00:14:04.567 --> 00:14:06.573
+GCRA, token bucket, windows.
+
+212
+00:14:06.853 --> 00:14:11.930
+With millions of keys, per-key state size and write cost matter as much as behaviour.
+
+213
+00:14:12.210 --> 00:14:14.343
+L1 measured real Redis memory:
+
+214
+00:14:15.693 --> 00:14:17.059
+Here is a quick table:
+
+215
+00:14:17.339 --> 00:14:20.475
+Representation, and Bytes per key, and 10M keys.
+
+216
+00:14:20.755 --> 00:14:23.912
+Sliding-window log (sorted set, 30 timestamps).
+
+217
+00:14:24.192 --> 00:14:25.195
+Bytes per key:
+
+218
+00:14:25.475 --> 00:14:26.947
+987.
+
+219
+00:14:27.227 --> 00:14:28.315
+10M keys:
+
+220
+00:14:28.595 --> 00:14:30.387
+9.87 GB.
+
+221
+00:14:30.667 --> 00:14:32.907
+Sliding-window counter (two counters).
+
+222
+00:14:33.187 --> 00:14:34.189
+Bytes per key:
+
+223
+00:14:34.469 --> 00:14:35.856
+149.
+
+224
+00:14:36.136 --> 00:14:37.224
+10M keys:
+
+225
+00:14:37.504 --> 00:14:39.147
+1.49 GB.
+
+226
+00:14:39.427 --> 00:14:42.264
+Token bucket (hash of tokens + timestamp).
+
+227
+00:14:42.544 --> 00:14:43.547
+Bytes per key:
+
+228
+00:14:43.827 --> 00:14:45.256
+123.
+
+229
+00:14:45.536 --> 00:14:46.624
+10M keys:
+
+230
+00:14:46.904 --> 00:14:48.568
+1.23 GB.
+
+231
+00:14:48.848 --> 00:14:51.301
+GCRA (one theoretical arrival time).
+
+232
+00:14:51.581 --> 00:14:52.584
+Bytes per key:
+
+233
+00:14:52.864 --> 00:14:53.696
+90.
+
+234
+00:14:53.976 --> 00:14:55.064
+10M keys:
+
+235
+00:14:55.344 --> 00:14:57.541
+0.90 GB.
+
+236
+00:14:58.891 --> 00:15:12.161
+GCRA (Generic Cell Rate Algorithm, from ATM networks) stores one number per key: the theoretical arrival time (TAT) of the next request if the client sent at exactly the allowed rate.
+
+237
+00:15:12.441 --> 00:15:16.835
+With emission interval T = 1 or rate and burst tolerance τ:
+
+238
+00:15:18.185 --> 00:15:29.001
+On screen: newtat = max(tat, now) + T. if newtat - now τ + T, then deny (retry after newtat - T - τ - now). else, then allow, tat = newtat.
+
+239
+00:15:31.851 --> 00:15:34.497
+It is mathematically a token bucket (L1:
+
+240
+00:15:34.777 --> 00:15:41.198
+0 of 2.2M decisions differ), with one integer of state and a natural retry-after.
+
+241
+00:15:41.478 --> 00:15:44.422
+It is what redis-cell and several gateways implement.
+
+242
+00:15:44.702 --> 00:15:46.921
+Sliding-window counters are approximate.
+
+243
+00:15:47.201 --> 00:15:52.321
+The weighted two-window estimate assumes the previous window's requests were evenly spread.
+
+244
+00:15:52.601 --> 00:15:57.977
+Ch 18's single-burst test hid the error; L1's bursty traffic exposed it:
+
+245
+00:15:58.257 --> 00:16:15.110
+4.3% of decisions differed from the exact log (73,704 extra allows, 22,468 extra denials), and a key reached 108 in a true 60-second span against a limit of 60.
+
+246
+00:16:15.390 --> 00:16:19.230
+That's better than the fixed window's 120, but not a hard cap.
+
+247
+00:16:19.510 --> 00:16:21.963
+Use them where roughly N per window is enough.
+
+248
+00:16:23.313 --> 00:16:26.705
+Exact logs are the only hard at most N in any window.
+
+249
+00:16:26.985 --> 00:16:32.745
+Use them where that matters and volume is low, OTP sends per phone, with short TTLs.
+
+250
+00:16:34.095 --> 00:16:36.762
+Enforcing a global limit across many nodes.
+
+251
+00:16:37.042 --> 00:16:48.605
+L2 enforced one partner's 1,000 req per second contract from 8 gateway nodes, with the partner sending 900 req per second skewed 60% onto node 0:
+
+252
+00:16:49.955 --> 00:16:51.320
+Here is a quick table:
+
+253
+00:16:51.600 --> 00:16:59.643
+Strategy, and In-contract requests rejected, and Redis calls per request, and Over the limit (2,000 req per second offered).
+
+254
+00:16:59.923 --> 00:17:02.803
+Local only (limit ÷ 8 per node).
+
+255
+00:17:03.083 --> 00:17:04.960
+In-contract requests rejected:
+
+256
+00:17:05.240 --> 00:17:06.819
+4,093.
+
+257
+00:17:07.099 --> 00:17:08.592
+Redis calls per request:
+
+258
+00:17:08.872 --> 00:17:09.619
+0.
+
+259
+00:17:09.899 --> 00:17:12.800
+Over the limit (2,000 req per second offered):
+
+260
+00:17:13.080 --> 00:17:14.000
+Capped only because load was even.
+
+261
+00:17:15.280 --> 00:17:16.923
+Central GCRA in Redis.
+
+262
+00:17:17.203 --> 00:17:19.080
+In-contract requests rejected:
+
+263
+00:17:19.360 --> 00:17:20.107
+0.
+
+264
+00:17:20.387 --> 00:17:21.880
+Redis calls per request:
+
+265
+00:17:22.160 --> 00:17:23.611
+1.00.
+
+266
+00:17:23.891 --> 00:17:26.792
+Over the limit (2,000 req per second offered):
+
+267
+00:17:27.072 --> 00:17:29.333
+Capped at ~1,010 per second.
+
+268
+00:17:29.613 --> 00:17:31.256
+Token leasing (adaptive).
+
+269
+00:17:31.536 --> 00:17:33.413
+In-contract requests rejected:
+
+270
+00:17:33.693 --> 00:17:34.440
+0.
+
+271
+00:17:34.720 --> 00:17:36.213
+Redis calls per request:
+
+272
+00:17:36.493 --> 00:17:37.965
+0.17.
+
+273
+00:17:38.245 --> 00:17:41.147
+Over the limit (2,000 req per second offered):
+
+274
+00:17:41.427 --> 00:17:44.115
+Capped; 0.39 calls per request.
+
+275
+00:17:45.465 --> 00:17:57.347
+Local splits are free but wrong whenever load is uneven, sticky connections, one partner data centre, uneven load-balancing, and nodes come and go with autoscaling, changing N.
+
+276
+00:17:57.627 --> 00:18:14.651
+Central checks are exact and simple (one atomic Lua script, Ch 18 L3), but add a network round-trip and a store call to every request: fine for thousands of req per second, costly at 450k rule checks per second across AZs.
+
+277
+00:18:16.001 --> 00:18:22.316
+Token leasing: a node takes a small batch of tokens from the central GCRA and spends them locally.
+
+278
+00:18:22.596 --> 00:18:37.529
+L2 needed three refinements before leasing matched the central limiter: size leases to each node's recent rate (~50 ms of its traffic), give unused tokens back when a lease expires, and cache denials until tokens are due.
+
+279
+00:18:37.809 --> 00:18:43.463
+Fixed large leases stranded tokens on quiet nodes and rejected in-contract traffic.
+
+280
+00:18:43.743 --> 00:18:50.761
+Over the limit, leases shrink because tokens are scarce, so the call rate rises (0.39 per request).
+
+281
+00:18:51.041 --> 00:19:04.268
+Other options: approximate local limits with periodic count synchronisation (gossip), or a sticky routing of each key to one limiter node (consistent hashing), which moves the hot-key problem to that node.
+
+282
+00:19:05.618 --> 00:19:20.381
+A practical tiering: local limiters for coarse protection (per-node concurrency, load shedding, Ch 18), leased or central GCRA for customer and partner limits, and central exact checks for low-volume fraud controls.
+
+283
+00:19:21.731 --> 00:19:23.160
+Multi-region limits.
+
+284
+00:19:23.440 --> 00:19:28.432
+A global contract served from two regions needs either a global store or a split.
+
+285
+00:19:28.712 --> 00:19:29.587
+L4:
+
+286
+00:19:30.937 --> 00:19:32.302
+Here is a quick table:
+
+287
+00:19:32.582 --> 00:19:40.347
+Design, and In-contract requests rejected, and Max admitted in 1 s (contract 1,000), and Cross-region calls.
+
+288
+00:19:40.627 --> 00:19:43.038
+Static split 500 or 500.
+
+289
+00:19:43.318 --> 00:19:45.195
+In-contract requests rejected:
+
+290
+00:19:45.475 --> 00:19:48.099
+99,370.
+
+291
+00:19:48.379 --> 00:19:51.409
+Max admitted in 1 s (contract 1,000):
+
+292
+00:19:51.689 --> 00:19:53.182
+944.
+
+293
+00:19:53.462 --> 00:19:54.763
+Cross-region calls:
+
+294
+00:19:55.043 --> 00:19:55.790
+0.
+
+295
+00:19:56.070 --> 00:19:59.121
+Static split from history 800 or 200.
+
+296
+00:19:59.401 --> 00:20:01.278
+In-contract requests rejected:
+
+297
+00:20:01.558 --> 00:20:04.993
+167,179.
+
+298
+00:20:05.273 --> 00:20:08.302
+Max admitted in 1 s (contract 1,000):
+
+299
+00:20:08.582 --> 00:20:10.075
+945.
+
+300
+00:20:10.355 --> 00:20:11.657
+Cross-region calls:
+
+301
+00:20:11.937 --> 00:20:12.683
+0.
+
+302
+00:20:12.963 --> 00:20:15.011
+Rebalance every 10 s by demand.
+
+303
+00:20:15.291 --> 00:20:17.169
+In-contract requests rejected:
+
+304
+00:20:17.449 --> 00:20:18.878
+914.
+
+305
+00:20:19.158 --> 00:20:22.187
+Max admitted in 1 s (contract 1,000):
+
+306
+00:20:22.467 --> 00:20:23.491
+1,000.
+
+307
+00:20:23.771 --> 00:20:25.073
+Cross-region calls:
+
+308
+00:20:25.353 --> 00:20:26.099
+0.
+
+309
+00:20:26.379 --> 00:20:28.342
+Central limiter in one region.
+
+310
+00:20:28.622 --> 00:20:30.499
+In-contract requests rejected:
+
+311
+00:20:30.779 --> 00:20:31.526
+0.
+
+312
+00:20:31.806 --> 00:20:34.835
+Max admitted in 1 s (contract 1,000):
+
+313
+00:20:35.115 --> 00:20:39.147
+1,468 during a partition (fail open).
+
+314
+00:20:39.427 --> 00:20:40.729
+Cross-region calls:
+
+315
+00:20:41.009 --> 00:20:44.081
+308,377.
+
+316
+00:20:45.431 --> 00:20:55.415
+Traffic between regions moves, failovers, DNS changes, a partner's own routing, so a static split refuses in-contract traffic exactly when it moves.
+
+317
+00:20:55.695 --> 00:21:03.737
+Rebalancing shares by recent demand keeps both properties, with only periodic, asynchronous exchange of counts between regions.
+
+318
+00:21:04.017 --> 00:21:10.716
+A single central limiter is exact until the regions partition, and then it must either over-admit or fail.
+
+319
+00:21:10.996 --> 00:21:20.340
+Most platforms accept approximate global limits (a few percent) for contracts, and keep hard fraud budgets per region with conservative shares.
+
+320
+00:21:21.690 --> 00:21:22.927
+When the limiter fails.
+
+321
+00:21:23.207 --> 00:21:24.722
+The limiter's store will fail.
+
+322
+00:21:25.002 --> 00:21:27.349
+Decide the behaviour per rule, in advance.
+
+323
+00:21:27.629 --> 00:21:32.322
+L4 took the OTP limiter's Redis down for 2 minutes during an attack:
+
+324
+00:21:33.672 --> 00:21:35.037
+Here is a quick table:
+
+325
+00:21:35.317 --> 00:21:39.861
+Behaviour, and Attack SMS in 2 min, and Real OTPs refused.
+
+326
+00:21:40.141 --> 00:21:41.187
+Fail open.
+
+327
+00:21:41.467 --> 00:21:43.152
+Attack SMS in 2 min:
+
+328
+00:21:43.432 --> 00:21:47.656
+2,059 (9,265 rupees).
+
+329
+00:21:47.936 --> 00:21:49.579
+Real OTPs refused:
+
+330
+00:21:49.859 --> 00:21:50.605
+0.
+
+331
+00:21:50.885 --> 00:21:51.973
+Fail closed.
+
+332
+00:21:52.253 --> 00:21:53.939
+Attack SMS in 2 min:
+
+333
+00:21:54.219 --> 00:21:54.965
+0.
+
+334
+00:21:55.245 --> 00:21:56.888
+Real OTPs refused:
+
+335
+00:21:57.168 --> 00:22:00.581
+3,955, nobody can log in.
+
+336
+00:22:00.861 --> 00:22:04.000
+Local fallback (1 or 8 of each budget per node, 3x headroom).
+
+337
+00:22:05.280 --> 00:22:06.965
+Attack SMS in 2 min:
+
+338
+00:22:07.245 --> 00:22:09.421
+30 (135 rupees).
+
+339
+00:22:09.701 --> 00:22:11.344
+Real OTPs refused:
+
+340
+00:22:11.624 --> 00:22:12.563
+16.
+
+341
+00:22:13.913 --> 00:22:23.769
+Fail open where the limit protects fairness or capacity and other layers (load shedding) still protect the system: customer API limits, partner quotas.
+
+342
+00:22:24.049 --> 00:22:33.286
+Fail closed only where the downside of allowing is worse than an outage, and scope it narrowly (per phone after failed logins, not all OTPs).
+
+343
+00:22:33.566 --> 00:22:41.438
+Local fallback for fraud controls: each node enforces a conservative share of the budget from its last known configuration.
+
+344
+00:22:41.718 --> 00:22:52.641
+The 16 refused logins in L4 come from an assumed 0.4% of retries landing on a node whose local per-phone limit is stricter, an assumption to measure.
+
+345
+00:22:53.991 --> 00:23:01.756
+Protect the limiter: timeouts of a few milliseconds on limiter calls, a circuit breaker around the store, and an alert on fallback mode.
+
+346
+00:23:03.106 --> 00:23:05.986
+Responding: headers, retry-after and clients.
+
+347
+00:23:06.266 --> 00:23:18.362
+429 Too Many Requests with Retry-After, and the RateLimit-Policy or RateLimit headers (IETF draft, VERIFY the current field names) so clients can pace themselves.
+
+348
+00:23:18.642 --> 00:23:27.773
+Don't reveal fraud-control internals: an OTP budget denial can look like Please try again later with a challenge, not range budget exceeded.
+
+349
+00:23:28.053 --> 00:23:34.794
+Clients back off with jitter (Ch 18); partners get documented limits and a dashboard of their usage.
+
+350
+00:23:36.144 --> 00:23:47.835
+Shape instead of reject for outbound vendor limits: queue SMS and pace them at the vendor's TPS with a leaky bucket, prioritising OTPs over marketing (Ch 40).
+
+351
+00:23:49.185 --> 00:23:51.361
+Rules, configuration and rollout.
+
+352
+00:23:51.641 --> 00:23:57.507
+Rules as data: match: route or client class, key: phone, algorithm: gcra, rate:
+
+353
+00:23:57.787 --> 00:23:59.622
+3 or 600s, burst:
+
+354
+00:23:59.902 --> 00:24:03.550
+3, onFailure: localFallback, mode: enforceshadow.
+
+355
+00:24:03.830 --> 00:24:11.958
+Stored in a config service, versioned, reviewed; pushed to gateways and cached locally, so a config store outage doesn't stop limiting.
+
+356
+00:24:12.238 --> 00:24:19.406
+Shadow mode first: log would-be denials for a week, check false positives against known-good traffic, then enforce.
+
+357
+00:24:19.686 --> 00:24:29.478
+Budgets learned from baselines (L3's range budgets about 3x normal hourly volume), recomputed daily, with manual overrides for campaigns.
+
+358
+00:24:30.828 --> 00:24:34.092
+Per-tenant or plan limits for B2B (Ch 30).
+
+359
+00:24:35.442 --> 00:24:36.551
+Where limits live.
+
+360
+00:24:36.831 --> 00:24:38.197
+Here is a quick table:
+
+361
+00:24:38.477 --> 00:24:40.333
+Tier, and Limits, and Why there.
+
+362
+00:24:40.613 --> 00:24:42.874
+Edge or CDN or WAF.
+
+363
+00:24:43.154 --> 00:24:43.986
+Limits:
+
+364
+00:24:44.266 --> 00:24:47.487
+Volumetric per IP or ASN, bot scores.
+
+365
+00:24:47.767 --> 00:24:48.642
+Why there:
+
+366
+00:24:48.922 --> 00:24:50.650
+Cheapest place to drop floods.
+
+367
+00:24:50.930 --> 00:24:52.210
+API gateway.
+
+368
+00:24:52.490 --> 00:24:53.322
+Limits:
+
+369
+00:24:53.602 --> 00:24:56.354
+Per user, per API key, per route class.
+
+370
+00:24:56.634 --> 00:24:57.509
+Why there:
+
+371
+00:24:57.789 --> 00:24:59.965
+Knows identity, before work starts.
+
+372
+00:25:00.245 --> 00:25:01.077
+Service.
+
+373
+00:25:01.357 --> 00:25:02.189
+Limits:
+
+374
+00:25:02.469 --> 00:25:08.421
+Business rules (OTP per phone, orders per minute per B2B account), concurrency limits.
+
+375
+00:25:08.701 --> 00:25:09.575
+Why there:
+
+376
+00:25:09.855 --> 00:25:11.413
+Knows domain context.
+
+377
+00:25:11.693 --> 00:25:12.546
+Egress.
+
+378
+00:25:12.826 --> 00:25:13.658
+Limits:
+
+379
+00:25:13.938 --> 00:25:15.154
+Vendor TPS.
+
+380
+00:25:15.434 --> 00:25:16.309
+Why there:
+
+381
+00:25:16.589 --> 00:25:18.167
+Protects vendor contracts.
+
+382
+00:25:18.447 --> 00:25:19.386
+Data tier.
+
+383
+00:25:19.666 --> 00:25:20.498
+Limits:
+
+384
+00:25:20.778 --> 00:25:22.890
+Connection pools, statement timeouts.
+
+385
+00:25:23.170 --> 00:25:24.045
+Why there:
+
+386
+00:25:24.325 --> 00:25:25.647
+Last line of defence.
+
+387
+00:25:26.997 --> 00:25:28.128
+Interview framing.
+
+388
+00:25:28.408 --> 00:25:31.992
+Spend five minutes on what the limits protect and who they key on.
+
+389
+00:25:32.272 --> 00:25:36.859
+Most candidates jump to Redis token bucket, so that alone is a strong signal.
+
+390
+00:25:37.139 --> 00:25:48.509
+Then cover the algorithm and state size (GCRA), the distributed enforcement options with their trade-offs (central, local, leasing), multi-region, and failure modes per rule.
+
+391
+00:25:48.789 --> 00:25:50.155
+Staff-level signals:
+
+392
+00:25:50.435 --> 00:25:58.243
+CGNAT and residential proxies, SMS pumping, shadow mode, and fail-open versus fail-closed as a per-rule decision.
+
+393
+00:25:59.593 --> 00:26:00.489
+Part 3.
+
+394
+00:26:00.769 --> 00:26:02.497
+Architecture and Diagrams.
+
+395
+00:26:03.747 --> 00:26:04.813
+Component view.
+
+396
+00:26:05.093 --> 00:26:06.437
+Here is the diagram.
+
+397
+00:26:10.287 --> 00:26:12.847
+Sequence: happy path, a leased partner limit.
+
+398
+00:26:13.127 --> 00:26:15.794
+The sequence diagram walks through it step by step.
+
+399
+00:26:16.074 --> 00:26:17.098
+P to G:
+
+400
+00:26:17.378 --> 00:26:21.026
+POST or partner or v1 or orders with API key.
+
+401
+00:26:21.306 --> 00:26:23.247
+G to L: take one token.
+
+402
+00:26:23.527 --> 00:26:25.255
+L to G: lease empty.
+
+403
+00:26:25.535 --> 00:26:26.538
+G to R:
+
+404
+00:26:26.818 --> 00:26:28.738
+EVALSHA lease key, want 12.
+
+405
+00:26:29.018 --> 00:26:30.938
+R to G: granted 12.
+
+406
+00:26:31.218 --> 00:26:35.463
+G to L: store 12 tokens, expire in 100 ms.
+
+407
+00:26:35.743 --> 00:26:38.069
+L to G: allowed, 11 left.
+
+408
+00:26:38.349 --> 00:26:39.373
+G to P:
+
+409
+00:26:39.653 --> 00:26:41.999
+201 with RateLimit headers.
+
+410
+00:26:45.849 --> 00:26:50.201
+Sequence: failure path, limiter store down during an OTP attack.
+
+411
+00:26:50.481 --> 00:26:53.148
+The sequence diagram walks through it step by step.
+
+412
+00:26:53.428 --> 00:26:56.372
+A to O: send OTP to foreign range number.
+
+413
+00:26:56.652 --> 00:26:59.084
+O to R: check phone and range budget.
+
+414
+00:26:59.364 --> 00:27:01.839
+R to O: timeout after 5 ms.
+
+415
+00:27:02.119 --> 00:27:05.447
+O to O: breaker opens - fallback mode, alert fired.
+
+416
+00:27:05.727 --> 00:27:08.244
+O to F: local share of range budget.
+
+417
+00:27:08.524 --> 00:27:10.145
+F to O: exhausted.
+
+418
+00:27:10.425 --> 00:27:12.708
+O to A: try again later with challenge.
+
+419
+00:27:16.558 --> 00:27:18.286
+State: a rule's lifecycle.
+
+420
+00:27:18.566 --> 00:27:19.910
+Here is the diagram.
+
+421
+00:27:23.760 --> 00:27:24.677
+Part 4.
+
+422
+00:27:24.957 --> 00:27:26.579
+Design Document Excerpt:
+
+423
+00:27:26.859 --> 00:27:28.608
+Platform Rate-Limiting Service.
+
+424
+00:27:29.858 --> 00:27:30.605
+Note:
+
+425
+00:27:30.885 --> 00:27:34.042
+Design Document (excerpt), Rate Limiting v2.
+
+426
+00:27:34.322 --> 00:27:35.218
+Status:
+
+427
+00:27:35.498 --> 00:27:36.778
+Accepted, Authors:
+
+428
+00:27:37.058 --> 00:27:38.786
+Edge platform team, Reviewers:
+
+429
+00:27:39.066 --> 00:27:42.437
+Security or fraud, SRE, Partner engineering.
+
+430
+00:27:42.717 --> 00:27:57.543
+Context, v1 limited OTPs per IP (locked out CGNAT customers), missed an SMS-pumping attack, enforced partner contracts as per-node splits, failed closed on a Redis failover, and didn't pace vendor egress.
+
+431
+00:27:58.893 --> 00:28:21.080
+Decision, Rules as versioned data with shadow mode; GCRA state in regional Redis; leased tokens for high-volume limits, exact central checks for fraud controls; destination-range budgets and attestation for OTP; demand-based cross-region rebalancing for contracts; per-rule failure mode with local fallback; egress shaping for vendors.
+
+432
+00:28:22.430 --> 00:28:48.478
+Related ADRs, ADR-250 GCRA as the default algorithm, exact log only for OTP-per-phone (L1); ADR-251 Adaptive token leasing at the gateway (L2); ADR-252 OTP keys: phone + destination-range budgets + attestation or challenge; IP limits loose and ASN-based (L3); ADR-253 Cross-region share rebalancing
+
+433
+00:28:48.758 --> 00:29:08.662
+every 10 s (L4); ADR-254 Failure mode declared per rule; local fallback for fraud budgets (L4); ADR-255 Shadow mode mandatory before enforcement; ADR-256 Vendor egress via leaky-bucket shaper with OTP priority.
+
+434
+00:29:08.942 --> 00:29:09.902
+Requirements.
+
+435
+00:29:10.182 --> 00:29:17.521
+R1 Added latency under 1 ms p99 at the gateway at 150k req per second.
+
+436
+00:29:18.871 --> 00:29:26.444
+R2 Partner contracts enforced within 2% globally; no in-contract rejections when traffic moves between regions.
+
+437
+00:29:26.724 --> 00:29:37.839
+R3 SMS-pumping cost under 5,000 rupees per day at attack volumes seen so far; real-user OTP denial under 0.05%.
+
+438
+00:29:38.119 --> 00:29:42.855
+R4 No platform outage caused by the limiter's store; failure mode per rule.
+
+439
+00:29:43.135 --> 00:29:45.823
+R5 Vendor TPS never exceeded.
+
+440
+00:29:46.103 --> 00:29:47.511
+Decisions in detail.
+
+441
+00:29:48.861 --> 00:29:50.951
+State (ADR-250).
+
+442
+00:29:51.231 --> 00:30:00.639
+GCRA with TAT in microseconds, PX expiry of burst + 1 s; OTP-per-phone as a sorted set with 1 h TTL.
+
+443
+00:30:00.919 --> 00:30:03.565
+Enforcement (ADR-251).
+
+444
+00:30:03.845 --> 00:30:13.253
+Leases of ~50 ms of each node's rate (1 to 50 tokens), 100 ms expiry, give-back on expiry, denial caching.
+
+445
+00:30:13.533 --> 00:30:15.495
+OTP (ADR-252).
+
+446
+00:30:15.775 --> 00:30:25.973
+Range budgets = 3x the 28-day hourly baseline per range, a per-country and a global international budget; attestation failure, then challenge.
+
+447
+00:30:26.253 --> 00:30:28.834
+Regions (ADR-253).
+
+448
+00:30:29.114 --> 00:30:34.447
+Each region publishes per-key demand every 10 s; shares recomputed proportionally.
+
+449
+00:30:35.797 --> 00:30:38.315
+Failure (ADR-254).
+
+450
+00:30:38.595 --> 00:30:46.168
+Limiter calls time out at 5 ms; breaker; fallback shares = budget ÷ nodes times 3; alert.
+
+451
+00:30:46.448 --> 00:30:49.008
+Rollout (ADR-255).
+
+452
+00:30:49.288 --> 00:30:54.877
+Every new rule spends ≥7 days in shadow with a false-positive review.
+
+453
+00:30:55.157 --> 00:30:56.181
+Consequences.
+
+454
+00:30:56.461 --> 00:31:03.736
+More moving parts than a single Redis token bucket: rule configuration, leasing logic and fallback shares to test.
+
+455
+00:31:04.016 --> 00:31:06.363
+Contracts are approximate by a few percent.
+
+456
+00:31:06.643 --> 00:31:10.611
+Fraud budgets need tuning and on-call attention during campaigns.
+
+457
+00:31:10.891 --> 00:31:19.189
+In return: no locked-out carriers, attack cost bounded, partners served within contract, and a limiter that can't take the platform down.
+
+458
+00:31:20.539 --> 00:31:21.499
+Part 5.
+
+459
+00:31:21.779 --> 00:31:23.763
+Hands-On Code, Level Ladder.
+
+460
+00:31:25.013 --> 00:31:25.781
+Info:
+
+461
+00:31:26.061 --> 00:31:27.149
+What's real here.
+
+462
+00:31:27.429 --> 00:31:29.947
+All four labs are JDK 21.
+
+463
+00:31:30.227 --> 00:31:33.320
+L1 and L2 run against a real Redis 7:
+
+464
+00:31:33.600 --> 00:31:43.627
+L1 measures memory with INFO, and L2 executes the GCRA and lease scripts in Lua with a simulated clock passed in, so the decisions are reproducible.
+
+465
+00:31:43.907 --> 00:31:48.280
+L3 and L4 are deterministic simulations with a fixed seed.
+
+466
+00:31:48.560 --> 00:31:59.141
+Traffic mixes, attack parameters, SMS prices, attestation pass rates and the L4 fallback's 0.4% refusal rate are stated assumptions.
+
+467
+00:32:00.491 --> 00:32:10.091
+L1 and L2 need a Redis 7 on port 6390: redis-server --port 6390 --save '' --appendonly no.
+
+468
+00:32:10.371 --> 00:32:14.510
+Run every lab with -Dstdout.encoding=UTF-8.
+
+469
+00:32:15.860 --> 00:32:18.740
+L1, State per key, and how accurate it is.
+
+470
+00:32:19.020 --> 00:32:19.959
+Requirement:
+
+471
+00:32:20.239 --> 00:32:22.692
+We'll hold limiter state for 10 million keys.
+
+472
+00:32:22.972 --> 00:32:26.428
+Which representation, how much memory, and how wrong is each?
+
+473
+00:32:26.708 --> 00:32:34.708
+Part 1 writes 100,000 keys of each representation into a real Redis (pipelined) and measures usedmemory.
+
+474
+00:32:34.988 --> 00:32:46.743
+Part 2 replays 2.2 million bursty decisions through the exact log, the sliding counter, the fixed window, a token bucket and GCRA, all in exact integer arithmetic.
+
+475
+00:32:48.093 --> 00:32:51.250
+Here is the Java code, LimiterStateL1.java.
+
+476
+00:32:51.530 --> 00:32:55.541
+It runs to 210 lines; the full listing is in the chapter.
+
+477
+00:32:55.821 --> 00:33:07.085
+LimiterStateL1.java, run with (Redis 7 on:6390): java LimiterStateL1.java (JDK 21, no dependencies).
+
+478
+00:33:07.365 --> 00:33:10.927
+WHAT A RATE LIMITER COSTS PER KEY, AND HOW ACCURATE IT IS.
+
+479
+00:33:11.207 --> 00:33:14.557
+Ch 18 compared algorithms on one client.
+
+480
+00:33:14.837 --> 00:33:24.799
+A platform limiter. holds state for MILLIONS of keys (every user, device, IP, phone number, API key), so state size and accuracy per key.
+
+481
+00:33:27.649 --> 00:33:28.567
+On screen:
+
+482
+00:33:28.847 --> 00:33:58.878
+Part 1, 100,000 keys per representation in real Redis (limit 60 per minute, 30 requests in. the current window). representation bytes per key 10M keys would need. sliding log (ZSET of 30 timestamps) 986 9.86 GB. sliding counter (2 window counters) 149 1.49 GB. token bucket (HASH tokens + ts) 122 1.22 GB.
+
+483
+00:33:59.158 --> 00:34:03.787
+GCRA (one TAT integer) 90 0.90 GB.
+
+484
+00:34:04.067 --> 00:34:22.350
+Part 2, 2,217,134 decisions for 20,000 bursty keys over 10 minutes, limit 60 per 60 s. algorithm decisions is not exact log max allowed in any 60 s. sliding window log (exact reference), 60.
+
+485
+00:34:22.630 --> 00:34:24.145
+The rest is in the chapter.
+
+486
+00:34:26.995 --> 00:34:27.848
+Reading it:
+
+487
+00:34:28.128 --> 00:34:33.995
+Memory: the exact log costs 987 bytes per key, 11x GCRA's 90.
+
+488
+00:34:34.275 --> 00:34:43.235
+At 10M keys that's ~9.9 GB against 0.9 GB, before counting a write per request into a sorted set.
+
+489
+00:34:43.515 --> 00:34:45.328
+GCRA = token bucket:
+
+490
+00:34:45.608 --> 00:34:53.693
+0 of 2,217,134 decisions differ once both use integer arithmetic.
+
+491
+00:34:53.973 --> 00:35:02.315
+An earlier floating-point version of this lab showed 65 spurious differences: use integer microseconds in production code too.
+
+492
+00:35:03.665 --> 00:35:05.691
+The sliding counter is approximate:
+
+493
+00:35:05.971 --> 00:35:19.710
+4.3% of decisions differ from the exact log, mostly extra allows (73,704), and one key reached 108 in a true 60-second span against a limit of 60.
+
+494
+00:35:19.990 --> 00:35:22.230
+The fixed window reached 120.
+
+495
+00:35:22.510 --> 00:35:29.678
+GCRA with burst 60 reached 119, which is its design: burst 60 plus 1 per second refill.
+
+496
+00:35:31.028 --> 00:35:33.481
+L2, One global limit from eight nodes.
+
+497
+00:35:33.761 --> 00:35:34.700
+Requirement:
+
+498
+00:35:34.980 --> 00:35:39.865
+A partner's contract is 1,000 req per second across our whole gateway fleet.
+
+499
+00:35:40.145 --> 00:35:46.481
+Don't throttle them inside it; don't let them exceed it; don't add a Redis call to every request if we can help it.
+
+500
+00:35:46.761 --> 00:35:52.735
+Three enforcement strategies, with the GCRA and leasing logic running as Lua in a real Redis.
+
+501
+00:35:53.015 --> 00:35:57.687
+The simulated clock is passed as an argument, so the result is reproducible.
+
+502
+00:35:59.037 --> 00:36:02.258
+Here is the Java code, GlobalLimitL2.java.
+
+503
+00:36:02.538 --> 00:36:06.634
+It runs to 220 lines; the full listing is in the chapter.
+
+504
+00:36:06.914 --> 00:36:17.815
+GlobalLimitL2.java, run with (Redis 7 on:6390): java GlobalLimitL2.java (JDK 21, no dependencies).
+
+505
+00:36:18.095 --> 00:36:21.253
+ENFORCING ONE GLOBAL LIMIT FROM 8 GATEWAY NODES.
+
+506
+00:36:21.533 --> 00:36:27.378
+A logistics partner's API key may call us at 1,000 req per second (burst 100).
+
+507
+00:36:27.658 --> 00:36:31.903
+Requests arrive at 8 gateway nodes; the limit is for the key as a whole.
+
+508
+00:36:32.183 --> 00:36:35.255
+Three ways to enforce it, all executed for real.
+
+509
+00:36:38.105 --> 00:36:39.023
+On screen:
+
+510
+00:36:39.303 --> 00:36:48.327
+Global limit 1,000 req per second (burst 100) for one partner key, 8 gateway nodes, 10 s. simulated, real Redis Lua.
+
+511
+00:36:48.607 --> 00:36:50.676
+Scenario 1, UNDER the limit, skewed:
+
+512
+00:36:50.956 --> 00:37:04.140
+900 req per second offered (node 0 gets 60% = 540. req per second). strategy allowed per second rejected Redis calls calls per request busiest second.
+
+513
+00:37:04.420 --> 00:37:14.895
+A) local only (125 per second per node) 486 4,093 0 0.000 503.
+
+514
+00:37:15.175 --> 00:37:24.924
+B) central GCRA in Redis 895 0 8,951 1.000 930.
+
+515
+00:37:25.204 --> 00:37:39.263
+C) leasing (adaptive 1 to 20, 100 ms) 895 0 1,484 0.166 930. leased tokens expired unused and given back:
+
+516
+00:37:39.543 --> 00:37:41.612
+4,823.
+
+517
+00:37:41.892 --> 00:37:44.217
+Scenario 2, OVER the limit, even:
+
+518
+00:37:44.497 --> 00:37:52.412
+2,000 req per second offered. strategy allowed per second rejected Redis calls calls per request busiest second.
+
+519
+00:37:52.692 --> 00:37:54.207
+The rest is in the chapter.
+
+520
+00:37:57.057 --> 00:37:57.910
+Reading it:
+
+521
+00:37:58.190 --> 00:38:11.587
+Local splits allowed only 486 req per second of a 900 req per second in-contract load: node 0 received 540 req per second against its 125 share.
+
+522
+00:38:11.867 --> 00:38:16.923
+Over the limit, with even load, they happened to cap correctly at ~1,009.
+
+523
+00:38:17.203 --> 00:38:22.878
+Central GCRA: exact both times, at 1.00 Redis call per request.
+
+524
+00:38:23.158 --> 00:38:34.379
+On localhost that is 20 to 50 µs; across AZs it's the 0.5 to 1 ms that R1 can't afford at 450k checks per second.
+
+525
+00:38:35.729 --> 00:38:48.145
+Leasing matched the central limiter under skew (895 per second, 0 rejected) with 0.17 calls per request, and held the cap over the limit with 0.39.
+
+526
+00:38:48.425 --> 00:38:56.020
+It gave back 4,823 unused tokens under skew, which is exactly why it didn't strand capacity.
+
+527
+00:38:56.300 --> 00:39:07.372
+The output records the history: fixed 20-token leases without give-back rejected 244 to 922 in-contract requests in earlier runs.
+
+528
+00:39:07.652 --> 00:39:10.127
+The refinements are what make leasing correct.
+
+529
+00:39:11.477 --> 00:39:14.847
+L3, OTP SMS pumping: choosing the key.
+
+530
+00:39:15.127 --> 00:39:16.066
+Requirement:
+
+531
+00:39:16.346 --> 00:39:22.490
+Stop fraudsters triggering OTPs to premium ranges without locking real customers out of login.
+
+532
+00:39:22.770 --> 00:39:25.373
+One hour of simulated OTP traffic:
+
+533
+00:39:25.653 --> 00:39:39.029
+100,000 real users (60% behind carrier CGNAT) and a pumping attack using 5,000 proxy IPs, fresh device ids and 30,000 numbers in 5 international ranges.
+
+534
+00:39:39.309 --> 00:39:42.103
+Four policies are applied to the same requests.
+
+535
+00:39:43.453 --> 00:39:46.632
+Here is the Java code, OtpAbuseL3.java.
+
+536
+00:39:46.912 --> 00:39:51.179
+It runs to 126 lines; the full listing is in the chapter.
+
+537
+00:39:51.459 --> 00:39:59.181
+OtpAbuseL3.java, run with: java OtpAbuseL3.java (JDK 21, no dependencies).
+
+538
+00:39:59.461 --> 00:40:01.189
+RATE LIMITING AS FRAUD CONTROL:
+
+539
+00:40:01.469 --> 00:40:02.984
+OTP SMS PUMPING.
+
+540
+00:40:03.264 --> 00:40:05.163
+Login is OTP-by-SMS.
+
+541
+00:40:05.443 --> 00:40:17.005
+In an SMS-pumping attack, fraudsters trigger OTPs. to phone numbers in ranges where they share the termination revenue, every OTP costs the platform money and nobody.
+
+542
+00:40:19.855 --> 00:40:20.773
+On screen:
+
+543
+00:40:21.053 --> 00:40:21.970
+One hour:
+
+544
+00:40:22.250 --> 00:40:38.442
+179,343 OTP requests (119,343 legitimate from 100,000 users, 60,000 attack). policy attack SMS attack cost legit users blocked.
+
+545
+00:40:38.722 --> 00:40:40.151
+P1) per IP:
+
+546
+00:40:40.431 --> 00:40:53.914
+10 OTPs or hour 47,175 212,288 rupees57,503 (57.50%).
+
+547
+00:40:54.194 --> 00:40:55.431
+P2) per phone:
+
+548
+00:40:55.711 --> 00:41:07.615
+3 per 10 min, 5 per hour 59,199 266,396 rupees0 (0.00%).
+
+549
+00:41:07.895 --> 00:41:25.026
+P3) P2 + per IP 60 or hour + per device 5 or hour 59,199 266,396 rupees48,122 (48.12%).
+
+550
+00:41:25.306 --> 00:41:41.711
+P4) P2 + per-range hourly budget + attestation, then challenge 79 356 rupees3 (0.00%). then the obvious key is the wrong one: per-IP limits barely touch an attacker with.
+
+551
+00:41:41.991 --> 00:41:49.309
+5,000 proxy IPs and lock out. real customers who share a carrier CGNAT address with thousands of others.
+
+552
+00:41:49.589 --> 00:41:55.903
+Per-phone limits stop repeats to. one number but not a pump that spreads across 30,000 numbers.
+
+553
+00:41:56.183 --> 00:41:57.165
+What works is.
+
+554
+00:41:57.445 --> 00:41:58.959
+The rest is in the chapter.
+
+555
+00:42:01.809 --> 00:42:02.663
+Reading it:
+
+556
+00:42:02.943 --> 00:42:03.924
+Per IP:
+
+557
+00:42:04.204 --> 00:42:12.225
+47,175 attack SMS still sent, since each proxy IP made ~12 requests.
+
+558
+00:42:12.505 --> 00:42:23.001
+57,503 real users (57.5%) were blocked, because their carrier CGNAT address was shared with hundreds of others.
+
+559
+00:42:23.281 --> 00:42:29.937
+Per phone: no real user blocked, but the attack barely noticed (59,199 sent).
+
+560
+00:42:30.217 --> 00:42:33.695
+Two OTPs per number stays under any sane per-phone limit.
+
+561
+00:42:33.975 --> 00:42:45.324
+Adding IP and device limits (P3) blocked 48% of real users (CGNAT again) and no extra attack traffic (fresh devices, 12 requests per IP).
+
+562
+00:42:46.674 --> 00:42:48.637
+Range budgets + attestation:
+
+563
+00:42:48.917 --> 00:42:57.791
+79 attack SMS (356 rupees), and 3 real international users who failed attestation and then the challenge.
+
+564
+00:42:58.071 --> 00:43:01.805
+The budget works because the attacker must send to the ranges that pay.
+
+565
+00:43:03.155 --> 00:43:06.760
+L4, Regions, partitions and the limiter's own outage.
+
+566
+00:43:07.040 --> 00:43:07.979
+Requirement:
+
+567
+00:43:08.259 --> 00:43:16.515
+Serve a global contract from two regions while traffic moves between them, and decide what the OTP limiter does when its Redis is down.
+
+568
+00:43:16.795 --> 00:43:19.653
+A deterministic second-by-second simulation.
+
+569
+00:43:19.933 --> 00:43:33.011
+Part 1 shifts a partner's traffic from 80% Mumbai to 25% over two minutes, with a runaway job at 1,400 req per second and an inter-region partition in minutes 6 to 7.
+
+570
+00:43:33.291 --> 00:43:37.813
+Part 2 takes the OTP limiter's store down for 2 minutes during an attack.
+
+571
+00:43:39.163 --> 00:43:42.683
+Here is the Java code, RegionsFailuresL4.java.
+
+572
+00:43:42.963 --> 00:43:47.230
+It runs to 126 lines; the full listing is in the chapter.
+
+573
+00:43:47.510 --> 00:43:56.129
+RegionsFailuresL4.java, run with: java RegionsFailuresL4.java (JDK 21, no dependencies).
+
+574
+00:43:56.409 --> 00:43:59.907
+A LIMITER THAT SPANS REGIONS AND SURVIVES ITS OWN OUTAGES.
+
+575
+00:44:00.187 --> 00:44:03.067
+Deterministic simulation, second by second.
+
+576
+00:44:03.347 --> 00:44:12.286
+Part 1, a partner's contract is 1,000 req per second GLOBALLY; we serve it from two regions (Mumbai, Hyderabad), each with its own.
+
+577
+00:44:15.136 --> 00:44:16.053
+On screen:
+
+578
+00:44:16.333 --> 00:44:35.917
+Part 1, contract 1,000 req per second global; offered 900 req per second (1,400 in minutes 6 to 7); Mumbai. share 80%, then 25% over minutes 3 to 5. design in-contract reqs max admitted in 1 s cross-region calls. rejected (contract.
+
+579
+00:44:36.197 --> 00:44:37.264
+1,000).
+
+580
+00:44:37.544 --> 00:44:45.459
+S1) static split 500 or 500 99,370 944 0.
+
+581
+00:44:45.739 --> 00:44:54.997
+S2) static split from history 800 or 200 167,179 945 0.
+
+582
+00:44:55.277 --> 00:45:00.760
+S3) rebalance every 10 s by demand 914 1,000 0.
+
+583
+00:45:01.040 --> 00:45:11.963
+S4) central in Mumbai (partition min 6 to 7: fail open) 0 1,468 308,377.
+
+584
+00:45:12.243 --> 00:45:21.523
+Part 2, OTP limiter's Redis down for 120 s (minutes 4 to 6) during an SMS-pumping. attack; 8 gateway nodes.
+
+585
+00:45:21.803 --> 00:45:23.317
+The rest is in the chapter.
+
+586
+00:45:26.167 --> 00:45:27.021
+Reading it:
+
+587
+00:45:27.301 --> 00:45:41.487
+Static splits refused 99,370 (500 or 500) and 167,179 (800 or 200, last month's split) in-contract requests.
+
+588
+00:45:41.767 --> 00:45:47.463
+Any static split is wrong once traffic moves, and the historical one was the worst after the shift.
+
+589
+00:45:47.743 --> 00:45:53.823
+Rebalancing every 10 s refused only 914, in the seconds just after the shift.
+
+590
+00:45:54.103 --> 00:45:58.114
+It also capped the runaway job at exactly 1,000 per second.
+
+591
+00:45:58.394 --> 00:46:12.794
+Central in Mumbai refused nothing in contract but made 308,377 cross-region calls, and during the partition Hyderabad's fail-open admitted 1,468 per second.
+
+592
+00:46:14.144 --> 00:46:36.309
+Limiter outage: fail open paid the fraudsters 9,265 rupeesin two minutes; fail closed refused 3,955 real OTPs, so nobody could log in; local fallback allowed 30 attack SMS and refused 16 (from an assumed 0.4% cross-node retry effect, measure your own).
+
+593
+00:46:37.659 --> 00:46:38.598
+Part 6.
+
+594
+00:46:38.878 --> 00:46:40.158
+Production Concerns.
+
+595
+00:46:41.408 --> 00:46:42.560
+Failure modes.
+
+596
+00:46:42.840 --> 00:46:44.205
+Here is a quick table:
+
+597
+00:46:44.485 --> 00:46:46.768
+Failure, and Symptom, and Mitigation.
+
+598
+00:46:47.048 --> 00:46:48.797
+Keying on shared identifiers.
+
+599
+00:46:49.077 --> 00:46:49.888
+Symptom:
+
+600
+00:46:50.168 --> 00:46:52.493
+CGNAT customers locked out (L3).
+
+601
+00:46:52.773 --> 00:46:53.776
+Mitigation:
+
+602
+00:46:54.056 --> 00:46:57.256
+User or phone keys; IP limits loose, per ASN.
+
+603
+00:46:57.536 --> 00:46:59.264
+Keying on cheap identifiers.
+
+604
+00:46:59.544 --> 00:47:00.355
+Symptom:
+
+605
+00:47:00.635 --> 00:47:04.304
+Attack spreads across IPs, devices, numbers (L3).
+
+606
+00:47:04.584 --> 00:47:05.587
+Mitigation:
+
+607
+00:47:05.867 --> 00:47:09.003
+Key on what the attacker must concentrate; attestation.
+
+608
+00:47:09.283 --> 00:47:11.160
+Per-node splits of global limits.
+
+609
+00:47:11.440 --> 00:47:12.251
+Symptom:
+
+610
+00:47:12.531 --> 00:47:15.069
+In-contract rejections under skew (L2).
+
+611
+00:47:15.349 --> 00:47:16.352
+Mitigation:
+
+612
+00:47:16.632 --> 00:47:18.467
+Leasing or central GCRA.
+
+613
+00:47:18.747 --> 00:47:20.304
+Static regional splits.
+
+614
+00:47:20.584 --> 00:47:21.395
+Symptom:
+
+615
+00:47:21.675 --> 00:47:24.064
+Rejections when traffic moves (L4).
+
+616
+00:47:24.344 --> 00:47:25.347
+Mitigation:
+
+617
+00:47:25.627 --> 00:47:27.248
+Demand-based rebalancing.
+
+618
+00:47:27.528 --> 00:47:28.787
+Limiter store down.
+
+619
+00:47:29.067 --> 00:47:29.877
+Symptom:
+
+620
+00:47:30.157 --> 00:47:33.699
+Outage (fail closed) or fraud (fail open) (L4).
+
+621
+00:47:33.979 --> 00:47:34.981
+Mitigation:
+
+622
+00:47:35.261 --> 00:47:37.160
+Per-rule mode; local fallback.
+
+623
+00:47:38.510 --> 00:47:40.537
+Approximate windows as hard caps.
+
+624
+00:47:40.817 --> 00:47:41.627
+Symptom:
+
+625
+00:47:41.907 --> 00:47:44.617
+108 allowed against 60 (L1).
+
+626
+00:47:44.897 --> 00:47:45.899
+Mitigation:
+
+627
+00:47:46.179 --> 00:47:48.505
+GCRA or exact logs where it matters.
+
+628
+00:47:48.785 --> 00:47:50.299
+Unpaced vendor egress.
+
+629
+00:47:50.579 --> 00:47:51.390
+Symptom:
+
+630
+00:47:51.670 --> 00:47:53.377
+Vendor drops OTPs.
+
+631
+00:47:53.657 --> 00:47:54.659
+Mitigation:
+
+632
+00:47:54.939 --> 00:47:56.411
+Shaper with priorities.
+
+633
+00:47:56.691 --> 00:47:58.398
+Enforcing untested rules.
+
+634
+00:47:58.678 --> 00:47:59.489
+Symptom:
+
+635
+00:47:59.769 --> 00:48:01.326
+False positives at scale.
+
+636
+00:48:01.606 --> 00:48:02.609
+Mitigation:
+
+637
+00:48:02.889 --> 00:48:03.934
+Shadow mode.
+
+638
+00:48:05.284 --> 00:48:06.372
+Observability.
+
+639
+00:48:06.652 --> 00:48:11.196
+Allowed or denied per rule, per key class, per region; top denied keys.
+
+640
+00:48:11.476 --> 00:48:14.399
+Shadow-mode would-deny counts and samples for review.
+
+641
+00:48:14.679 --> 00:48:18.839
+Limiter latency and error rate; fallback mode active as an alert.
+
+642
+00:48:19.119 --> 00:48:22.660
+Lease statistics: calls per request, tokens given back.
+
+643
+00:48:22.940 --> 00:48:24.113
+Fraud dashboards:
+
+644
+00:48:24.393 --> 00:48:36.169
+OTP sends by destination range versus baseline, SMS spend per hour, conversion (OTP sent, then login verified), pumping shows up as sends with no logins.
+
+645
+00:48:37.519 --> 00:48:38.458
+Security.
+
+646
+00:48:38.738 --> 00:48:49.170
+Limits are part of the security architecture (Ch 23): credential stuffing, OTP abuse, scraping, enumeration of short links (Ch 38).
+
+647
+00:48:49.450 --> 00:48:53.247
+Don't leak limit internals in error messages for fraud controls.
+
+648
+00:48:53.527 --> 00:48:59.415
+Trust client IPs only from your own edge (X-Forwarded-For hygiene, Ch 08).
+
+649
+00:49:00.765 --> 00:49:01.661
+Performance.
+
+650
+00:49:01.941 --> 00:49:09.045
+Evaluate rules in one Lua call per request when several keys apply (pass all keys, return the first denial).
+
+651
+00:49:09.325 --> 00:49:14.616
+Pipeline or batch lease requests; keep limiter Redis in the same AZ as gateways.
+
+652
+00:49:14.896 --> 00:49:22.427
+Hot keys (one partner, one campaign) concentrate on one shard, leasing reduces calls on those keys most (L2).
+
+653
+00:49:23.777 --> 00:49:24.502
+Cost.
+
+654
+00:49:24.782 --> 00:49:26.894
+GCRA keeps the store small (L1:
+
+655
+00:49:27.174 --> 00:49:29.819
+0.9 GB for 10M keys).
+
+656
+00:49:30.099 --> 00:49:36.969
+The dominant cost in L3 is SMS, not infrastructure: a limiter design is also a fraud budget.
+
+657
+00:49:37.249 --> 00:49:42.177
+Report attack spend avoided alongside infrastructure cost (Ch 35).
+
+658
+00:49:43.527 --> 00:49:44.465
+Part 7.
+
+659
+00:49:44.745 --> 00:49:46.452
+Anti-Patterns and Pitfalls.
+
+660
+00:49:47.702 --> 00:49:48.619
+Watch out:
+
+661
+00:49:48.899 --> 00:49:49.539
+1.
+
+662
+00:49:49.819 --> 00:49:51.953
+Per-IP limits on mobile traffic.
+
+663
+00:49:52.233 --> 00:49:56.243
+CGNAT shares one IP across thousands of customers (L3:
+
+664
+00:49:56.523 --> 00:49:58.891
+57.5% locked out).
+
+665
+00:50:00.241 --> 00:50:01.159
+Watch out:
+
+666
+00:50:01.439 --> 00:50:02.143
+2.
+
+667
+00:50:02.423 --> 00:50:04.087
+Trusting cheap identifiers.
+
+668
+00:50:04.367 --> 00:50:09.359
+IPs from proxy networks and unattested device ids rotate freely.
+
+669
+00:50:10.709 --> 00:50:11.626
+Watch out:
+
+670
+00:50:11.906 --> 00:50:12.653
+3.
+
+671
+00:50:12.933 --> 00:50:15.045
+One limit design for every purpose.
+
+672
+00:50:15.325 --> 00:50:19.933
+Fairness, contracts and fraud need different keys, accuracy and failure modes.
+
+673
+00:50:21.283 --> 00:50:22.200
+Watch out:
+
+674
+00:50:22.480 --> 00:50:23.184
+4.
+
+675
+00:50:23.464 --> 00:50:25.747
+Global limit ÷ N nodes.
+
+676
+00:50:26.027 --> 00:50:28.843
+Wrong under skew and when N changes (L2:
+
+677
+00:50:29.123 --> 00:50:32.109
+4,093 in-contract rejections).
+
+678
+00:50:33.459 --> 00:50:34.377
+Watch out:
+
+679
+00:50:34.657 --> 00:50:35.425
+5.
+
+680
+00:50:35.705 --> 00:50:38.649
+A store call per rule per request at high volume.
+
+681
+00:50:38.929 --> 00:50:42.662
+Adds latency and load; lease or keep coarse limits local.
+
+682
+00:50:44.012 --> 00:50:44.929
+Watch out:
+
+683
+00:50:45.209 --> 00:50:45.956
+6.
+
+684
+00:50:46.236 --> 00:50:48.241
+Sliding counters as hard caps.
+
+685
+00:50:48.521 --> 00:50:50.591
+Approximate under bursts (L1:
+
+686
+00:50:50.871 --> 00:50:52.641
+108 versus 60).
+
+687
+00:50:53.991 --> 00:50:54.909
+Watch out:
+
+688
+00:50:55.189 --> 00:50:55.935
+7.
+
+689
+00:50:56.215 --> 00:51:02.189
+Exact logs for millions of keys. ~1 KB per key and a write per request (L1).
+
+690
+00:51:03.539 --> 00:51:04.456
+Watch out:
+
+691
+00:51:04.736 --> 00:51:05.419
+8.
+
+692
+00:51:05.699 --> 00:51:08.131
+Static regional splits of global quotas.
+
+693
+00:51:08.411 --> 00:51:11.696
+Rejections exactly when traffic fails over (L4).
+
+694
+00:51:13.046 --> 00:51:13.963
+Watch out:
+
+695
+00:51:14.243 --> 00:51:14.990
+9.
+
+696
+00:51:15.270 --> 00:51:16.827
+Fail closed by default.
+
+697
+00:51:17.107 --> 00:51:20.179
+The limiter becomes the outage (§1.1).
+
+698
+00:51:20.459 --> 00:51:21.590
+Decide per rule.
+
+699
+00:51:22.940 --> 00:51:23.857
+Watch out:
+
+700
+00:51:24.137 --> 00:51:24.841
+10.
+
+701
+00:51:25.121 --> 00:51:26.999
+Fail open on fraud controls.
+
+702
+00:51:27.279 --> 00:51:28.943
+Attackers notice (L4:
+
+703
+00:51:29.223 --> 00:51:32.721
+9,265 rupeesin 2 minutes).
+
+704
+00:51:34.071 --> 00:51:34.989
+Watch out:
+
+705
+00:51:35.269 --> 00:51:36.101
+11.
+
+706
+00:51:36.381 --> 00:51:38.727
+Enforcing new rules without shadow mode.
+
+707
+00:51:39.007 --> 00:51:41.909
+False positives land on real customers first.
+
+708
+00:51:43.259 --> 00:51:44.176
+Watch out:
+
+709
+00:51:44.456 --> 00:51:45.245
+12.
+
+710
+00:51:45.525 --> 00:51:47.061
+Rejecting when you should shape.
+
+711
+00:51:47.341 --> 00:51:51.864
+Outbound vendor limits call for queuing and pacing, with OTP priority.
+
+712
+00:51:53.214 --> 00:51:54.089
+Part 8.
+
+713
+00:51:54.369 --> 00:51:55.713
+Interview Q and A.
+
+714
+00:51:56.963 --> 00:51:57.795
+Beginner.
+
+715
+00:51:58.075 --> 00:51:59.099
+Question 1.
+
+716
+00:51:59.379 --> 00:52:02.429
+Design a distributed rate limiter, where do you start?
+
+717
+00:52:02.709 --> 00:52:04.075
+Thirty-second answer:
+
+718
+00:52:04.355 --> 00:52:15.661
+With what each limit protects and who it limits: fairness per user, contracts per API key, fraud controls per phone and destination, capacity per service, vendor TPS.
+
+719
+00:52:15.941 --> 00:52:19.483
+That decides the key, the accuracy needed and the failure mode.
+
+720
+00:52:19.763 --> 00:52:33.757
+Then the algorithm (GCRA or token bucket by default), where state lives (Redis, local, leased), multi-node and multi-region enforcement, response headers, configuration with shadow mode, and observability.
+
+721
+00:52:35.107 --> 00:52:36.110
+Question 2.
+
+722
+00:52:36.390 --> 00:52:38.673
+What is GCRA and why is it popular?
+
+723
+00:52:38.953 --> 00:52:40.318
+Thirty-second answer:
+
+724
+00:52:40.598 --> 00:52:48.491
+The Generic Cell Rate Algorithm stores one value per key, the theoretical arrival time of the next request at the allowed rate.
+
+725
+00:52:48.771 --> 00:52:56.771
+A request is allowed if it isn't earlier than that time minus the burst tolerance; then the time advances by one emission interval.
+
+726
+00:52:57.051 --> 00:53:03.153
+It behaves exactly like a token bucket but with one integer of state and a natural retry-after.
+
+727
+00:53:04.503 --> 00:53:05.548
+Question 3.
+
+728
+00:53:05.828 --> 00:53:09.348
+Why are per-IP limits dangerous for a mobile-first product?
+
+729
+00:53:09.628 --> 00:53:10.993
+Thirty-second answer:
+
+730
+00:53:11.273 --> 00:53:22.217
+Carrier-grade NAT puts hundreds or thousands of phones behind one public IPv4 address, so a per-IP limit treats a carrier's customers as one client and locks them out.
+
+731
+00:53:22.497 --> 00:53:26.167
+Meanwhile attackers rent thousands of residential IPs.
+
+732
+00:53:26.447 --> 00:53:30.095
+Per-IP limits end up hurting customers more than attackers.
+
+733
+00:53:31.445 --> 00:53:32.511
+Question 4.
+
+734
+00:53:32.791 --> 00:53:35.778
+What should a 429 response contain?
+
+735
+00:53:36.058 --> 00:53:37.423
+Thirty-second answer:
+
+736
+00:53:37.703 --> 00:53:49.543
+Status 429, a Retry-After header, and rate-limit headers describing the policy and remaining quota (the IETF RateLimit fields) so clients can pace themselves.
+
+737
+00:53:49.823 --> 00:53:56.287
+For fraud controls, keep the message generic and possibly present a challenge rather than revealing the rule.
+
+738
+00:53:57.637 --> 00:53:58.747
+Question 5.
+
+739
+00:53:59.027 --> 00:54:02.653
+Token bucket or sliding window for a 'max 60 per minute' rule?
+
+740
+00:54:02.933 --> 00:54:04.299
+Thirty-second answer:
+
+741
+00:54:04.579 --> 00:54:10.189
+If the rule is a rate with some burst, a token bucket or GCRA (60 per minute, burst N).
+
+742
+00:54:10.469 --> 00:54:24.891
+If it must never exceed 60 in any 60-second span, only an exact sliding log guarantees it; a sliding-window counter is approximate and can exceed the limit under bursty traffic; a fixed window can double it at boundaries.
+
+743
+00:54:26.241 --> 00:54:27.243
+Intermediate.
+
+744
+00:54:27.523 --> 00:54:28.633
+Question 6.
+
+745
+00:54:28.913 --> 00:54:32.603
+How do you enforce one global limit across many gateway nodes?
+
+746
+00:54:32.883 --> 00:54:34.249
+Thirty-second answer:
+
+747
+00:54:34.529 --> 00:54:54.731
+Options: split the limit per node (free, wrong under skew and autoscaling); check a central store per request (exact, a round-trip each time); or lease tokens from the central store in small batches sized to each node's rate, giving unused tokens back and caching denials (near-exact with far fewer calls).
+
+748
+00:54:55.011 --> 00:54:58.638
+Or route each key to one limiter node by consistent hashing.
+
+749
+00:54:59.988 --> 00:55:01.076
+Question 7.
+
+750
+00:55:01.356 --> 00:55:04.385
+How much state does a limiter need for 10 million keys?
+
+751
+00:55:04.665 --> 00:55:06.031
+Thirty-second answer:
+
+752
+00:55:06.311 --> 00:55:08.017
+Depends on representation:
+
+753
+00:55:08.297 --> 00:55:25.556
+GCRA ~90 bytes per key in Redis (~0.9 GB for 10M), a token-bucket hash ~123, two window counters ~149, an exact log ~1 KB with 30 entries (~10 GB).
+
+754
+00:55:25.836 --> 00:55:31.148
+Choose GCRA for most limits and exact logs only for small, short-lived key sets.
+
+755
+00:55:32.498 --> 00:55:33.522
+Question 8.
+
+756
+00:55:33.802 --> 00:55:35.722
+How do you roll out a new limit safely?
+
+757
+00:55:36.002 --> 00:55:37.367
+Thirty-second answer:
+
+758
+00:55:37.647 --> 00:55:53.903
+Rules as versioned configuration; deploy in shadow mode that logs would-be denials; review false positives against known-good traffic for a week; then enforce gradually (by region or percentage); monitor denials by rule with an easy rollback.
+
+759
+00:55:55.253 --> 00:55:56.320
+Question 9.
+
+760
+00:55:56.600 --> 00:55:59.715
+Rate limiting versus load shedding versus backpressure?
+
+761
+00:55:59.995 --> 00:56:01.360
+Thirty-second answer:
+
+762
+00:56:01.640 --> 00:56:08.339
+Rate limiting caps what a given client may send (fairness, contracts, abuse), independent of current load.
+
+763
+00:56:08.619 --> 00:56:14.080
+Load shedding rejects work when the system is overloaded, prioritising important traffic.
+
+764
+00:56:14.360 --> 00:56:18.328
+Backpressure slows producers by signalling downstream capacity.
+
+765
+00:56:18.608 --> 00:56:23.216
+You need all three; rate limits alone don't protect against aggregate overload.
+
+766
+00:56:24.566 --> 00:56:25.334
+Senior.
+
+767
+00:56:25.614 --> 00:56:26.659
+Question 10.
+
+768
+00:56:26.939 --> 00:56:32.550
+Design OTP rate limiting that stops SMS pumping without locking out customers.
+
+769
+00:56:32.830 --> 00:56:34.195
+Thirty-second answer:
+
+770
+00:56:34.475 --> 00:56:51.350
+Layered keys: per phone (3 or 10 min, 5 or hour, exact), per destination range and country budgets learned from baseline, a global international budget, attested-device checks with a challenge on failure, loose per-ASN limits for known-abusive networks.
+
+771
+00:56:51.630 --> 00:56:54.745
+Monitor sends versus verified logins per range.
+
+772
+00:56:55.025 --> 00:56:59.270
+Treat it as a fraud control with a cost on both sides; shadow new rules.
+
+773
+00:57:00.620 --> 00:57:01.751
+Question 11.
+
+774
+00:57:02.031 --> 00:57:03.588
+The limiter's Redis is down.
+
+775
+00:57:03.868 --> 00:57:04.807
+What happens?
+
+776
+00:57:05.087 --> 00:57:06.452
+Thirty-second answer:
+
+777
+00:57:06.732 --> 00:57:08.332
+Whatever each rule declares.
+
+778
+00:57:08.612 --> 00:57:12.879
+Fairness and partner limits fail open (other layers protect capacity).
+
+779
+00:57:13.159 --> 00:57:17.447
+Fraud controls fall back to local, conservative shares of their budgets.
+
+780
+00:57:17.727 --> 00:57:22.463
+Fail closed only for narrowly scoped rules where allowing is worse than an outage.
+
+781
+00:57:22.743 --> 00:57:27.265
+Limiter calls have millisecond timeouts and a breaker; fallback mode alerts.
+
+782
+00:57:28.615 --> 00:57:29.703
+Question 12.
+
+783
+00:57:29.983 --> 00:57:33.973
+How do you enforce a partner quota across two active-active regions?
+
+784
+00:57:34.253 --> 00:57:35.618
+Thirty-second answer:
+
+785
+00:57:35.898 --> 00:57:44.154
+Give each region a share of the global limit and rebalance shares periodically by recent demand, exchanging counts asynchronously.
+
+786
+00:57:44.434 --> 00:57:46.759
+Accept a few percent of approximation.
+
+787
+00:57:47.039 --> 00:57:55.103
+A single central limiter is exact but adds cross-region latency and forces a fail-open or closed choice during partitions.
+
+788
+00:57:56.453 --> 00:57:57.733
+Question 13.
+
+789
+00:57:58.013 --> 00:58:01.640
+How do you handle a hot key, one huge partner or a campaign?
+
+790
+00:58:01.920 --> 00:58:03.285
+Thirty-second answer:
+
+791
+00:58:03.565 --> 00:58:07.619
+A single key lives on one shard, so its limiter checks concentrate there.
+
+792
+00:58:07.899 --> 00:58:14.725
+Lease tokens so most requests are decided locally, cache denials, and if needed give the key its own shard.
+
+793
+00:58:15.005 --> 00:58:18.888
+Shape rather than reject if the traffic is legitimate but bursty.
+
+794
+00:58:20.238 --> 00:58:21.433
+Question 14.
+
+795
+00:58:21.713 --> 00:58:26.001
+How do you pace calls to a vendor with a TPS limit, from many services?
+
+796
+00:58:26.281 --> 00:58:27.646
+Thirty-second answer:
+
+797
+00:58:27.926 --> 00:58:41.686
+Centralise egress: all services enqueue SMS to one queue; a shaper (leaky bucket) sends at the vendor's TPS minus headroom, with priority classes (OTP before transactional before marketing).
+
+798
+00:58:41.966 --> 00:58:47.534
+If multiple senders must remain, use a global GCRA with leasing and back-pressure producers.
+
+799
+00:58:48.884 --> 00:58:49.780
+Architect.
+
+800
+00:58:50.060 --> 00:58:51.255
+Question 15.
+
+801
+00:58:51.535 --> 00:58:55.161
+Design the rate-limiting platform for a national grocery app.
+
+802
+00:58:55.441 --> 00:58:56.807
+Thirty-second answer:
+
+803
+00:58:57.087 --> 00:59:10.655
+Edge volumetric limits; gateway limits per user and API key with GCRA state in regional Redis and adaptive leasing; service-level exact checks for fraud controls (OTP per phone, range budgets,
+
+804
+00:59:10.935 --> 00:59:26.209
+attestation); egress shaping for vendors; rules as versioned data with shadow mode; per-rule failure modes with local fallback; cross-region share rebalancing; observability including fraud metrics (sends versus verifications).
+
+805
+00:59:27.559 --> 00:59:28.754
+Question 16.
+
+806
+00:59:29.034 --> 00:59:31.210
+How do you measure whether your limits are right?
+
+807
+00:59:31.490 --> 00:59:32.855
+Thirty-second answer:
+
+808
+00:59:33.135 --> 00:59:48.538
+Measure both sides: harm prevented (attack spend avoided, abusive traffic dropped, overload incidents avoided) and harm caused (false positives: real users denied, support tickets, partner complaints, conversion drop on denied flows).
+
+809
+00:59:48.818 --> 00:59:53.831
+Use shadow mode and holdouts for new rules, and review top denied keys regularly.
+
+810
+00:59:55.181 --> 00:59:56.525
+Question 17.
+
+811
+00:59:56.805 --> 00:59:59.835
+Build your own limiter or use the gateway's or cloud's?
+
+812
+01:00:00.115 --> 01:00:01.480
+Thirty-second answer:
+
+813
+01:00:01.760 --> 01:00:09.419
+Use managed edge or WAF limits for volumetric protection and the gateway's built-in limiter for simple per-key limits.
+
+814
+01:00:09.699 --> 01:00:19.235
+Build (on shared components) where the business needs it: fraud-aware OTP limits, partner contracts across regions, leasing, per-rule failure modes.
+
+815
+01:00:19.515 --> 01:00:21.456
+Keep one rule model across both.
+
+816
+01:00:22.806 --> 01:00:23.979
+Question 18.
+
+817
+01:00:24.259 --> 01:00:28.270
+How do rate limits interact with multi-tenancy and pricing plans?
+
+818
+01:00:28.550 --> 01:00:29.915
+Thirty-second answer:
+
+819
+01:00:30.195 --> 01:00:38.771
+Limits become product features: per-tenant plans with quotas and burst, visible usage, overage policies, and noisy-neighbour protection.
+
+820
+01:00:39.051 --> 01:00:51.638
+Key by tenant and user, enforce plan limits at the gateway, and keep capacity-protection limits separate from commercial quotas (fail modes differ: quotas may fail open, capacity protection sheds).
+
+821
+01:00:52.988 --> 01:00:54.225
+Question 19.
+
+822
+01:00:54.505 --> 01:00:56.937
+An attacker adapts to your OTP limits.
+
+823
+01:00:57.217 --> 01:00:58.881
+What's your long-term strategy?
+
+824
+01:00:59.161 --> 01:01:00.527
+Thirty-second answer:
+
+825
+01:01:00.807 --> 01:01:19.815
+Make attacks expensive and signals rich: attested devices, risk scoring combining many signals (range, device, behaviour, velocity), progressive friction (challenge, delay, voice OTP), per-country budgets, commercial controls with SMS vendors (blocked premium ranges, spend caps),
+
+826
+01:01:20.095 --> 01:01:26.409
+monitoring send-to-verify ratios, and quick-response tooling for new rules in shadow and enforce modes.
+
+827
+01:01:27.759 --> 01:01:28.869
+Question 20.
+
+828
+01:01:29.149 --> 01:01:32.434
+What SLOs and alerts would you set for the limiter itself?
+
+829
+01:01:32.714 --> 01:01:34.079
+Thirty-second answer:
+
+830
+01:01:34.359 --> 01:01:49.613
+Added latency p99 under 1 ms at the gateway; limiter store availability; fallback-mode duration; false-positive rate (in-contract rejections for partners, real-user OTP denials); shadow review backlog.
+
+831
+01:01:49.893 --> 01:01:59.215
+Page on fallback mode and on a sudden rise in denials across many keys (misconfiguration); ticket on shadow-mode hits and drifting baselines.
+
+832
+01:02:00.565 --> 01:02:01.461
+Part 9.
+
+833
+01:02:01.741 --> 01:02:03.149
+Summary and Practice.
+
+834
+01:02:04.399 --> 01:02:05.487
+Key takeaways.
+
+835
+01:02:05.767 --> 01:02:12.338
+Start from what each limit protects; fairness, contracts, fraud and capacity differ (§1.2).
+
+836
+01:02:12.618 --> 01:02:13.898
+The key matters most:
+
+837
+01:02:14.178 --> 01:02:18.658
+IPs are shared and cheap; key on what attackers must concentrate (L3).
+
+838
+01:02:18.938 --> 01:02:23.845
+GCRA by default: one integer per key, token-bucket semantics (L1).
+
+839
+01:02:24.125 --> 01:02:29.693
+Sliding counters are approximate; exact logs only where caps must be hard (L1).
+
+840
+01:02:29.973 --> 01:02:37.567
+Global limits from many nodes: central for exactness, leasing for scale, sized, returned, denial-cached (L2).
+
+841
+01:02:38.917 --> 01:02:44.507
+Regions: rebalance shares by demand; central limiters struggle with partitions (L4).
+
+842
+01:02:44.787 --> 01:02:49.117
+Failure mode per rule, with local fallback for fraud controls (L4).
+
+843
+01:02:49.397 --> 01:02:51.360
+Shadow first, measure both sides.
+
+844
+01:02:52.710 --> 01:02:54.033
+Decision cheat sheet.
+
+845
+01:02:54.313 --> 01:02:55.678
+Here is a quick table:
+
+846
+01:02:55.958 --> 01:02:57.131
+Need, and Choice.
+
+847
+01:02:57.411 --> 01:02:59.118
+Per-user API fairness:
+
+848
+01:02:59.398 --> 01:03:02.833
+GCRA per user id at the gateway, leased, fail open.
+
+849
+01:03:03.113 --> 01:03:04.350
+Partner contract:
+
+850
+01:03:04.630 --> 01:03:09.409
+GCRA per API key, leasing, cross-region rebalancing, fail open.
+
+851
+01:03:09.689 --> 01:03:10.862
+OTP abuse:
+
+852
+01:03:11.142 --> 01:03:16.070
+Exact per phone + range budgets + attestation or challenge, local fallback.
+
+853
+01:03:16.350 --> 01:03:17.609
+Hard N per window:
+
+854
+01:03:17.889 --> 01:03:20.257
+Sliding log, low-volume keys only.
+
+855
+01:03:20.537 --> 01:03:21.667
+Vendor TPS:
+
+856
+01:03:21.947 --> 01:03:25.595
+Central egress queue + leaky-bucket shaper with priorities.
+
+857
+01:03:25.875 --> 01:03:27.198
+Volumetric floods:
+
+858
+01:03:27.478 --> 01:03:30.294
+Edge or WAF per IP or ASN.
+
+859
+01:03:31.644 --> 01:03:32.775
+Exercises.
+
+860
+01:03:33.055 --> 01:03:37.513
+(B2) In L1, add a 4th scenario with smoother traffic (no bursts).
+
+861
+01:03:37.793 --> 01:03:39.991
+How does the sliding counter's error change?
+
+862
+01:03:40.271 --> 01:03:45.796
+(B3) In L2, add node churn: node 7 leaves at 5 s and a new node joins.
+
+863
+01:03:46.076 --> 01:03:47.932
+Compare local splits and leasing.
+
+864
+01:03:48.212 --> 01:03:52.031
+(B3) In L3, make the attacker spread over 50 ranges.
+
+865
+01:03:52.311 --> 01:03:56.108
+Which additional budget stops it, and what does it cost real users?
+
+866
+01:03:56.388 --> 01:04:01.017
+(B4) In L4, change the rebalance interval to 1 s and 60 s.
+
+867
+01:04:01.297 --> 01:04:04.604
+Plot in-contract rejections against exchange traffic.
+
+868
+01:04:05.954 --> 01:04:15.234
+(B4) Implement a multi-key Lua script that checks phone, range and country budgets atomically and returns the first denial with retry-after.
+
+869
+01:04:16.584 --> 01:04:17.587
+Further reading.
+
+870
+01:04:17.867 --> 01:04:24.971
+ATM Forum Traffic Management Specification (GCRA); Brandur Leach, Rate limiting, cells, and GCRA.
+
+871
+01:04:25.251 --> 01:04:31.651
+Cloudflare, How we built rate limiting capable of scaling to millions of domains (sliding-window counters).
+
+872
+01:04:31.931 --> 01:04:34.725
+Stripe, Scaling your API with rate limiters.
+
+873
+01:04:35.005 --> 01:04:38.675
+IETF draft RateLimit header fields for HTTP.
+
+874
+01:04:38.955 --> 01:04:45.419
+Twilio or industry write-ups on SMS pumping (artificially inflated traffic) and mitigations.
+
+875
+01:04:46.769 --> 01:04:49.841
+Envoy global rate limiting service documentation.
+
+876
+01:04:51.191 --> 01:04:52.428
+Related chapters.
+
+877
+01:04:52.708 --> 01:04:58.191
+Ch 08, Load Balancing, Proxies and Gateways: gateway limiter placement.
+
+878
+01:04:58.471 --> 01:05:02.801
+Ch 18, Resilience Patterns: algorithms, shedding, backoff.
+
+879
+01:05:03.081 --> 01:05:07.263
+Ch 23, Security Architecture: abuse and identity.
+
+880
+01:05:07.543 --> 01:05:12.065
+Ch 30, Multi-Tenancy and SaaS Architecture: plan quotas.
+
+881
+01:05:12.345 --> 01:05:17.060
+Ch 38, URL Shortener: rate-limiting 404 probes.
+
+882
+01:05:17.340 --> 01:05:22.716
+Ch 40, Notification System: vendor egress shaping and OTP priority.
+
+883
+01:05:24.066 --> 01:05:25.666
+That's the end of this chapter.
+
+884
+01:05:25.946 --> 01:05:32.069
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+885
+01:05:32.349 --> 01:05:33.799
+See you in the next chapter.
+

@@ -1,0 +1,1746 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:03.465
+Amazon-Style Marketplace, How the Whole System Works.
+
+2
+00:00:03.745 --> 00:00:08.886
+Chapter I01b, from the Industry Designs part of the System Design Playbook.
+
+3
+00:00:10.636 --> 00:00:11.596
+At a glance:
+
+4
+00:00:11.876 --> 00:00:13.177
+What this page adds.
+
+5
+00:00:13.457 --> 00:00:17.660
+I01 focuses on four hard problems with runnable labs.
+
+6
+00:00:17.940 --> 00:00:20.799
+This page is the system walkthrough, with no code.
+
+7
+00:00:21.079 --> 00:00:41.601
+It follows one order from search to doorstep and the seller's payout, and explains each subsystem: catalog, search, recommendations, pricing and the buy box, cart, checkout and payments;. the order pipeline, fulfilment centres, transportation and delivery, returns;. the seller side and advertising;. the algorithms behind them;.
+
+8
+00:00:42.951 --> 00:00:50.226
+the data platform and warehouse;. the tech stack, with what has been publicly described kept separate from a reference choice.
+
+9
+00:00:51.576 --> 00:00:52.323
+Warning:
+
+10
+00:00:52.603 --> 00:00:54.011
+Sources and honesty.
+
+11
+00:00:54.291 --> 00:01:04.573
+Everything attributed to Amazon comes from public sources: papers such as Dynamo (2007) and item-to-item collaborative filtering (2003);.
+
+12
+00:01:04.853 --> 00:01:11.253
+AWS blog posts, the AWS Builders' Library, re:Invent talks and news coverage.
+
+13
+00:01:11.533 --> 00:01:12.984
+These are marked VERIFY.
+
+14
+00:01:13.264 --> 00:01:22.629
+Internal details are not public, so where this page says a system like this would... it is describing a reference design, not Amazon's implementation.
+
+15
+00:01:23.979 --> 00:01:24.833
+Part 1.
+
+16
+00:01:25.113 --> 00:01:27.886
+The Business in Numbers (orders of magnitude).
+
+17
+00:01:29.136 --> 00:01:30.501
+Here is a quick table:
+
+18
+00:01:30.781 --> 00:01:34.344
+Quantity, and Order of magnitude (VERIFY current figures).
+
+19
+00:01:34.624 --> 00:01:36.288
+Products (catalog entries):
+
+20
+00:01:36.568 --> 00:01:37.805
+Hundreds of millions.
+
+21
+00:01:38.085 --> 00:01:38.896
+Sellers:
+
+22
+00:01:39.176 --> 00:01:44.147
+Millions, with the majority of units sold by third-party sellers (VERIFY share).
+
+23
+00:01:44.427 --> 00:01:45.323
+Customers:
+
+24
+00:01:45.603 --> 00:01:46.840
+Hundreds of millions.
+
+25
+00:01:47.120 --> 00:01:48.912
+Fulfilment and delivery sites:
+
+26
+00:01:49.192 --> 00:01:54.397
+Hundreds of fulfilment centres, plus sortation centres and delivery stations worldwide.
+
+27
+00:01:54.677 --> 00:01:55.616
+Peak events:
+
+28
+00:01:55.896 --> 00:02:04.707
+Prime Day and holiday peaks, with AWS publishing per-service peak metrics for the retail business in yearly blog posts (VERIFY).
+
+29
+00:02:06.057 --> 00:02:07.443
+What this scale implies:
+
+30
+00:02:07.723 --> 00:02:10.774
+Everything is sharded by customer, product or seller.
+
+31
+00:02:11.054 --> 00:02:14.446
+Everything is owned by a small team behind an API.
+
+32
+00:02:14.726 --> 00:02:15.985
+Everything is measured.
+
+33
+00:02:17.335 --> 00:02:18.209
+Part 2.
+
+34
+00:02:18.489 --> 00:02:20.068
+The Architecture in Layers.
+
+35
+00:02:21.318 --> 00:02:22.662
+Here is the diagram.
+
+36
+00:02:26.512 --> 00:02:30.011
+Organising principles (publicly described; VERIFY):
+
+37
+00:02:30.291 --> 00:02:32.061
+Service-oriented from early on.
+
+38
+00:02:32.341 --> 00:02:35.413
+Teams own services end to end, including on-call.
+
+39
+00:02:35.693 --> 00:02:39.811
+They communicate only through APIs, with no shared databases.
+
+40
+00:02:40.091 --> 00:02:43.248
+Small teams, often described as two-pizza teams.
+
+41
+00:02:43.528 --> 00:02:48.285
+Cells, shuffle sharding and constant-work designs for blast-radius control.
+
+42
+00:02:48.565 --> 00:02:54.944
+Deployments roll out in waves, region by region and cell by cell (AWS Builders' Library).
+
+43
+00:02:55.224 --> 00:03:03.352
+Correction of Errors (COE) documents after incidents, a blameless postmortem culture with root-cause analysis (VERIFY).
+
+44
+00:03:04.702 --> 00:03:05.598
+Part 3.
+
+45
+00:03:05.878 --> 00:03:07.371
+One Order, End to End.
+
+46
+00:03:08.621 --> 00:03:09.389
+Search.
+
+47
+00:03:09.669 --> 00:03:12.400
+Request: a customer types running shoes men.
+
+48
+00:03:12.680 --> 00:03:16.648
+The request reaches a front-end fleet in their region, routed to a cell.
+
+49
+00:03:16.928 --> 00:03:30.240
+Query understanding: spelling correction;. tokenisation and normalisation;. category and attribute prediction (department = shoes, gender = men, activity = running);. brand detection;.
+
+50
+00:03:31.590 --> 00:03:38.715
+synonyms;. intent classification: navigational (nike air zoom) versus exploratory (gift for runner).
+
+51
+00:03:38.995 --> 00:03:48.361
+Candidate retrieval: lexical retrieval over an inverted index of product text (titles, bullets, attributes, backend keywords sellers provide);.
+
+52
+00:03:49.711 --> 00:04:01.060
+semantic retrieval with neural embeddings (query and product encoded into the same vector space; approximate nearest-neighbour search) to catch products that don't share words with the query.
+
+53
+00:04:01.340 --> 00:04:04.732
+Amazon published semantic product search work (VERIFY:
+
+54
+00:04:05.012 --> 00:04:14.591
+Semantic Product Search, KDD 2019);. filters: availability in the customer's region, and deliverability to the customer's address.
+
+55
+00:04:14.871 --> 00:04:17.836
+Ranking: a learning-to-rank model scores candidates.
+
+56
+00:04:18.116 --> 00:04:18.991
+Features:
+
+57
+00:04:20.341 --> 00:04:31.925
+text relevance, and behavioural signals (clicks, add-to-carts, purchases for this query);. price, delivery speed, reviews and ratings, availability, seller quality;. personalisation.
+
+58
+00:04:32.205 --> 00:04:36.557
+It is trained on historical searches with purchase and engagement labels.
+
+59
+00:04:36.837 --> 00:04:42.234
+Ranking is multi-objective: relevance, conversion, customer experience signals.
+
+60
+00:04:42.514 --> 00:04:50.514
+Blending: sponsored products (from the ads auction, §3.12) and widgets are blended into the results with limits.
+
+61
+00:04:51.864 --> 00:05:00.312
+Rendering: the page aggregator combines results with prices and delivery promises (from the offer and promise services), then renders.
+
+62
+00:05:00.592 --> 00:05:04.133
+The whole flow has a latency budget of a few hundred ms.
+
+63
+00:05:05.483 --> 00:05:06.977
+Product detail page.
+
+64
+00:05:07.257 --> 00:05:26.905
+When the customer clicks a product, the detail page aggregator calls tens of services in parallel with deadlines: catalog (title, images, attributes, variations);. offer listing and buy box (the winning offer);. price and deals;. delivery promise for the customer's address;. stock status;. reviews summary;.
+
+65
+00:05:28.255 --> 00:05:36.895
+Q and A;. recommendations (frequently bought together, customers also viewed);. ads;. the customer's own state (bought before, in cart).
+
+66
+00:05:37.175 --> 00:05:41.847
+Critical widgets (price, buy box, availability, Add to Cart) must render.
+
+67
+00:05:42.127 --> 00:05:46.201
+Optional widgets degrade (see I01 §2.6).
+
+68
+00:05:47.551 --> 00:05:49.685
+Catalog, one product, many sellers.
+
+69
+00:05:49.965 --> 00:05:53.378
+Identity: each product has an identifier (ASIN).
+
+70
+00:05:53.658 --> 00:06:01.871
+Sellers either match their offer to an existing ASIN (using UPC or EAN or ISBN or matching) or create one.
+
+71
+00:06:02.151 --> 00:06:10.066
+Contributions: many sellers and vendors contribute data about the same product, which conflicts (different titles, wrong weights).
+
+72
+00:06:10.346 --> 00:06:18.986
+An arbitration process picks the displayed value per attribute, using contributor trust, consistency checks and ML-based quality models.
+
+73
+00:06:19.266 --> 00:06:22.679
+Duplicate detection merges accidental duplicates.
+
+74
+00:06:24.029 --> 00:06:31.688
+Product types and schemas: attributes are defined per product type (shoes have size and width; TVs have screen size).
+
+75
+00:06:31.968 --> 00:06:34.272
+Listings are validated against the schema.
+
+76
+00:06:34.552 --> 00:06:40.227
+Variations: parent, child relationships (size and colour) group variants on one page.
+
+77
+00:06:40.507 --> 00:06:48.229
+Storage: a versioned, attribute-level store, with change events feeding search indexing, the detail page and the data lake.
+
+78
+00:06:49.579 --> 00:06:51.627
+Offers, pricing and the buy box.
+
+79
+00:06:51.907 --> 00:07:01.443
+An offer = seller + ASIN + condition + price + shipping + fulfilment channel (seller-fulfilled or platform-fulfilled) + quantity.
+
+80
+00:07:01.723 --> 00:07:21.585
+Pricing: sellers set prices, often through automated repricers;. the platform's own retail pricing uses automated competitive pricing (monitoring prices elsewhere, cost, demand elasticity; VERIFY specifics);. fair-pricing policies block unusually high prices (VERIFY policy details).
+
+81
+00:07:22.935 --> 00:07:26.753
+The buy box: one offer wins the default Add to Cart position.
+
+82
+00:07:27.033 --> 00:07:38.447
+The factors publicly described to sellers include landed price, fulfilment method and delivery speed, seller performance metrics and stock (VERIFY; the exact formula is not public).
+
+83
+00:07:38.727 --> 00:07:43.377
+I01 L2 shows how to maintain it consistently under repricing.
+
+84
+00:07:44.727 --> 00:07:45.453
+Cart.
+
+85
+00:07:45.733 --> 00:07:56.229
+Always writable: the cart is the original use case of the Dynamo paper's highly available key-value design (VERIFY; today's implementation isn't public).
+
+86
+00:07:56.509 --> 00:08:01.693
+Contents: item references and quantities, not prices, which are re-read at checkout.
+
+87
+00:08:01.973 --> 00:08:04.682
+Merge semantics: see I01 L1.
+
+88
+00:08:04.962 --> 00:08:07.010
+Saved for later is a separate list.
+
+89
+00:08:07.290 --> 00:08:09.999
+Guest carts are merged into the account at sign-in.
+
+90
+00:08:11.349 --> 00:08:12.245
+Checkout.
+
+91
+00:08:12.525 --> 00:08:14.275
+Address and delivery options.
+
+92
+00:08:14.555 --> 00:08:23.237
+The promise service computes delivery dates per shipping speed from inventory positions, carrier cut-offs and capacity (§3.9).
+
+93
+00:08:23.517 --> 00:08:30.216
+Payment selection: cards (tokenised), wallets, gift balances, instalments and local methods per country.
+
+94
+00:08:30.496 --> 00:08:38.091
+Order total: item prices re-validated;. promotions and coupons applied (a rules engine; Ch 49);.
+
+95
+00:08:39.441 --> 00:08:45.499
+tax computed per jurisdiction by a tax engine using product tax codes and the ship-to address.
+
+96
+00:08:45.779 --> 00:08:55.657
+Place order: a risk check (fraud score);. payment authorisation;. order creation with the promise and fulfilment plan attached;. confirmation to the customer.
+
+97
+00:08:57.007 --> 00:09:03.279
+Payment is usually captured later, when items ship (common e-commerce practice; VERIFY per market).
+
+98
+00:09:04.629 --> 00:09:05.887
+Payments and fraud.
+
+99
+00:09:06.167 --> 00:09:22.146
+Payments: an authorisation at order time, and capture at shipment (partial captures for split shipments);. refunds on returns;. card data kept out of most systems through tokenisation (PCI DSS scope reduction; Ch 45).
+
+100
+00:09:22.426 --> 00:09:29.893
+Fraud detection: real-time models score each order, using: account age and history, device and network signals;.
+
+101
+00:09:31.243 --> 00:09:35.893
+address risk, payment instrument risk, velocity;. graph links between accounts.
+
+102
+00:09:36.173 --> 00:09:41.059
+The actions are: accept, hold for review, step-up verification, or cancel.
+
+103
+00:09:41.339 --> 00:09:51.664
+Amazon offers related capability as an AWS service, Amazon Fraud Detector (VERIFY that it is still offered), which reflects the kind of models used.
+
+104
+00:09:51.944 --> 00:10:01.821
+Seller-side risk: new-seller verification, suspicious listing detection, counterfeit reports and brand registry protections (VERIFY programme names).
+
+105
+00:10:03.171 --> 00:10:04.387
+The order pipeline.
+
+106
+00:10:04.667 --> 00:10:15.654
+A long-running workflow: placed, then payment authorised, then released to fulfilment, then picked, then packed, then shipped (capture), then delivered, then return window, then closed.
+
+107
+00:10:15.934 --> 00:10:18.067
+Each shipment is its own sub-workflow.
+
+108
+00:10:18.347 --> 00:10:22.145
+Cancellation is possible until release to the fulfilment centre.
+
+109
+00:10:22.425 --> 00:10:26.371
+Orchestrated by workflow engines with durable state and timers.
+
+110
+00:10:26.651 --> 00:10:38.363
+The public analogue is AWS Step Functions and the Simple Workflow Service (SWF), whose paradigm came from internal use (VERIFY) (Ch 13, Ch 50).
+
+111
+00:10:39.713 --> 00:10:44.748
+Events from every step go to tracking pages, notifications, analytics and finance.
+
+112
+00:10:46.098 --> 00:10:48.253
+Inventory placement and the promise.
+
+113
+00:10:48.533 --> 00:10:54.293
+Demand forecasting per product, per region, per day, as probabilistic (quantile) forecasts.
+
+114
+00:10:54.573 --> 00:11:06.199
+Amazon researchers published deep-learning forecasting methods such as DeepAR and multi-horizon quantile recurrent forecasters (MQ-RNN) (VERIFY papers and use).
+
+115
+00:11:06.479 --> 00:11:18.085
+Buying and placement: how much to buy, from forecasts, lead times and cost of stock-outs versus holding;. where to place it (which fulfilment centres), so most customers are near stock.
+
+116
+00:11:19.435 --> 00:11:23.104
+I01 L3 shows placement dominates the promise.
+
+117
+00:11:23.384 --> 00:11:38.275
+Inbound: vendors ship to the platform, and sellers using the platform's fulfilment (FBA) send inbound shipments;. the system chooses the destination FCs, and inventory is distributed later between FCs as needed.
+
+118
+00:11:38.555 --> 00:11:47.301
+The promise: for a customer and item, find FCs with available stock, pick and ship cut-off times, carrier transit time and capacity.
+
+119
+00:11:47.581 --> 00:11:51.059
+The fastest feasible option is shown as Arrives Tuesday.
+
+120
+00:11:52.409 --> 00:11:54.009
+Inside a fulfilment centre.
+
+121
+00:11:54.289 --> 00:11:56.913
+Receive: inbound units are scanned and checked.
+
+122
+00:11:57.193 --> 00:12:02.227
+Stow: units are placed into any available bin, not a fixed location per product.
+
+123
+00:12:02.507 --> 00:12:06.411
+This is random (chaotic) stow, widely described (VERIFY).
+
+124
+00:12:06.691 --> 00:12:11.769
+It maximises space use and spreads popular items so many pickers can reach them.
+
+125
+00:12:12.049 --> 00:12:14.886
+The system records exactly which bin holds what.
+
+126
+00:12:15.166 --> 00:12:15.849
+Pick:
+
+127
+00:12:16.129 --> 00:12:20.459
+Traditional FCs: pickers follow optimised pick paths through aisles.
+
+128
+00:12:21.809 --> 00:12:33.564
+Robotic FCs: drive units carry shelving pods to picker stations (from the Kiva Systems acquisition in 2012, now Amazon Robotics; VERIFY current systems).
+
+129
+00:12:33.844 --> 00:12:37.449
+Pick lists are batched by wave and by the chosen shipping cut-off.
+
+130
+00:12:37.729 --> 00:12:47.159
+Pack: the system recommends a box size from item dimensions (cartonisation, a 3D bin-packing heuristic), or uses automated packaging.
+
+131
+00:12:47.439 --> 00:12:56.015
+Label and sort: a label is applied, and the parcel is sorted to the right outbound lane: carrier and destination sortation centre.
+
+132
+00:12:57.365 --> 00:13:02.122
+Throughput control: the warehouse management system balances work across stations.
+
+133
+00:13:02.402 --> 00:13:05.389
+Labour planning uses forecasts of units per hour.
+
+134
+00:13:06.739 --> 00:13:08.659
+Transportation and last mile.
+
+135
+00:13:08.939 --> 00:13:15.211
+Middle mile: trucks and planes move parcels from FCs to sortation centres and delivery stations.
+
+136
+00:13:15.491 --> 00:13:19.181
+Linehaul schedules are optimised against volume forecasts.
+
+137
+00:13:19.461 --> 00:13:33.413
+Last mile: parcels are sorted by route at delivery stations;. route planning solves a vehicle routing problem with time windows (VRP-TW), with stop sequences, road network travel times and driver hours;.
+
+138
+00:13:34.763 --> 00:13:39.606
+drivers include in-house partners and crowd-sourced drivers (VERIFY programmes).
+
+139
+00:13:39.886 --> 00:13:43.726
+Tracking: scan events and driver app GPS update tracking.
+
+140
+00:13:44.006 --> 00:13:48.315
+Delivery photo proof and OTPs are used for high-value items.
+
+141
+00:13:48.595 --> 00:13:51.198
+Alternatives: lockers and pickup points.
+
+142
+00:13:52.548 --> 00:13:53.615
+Advertising.
+
+143
+00:13:53.895 --> 00:13:57.820
+Sponsored products: advertisers bid on keywords or targets.
+
+144
+00:13:58.100 --> 00:14:10.729
+For each search, eligible ads go through an auction: the ranking combines bid times predicted click-through rate times relevance;. pricing is a second-price-like auction (VERIFY the current auction design).
+
+145
+00:14:11.009 --> 00:14:16.748
+Budget pacing spreads spend across the day (Ch 49 L3 for pacing concepts).
+
+146
+00:14:17.028 --> 00:14:23.087
+Measurement: attribution of purchases to ad clicks, and advertiser reporting from the data platform.
+
+147
+00:14:24.437 --> 00:14:25.269
+Reviews.
+
+148
+00:14:25.549 --> 00:14:29.517
+Collection: reviews and ratings, with Verified Purchase badges.
+
+149
+00:14:29.797 --> 00:14:30.991
+Abuse detection:
+
+150
+00:14:31.271 --> 00:14:37.245
+ML models, graph analysis of reviewer, seller relationships, and bulk suppression (VERIFY).
+
+151
+00:14:37.525 --> 00:14:41.493
+Aggregated rating: a weighted model rather than a simple average.
+
+152
+00:14:41.773 --> 00:14:49.090
+Amazon has said its star ratings use ML weighting by factors such as recency and verification (VERIFY).
+
+153
+00:14:50.440 --> 00:14:51.315
+Returns.
+
+154
+00:14:51.595 --> 00:14:54.176
+The return request is checked against policy.
+
+155
+00:14:54.456 --> 00:14:58.680
+Options: drop-off, pickup, or refund at drop-off for some items.
+
+156
+00:14:58.960 --> 00:15:07.536
+Grading: returned items are graded and routed to restock, sell as used or open-box, return to the seller, liquidate, or dispose.
+
+157
+00:15:07.816 --> 00:15:11.933
+Money and fraud: refunds via payments, and return-abuse detection.
+
+158
+00:15:13.283 --> 00:15:14.435
+The seller's side.
+
+159
+00:15:14.715 --> 00:15:19.921
+Onboarding: identity and business verification, tax information and bank account.
+
+160
+00:15:20.201 --> 00:15:24.659
+Listing: matching or creating ASINs, and bulk upload through APIs.
+
+161
+00:15:24.939 --> 00:15:27.905
+Inventory: seller-fulfilled or platform-fulfilled.
+
+162
+00:15:28.185 --> 00:15:36.526
+Orders: notifications and SLAs for seller-fulfilled orders, and performance metrics (late shipment, cancellation, defect rates).
+
+163
+00:15:36.806 --> 00:15:37.702
+Settlement:
+
+164
+00:15:39.052 --> 00:15:55.201
+a per-seller ledger: sales, less fees (referral, fulfilment, storage, ads), refunds and chargebacks;. held until the return window, then disbursed on a schedule, with statements;. double-entry accounting as in Ch 45 and I03.
+
+165
+00:15:56.551 --> 00:15:57.469
+Part 4.
+
+166
+00:15:57.749 --> 00:15:59.199
+Algorithms Catalog.
+
+167
+00:16:00.449 --> 00:16:01.815
+Here is a quick table:
+
+168
+00:16:02.095 --> 00:16:04.548
+Problem, and Algorithm (typical), and Where.
+
+169
+00:16:04.828 --> 00:16:07.111
+Similar products (customers who bought).
+
+170
+00:16:07.391 --> 00:16:08.820
+Algorithm (typical):
+
+171
+00:16:09.100 --> 00:16:22.924
+Item-to-item collaborative filtering (publicly described, 2003): compute similarity between items from co-purchases, offline; online, look up similar items for what the customer bought or viewed.
+
+172
+00:16:23.204 --> 00:16:23.865
+Where:
+
+173
+00:16:24.145 --> 00:16:25.319
+Recommendations.
+
+174
+00:16:25.599 --> 00:16:26.985
+Personalised ranking.
+
+175
+00:16:27.265 --> 00:16:28.695
+Algorithm (typical):
+
+176
+00:16:28.975 --> 00:16:34.692
+Learning-to-rank (gradient-boosted trees, neural rankers) on engagement and purchase labels.
+
+177
+00:16:34.972 --> 00:16:35.633
+Where:
+
+178
+00:16:35.913 --> 00:16:37.001
+Search, feeds.
+
+179
+00:16:37.281 --> 00:16:38.519
+Semantic matching.
+
+180
+00:16:38.799 --> 00:16:40.228
+Algorithm (typical):
+
+181
+00:16:40.508 --> 00:16:46.332
+Two-tower neural embeddings + approximate nearest neighbour (HNSW or IVF).
+
+182
+00:16:46.612 --> 00:16:47.273
+Where:
+
+183
+00:16:47.553 --> 00:16:48.705
+Search retrieval.
+
+184
+00:16:48.985 --> 00:16:50.287
+Query understanding.
+
+185
+00:16:50.567 --> 00:16:51.996
+Algorithm (typical):
+
+186
+00:16:52.276 --> 00:16:57.183
+Classifiers for category, attributes and intent; spell correction; synonyms.
+
+187
+00:16:57.463 --> 00:16:58.124
+Where:
+
+188
+00:16:58.404 --> 00:16:59.172
+Search.
+
+189
+00:17:00.522 --> 00:17:01.802
+Demand forecasting.
+
+190
+00:17:02.082 --> 00:17:03.511
+Algorithm (typical):
+
+191
+00:17:03.791 --> 00:17:06.863
+Probabilistic deep-learning forecasters (quantiles).
+
+192
+00:17:07.143 --> 00:17:07.805
+Where:
+
+193
+00:17:08.085 --> 00:17:09.706
+Buying, placement, labour.
+
+194
+00:17:09.986 --> 00:17:11.287
+Inventory placement.
+
+195
+00:17:11.567 --> 00:17:12.997
+Algorithm (typical):
+
+196
+00:17:13.277 --> 00:17:18.738
+Optimisation: minimise expected shipping cost and missed promises under capacity.
+
+197
+00:17:19.018 --> 00:17:19.679
+Where:
+
+198
+00:17:19.959 --> 00:17:21.047
+Supply chain.
+
+199
+00:17:21.327 --> 00:17:22.309
+Buy box.
+
+200
+00:17:22.589 --> 00:17:24.018
+Algorithm (typical):
+
+201
+00:17:24.298 --> 00:17:28.949
+Scoring on landed price, delivery, seller performance (formula not public).
+
+202
+00:17:29.229 --> 00:17:29.890
+Where:
+
+203
+00:17:30.170 --> 00:17:31.002
+Offers.
+
+204
+00:17:31.282 --> 00:17:32.114
+Pricing.
+
+205
+00:17:32.394 --> 00:17:33.823
+Algorithm (typical):
+
+206
+00:17:34.103 --> 00:17:37.602
+Competitive price monitoring, elasticity models, rules.
+
+207
+00:17:37.882 --> 00:17:38.543
+Where:
+
+208
+00:17:38.823 --> 00:17:40.039
+Retail pricing.
+
+209
+00:17:40.319 --> 00:17:41.493
+Fulfilment plan.
+
+210
+00:17:41.773 --> 00:17:43.202
+Algorithm (typical):
+
+211
+00:17:43.482 --> 00:17:47.514
+Search over FC combinations, minimising cost under the promise.
+
+212
+00:17:47.794 --> 00:17:48.455
+Where:
+
+213
+00:17:48.735 --> 00:17:51.061
+Order release (I01 L3).
+
+214
+00:17:51.341 --> 00:17:52.279
+Pick paths.
+
+215
+00:17:52.559 --> 00:17:53.989
+Algorithm (typical):
+
+216
+00:17:54.269 --> 00:17:57.767
+Heuristic TSP within zones, batching and wave planning.
+
+217
+00:17:58.047 --> 00:17:58.709
+Where:
+
+218
+00:17:58.989 --> 00:18:00.226
+Fulfilment centres.
+
+219
+00:18:01.576 --> 00:18:02.749
+Box selection.
+
+220
+00:18:03.029 --> 00:18:04.459
+Algorithm (typical):
+
+221
+00:18:04.739 --> 00:18:06.765
+3D bin packing heuristics.
+
+222
+00:18:07.045 --> 00:18:07.707
+Where:
+
+223
+00:18:07.987 --> 00:18:08.840
+Packing.
+
+224
+00:18:09.120 --> 00:18:10.123
+Route planning.
+
+225
+00:18:10.403 --> 00:18:11.832
+Algorithm (typical):
+
+226
+00:18:12.112 --> 00:18:15.909
+Vehicle routing with time windows (heuristics + local search).
+
+227
+00:18:16.189 --> 00:18:16.851
+Where:
+
+228
+00:18:17.131 --> 00:18:18.027
+Last mile.
+
+229
+00:18:18.307 --> 00:18:19.117
+Fraud.
+
+230
+00:18:19.397 --> 00:18:20.827
+Algorithm (typical):
+
+231
+00:18:21.107 --> 00:18:23.965
+Gradient-boosted models, graph features, rules.
+
+232
+00:18:24.245 --> 00:18:24.907
+Where:
+
+233
+00:18:25.187 --> 00:18:26.808
+Checkout, sellers, reviews.
+
+234
+00:18:27.088 --> 00:18:28.069
+Ads auction.
+
+235
+00:18:28.349 --> 00:18:29.779
+Algorithm (typical):
+
+236
+00:18:30.059 --> 00:18:34.667
+Bid times predicted CTR times relevance ranking; pacing controllers.
+
+237
+00:18:34.947 --> 00:18:35.608
+Where:
+
+238
+00:18:35.888 --> 00:18:36.955
+Advertising.
+
+239
+00:18:37.235 --> 00:18:38.280
+Review ranking.
+
+240
+00:18:38.560 --> 00:18:39.989
+Algorithm (typical):
+
+241
+00:18:40.269 --> 00:18:42.488
+Helpfulness models, abuse detection.
+
+242
+00:18:42.768 --> 00:18:43.429
+Where:
+
+243
+00:18:43.709 --> 00:18:44.541
+Reviews.
+
+244
+00:18:44.821 --> 00:18:46.336
+Availability of the site.
+
+245
+00:18:46.616 --> 00:18:48.045
+Algorithm (typical):
+
+246
+00:18:48.325 --> 00:18:50.651
+Cells, shuffle sharding, constant work.
+
+247
+00:18:50.931 --> 00:18:51.592
+Where:
+
+248
+00:18:51.872 --> 00:18:54.197
+Infrastructure (I01 L4).
+
+249
+00:18:55.547 --> 00:18:57.787
+Item-to-item collaborative filtering.
+
+250
+00:18:58.067 --> 00:19:02.803
+A closer look at the algorithm from the published 2003 paper (VERIFY:
+
+251
+00:19:03.083 --> 00:19:06.283
+Linden, Smith and York, IEEE Internet Computing):
+
+252
+00:19:06.563 --> 00:19:09.017
+Offline, build an item, item table.
+
+253
+00:19:09.297 --> 00:19:11.985
+For each item A, look at customers who bought A.
+
+254
+00:19:12.265 --> 00:19:21.950
+For each other item B those customers bought, compute a similarity between A and B, for example, the cosine similarity of their customer-purchase vectors.
+
+255
+00:19:22.230 --> 00:19:24.641
+Keep the top N similar items per item.
+
+256
+00:19:24.921 --> 00:19:31.449
+Online, for a customer: take the items they bought, rated or viewed, and collect each one's similar items.
+
+257
+00:19:31.729 --> 00:19:35.633
+Sum the similarity scores, remove items already bought, and rank.
+
+258
+00:19:36.983 --> 00:19:47.692
+Why it scales: the expensive part is offline, and grows with items and co-purchase pairs, not with customers times items;. online, it is a few table lookups.
+
+259
+00:19:47.972 --> 00:19:56.484
+What it teaches: precompute the heavy relationship offline, serve it cheaply online, and personalise by combining precomputed pieces.
+
+260
+00:19:56.764 --> 00:20:02.567
+Modern systems add deep learning, sequence models and real-time signals on the same principle.
+
+261
+00:20:03.917 --> 00:20:04.877
+Part 5.
+
+262
+00:20:05.157 --> 00:20:05.946
+4A.
+
+263
+00:20:06.226 --> 00:20:07.250
+Deep Dives.
+
+264
+00:20:08.500 --> 00:20:12.404
+4A.1 From a seller's new listing to a searchable product.
+
+265
+00:20:12.684 --> 00:20:20.769
+Submission: the seller submits a listing (via portal, feed file or API), which is validated against the product type schema.
+
+266
+00:20:21.049 --> 00:20:37.412
+Matching: an identifier match (UPC or EAN or ISBN) links it to an existing product;. otherwise ML matching compares titles, attributes and images to detect duplicates;. if no match is found, a new product is created.
+
+267
+00:20:38.762 --> 00:20:42.495
+Content arbitration chooses the displayed attribute values.
+
+268
+00:20:42.775 --> 00:20:49.687
+Image and content quality checks run, and prohibited or restricted products are screened by rules and classifiers.
+
+269
+00:20:49.967 --> 00:21:02.554
+Change events: the resulting catalog change events trigger: search document rebuild and partial index update;. embedding refresh (batch);. detail-page cache invalidation;. lake ingestion.
+
+270
+00:21:03.904 --> 00:21:14.251
+Offer events: when the seller's offer (price, quantity) is created, events update the buy box (I01 L2) and the availability used for search filtering.
+
+271
+00:21:15.601 --> 00:21:19.121
+4A.2 The recommendation pipeline in a modern form.
+
+272
+00:21:19.401 --> 00:21:32.243
+Offline: item-to-item similarity tables (the 2003 approach) and embedding models trained on sequences of views and purchases;. candidate tables per item and per customer segment.
+
+273
+00:21:32.523 --> 00:21:41.291
+Nearline: recent customer activity (last views, cart adds) is kept in a fast profile store and updated from streams within seconds.
+
+274
+00:21:41.571 --> 00:21:44.451
+Online: gather candidates from several sources;.
+
+275
+00:21:45.801 --> 00:21:58.431
+rank with a model using customer, item and context features;. apply business rules (availability, deliverability, diversity, no already-purchased consumables unless re-buy is likely).
+
+276
+00:21:58.711 --> 00:22:03.916
+Placement: widget selection per page, with experiments on each widget's contribution.
+
+277
+00:22:05.266 --> 00:22:07.527
+4A.3 How the promise stays true.
+
+278
+00:22:07.807 --> 00:22:17.642
+Promise inputs: inventory positions (by FC), open capacity (by FC and shift), carrier cut-offs, and transit time distributions by lane.
+
+279
+00:22:17.922 --> 00:22:26.029
+Using history: the service uses historical delivery performance by lane and day to pick a date it can meet with high probability.
+
+280
+00:22:26.309 --> 00:22:31.386
+It is a quantile decision, not an average: a promise must be kept most of the time.
+
+281
+00:22:31.666 --> 00:22:37.319
+When capacity tightens (peak season), promises lengthen automatically instead of being broken.
+
+282
+00:22:37.599 --> 00:22:41.077
+After ordering: the order stores the promise it was sold with.
+
+283
+00:22:41.357 --> 00:22:45.005
+Downstream systems prioritise orders at risk of missing it.
+
+284
+00:22:46.355 --> 00:22:48.616
+4A.4 A peak-day request path.
+
+285
+00:22:48.896 --> 00:22:54.891
+Front end: a request hits a cell's front-end fleet, and page aggregators fan out with deadlines.
+
+286
+00:22:55.171 --> 00:23:01.656
+Degradation: under load, optional widgets are dropped first, and shedding protects checkout (Ch 18).
+
+287
+00:23:01.936 --> 00:23:05.648
+Orders: they flow into the pipeline, where queues absorb bursts.
+
+288
+00:23:05.928 --> 00:23:08.979
+Fulfilment release is paced by FC capacity.
+
+289
+00:23:09.259 --> 00:23:14.955
+Monitoring: operations dashboards watch per-cell error rates, order rates and payment success.
+
+290
+00:23:15.235 --> 00:23:17.368
+Deployments pause during peak windows.
+
+291
+00:23:18.718 --> 00:23:19.678
+Part 5.
+
+292
+00:23:19.958 --> 00:23:21.643
+Data Platform and Warehouse.
+
+293
+00:23:22.893 --> 00:23:23.917
+What flows in.
+
+294
+00:23:24.197 --> 00:23:35.056
+Event streams from every service: page views, searches, clicks, add-to-carts, orders, shipments, FC scans, delivery scans, ad impressions and clicks, payments, reviews.
+
+295
+00:23:35.336 --> 00:23:38.088
+Change data from operational databases.
+
+296
+00:23:38.368 --> 00:23:41.760
+External data: carrier data and competitor prices.
+
+297
+00:23:43.110 --> 00:23:48.593
+How it is organised (reference design, informed by public AWS material).
+
+298
+00:23:48.873 --> 00:23:50.238
+Here is a quick table:
+
+299
+00:23:50.518 --> 00:23:57.259
+Layer, and Role, and AWS services commonly described (VERIFY for Amazon retail's own use).
+
+300
+00:23:57.539 --> 00:23:58.499
+Ingestion.
+
+301
+00:23:58.779 --> 00:23:59.505
+Role:
+
+302
+00:23:59.785 --> 00:24:01.257
+Streams and CDC.
+
+303
+00:24:01.537 --> 00:24:06.870
+AWS services commonly described (VERIFY for Amazon retail's own use):
+
+304
+00:24:07.150 --> 00:24:11.801
+Kinesis Data Streams, Kinesis Firehose, MSK (Kafka), DMS.
+
+305
+00:24:12.081 --> 00:24:13.147
+Lake storage.
+
+306
+00:24:13.427 --> 00:24:14.153
+Role:
+
+307
+00:24:14.433 --> 00:24:16.673
+All raw and curated data as files.
+
+308
+00:24:16.953 --> 00:24:22.286
+AWS services commonly described (VERIFY for Amazon retail's own use):
+
+309
+00:24:22.566 --> 00:24:24.827
+S3, with open table formats.
+
+310
+00:24:25.107 --> 00:24:26.579
+Catalog and governance.
+
+311
+00:24:26.859 --> 00:24:27.585
+Role:
+
+312
+00:24:27.865 --> 00:24:29.678
+Schemas, ownership, permissions.
+
+313
+00:24:29.958 --> 00:24:35.291
+AWS services commonly described (VERIFY for Amazon retail's own use):
+
+314
+00:24:35.571 --> 00:24:37.811
+Glue Data Catalog, Lake Formation.
+
+315
+00:24:38.091 --> 00:24:39.030
+Processing.
+
+316
+00:24:39.310 --> 00:24:40.035
+Role:
+
+317
+00:24:40.315 --> 00:24:41.979
+Batch and streaming transforms.
+
+318
+00:24:42.259 --> 00:24:47.593
+AWS services commonly described (VERIFY for Amazon retail's own use):
+
+319
+00:24:47.873 --> 00:24:51.990
+EMR (Spark), Glue, Kinesis Data Analytics or Managed Flink.
+
+320
+00:24:52.270 --> 00:24:53.166
+Warehouse.
+
+321
+00:24:53.446 --> 00:24:54.171
+Role:
+
+322
+00:24:54.451 --> 00:24:56.393
+SQL analytics, dashboards.
+
+323
+00:24:56.673 --> 00:25:02.006
+AWS services commonly described (VERIFY for Amazon retail's own use):
+
+324
+00:25:02.286 --> 00:25:03.139
+Redshift.
+
+325
+00:25:04.489 --> 00:25:05.641
+Ad hoc query.
+
+326
+00:25:05.921 --> 00:25:06.647
+Role:
+
+327
+00:25:06.927 --> 00:25:08.271
+SQL over the lake.
+
+328
+00:25:08.551 --> 00:25:13.884
+AWS services commonly described (VERIFY for Amazon retail's own use):
+
+329
+00:25:14.164 --> 00:25:15.017
+Athena.
+
+330
+00:25:15.297 --> 00:25:16.023
+BI.
+
+331
+00:25:16.303 --> 00:25:17.028
+Role:
+
+332
+00:25:17.308 --> 00:25:18.268
+Dashboards.
+
+333
+00:25:18.548 --> 00:25:23.881
+AWS services commonly described (VERIFY for Amazon retail's own use):
+
+334
+00:25:24.161 --> 00:25:25.079
+QuickSight.
+
+335
+00:25:25.359 --> 00:25:26.105
+ML.
+
+336
+00:25:26.385 --> 00:25:27.111
+Role:
+
+337
+00:25:27.391 --> 00:25:28.948
+Training, features, serving.
+
+338
+00:25:29.228 --> 00:25:34.561
+AWS services commonly described (VERIFY for Amazon retail's own use):
+
+339
+00:25:34.841 --> 00:25:35.887
+SageMaker.
+
+340
+00:25:37.237 --> 00:25:38.581
+Public milestones:
+
+341
+00:25:38.861 --> 00:25:53.175
+AWS publicly described Amazon's consumer business migrating off Oracle databases to AWS services, including DynamoDB, Aurora and Redshift, completed in 2019 (VERIFY:
+
+342
+00:25:53.455 --> 00:26:01.007
+AWS News Blog, Migration Complete, Amazon's Consumer Business Just Turned off its Final Oracle Database).
+
+343
+00:26:01.287 --> 00:26:11.143
+AWS has also described an internal consumer-business data lake on S3 with a catalog and self-service access (VERIFY name and details).
+
+344
+00:26:12.493 --> 00:26:13.304
+Modelling.
+
+345
+00:26:13.584 --> 00:26:16.891
+Data ownership follows service ownership (data-mesh style).
+
+346
+00:26:17.171 --> 00:26:24.147
+Each team publishes curated datasets with schemas and SLAs, and a central catalog makes them discoverable.
+
+347
+00:26:24.427 --> 00:26:39.424
+Star schemas for business reporting: facts: orders, order items, shipments, page views, ad events, returns;. dimensions: product (ASIN), customer (pseudonymised for analytics), seller, marketplace, date, fulfilment centre.
+
+348
+00:26:39.704 --> 00:26:49.475
+Metrics: conversion by page and search, delivery promise accuracy, cost per unit shipped, ad return on spend, seller performance, forecast accuracy.
+
+349
+00:26:50.825 --> 00:27:02.217
+Experimentation: an A or B testing platform assigns customers to treatments;. metrics are computed from the lake;. a change is launched only on measured customer impact.
+
+350
+00:27:02.497 --> 00:27:08.214
+Amazon is publicly known for heavy experimentation (VERIFY its internal platform names).
+
+351
+00:27:09.564 --> 00:27:10.503
+Part 6.
+
+352
+00:27:10.783 --> 00:27:11.700
+Tech Stack.
+
+353
+00:27:12.950 --> 00:27:14.315
+Here is a quick table:
+
+354
+00:27:14.595 --> 00:27:21.401
+Layer, and Publicly described for Amazon retail (VERIFY), and Reference choice for building something similar.
+
+355
+00:27:21.681 --> 00:27:22.683
+Languages.
+
+356
+00:27:22.963 --> 00:27:26.121
+Publicly described for Amazon retail (VERIFY):
+
+357
+00:27:26.401 --> 00:27:29.217
+Java widely used in services (VERIFY).
+
+358
+00:27:29.497 --> 00:27:31.801
+Reference choice for building something similar:
+
+359
+00:27:32.081 --> 00:27:37.137
+Java or Kotlin for services; Python for ML; TypeScript for front ends.
+
+360
+00:27:37.417 --> 00:27:39.358
+Service framework and RPC.
+
+361
+00:27:39.638 --> 00:27:42.795
+Publicly described for Amazon retail (VERIFY):
+
+362
+00:27:43.075 --> 00:27:45.721
+Internal frameworks (not public in detail).
+
+363
+00:27:46.001 --> 00:27:48.305
+Reference choice for building something similar:
+
+364
+00:27:48.585 --> 00:27:53.321
+Spring Boot or Micronaut; gRPC or HTTP APIs.
+
+365
+00:27:53.601 --> 00:27:55.158
+Key-value and document.
+
+366
+00:27:55.438 --> 00:27:58.595
+Publicly described for Amazon retail (VERIFY):
+
+367
+00:27:58.875 --> 00:28:01.137
+DynamoDB (Dynamo lineage).
+
+368
+00:28:01.417 --> 00:28:03.721
+Reference choice for building something similar:
+
+369
+00:28:04.001 --> 00:28:06.817
+DynamoDB, Cassandra or ScyllaDB.
+
+370
+00:28:07.097 --> 00:28:07.993
+Relational.
+
+371
+00:28:08.273 --> 00:28:11.430
+Publicly described for Amazon retail (VERIFY):
+
+372
+00:28:11.710 --> 00:28:14.697
+Aurora and RDS after the Oracle migration.
+
+373
+00:28:14.977 --> 00:28:17.281
+Reference choice for building something similar:
+
+374
+00:28:17.561 --> 00:28:19.417
+PostgreSQL or Aurora.
+
+375
+00:28:19.697 --> 00:28:20.913
+Object storage.
+
+376
+00:28:21.193 --> 00:28:24.350
+Publicly described for Amazon retail (VERIFY):
+
+377
+00:28:24.630 --> 00:28:25.483
+S3.
+
+378
+00:28:25.763 --> 00:28:28.067
+Reference choice for building something similar:
+
+379
+00:28:28.347 --> 00:28:29.883
+S3 or compatible.
+
+380
+00:28:31.233 --> 00:28:32.428
+Queues and streams.
+
+381
+00:28:32.708 --> 00:28:35.865
+Publicly described for Amazon retail (VERIFY):
+
+382
+00:28:36.145 --> 00:28:38.129
+SQS, SNS, Kinesis.
+
+383
+00:28:38.409 --> 00:28:40.713
+Reference choice for building something similar:
+
+384
+00:28:40.993 --> 00:28:43.127
+Kafka, SQS or SNS.
+
+385
+00:28:43.407 --> 00:28:44.324
+Workflows.
+
+386
+00:28:44.604 --> 00:28:47.761
+Publicly described for Amazon retail (VERIFY):
+
+387
+00:28:48.041 --> 00:28:50.431
+SWF or Step Functions lineage.
+
+388
+00:28:50.711 --> 00:28:53.015
+Reference choice for building something similar:
+
+389
+00:28:53.295 --> 00:28:54.831
+Temporal, Step Functions.
+
+390
+00:28:55.111 --> 00:28:55.879
+Search.
+
+391
+00:28:56.159 --> 00:28:59.316
+Publicly described for Amazon retail (VERIFY):
+
+392
+00:28:59.596 --> 00:29:03.969
+Internal search (A9 heritage); AWS offers OpenSearch.
+
+393
+00:29:04.249 --> 00:29:06.553
+Reference choice for building something similar:
+
+394
+00:29:06.833 --> 00:29:09.628
+OpenSearch or Elasticsearch + vector search.
+
+395
+00:29:09.908 --> 00:29:10.740
+Caching.
+
+396
+00:29:11.020 --> 00:29:14.177
+Publicly described for Amazon retail (VERIFY):
+
+397
+00:29:14.457 --> 00:29:16.015
+Internal and ElastiCache.
+
+398
+00:29:16.295 --> 00:29:18.599
+Reference choice for building something similar:
+
+399
+00:29:18.879 --> 00:29:19.647
+Redis.
+
+400
+00:29:19.927 --> 00:29:21.079
+Warehouse and lake.
+
+401
+00:29:21.359 --> 00:29:24.516
+Publicly described for Amazon retail (VERIFY):
+
+402
+00:29:24.796 --> 00:29:26.609
+Redshift, S3, EMR, Glue.
+
+403
+00:29:26.889 --> 00:29:29.193
+Reference choice for building something similar:
+
+404
+00:29:29.473 --> 00:29:33.313
+Iceberg on object storage, Spark, Trino, a cloud warehouse.
+
+405
+00:29:34.663 --> 00:29:35.410
+ML.
+
+406
+00:29:35.690 --> 00:29:38.847
+Publicly described for Amazon retail (VERIFY):
+
+407
+00:29:39.127 --> 00:29:40.173
+SageMaker.
+
+408
+00:29:40.453 --> 00:29:42.757
+Reference choice for building something similar:
+
+409
+00:29:43.037 --> 00:29:46.429
+MLflow, Kubeflow or SageMaker; feature store.
+
+410
+00:29:46.709 --> 00:29:47.626
+Deployment.
+
+411
+00:29:47.906 --> 00:29:51.063
+Publicly described for Amazon retail (VERIFY):
+
+412
+00:29:51.343 --> 00:29:56.549
+Internal build and deploy systems; waves by region and cell (Builders' Library).
+
+413
+00:29:56.829 --> 00:29:59.133
+Reference choice for building something similar:
+
+414
+00:29:59.413 --> 00:30:02.335
+Kubernetes, Argo CD, progressive delivery.
+
+415
+00:30:02.615 --> 00:30:03.703
+Observability.
+
+416
+00:30:03.983 --> 00:30:07.141
+Publicly described for Amazon retail (VERIFY):
+
+417
+00:30:07.421 --> 00:30:09.277
+CloudWatch and internal tools.
+
+418
+00:30:09.557 --> 00:30:11.861
+Reference choice for building something similar:
+
+419
+00:30:12.141 --> 00:30:14.658
+OpenTelemetry, Prometheus, Grafana.
+
+420
+00:30:16.008 --> 00:30:16.947
+Part 7.
+
+421
+00:30:17.227 --> 00:30:19.147
+Reliability and Operations.
+
+422
+00:30:20.397 --> 00:30:26.306
+Cells and shuffle sharding limit how many customers one failure touches (I01 L4).
+
+423
+00:30:26.586 --> 00:30:33.925
+Timeouts, retries with jitter, and load shedding everywhere (AWS Builders' Library articles; Ch 18).
+
+424
+00:30:34.205 --> 00:30:42.823
+Peak readiness: load tests beyond forecast peaks, game days, pre-scaling, and change freezes near peak events (VERIFY practices).
+
+425
+00:30:43.103 --> 00:30:49.311
+Operational reviews: weekly metric reviews per team, and COE postmortems with action items.
+
+426
+00:30:50.661 --> 00:30:56.037
+Degradation: optional widgets turn off, heavy features pause, and core buying stays up.
+
+427
+00:30:57.387 --> 00:30:58.262
+Part 8.
+
+428
+00:30:58.542 --> 00:30:59.673
+Interview Angles.
+
+429
+00:31:00.923 --> 00:31:04.251
+Use this page to answer design Amazon at any depth:
+
+430
+00:31:04.531 --> 00:31:07.112
+B2: the order journey and main services.
+
+431
+00:31:07.392 --> 00:31:13.045
+B3: deep dives into cart, buy box, promise and fulfilment (I01 labs).
+
+432
+00:31:13.325 --> 00:31:18.040
+B4: data platform, algorithms, cells, and the organisational model.
+
+433
+00:31:18.320 --> 00:31:22.971
+The 20 interview questions for this design are in I01 §8.
+
+434
+00:31:24.321 --> 00:31:25.921
+That's the end of this chapter.
+
+435
+00:31:26.201 --> 00:31:32.323
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+436
+00:31:32.603 --> 00:31:34.054
+See you in the next chapter.
+

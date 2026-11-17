@@ -1,0 +1,5714 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.142
+Messaging and Event Streaming.
+
+2
+00:00:02.422 --> 00:00:06.774
+Chapter 14, from the Distributed Core part of the System Design Playbook.
+
+3
+00:00:08.524 --> 00:00:09.484
+At a glance:
+
+4
+00:00:09.764 --> 00:00:10.937
+Chapter at a glance.
+
+5
+00:00:11.217 --> 00:00:12.220
+Reader bands:
+
+6
+00:00:12.500 --> 00:00:14.804
+B1, then B4, Prerequisites:
+
+7
+00:00:15.084 --> 00:00:18.711
+Ch 10, Ch 12, Ch 13, What you will build:
+
+8
+00:00:18.991 --> 00:00:21.444
+The event backbone of the grocery platform.
+
+9
+00:00:21.724 --> 00:00:24.839
+L1 contrasts queues with logs (plain Java).
+
+10
+00:00:25.119 --> 00:00:39.092
+L2 designs topics with the real Kafka client library: the producer's murmur2 partitioner, key skew, partition-count changes, and the real consumer-group assignors (range, round-robin, cooperative-sticky).
+
+11
+00:00:39.372 --> 00:00:51.724
+L3 simulates a Kafka partition's replication (ISR, high watermark, acks, min.insync.replicas, unclean election, idempotent producer) under crashes and network cuts.
+
+12
+00:00:53.074 --> 00:01:03.847
+L4 covers consumer semantics: where you commit decides at-most or at-least or effectively-once, and a poison message shows blocking retries versus retry topics.
+
+13
+00:01:04.127 --> 00:01:05.941
+Two real brokers in the labs:
+
+14
+00:01:06.221 --> 00:01:08.290
+A 3-node NATS JetStream cluster:
+
+15
+00:01:08.570 --> 00:01:22.949
+Raft-replicated streams, idempotent publish, redelivery until max-deliver with a dead-letter advisory, competing consumers versus fan-out, leader failover versus a single-replica stream, per-key compaction, backpressure.
+
+16
+00:01:24.299 --> 00:01:33.941
+Redis 7 Streams: consumer groups, the pending-entries list, crash takeover, dead-lettering, replay, and retention trimming data a lagging group never read.
+
+17
+00:01:34.221 --> 00:01:40.877
+A Kafka broker couldn't be installed in this environment, so the Kafka-specific Spring code is marked VERIFY.
+
+18
+00:01:41.157 --> 00:01:42.139
+Reading time:
+
+19
+00:01:42.419 --> 00:01:44.957
+130 min + code + labs.
+
+20
+00:01:46.307 --> 00:01:47.161
+Part 1.
+
+21
+00:01:47.441 --> 00:01:49.361
+Introduction and Why It Matters.
+
+22
+00:01:50.611 --> 00:01:52.616
+A story: the Diwali backlog.
+
+23
+00:01:52.896 --> 00:01:59.744
+The order platform published every order event to one Kafka topic, orders, with 6 partitions and no key.
+
+24
+00:02:00.024 --> 00:02:01.645
+Six services consumed it.
+
+25
+00:02:01.925 --> 00:02:04.955
+On Diwali eve, four things went wrong within an hour:
+
+26
+00:02:05.235 --> 00:02:06.707
+Wrong order, wrong state.
+
+27
+00:02:06.987 --> 00:02:11.083
+With no key, the producer spread one order's events across partitions.
+
+28
+00:02:11.363 --> 00:02:19.576
+Picking processed ORDERCANCELLED before ORDERPLACED for 1,900 orders, and packed groceries for orders that had been cancelled.
+
+29
+00:02:20.926 --> 00:02:23.507
+One bad message stopped a whole partition.
+
+30
+00:02:23.787 --> 00:02:28.502
+An event with a malformed GST field made the invoicing consumer throw.
+
+31
+00:02:28.782 --> 00:02:36.675
+The default error handler retried it forever, partition 3 stopped, and invoices for a sixth of all orders were 4 hours behind.
+
+32
+00:02:36.955 --> 00:02:38.299
+Rebalancing storms.
+
+33
+00:02:38.579 --> 00:02:42.569
+The team scaled the notification consumers from 6 to 12 pods.
+
+34
+00:02:42.849 --> 00:02:45.579
+Only 6 could ever be busy (6 partitions).
+
+35
+00:02:45.859 --> 00:02:58.211
+Each pod joining triggered a stop-the-world rebalance under the eager assignor, and slow processing exceeded max.poll.interval.ms, which kicked consumers out and triggered more rebalances.
+
+36
+00:02:58.491 --> 00:03:01.350
+SMS confirmations were 40 minutes late.
+
+37
+00:03:02.700 --> 00:03:04.172
+Acknowledged, then lost.
+
+38
+00:03:04.452 --> 00:03:06.628
+The producer used acks=1.
+
+39
+00:03:06.908 --> 00:03:17.169
+A broker died during the spike, and the follower elected in its place was a few hundred milliseconds behind: ~3,000 acknowledged events were gone, silently.
+
+40
+00:03:17.449 --> 00:03:19.049
+Nothing was wrong with Kafka.
+
+41
+00:03:19.329 --> 00:03:22.508
+Every failure was a design choice left at its default:
+
+42
+00:03:22.788 --> 00:03:28.996
+Key by aggregate id (the order id), so all events of one order stay in one partition, in order.
+
+43
+00:03:29.276 --> 00:03:37.063
+Poison messages go to a retry topic and then a dead-letter topic, with bounded retries, instead of blocking a partition.
+
+44
+00:03:38.413 --> 00:03:47.095
+Size partitions for peak consumer parallelism, use the cooperative-sticky assignor, and keep per-record processing well under the poll interval.
+
+45
+00:03:47.375 --> 00:03:58.170
+Producers use acks=all + idempotence, and topics use replication.factor=3, min.insync.replicas=2, no unclean election.
+
+46
+00:03:58.450 --> 00:04:01.074
+Consumers are idempotent (Ch 13).
+
+47
+00:04:02.424 --> 00:04:03.107
+Quote:
+
+48
+00:04:03.387 --> 00:04:05.051
+The thesis of this chapter.
+
+49
+00:04:05.331 --> 00:04:17.981
+A message broker gives you decoupling in time (producers don't wait for consumers) and fan-out, and in return makes you design for ordering, duplicates, poison messages, lag and retention explicitly.
+
+50
+00:04:18.261 --> 00:04:23.787
+Pick the model (queue or log), then pick keys, partitions, acks and commit points on purpose.
+
+51
+00:04:24.067 --> 00:04:25.965
+Each default trades away one of them.
+
+52
+00:04:27.315 --> 00:04:29.619
+Where this lives in the grocery platform.
+
+53
+00:04:29.899 --> 00:04:31.265
+Here is a quick table:
+
+54
+00:04:31.545 --> 00:04:34.723
+Flow, and Technology, and Key or routing, and Why.
+
+55
+00:04:35.003 --> 00:04:36.497
+Order lifecycle events.
+
+56
+00:04:36.777 --> 00:04:37.779
+Technology:
+
+57
+00:04:38.059 --> 00:04:40.043
+Kafka order.order..v1.
+
+58
+00:04:40.323 --> 00:04:42.115
+Key or routing: orderid.
+
+59
+00:04:42.395 --> 00:04:43.078
+Why:
+
+60
+00:04:43.358 --> 00:04:47.027
+Per-order ordering, many consumers, replay for new services.
+
+61
+00:04:47.307 --> 00:04:50.123
+Inventory changes, then search index, cache.
+
+62
+00:04:50.403 --> 00:04:51.406
+Technology:
+
+63
+00:04:51.686 --> 00:04:55.121
+Kafka inventory.stock.changed.v1 (compacted).
+
+64
+00:04:55.401 --> 00:04:57.449
+Key or routing: storeid:sku.
+
+65
+00:04:57.729 --> 00:04:58.411
+Why:
+
+66
+00:04:58.691 --> 00:05:01.571
+Latest value per key; rebuild from the topic.
+
+67
+00:05:01.851 --> 00:05:03.366
+Rider GPS pings.
+
+68
+00:05:03.646 --> 00:05:04.649
+Technology:
+
+69
+00:05:04.929 --> 00:05:07.531
+Kafka delivery.rider.location.v1.
+
+70
+00:05:07.811 --> 00:05:09.710
+Key or routing: riderid.
+
+71
+00:05:09.990 --> 00:05:10.673
+Why:
+
+72
+00:05:10.953 --> 00:05:15.134
+High volume, per-rider order, short retention (Ch 47).
+
+73
+00:05:15.414 --> 00:05:17.675
+SMS or WhatsApp or push jobs.
+
+74
+00:05:17.955 --> 00:05:18.958
+Technology:
+
+75
+00:05:19.238 --> 00:05:23.185
+Queue semantics (Kafka share groups, or RabbitMQ or SQS).
+
+76
+00:05:23.465 --> 00:05:24.531
+Key or routing:
+
+77
+00:05:24.811 --> 00:05:25.729
+Per job.
+
+78
+00:05:26.009 --> 00:05:26.691
+Why:
+
+79
+00:05:26.971 --> 00:05:30.982
+Competing workers, per-message retry and DLQ (Ch 40).
+
+80
+00:05:32.332 --> 00:05:33.847
+Outbox relay target.
+
+81
+00:05:34.127 --> 00:05:35.129
+Technology:
+
+82
+00:05:35.409 --> 00:05:36.263
+Kafka.
+
+83
+00:05:36.543 --> 00:05:37.609
+Key or routing:
+
+84
+00:05:37.889 --> 00:05:39.041
+Aggregate id.
+
+85
+00:05:39.321 --> 00:05:40.004
+Why:
+
+86
+00:05:40.284 --> 00:05:41.415
+Ch 13.
+
+87
+00:05:41.695 --> 00:05:43.743
+Change data capture to the warehouse.
+
+88
+00:05:44.023 --> 00:05:45.025
+Technology:
+
+89
+00:05:45.305 --> 00:05:47.097
+Kafka Connect + Debezium.
+
+90
+00:05:47.377 --> 00:05:48.444
+Key or routing:
+
+91
+00:05:48.724 --> 00:05:49.769
+Primary key.
+
+92
+00:05:50.049 --> 00:05:50.732
+Why:
+
+93
+00:05:51.012 --> 00:05:53.231
+Ch 13, Ch 21.
+
+94
+00:05:53.511 --> 00:05:56.135
+In-cluster events for low-latency services.
+
+95
+00:05:56.415 --> 00:05:57.417
+Technology:
+
+96
+00:05:57.697 --> 00:05:59.255
+NATS JetStream (lab).
+
+97
+00:05:59.535 --> 00:06:00.601
+Key or routing:
+
+98
+00:06:00.881 --> 00:06:02.311
+Subject hierarchy.
+
+99
+00:06:02.591 --> 00:06:03.273
+Why:
+
+100
+00:06:03.553 --> 00:06:05.729
+Lightweight, Raft-replicated streams.
+
+101
+00:06:06.009 --> 00:06:07.609
+Carts' recently viewed feed.
+
+102
+00:06:07.889 --> 00:06:08.892
+Technology:
+
+103
+00:06:09.172 --> 00:06:10.644
+Redis Streams (lab).
+
+104
+00:06:10.924 --> 00:06:11.991
+Key or routing:
+
+105
+00:06:12.271 --> 00:06:13.103
+Customer.
+
+106
+00:06:13.383 --> 00:06:14.065
+Why:
+
+107
+00:06:14.345 --> 00:06:16.585
+Small, ephemeral, already on Redis.
+
+108
+00:06:17.935 --> 00:06:19.258
+Learning objectives.
+
+109
+00:06:19.538 --> 00:06:20.903
+Here is a quick table:
+
+110
+00:06:21.183 --> 00:06:23.381
+Band, and After this chapter you can....
+
+111
+00:06:23.661 --> 00:06:24.493
+B1:
+
+112
+00:06:24.773 --> 00:06:32.559
+Explain why we use messaging, queue versus log (pub or sub), and at-most or at-least or exactly-once in plain words.
+
+113
+00:06:32.839 --> 00:06:33.714
+B2:
+
+114
+00:06:33.994 --> 00:06:41.631
+Design Kafka topics: keys, partitions, consumer groups, retention versus compaction, and choose where to commit offsets.
+
+115
+00:06:41.911 --> 00:06:42.807
+B3:
+
+116
+00:06:43.087 --> 00:06:56.037
+Configure durability (replication, ISR, acks, min.insync.replicas, idempotence), handle poison messages with retry topics and DLQs, and reason about rebalancing and lag.
+
+117
+00:06:56.317 --> 00:06:57.213
+B4:
+
+118
+00:06:57.493 --> 00:07:10.634
+Choose between Kafka, RabbitMQ, Pulsar, NATS, SQS or SNS and Redis Streams, design schema evolution and contracts, apply backpressure, and plan capacity and multi-region streaming.
+
+119
+00:07:11.984 --> 00:07:12.859
+Part 2.
+
+120
+00:07:13.139 --> 00:07:15.037
+Core Concepts, Beginner to Deep.
+
+121
+00:07:16.287 --> 00:07:19.722
+Intuition: the kitchen order rail versus the ledger book.
+
+122
+00:07:20.002 --> 00:07:23.373
+A busy restaurant kitchen has two ways to pass orders on.
+
+123
+00:07:23.653 --> 00:07:30.053
+The order rail (a queue): the waiter clips a ticket on the rail, and whichever cook is free takes it off and cooks it.
+
+124
+00:07:30.333 --> 00:07:32.082
+More cooks means faster service.
+
+125
+00:07:32.362 --> 00:07:34.367
+Once a ticket is taken, it's gone.
+
+126
+00:07:34.647 --> 00:07:38.615
+The pastry chef who wants to know what was ordered today can't look at the rail.
+
+127
+00:07:39.965 --> 00:07:44.019
+The order book (a log): every order is written on the next line of a book.
+
+128
+00:07:44.299 --> 00:07:50.805
+The kitchen reads from its bookmark, the bar reads from its own bookmark, and the accountant reads the whole book at night.
+
+129
+00:07:51.085 --> 00:07:55.651
+Nobody tears pages out; the book is archived after a month (retention).
+
+130
+00:07:55.931 --> 00:07:59.856
+A new sous-chef can read from page 1 to learn the day (replay).
+
+131
+00:08:00.136 --> 00:08:04.360
+Duplicates: the waiter, unsure the kitchen heard, shouts the order twice.
+
+132
+00:08:04.640 --> 00:08:10.251
+The kitchen must recognize table 7, order 41 as already cooking (idempotency).
+
+133
+00:08:11.601 --> 00:08:18.619
+Ordering: a table's no onions note must reach the same cook who is cooking that table's dish, after the dish order.
+
+134
+00:08:18.899 --> 00:08:22.633
+So a table's notes go to that table's cook (partitioning by key).
+
+135
+00:08:23.983 --> 00:08:26.692
+Why messaging: what a broker buys and costs.
+
+136
+00:08:26.972 --> 00:08:28.337
+Here is a quick table:
+
+137
+00:08:28.617 --> 00:08:30.580
+Benefit, and Example, and Cost.
+
+138
+00:08:30.860 --> 00:08:32.076
+Temporal decoupling.
+
+139
+00:08:32.356 --> 00:08:33.231
+Example:
+
+140
+00:08:33.511 --> 00:08:37.841
+Order-service keeps accepting orders while notification-service is down.
+
+141
+00:08:38.121 --> 00:08:38.847
+Cost:
+
+142
+00:08:39.127 --> 00:08:41.708
+Eventual consistency, lag to monitor.
+
+143
+00:08:41.988 --> 00:08:42.841
+Fan-out.
+
+144
+00:08:43.121 --> 00:08:43.996
+Example:
+
+145
+00:08:44.276 --> 00:08:48.585
+One order.placed, then picking, notifications, loyalty, analytics.
+
+146
+00:08:48.865 --> 00:08:49.591
+Cost:
+
+147
+00:08:49.871 --> 00:08:53.092
+Every consumer must handle duplicates and reordering.
+
+148
+00:08:53.372 --> 00:08:54.396
+Load leveling.
+
+149
+00:08:54.676 --> 00:08:55.551
+Example:
+
+150
+00:08:55.831 --> 00:09:01.207
+A burst of 20 K orders per minute is absorbed and consumed at a sustainable rate.
+
+151
+00:09:01.487 --> 00:09:02.212
+Cost:
+
+152
+00:09:02.492 --> 00:09:05.457
+Queue or lag growth becomes a capacity problem.
+
+153
+00:09:05.737 --> 00:09:07.444
+Replay or new consumers.
+
+154
+00:09:07.724 --> 00:09:08.599
+Example:
+
+155
+00:09:08.879 --> 00:09:11.439
+A fraud model reads 30 days of history.
+
+156
+00:09:11.719 --> 00:09:12.444
+Cost:
+
+157
+00:09:12.724 --> 00:09:14.665
+Storage and retention design.
+
+158
+00:09:14.945 --> 00:09:16.375
+Failure isolation.
+
+159
+00:09:16.655 --> 00:09:17.529
+Example:
+
+160
+00:09:17.809 --> 00:09:20.305
+A slow SMS vendor doesn't slow checkout.
+
+161
+00:09:20.585 --> 00:09:21.311
+Cost:
+
+162
+00:09:21.591 --> 00:09:24.321
+Retries, DLQs, poison-message handling.
+
+163
+00:09:25.671 --> 00:09:31.175
+Use synchronous calls when the caller needs the answer now: price, stock check, payment result.
+
+164
+00:09:31.455 --> 00:09:37.770
+Use messaging for facts other services react to, and for work that can happen later (Ch 17).
+
+165
+00:09:39.120 --> 00:09:40.251
+Queue versus log.
+
+166
+00:09:40.531 --> 00:09:41.896
+Here is a quick table:
+
+167
+00:09:42.176 --> 00:09:50.645
+Queue (RabbitMQ, SQS, ActiveMQ, JetStream work-queue), and Log (Kafka, Pulsar, Kinesis, JetStream limits, Redis Streams).
+
+168
+00:09:50.925 --> 00:09:52.141
+After consumption.
+
+169
+00:09:52.421 --> 00:09:56.347
+Queue (RabbitMQ, SQS, ActiveMQ, JetStream work-queue):
+
+170
+00:09:56.627 --> 00:09:58.120
+Message removed on ack.
+
+171
+00:09:58.400 --> 00:10:02.283
+Log (Kafka, Pulsar, Kinesis, JetStream limits, Redis Streams):
+
+172
+00:10:02.563 --> 00:10:05.421
+Record stays until retention or compaction.
+
+173
+00:10:05.701 --> 00:10:06.640
+Consumers.
+
+174
+00:10:06.920 --> 00:10:10.845
+Queue (RabbitMQ, SQS, ActiveMQ, JetStream work-queue):
+
+175
+00:10:11.125 --> 00:10:13.216
+Competing consumers share messages.
+
+176
+00:10:13.496 --> 00:10:17.379
+Log (Kafka, Pulsar, Kinesis, JetStream limits, Redis Streams):
+
+177
+00:10:17.659 --> 00:10:19.963
+Each consumer group has its own offset.
+
+178
+00:10:20.243 --> 00:10:22.205
+Within a group, partitions are shared.
+
+179
+00:10:22.485 --> 00:10:23.531
+Parallelism.
+
+180
+00:10:23.811 --> 00:10:27.736
+Queue (RabbitMQ, SQS, ActiveMQ, JetStream work-queue):
+
+181
+00:10:28.016 --> 00:10:29.445
+Add consumers freely.
+
+182
+00:10:29.725 --> 00:10:33.608
+Log (Kafka, Pulsar, Kinesis, JetStream limits, Redis Streams):
+
+183
+00:10:33.888 --> 00:10:35.936
+Bounded by partition count per group.
+
+184
+00:10:36.216 --> 00:10:37.005
+Ordering.
+
+185
+00:10:37.285 --> 00:10:41.211
+Queue (RabbitMQ, SQS, ActiveMQ, JetStream work-queue):
+
+186
+00:10:41.491 --> 00:10:44.904
+Usually FIFO per queue, lost with competing consumers.
+
+187
+00:10:45.184 --> 00:10:49.067
+Log (Kafka, Pulsar, Kinesis, JetStream limits, Redis Streams):
+
+188
+00:10:49.347 --> 00:10:50.883
+Guaranteed per partition.
+
+189
+00:10:51.163 --> 00:10:52.784
+Per-message ack or retry.
+
+190
+00:10:53.064 --> 00:10:56.989
+Queue (RabbitMQ, SQS, ActiveMQ, JetStream work-queue):
+
+191
+00:10:57.269 --> 00:10:59.979
+Native (nack, requeue, TTL, DLX).
+
+192
+00:11:00.259 --> 00:11:04.141
+Log (Kafka, Pulsar, Kinesis, JetStream limits, Redis Streams):
+
+193
+00:11:04.421 --> 00:11:08.795
+Offset-based: a stuck record blocks its partition unless you move it aside.
+
+194
+00:11:10.145 --> 00:11:10.998
+Replay.
+
+195
+00:11:11.278 --> 00:11:15.203
+Queue (RabbitMQ, SQS, ActiveMQ, JetStream work-queue):
+
+196
+00:11:15.483 --> 00:11:16.977
+No (once acked it's gone).
+
+197
+00:11:17.257 --> 00:11:21.139
+Log (Kafka, Pulsar, Kinesis, JetStream limits, Redis Streams):
+
+198
+00:11:21.419 --> 00:11:23.702
+Yes: seek to an offset or timestamp.
+
+199
+00:11:23.982 --> 00:11:25.091
+Typical use.
+
+200
+00:11:25.371 --> 00:11:29.297
+Queue (RabbitMQ, SQS, ActiveMQ, JetStream work-queue):
+
+201
+00:11:29.577 --> 00:11:33.779
+Jobs and commands: send SMS, generate invoice PDF.
+
+202
+00:11:34.059 --> 00:11:37.942
+Log (Kafka, Pulsar, Kinesis, JetStream limits, Redis Streams):
+
+203
+00:11:38.222 --> 00:11:42.105
+Events and streams: order lifecycle, CDC, telemetry.
+
+204
+00:11:43.455 --> 00:11:51.668
+L1 shows both: in the queue, a late subscriber gets null, and in the log, analytics replays from offset 0 a month later.
+
+205
+00:11:51.948 --> 00:11:52.993
+The lines blur:
+
+206
+00:11:53.273 --> 00:11:58.820
+Kafka 4.x adds share groups (queue semantics on a topic, KIP-932).
+
+207
+00:11:59.100 --> 00:12:02.257
+JetStream offers both work-queue and limits retention.
+
+208
+00:12:02.537 --> 00:12:04.159
+RabbitMQ has streams.
+
+209
+00:12:04.439 --> 00:12:10.839
+The questions stay the same: do messages disappear on ack, and is parallelism bounded by partitions?
+
+210
+00:12:12.189 --> 00:12:13.575
+Kafka's data model.
+
+211
+00:12:13.855 --> 00:12:16.693
+Topic: a named stream, split into partitions.
+
+212
+00:12:16.973 --> 00:12:21.794
+Each partition is an ordered, append-only log of records with increasing offsets.
+
+213
+00:12:22.074 --> 00:12:24.421
+Record: key, value, headers, timestamp.
+
+214
+00:12:24.701 --> 00:12:32.530
+The key decides the partition: murmur2(key) mod partitions for keyed records (L2 uses the real client code).
+
+215
+00:12:32.810 --> 00:12:37.951
+Records without keys go to a sticky partition, per batch, not round-robin per record.
+
+216
+00:12:38.231 --> 00:12:40.087
+Ordering is per partition only.
+
+217
+00:12:40.367 --> 00:12:45.039
+All events for ord-1001 go to partition 6 of 12, in order.
+
+218
+00:12:45.319 --> 00:12:49.522
+Events for different orders on different partitions have no relative order.
+
+219
+00:12:50.872 --> 00:12:52.664
+Adding partitions remaps keys:
+
+220
+00:12:52.944 --> 00:12:58.853
+L2 measured 50.1 % of order ids moving from 12 to 24 partitions.
+
+221
+00:12:59.133 --> 00:13:03.421
+During the change, an order's new events can be consumed before its old ones.
+
+222
+00:13:03.701 --> 00:13:09.781
+Pick partition counts with headroom up front (§2.12), or migrate to a new topic.
+
+223
+00:13:10.061 --> 00:13:19.491
+Keys can skew: keying by storeid put the mega store's 5 % of traffic on one partition (1.87x the average of 24).
+
+224
+00:13:19.771 --> 00:13:25.573
+That's the Ch 11 hot-key problem again, and one consumer in the group becomes the bottleneck.
+
+225
+00:13:26.923 --> 00:13:44.395
+Segments and retention: each partition is stored as segment files. retention.ms or retention.bytes delete old segments (time or size), and cleanup.policy=compact keeps the latest record per key (plus tombstones with null values for deletes).
+
+226
+00:13:44.675 --> 00:13:52.398
+Compacted topics are tables in stream form, used for the latest stock per SKU, config and CDC snapshots.
+
+227
+00:13:52.678 --> 00:14:01.787
+The lab shows the same idea with JetStream's max-msgs-per-subject=1: three statuses for ord-1 became one (DELIVERED).
+
+228
+00:14:03.137 --> 00:14:06.529
+Replication, ISR, acks and min.insync.replicas.
+
+229
+00:14:06.809 --> 00:14:12.633
+Each partition has replicas on different brokers: one leader takes writes and followers fetch from it.
+
+230
+00:14:12.913 --> 00:14:20.167
+ISR (in-sync replicas): the replicas that have caught up to the leader within replica.lag.time.max.ms.
+
+231
+00:14:20.447 --> 00:14:24.500
+A slow or cut-off follower is removed and rejoins when caught up.
+
+232
+00:14:24.780 --> 00:14:29.729
+High watermark (HW): the highest offset that all ISR members have.
+
+233
+00:14:30.009 --> 00:14:35.364
+Consumers only see records below the HW, the committed records. acks (producer):
+
+234
+00:14:35.644 --> 00:14:37.308
+0 means fire-and-forget.
+
+235
+00:14:37.588 --> 00:14:43.455
+1 means acked after the leader writes it. all means acked after all current ISR members have it.
+
+236
+00:14:44.805 --> 00:14:54.511
+min.insync.replicas (topic or broker): with acks=all, the leader rejects writes (NotEnoughReplicas) when the ISR is smaller than this.
+
+237
+00:14:54.791 --> 00:15:00.167
+Without it, acks=all can silently degrade to leader only when followers fall out.
+
+238
+00:15:00.447 --> 00:15:06.570
+Unclean leader election: if no ISR member is alive, allow an out-of-sync replica to lead.
+
+239
+00:15:06.850 --> 00:15:09.922
+You get availability back and lose whatever it didn't have.
+
+240
+00:15:10.202 --> 00:15:16.154
+L3 ran these configs under crashes and network cuts (RF=3, 2 M records):
+
+241
+00:15:17.504 --> 00:15:18.869
+Here is a quick table:
+
+242
+00:15:19.149 --> 00:15:23.693
+Config, and Acked-but-lost, and Rejected, and Notes. acks=0.
+
+243
+00:15:23.973 --> 00:15:25.083
+Acked-but-lost:
+
+244
+00:15:25.363 --> 00:15:27.880
+31,592.
+
+245
+00:15:28.160 --> 00:15:29.077
+Rejected:
+
+246
+00:15:29.357 --> 00:15:30.104
+0.
+
+247
+00:15:30.384 --> 00:15:31.195
+Notes:
+
+248
+00:15:31.475 --> 00:15:35.699
+Includes writes sent while the partition was offline. acks=1.
+
+249
+00:15:35.979 --> 00:15:37.088
+Acked-but-lost:
+
+250
+00:15:37.368 --> 00:15:39.224
+1,160.
+
+251
+00:15:39.504 --> 00:15:40.421
+Rejected:
+
+252
+00:15:40.701 --> 00:15:41.448
+0.
+
+253
+00:15:41.728 --> 00:15:42.539
+Notes:
+
+254
+00:15:42.819 --> 00:15:47.939
+Leader crashed before followers fetched. acks=all, min.insync=1.
+
+255
+00:15:48.219 --> 00:15:49.328
+Acked-but-lost:
+
+256
+00:15:49.608 --> 00:15:50.355
+0.
+
+257
+00:15:50.635 --> 00:15:51.552
+Rejected:
+
+258
+00:15:51.832 --> 00:15:52.579
+0.
+
+259
+00:15:52.859 --> 00:16:00.581
+Notes: ...until a disk dies while the ISR is just the leader (below). acks=all, min.insync=1, unclean.
+
+260
+00:16:00.861 --> 00:16:01.971
+Acked-but-lost:
+
+261
+00:16:02.251 --> 00:16:04.683
+15,566.
+
+262
+00:16:04.963 --> 00:16:05.880
+Rejected:
+
+263
+00:16:06.160 --> 00:16:06.907
+0.
+
+264
+00:16:07.187 --> 00:16:07.997
+Notes:
+
+265
+00:16:08.277 --> 00:16:18.197
+Online sooner (2,065 versus 30,432 offline ticks), at a cost. acks=all, min.insync=2.
+
+266
+00:16:18.477 --> 00:16:19.587
+Acked-but-lost:
+
+267
+00:16:19.867 --> 00:16:20.613
+0.
+
+268
+00:16:20.893 --> 00:16:21.811
+Rejected:
+
+269
+00:16:22.091 --> 00:16:25.184
+235,261.
+
+270
+00:16:25.464 --> 00:16:26.275
+Notes:
+
+271
+00:16:26.555 --> 00:16:31.312
+Writes refused while ISR 2: the producer knows and retries or fails.
+
+272
+00:16:32.662 --> 00:16:37.142
+The scripted case shows why min.insync.replicas=2 matters.
+
+273
+00:16:37.422 --> 00:16:43.011
+Both followers fall out of the ISR, 1,000 writes arrive, then the leader's disk dies.
+
+274
+00:16:43.291 --> 00:16:49.969
+With min.insync=1, all 1,000 acknowledged writes are gone (their only copy was on that disk).
+
+275
+00:16:50.249 --> 00:16:56.009
+With min.insync=2, those writes were refused, so 0 acknowledged writes were lost.
+
+276
+00:16:57.359 --> 00:17:08.772
+The standard durable setup is replication.factor=3, min.insync.replicas=2, acks=all, unclean.leader.election.enable=false.
+
+277
+00:17:09.052 --> 00:17:15.985
+It survives one broker loss with no data loss, and it refuses writes rather than lying when two are unavailable.
+
+278
+00:17:16.265 --> 00:17:24.372
+(Kafka 4.x adds eligible leader replicas, KIP-966, to reduce the last replica standing risk further.).
+
+279
+00:17:25.722 --> 00:17:27.237
+Delivery semantics, then.
+
+280
+00:17:27.517 --> 00:17:28.882
+Here is a quick table:
+
+281
+00:17:29.162 --> 00:17:35.541
+Semantics, and How it happens, and L4 measurement (1 M records, crashes in 2 % of batches).
+
+282
+00:17:35.821 --> 00:17:36.845
+At most once.
+
+283
+00:17:37.125 --> 00:17:38.191
+How it happens:
+
+284
+00:17:38.471 --> 00:17:44.061
+Commit the offset before processing (or auto-commit on poll); a crash skips the rest of the batch.
+
+285
+00:17:44.341 --> 00:17:48.565
+L4 measurement (1 M records, crashes in 2 % of batches):
+
+286
+00:17:48.845 --> 00:17:51.853
+8,413 never processed.
+
+287
+00:17:52.133 --> 00:17:53.178
+At least once.
+
+288
+00:17:53.458 --> 00:17:54.525
+How it happens:
+
+289
+00:17:54.805 --> 00:17:58.815
+Commit after processing; a crash reprocesses since the last commit.
+
+290
+00:17:59.095 --> 00:18:03.319
+L4 measurement (1 M records, crashes in 2 % of batches):
+
+291
+00:18:03.599 --> 00:18:06.842
+9,362 processed twice.
+
+292
+00:18:07.122 --> 00:18:08.295
+Effectively once.
+
+293
+00:18:08.575 --> 00:18:09.642
+How it happens:
+
+294
+00:18:09.922 --> 00:18:16.941
+At-least-once delivery + idempotent effect, or offset stored in the same DB transaction as the effect.
+
+295
+00:18:17.221 --> 00:18:21.445
+L4 measurement (1 M records, crashes in 2 % of batches):
+
+296
+00:18:21.725 --> 00:18:22.919
+0 and 0.
+
+297
+00:18:24.269 --> 00:18:26.488
+Kafka's exactly-once has two parts:
+
+298
+00:18:26.768 --> 00:18:36.944
+The idempotent producer (enable.idempotence=true, default since 3.0): the broker dedups retries by producer id and sequence number.
+
+299
+00:18:37.224 --> 00:18:38.077
+L3:
+
+300
+00:18:38.357 --> 00:18:40.939
+30 duplicates without it, 0 with it.
+
+301
+00:18:41.219 --> 00:18:47.875
+Transactions (transactional.id): write to several partitions and commit consumer offsets atomically.
+
+302
+00:18:48.155 --> 00:18:51.973
+Consumers must use isolation.level=readcommitted.
+
+303
+00:18:53.323 --> 00:18:59.382
+Together that's exactly-once for Kafka-to-Kafka read-process-write (Kafka Streams' exactlyoncev2).
+
+304
+00:18:59.662 --> 00:19:11.715
+The moment the effect is a database row, an email or an API call, you're back to Ch 13: an inbox or an idempotent effect, or storing offsets transactionally with the effect.
+
+305
+00:19:13.065 --> 00:19:14.367
+Ordering guarantees.
+
+306
+00:19:14.647 --> 00:19:18.039
+Per-partition order holds for records from one producer.
+
+307
+00:19:18.319 --> 00:19:23.396
+With idempotence on, it holds even with retries and up to 5 in-flight requests.
+
+308
+00:19:23.676 --> 00:19:29.201
+Choose the key = the entity whose events must stay in order, usually the aggregate id.
+
+309
+00:19:29.481 --> 00:19:30.889
+Things that break order:
+
+310
+00:19:31.169 --> 00:19:33.217
+Changing the partition count (L2:
+
+311
+00:19:33.497 --> 00:19:35.204
+50 % of keys move).
+
+312
+00:19:35.484 --> 00:19:41.521
+Producers without idempotence and with max.in.flight 1 (a retry lands after a later batch).
+
+313
+00:19:42.871 --> 00:19:48.439
+Retry topics (L4: the failed event was applied after later ones for the same order).
+
+314
+00:19:48.719 --> 00:19:51.386
+Several outbox relays (Ch 13:
+
+315
+00:19:51.666 --> 00:19:52.861
+6 inversions).
+
+316
+00:19:53.141 --> 00:19:56.255
+Consumers processing one partition with a thread pool.
+
+317
+00:19:56.535 --> 00:20:04.599
+Defend in consumers anyway: carry a per-aggregate version, and apply only newer ones (update... where version:v, Ch 12).
+
+318
+00:20:04.879 --> 00:20:07.503
+Then reordering costs a skip, not corruption.
+
+319
+00:20:08.853 --> 00:20:10.709
+Consumer groups and rebalancing.
+
+320
+00:20:10.989 --> 00:20:17.368
+A consumer group divides partitions among its members: each partition is read by one member of the group.
+
+321
+00:20:17.648 --> 00:20:20.229
+More members than partitions leaves some idle.
+
+322
+00:20:20.509 --> 00:20:24.925
+That's why §1.1's 12 pods on 6 partitions didn't help.
+
+323
+00:20:25.205 --> 00:20:34.229
+Rebalancing happens when members join or leave, or when one misses max.poll.interval.ms because processing took too long between polls.
+
+324
+00:20:34.509 --> 00:20:39.885
+L2 ran the real assignors for 12 partitions when a 4th consumer joins 3:
+
+325
+00:20:41.235 --> 00:20:42.601
+Here is a quick table:
+
+326
+00:20:42.881 --> 00:20:47.019
+Assignor, and Partitions that changed owner, and Protocol. range.
+
+327
+00:20:47.299 --> 00:20:49.049
+Partitions that changed owner:
+
+328
+00:20:49.329 --> 00:20:50.075
+6.
+
+329
+00:20:50.355 --> 00:20:51.251
+Protocol:
+
+330
+00:20:51.531 --> 00:20:57.142
+Eager: every member revokes everything, then gets a new assignment (stop-the-world). roundrobin.
+
+331
+00:20:57.422 --> 00:20:59.171
+Partitions that changed owner:
+
+332
+00:20:59.451 --> 00:21:00.198
+9.
+
+333
+00:21:00.478 --> 00:21:01.374
+Protocol:
+
+334
+00:21:01.654 --> 00:21:03.446
+Eager. cooperative-sticky.
+
+335
+00:21:03.726 --> 00:21:05.475
+Partitions that changed owner:
+
+336
+00:21:05.755 --> 00:21:07.355
+3 (9, 10, 11).
+
+337
+00:21:07.635 --> 00:21:08.531
+Protocol:
+
+338
+00:21:08.811 --> 00:21:11.115
+Incremental: members keep what they own.
+
+339
+00:21:11.395 --> 00:21:16.579
+In round 1 only 3 partitions are revoked, and round 2 hands them to c4.
+
+340
+00:21:17.929 --> 00:21:18.911
+Practices:
+
+341
+00:21:19.191 --> 00:21:27.468
+Use cooperative-sticky, or the new consumer protocol (KIP-848, server-side assignment, Kafka 4.x).
+
+342
+00:21:27.748 --> 00:21:32.868
+Set static membership (group.instance.id) so a rolling restart doesn't rebalance.
+
+343
+00:21:33.148 --> 00:21:40.572
+Keep processing per poll well below max.poll.interval.ms (smaller max.poll.records, async hand-off with care).
+
+344
+00:21:40.852 --> 00:21:43.199
+Commit offsets in onPartitionsRevoked.
+
+345
+00:21:44.549 --> 00:21:47.642
+Retries, poison messages and dead-letter topics.
+
+346
+00:21:47.922 --> 00:21:53.042
+A poison message fails every time: bad data, or a bug for one shape of input.
+
+347
+00:21:53.322 --> 00:21:57.887
+With offset-based consumption, retrying it in place blocks the whole partition.
+
+348
+00:21:58.167 --> 00:21:59.042
+L4:
+
+349
+00:21:59.322 --> 00:22:05.253
+5 retries with 1 s backoff put 5,002 ms of lag on everything behind it.
+
+350
+00:22:06.603 --> 00:22:07.968
+Here is a quick table:
+
+351
+00:22:08.248 --> 00:22:11.512
+Strategy, and Behaviour, and L4 result, and Use when.
+
+352
+00:22:11.792 --> 00:22:13.477
+Blocking retries (in place).
+
+353
+00:22:13.757 --> 00:22:14.653
+Behaviour:
+
+354
+00:22:14.933 --> 00:22:17.131
+Retry with backoff, partition waits.
+
+355
+00:22:17.411 --> 00:22:18.541
+L4 result:
+
+356
+00:22:18.821 --> 00:22:21.339
+Lag 5,002 ms, order kept.
+
+357
+00:22:21.619 --> 00:22:22.493
+Use when:
+
+358
+00:22:22.773 --> 00:22:26.101
+Transient errors (DB failover), strict ordering needed.
+
+359
+00:22:26.381 --> 00:22:28.173
+Non-blocking retry topics.
+
+360
+00:22:28.453 --> 00:22:29.349
+Behaviour:
+
+361
+00:22:29.629 --> 00:22:35.496
+Publish to orders.placed.retry-1s,...retry-10s, then...dlt, and keep consuming.
+
+362
+00:22:35.776 --> 00:22:36.907
+L4 result:
+
+363
+00:22:37.187 --> 00:22:40.003
+Lag 2 ms, 1 event applied out of order.
+
+364
+00:22:40.283 --> 00:22:41.157
+Use when:
+
+365
+00:22:41.437 --> 00:22:44.808
+Independent events, or per-key order handled by versions.
+
+366
+00:22:45.088 --> 00:22:47.093
+DLQ or DLT only.
+
+367
+00:22:47.373 --> 00:22:48.269
+Behaviour:
+
+368
+00:22:48.549 --> 00:22:51.685
+After N attempts, park it with error headers and alert.
+
+369
+00:22:51.965 --> 00:22:52.840
+Use when:
+
+370
+00:22:53.120 --> 00:22:54.763
+Always, as the last stop.
+
+371
+00:22:56.113 --> 00:22:56.966
+Rules:
+
+372
+00:22:57.246 --> 00:23:07.273
+Classify errors: retryable (timeouts, 5xx, deadlocks) versus non-retryable (validation, deserialization), then straight to the DLT.
+
+373
+00:23:07.553 --> 00:23:13.611
+Cap attempts, and keep the original topic, partition, offset, exception and attempt count in headers.
+
+374
+00:23:13.891 --> 00:23:17.091
+The DLT has an owner, an alert and a replay tool.
+
+375
+00:23:17.371 --> 00:23:21.190
+A DLT nobody reads is data loss with extra steps.
+
+376
+00:23:22.540 --> 00:23:24.503
+In queue systems this is native:
+
+377
+00:23:24.783 --> 00:23:39.396
+JetStream's maxdeliver emitted an advisory after 3 deliveries (lab), RabbitMQ has dead-letter exchanges, SQS has redrive policies, and Redis needs a claim-count check (lab: moved to orders.dlq).
+
+378
+00:23:40.746 --> 00:23:42.239
+Schemas and contracts.
+
+379
+00:23:42.519 --> 00:23:48.599
+Events are a public API between teams, and they live longer than the code that wrote them (replay).
+
+380
+00:23:48.879 --> 00:23:50.095
+Serialization:
+
+381
+00:23:50.375 --> 00:24:00.402
+JSON (readable, no schema enforcement), Avro (compact, schema required, great evolution rules), Protobuf (compact, field numbers, gRPC-friendly).
+
+382
+00:24:00.682 --> 00:24:11.519
+Schema registry (Confluent, Apicurio, Karapace): producers register schemas, records carry a schema id, and the registry enforces a compatibility mode:
+
+383
+00:24:12.869 --> 00:24:17.669
+Backward: new consumers can read old data (add optional fields, remove fields).
+
+384
+00:24:17.949 --> 00:24:20.488
+Forward: old consumers can read new data.
+
+385
+00:24:20.768 --> 00:24:21.792
+Full: both.
+
+386
+00:24:22.072 --> 00:24:25.229
+Evolution rules of thumb: add fields with defaults.
+
+387
+00:24:25.509 --> 00:24:27.621
+Never reuse or renumber fields.
+
+388
+00:24:27.901 --> 00:24:29.480
+Never change a field's meaning.
+
+389
+00:24:29.760 --> 00:24:36.117
+Breaking changes go to a new versioned topic (order.order.placed.v2) with a dual-publish migration.
+
+390
+00:24:36.397 --> 00:24:37.421
+Event design:
+
+391
+00:24:38.771 --> 00:24:42.910
+A notification says something happened, go fetch, with a small payload.
+
+392
+00:24:43.190 --> 00:24:48.139
+Event-carried state transfer includes the data consumers need, so they don't call back.
+
+393
+00:24:48.419 --> 00:24:49.934
+Keep internal fields out.
+
+394
+00:24:50.214 --> 00:24:56.294
+Include eventid, occurredat (HLC, Ch 12), aggregateid, version and schema version.
+
+395
+00:24:56.574 --> 00:25:00.307
+Use CloudEvents-style envelopes where multiple teams publish.
+
+396
+00:25:00.587 --> 00:25:07.222
+Ch 15 covers event types and event sourcing, and Ch 28 covers schema evolution in depth.
+
+397
+00:25:08.572 --> 00:25:09.895
+Backpressure and lag.
+
+398
+00:25:10.175 --> 00:25:16.383
+In a log, the broker never pushes more than a consumer asks for (pull model), so backpressure is natural.
+
+399
+00:25:16.663 --> 00:25:23.340
+The symptom is consumer lag (latest offset minus committed offset), which is the first metric to alert on.
+
+400
+00:25:23.620 --> 00:25:30.383
+Lag in time matters more than lag in records: alert on the oldest unprocessed event is 2 minutes old.
+
+401
+00:25:30.663 --> 00:25:33.180
+Push-style systems need explicit limits:
+
+402
+00:25:33.460 --> 00:25:37.343
+RabbitMQ prefetch (QoS), and JetStream maxackpending.
+
+403
+00:25:37.623 --> 00:25:42.721
+The lab capped a slow consumer at 5 unacknowledged deliveries when it asked for 20.
+
+404
+00:25:43.001 --> 00:25:47.119
+Everything else stays in the stream instead of piling up in consumer memory.
+
+405
+00:25:48.469 --> 00:26:00.821
+Fixes for lag: more partitions and consumers (up to the partition count), faster processing (batching, async I or O), splitting a hot key, or shedding non-critical consumers during peaks.
+
+406
+00:26:01.101 --> 00:26:03.298
+Retention is the deadline for lag.
+
+407
+00:26:03.578 --> 00:26:08.655
+A group that falls behind by more than the retention window loses data silently.
+
+408
+00:26:08.935 --> 00:26:17.362
+The Redis lab trimmed to 1,000 entries while groups lagged by ~3,000, so ~2,000 events would never reach them.
+
+409
+00:26:17.642 --> 00:26:20.330
+Alert when lag in time approaches retention.
+
+410
+00:26:21.680 --> 00:26:23.216
+Sizing and capacity.
+
+411
+00:26:23.496 --> 00:26:36.595
+Partitions ≥ max(target throughput or per-partition producer throughput, target throughput or per-consumer throughput), plus headroom for 2 to 3 years (you can't shrink, and growing remaps keys).
+
+412
+00:26:36.875 --> 00:26:44.277
+Typical numbers: tens of MB per second per partition for producers, and consumer throughput limited by your processing.
+
+413
+00:26:44.557 --> 00:26:52.749
+Too many partitions costs memory, file handles, longer failovers and controller load (KRaft improves it, but it's still a cost).
+
+414
+00:26:53.029 --> 00:27:00.368
+Storage = ingress bytes per second times retention times replication factor (+ ~20 % headroom).
+
+415
+00:27:00.648 --> 00:27:06.088
+Tiered storage (KIP-405) moves old segments to object storage.
+
+416
+00:27:07.438 --> 00:27:22.158
+For orders: ~1.3 K events per second times ~1 KB about 1.3 MB per second about 112 GB per day times 7 days times RF 3 about 2.4 TB.
+
+417
+00:27:22.438 --> 00:27:23.313
+That's small.
+
+418
+00:27:23.593 --> 00:27:26.793
+Throughput isn't the constraint, consumer parallelism is:
+
+419
+00:27:27.073 --> 00:27:31.318
+24 partitions leaves room for 24 consumers per group.
+
+420
+00:27:32.668 --> 00:27:33.863
+Choosing a broker.
+
+421
+00:27:34.143 --> 00:27:35.508
+Here is a quick table:
+
+422
+00:27:35.788 --> 00:27:42.103
+Kafka, and RabbitMQ, and Pulsar, and NATS JetStream, and SQS or SNS, and Redis Streams.
+
+423
+00:27:42.383 --> 00:27:43.129
+Model.
+
+424
+00:27:43.409 --> 00:27:44.241
+Kafka:
+
+425
+00:27:44.521 --> 00:27:45.695
+Partitioned log.
+
+426
+00:27:45.975 --> 00:27:47.063
+RabbitMQ:
+
+427
+00:27:47.343 --> 00:27:50.287
+Queues + exchanges (routing), plus streams.
+
+428
+00:27:50.567 --> 00:27:51.441
+Pulsar:
+
+429
+00:27:51.721 --> 00:27:55.156
+Log with segment storage (BookKeeper), queues and logs.
+
+430
+00:27:55.436 --> 00:27:56.695
+NATS JetStream:
+
+431
+00:27:56.975 --> 00:27:59.620
+Streams (subjects) + consumers, KV.
+
+432
+00:27:59.900 --> 00:28:01.457
+SQS or SNS:
+
+433
+00:28:01.737 --> 00:28:03.572
+Managed queue + pub or sub.
+
+434
+00:28:03.852 --> 00:28:04.919
+Redis Streams:
+
+435
+00:28:05.199 --> 00:28:07.097
+Log per key, consumer groups.
+
+436
+00:28:07.377 --> 00:28:08.167
+Ordering.
+
+437
+00:28:08.447 --> 00:28:09.279
+Kafka:
+
+438
+00:28:09.559 --> 00:28:10.583
+Per partition.
+
+439
+00:28:10.863 --> 00:28:11.951
+RabbitMQ:
+
+440
+00:28:12.231 --> 00:28:13.831
+Per queue (single consumer).
+
+441
+00:28:14.111 --> 00:28:14.985
+Pulsar:
+
+442
+00:28:15.265 --> 00:28:16.844
+Per partition or key-shared.
+
+443
+00:28:17.124 --> 00:28:18.383
+NATS JetStream:
+
+444
+00:28:18.663 --> 00:28:20.092
+Per stream or subject.
+
+445
+00:28:20.372 --> 00:28:21.929
+SQS or SNS:
+
+446
+00:28:22.209 --> 00:28:23.553
+FIFO queues only.
+
+447
+00:28:23.833 --> 00:28:24.900
+Redis Streams:
+
+448
+00:28:25.180 --> 00:28:26.097
+Per stream.
+
+449
+00:28:26.377 --> 00:28:27.231
+Replay.
+
+450
+00:28:27.511 --> 00:28:28.343
+Kafka:
+
+451
+00:28:28.623 --> 00:28:30.799
+Yes (retention, compaction, tiered).
+
+452
+00:28:31.079 --> 00:28:32.167
+RabbitMQ:
+
+453
+00:28:32.447 --> 00:28:33.535
+Streams only.
+
+454
+00:28:33.815 --> 00:28:34.689
+Pulsar:
+
+455
+00:28:34.969 --> 00:28:35.951
+Yes (tiered).
+
+456
+00:28:36.231 --> 00:28:37.489
+NATS JetStream:
+
+457
+00:28:37.769 --> 00:28:38.495
+Yes.
+
+458
+00:28:38.775 --> 00:28:40.332
+SQS or SNS:
+
+459
+00:28:40.612 --> 00:28:41.295
+No.
+
+460
+00:28:41.575 --> 00:28:42.641
+Redis Streams:
+
+461
+00:28:42.921 --> 00:28:44.329
+Yes (until trimmed).
+
+462
+00:28:45.679 --> 00:28:46.703
+Replication.
+
+463
+00:28:46.983 --> 00:28:47.815
+Kafka:
+
+464
+00:28:48.095 --> 00:28:49.098
+ISR, acks.
+
+465
+00:28:49.378 --> 00:28:50.466
+RabbitMQ:
+
+466
+00:28:50.746 --> 00:28:52.111
+Quorum queues (Raft).
+
+467
+00:28:52.391 --> 00:28:53.266
+Pulsar:
+
+468
+00:28:53.546 --> 00:28:54.847
+BookKeeper quorums.
+
+469
+00:28:55.127 --> 00:28:56.386
+NATS JetStream:
+
+470
+00:28:56.666 --> 00:28:58.117
+Raft per stream (lab).
+
+471
+00:28:58.397 --> 00:28:59.954
+SQS or SNS:
+
+472
+00:29:00.234 --> 00:29:01.087
+Managed.
+
+473
+00:29:01.367 --> 00:29:02.434
+Redis Streams:
+
+474
+00:29:02.714 --> 00:29:04.719
+Async replicas (can lose writes).
+
+475
+00:29:04.999 --> 00:29:05.831
+Routing.
+
+476
+00:29:06.111 --> 00:29:06.943
+Kafka:
+
+477
+00:29:07.223 --> 00:29:08.674
+By key, then partition.
+
+478
+00:29:08.954 --> 00:29:10.042
+RabbitMQ:
+
+479
+00:29:10.322 --> 00:29:12.477
+Rich (topic or header exchanges).
+
+480
+00:29:12.757 --> 00:29:13.631
+Pulsar:
+
+481
+00:29:13.911 --> 00:29:15.405
+Topics, subscriptions.
+
+482
+00:29:15.685 --> 00:29:16.943
+NATS JetStream:
+
+483
+00:29:17.223 --> 00:29:18.589
+Subject wildcards.
+
+484
+00:29:18.869 --> 00:29:20.426
+SQS or SNS:
+
+485
+00:29:20.706 --> 00:29:21.943
+Filter policies.
+
+486
+00:29:22.223 --> 00:29:23.290
+Redis Streams:
+
+487
+00:29:23.570 --> 00:29:24.253
+None.
+
+488
+00:29:24.533 --> 00:29:25.365
+Throughput.
+
+489
+00:29:25.645 --> 00:29:26.477
+Kafka:
+
+490
+00:29:26.757 --> 00:29:27.674
+Very high.
+
+491
+00:29:27.954 --> 00:29:29.042
+RabbitMQ:
+
+492
+00:29:29.322 --> 00:29:30.410
+Medium, high.
+
+493
+00:29:30.690 --> 00:29:31.565
+Pulsar:
+
+494
+00:29:31.845 --> 00:29:32.762
+Very high.
+
+495
+00:29:33.042 --> 00:29:34.301
+NATS JetStream:
+
+496
+00:29:34.581 --> 00:29:35.263
+High.
+
+497
+00:29:35.543 --> 00:29:37.101
+SQS or SNS:
+
+498
+00:29:37.381 --> 00:29:38.511
+High (managed).
+
+499
+00:29:38.791 --> 00:29:39.858
+Redis Streams:
+
+500
+00:29:40.138 --> 00:29:41.439
+High, memory-bound.
+
+501
+00:29:41.719 --> 00:29:42.487
+Ops.
+
+502
+00:29:42.767 --> 00:29:43.599
+Kafka:
+
+503
+00:29:43.879 --> 00:29:45.735
+Heavy (KRaft simplifies).
+
+504
+00:29:46.015 --> 00:29:47.103
+RabbitMQ:
+
+505
+00:29:47.383 --> 00:29:48.194
+Medium.
+
+506
+00:29:48.474 --> 00:29:49.349
+Pulsar:
+
+507
+00:29:49.629 --> 00:29:50.311
+Heavy.
+
+508
+00:29:50.591 --> 00:29:51.850
+NATS JetStream:
+
+509
+00:29:52.130 --> 00:29:52.855
+Light.
+
+510
+00:29:53.135 --> 00:29:54.693
+SQS or SNS:
+
+511
+00:29:54.973 --> 00:29:55.655
+None.
+
+512
+00:29:55.935 --> 00:29:57.002
+Redis Streams:
+
+513
+00:29:57.282 --> 00:29:58.007
+Light.
+
+514
+00:29:59.357 --> 00:30:00.189
+Fit here.
+
+515
+00:30:00.469 --> 00:30:01.301
+Kafka:
+
+516
+00:30:01.581 --> 00:30:03.352
+Event backbone, CDC.
+
+517
+00:30:03.632 --> 00:30:04.720
+RabbitMQ:
+
+518
+00:30:04.000 --> 00:30:07.304
+Jobs with routing, RPC-ish work.
+
+519
+00:30:07.584 --> 00:30:08.459
+Pulsar:
+
+520
+00:30:08.739 --> 00:30:11.256
+Multi-tenant geo-replicated streaming.
+
+521
+00:30:11.536 --> 00:30:12.795
+NATS JetStream:
+
+522
+00:30:13.075 --> 00:30:15.336
+Low-latency in-cluster events, edge.
+
+523
+00:30:15.616 --> 00:30:17.173
+SQS or SNS:
+
+524
+00:30:17.453 --> 00:30:18.691
+Cloud-native jobs.
+
+525
+00:30:18.971 --> 00:30:20.037
+Redis Streams:
+
+526
+00:30:20.317 --> 00:30:21.789
+Small ephemeral streams.
+
+527
+00:30:23.139 --> 00:30:24.035
+Part 3.
+
+528
+00:30:24.315 --> 00:30:26.043
+Architecture and Diagrams.
+
+529
+00:30:27.293 --> 00:30:29.384
+Component view: the event backbone.
+
+530
+00:30:29.664 --> 00:30:31.008
+Here is the diagram.
+
+531
+00:30:34.858 --> 00:30:41.002
+Each consumer group reads the same topic independently, at its own pace, and fails independently.
+
+532
+00:30:41.282 --> 00:30:44.077
+Notifications' retries don't delay picking.
+
+533
+00:30:45.427 --> 00:30:50.184
+Sequence: happy path, publish with acks=all and consume at least once.
+
+534
+00:30:50.464 --> 00:30:53.131
+The sequence diagram walks through it step by step.
+
+535
+00:30:53.411 --> 00:31:00.301
+R to L: produce ord-1001 placed, pid 17 seq 4210, acks all.
+
+536
+00:31:00.581 --> 00:31:04.357
+L to L: append at offset 90211.
+
+537
+00:31:04.637 --> 00:31:08.221
+F1 to L: fetch from 90211.
+
+538
+00:31:08.501 --> 00:31:12.064
+F2 to L: fetch from 90211.
+
+539
+00:31:12.344 --> 00:31:15.885
+L to F1: record 90211.
+
+540
+00:31:16.165 --> 00:31:19.664
+L to F2: record 90211.
+
+541
+00:31:19.944 --> 00:31:26.856
+F1 to L: next fetch from 90212 acknowledges 90211.
+
+542
+00:31:27.136 --> 00:31:28.011
+L to L:
+
+543
+00:31:28.291 --> 00:31:33.091
+HW advances to 90212, ISR all have it.
+
+544
+00:31:33.371 --> 00:31:36.912
+L to R: ack offset 90211.
+
+545
+00:31:37.192 --> 00:31:40.456
+C to L: fetch partition 6 from committed offset.
+
+546
+00:31:40.736 --> 00:31:43.168
+L to C: records up to HW.
+
+547
+00:31:43.448 --> 00:31:47.693
+C to C: inbox insert plus effect in one DB transaction.
+
+548
+00:31:47.973 --> 00:31:51.323
+C to L: commit offset 90212.
+
+549
+00:31:55.173 --> 00:31:58.863
+Sequence: failure path, a poison message and a leader failure.
+
+550
+00:31:59.143 --> 00:32:01.810
+The sequence diagram walks through it step by step.
+
+551
+00:32:02.090 --> 00:32:04.245
+C to T: poll partition 3.
+
+552
+00:32:04.525 --> 00:32:09.218
+T to C: offset 5501 malformed phone number.
+
+553
+00:32:09.498 --> 00:32:12.463
+C to C: non-retryable, validation error.
+
+554
+00:32:12.743 --> 00:32:17.202
+C to D: publish with headers original offset, exception, attempts 1.
+
+555
+00:32:17.482 --> 00:32:22.709
+C to T: commit 5502 and continue, no partition stall.
+
+556
+00:32:22.989 --> 00:32:27.917
+T to C: offset 5502 SMS vendor timeout.
+
+557
+00:32:28.197 --> 00:32:31.589
+C to RT: publish with attempt 1, due in 10 s.
+
+558
+00:32:31.869 --> 00:32:34.983
+C to T: commit 5503.
+
+559
+00:32:35.263 --> 00:32:37.631
+R to T: produce to partition 6.
+
+560
+00:32:37.911 --> 00:32:38.871
+T to R:
+
+561
+00:32:39.151 --> 00:32:40.943
+NOTLEADER, metadata refresh.
+
+562
+00:32:41.223 --> 00:32:45.469
+K to K: elect broker-1 from ISR, leader epoch 12.
+
+563
+00:32:45.749 --> 00:32:49.141
+R to T: retry same pid and seq to broker-1.
+
+564
+00:32:49.421 --> 00:32:52.834
+T to R: ack, deduplicated if it had already landed.
+
+565
+00:32:56.684 --> 00:32:58.497
+State: a consumer group member.
+
+566
+00:32:58.777 --> 00:33:00.121
+Here is the diagram.
+
+567
+00:33:03.971 --> 00:33:04.889
+Part 4.
+
+568
+00:33:05.169 --> 00:33:06.790
+Design Document Excerpt:
+
+569
+00:33:07.070 --> 00:33:08.393
+Order Event Streaming.
+
+570
+00:33:09.643 --> 00:33:11.008
+Here is a quick table:
+
+571
+00:33:11.288 --> 00:33:12.589
+Field, and Value.
+
+572
+00:33:12.869 --> 00:33:14.213
+Author or Reviewers:
+
+573
+00:33:14.493 --> 00:33:18.312
+Platform team or Orders, Notifications, Data, SRE.
+
+574
+00:33:18.592 --> 00:33:19.488
+Status:
+
+575
+00:33:19.768 --> 00:33:20.643
+Approved.
+
+576
+00:33:20.923 --> 00:33:22.245
+Related ADRs:
+
+577
+00:33:22.525 --> 00:33:43.091
+ADR-053 Kafka as the event backbone; ADR-054 Keys, partitions and naming; ADR-055 Durability settings; ADR-056 Retry topics and DLT ownership; ADR-057 Avro + schema registry (backward).
+
+578
+00:33:44.441 --> 00:33:45.081
+1.
+
+579
+00:33:45.361 --> 00:33:46.769
+Context and Problem.
+
+580
+00:33:47.049 --> 00:34:04.371
+Unkeyed events reordered order state for 1,900 orders, a poison message stalled invoicing for 4 h, eager rebalances delayed SMS by 40 min, and acks=1 lost ~3,000 acknowledged events (§1.1).
+
+581
+00:34:04.651 --> 00:34:05.355
+2.
+
+582
+00:34:05.635 --> 00:34:06.979
+Goals or Non-Goals.
+
+583
+00:34:07.259 --> 00:34:25.755
+Goals: per-order ordering; no acknowledged event lost on single-broker or single-AZ failure; a poison message never stalls a partition for more than its retry budget; lag p99 5 s at peak for tier-1 consumers; schemas evolve without breaking consumers.
+
+584
+00:34:27.105 --> 00:34:37.815
+Non-goals: exactly-once to external systems (handled by idempotent consumers, Ch 13); cross-region active-active streaming (Ch 27).
+
+585
+00:34:38.095 --> 00:34:38.841
+3.
+
+586
+00:34:39.121 --> 00:34:40.081
+Requirements.
+
+587
+00:34:41.431 --> 00:34:42.797
+Here is a quick table:
+
+588
+00:34:43.077 --> 00:34:44.549
+ID, and Requirement.
+
+589
+00:34:44.829 --> 00:34:45.874
+NFR-1:
+
+590
+00:34:46.154 --> 00:34:51.039
+RPO 0 for acknowledged events on loss of one broker or one AZ.
+
+591
+00:34:51.319 --> 00:34:52.365
+NFR-2:
+
+592
+00:34:52.645 --> 00:34:55.503
+Per-aggregate ordering for every order. topic.
+
+593
+00:34:55.783 --> 00:34:56.850
+NFR-3:
+
+594
+00:34:57.130 --> 00:35:08.586
+Tier-1 consumer lag (time) p99 5 s; alert at 60 s; retention ≥ 7 days (≥ 100x the alert).
+
+595
+00:35:08.866 --> 00:35:09.954
+NFR-4:
+
+596
+00:35:10.234 --> 00:35:17.743
+Non-retryable failures reach the DLT on first failure; retryable ones within 3 attempts over at most 5 min.
+
+597
+00:35:18.023 --> 00:35:19.069
+NFR-5:
+
+598
+00:35:19.349 --> 00:35:24.533
+Schema changes are backward compatible, enforced in CI and by the registry.
+
+599
+00:35:24.813 --> 00:35:25.901
+NFR-6:
+
+600
+00:35:26.181 --> 00:35:29.765
+Rolling restarts don't trigger rebalances (static membership).
+
+601
+00:35:31.115 --> 00:35:31.819
+4.
+
+602
+00:35:32.099 --> 00:35:34.211
+Capacity and latency estimates.
+
+603
+00:35:35.561 --> 00:35:36.926
+Here is a quick table:
+
+604
+00:35:37.206 --> 00:35:39.510
+Item, and Calculation, and Result.
+
+605
+00:35:39.790 --> 00:35:41.667
+Order events at P90 peak.
+
+606
+00:35:41.947 --> 00:35:47.046
+Calculation: ~420 orders per second times ~3 events.
+
+607
+00:35:47.326 --> 00:35:50.270
+Result: ~1.3 K events per second.
+
+608
+00:35:50.550 --> 00:35:51.339
+Bytes.
+
+609
+00:35:51.619 --> 00:35:55.011
+Calculation: ~1 KB Avro + headers.
+
+610
+00:35:55.291 --> 00:35:58.001
+Result: ~1.3 MB per second.
+
+611
+00:35:58.281 --> 00:35:59.155
+Storage.
+
+612
+00:35:59.435 --> 00:36:00.502
+Calculation:
+
+613
+00:36:00.782 --> 00:36:09.209
+1.3 MB per second times 86,400 times 7 days times RF 3 times 1.2.
+
+614
+00:36:09.489 --> 00:36:12.987
+Result: ~2.8 TB (all order topics).
+
+615
+00:36:13.267 --> 00:36:15.977
+Partitions for order.order.placed.v1.
+
+616
+00:36:16.257 --> 00:36:17.323
+Calculation:
+
+617
+00:36:17.603 --> 00:36:28.526
+Peak 420 per second; slowest consumer ~25 ms or record, then 40 per second per consumer, then 11 consumers; times 2 headroom.
+
+618
+00:36:28.806 --> 00:36:29.617
+Result:
+
+619
+00:36:29.897 --> 00:36:30.899
+24.
+
+620
+00:36:31.179 --> 00:36:34.230
+Produce latency (acks=all, cross-AZ).
+
+621
+00:36:34.510 --> 00:36:35.577
+Calculation:
+
+622
+00:36:35.857 --> 00:36:39.569
+Leader append + follower fetch round trip ~1 to 3 ms.
+
+623
+00:36:39.849 --> 00:36:42.281
+Result: p99 ~10 ms.
+
+624
+00:36:42.561 --> 00:36:44.289
+Failover (leader election).
+
+625
+00:36:44.569 --> 00:36:45.635
+Calculation:
+
+626
+00:36:45.915 --> 00:36:48.795
+KRaft controller + metadata propagation.
+
+627
+00:36:49.075 --> 00:36:52.382
+Result: ~1 to 5 s of NOTLEADER retries.
+
+628
+00:36:53.732 --> 00:36:54.500
+5.
+
+629
+00:36:54.780 --> 00:36:55.975
+Proposed design.
+
+630
+00:36:56.255 --> 00:37:04.319
+Naming: domain.entity.event.vN, with retry topics topic.retry-delay and the DLT topic.dlt.
+
+631
+00:37:04.599 --> 00:37:07.372
+One event type per topic for high-volume events.
+
+632
+00:37:07.652 --> 00:37:11.279
+Low-volume related events may share a topic with a type header.
+
+633
+00:37:11.559 --> 00:37:15.143
+Keys: the aggregate id (orderid, storeid:sku, riderid).
+
+634
+00:37:15.423 --> 00:37:21.951
+Partition counts are fixed at creation with headroom; a repartition means a new topic + dual publish.
+
+635
+00:37:23.301 --> 00:37:24.261
+Durability:
+
+636
+00:37:24.541 --> 00:37:31.389
+RF 3 across 3 AZs (rack-aware), min.insync.replicas=2, unclean election off.
+
+637
+00:37:31.669 --> 00:37:38.815
+Producers use acks=all, idempotence on, delivery.timeout.ms=120000.
+
+638
+00:37:39.095 --> 00:37:57.378
+Consumers: cooperative-sticky (or the KIP-848 protocol), static membership, max.poll.records sized so a batch completes in 30 % of max.poll.interval.ms, manual commits after processing, and idempotent effects (inbox, Ch 13).
+
+639
+00:37:58.728 --> 00:37:59.581
+Errors:
+
+640
+00:37:59.861 --> 00:38:10.528
+Spring Kafka DefaultErrorHandler with a classifier, non-blocking retries (10s, 2m) for retryable errors, straight to the DLT for non-retryable ones.
+
+641
+00:38:10.808 --> 00:38:14.541
+Every DLT has an owner, an alert and a replay CLI.
+
+642
+00:38:14.821 --> 00:38:15.696
+Schemas:
+
+643
+00:38:15.976 --> 00:38:18.941
+Avro with the registry in BACKWARDTRANSITIVE mode.
+
+644
+00:38:19.221 --> 00:38:26.155
+Contract tests in CI (Ch 29), and a new.vN+1 topic for breaking changes.
+
+645
+00:38:26.435 --> 00:38:37.016
+Compacted topics for latest state feeds (stock, prices), with a min.compaction.lag.ms that lets consumers see intermediate values if they need them.
+
+646
+00:38:37.296 --> 00:38:38.043
+7.
+
+647
+00:38:38.323 --> 00:38:39.837
+Alternatives considered.
+
+648
+00:38:41.187 --> 00:38:42.553
+Here is a quick table:
+
+649
+00:38:42.833 --> 00:38:45.393
+Option, and Pros, and Cons, and Verdict.
+
+650
+00:38:45.673 --> 00:38:48.339
+Kafka (managed or self-run on KRaft).
+
+651
+00:38:48.619 --> 00:38:49.473
+Pros:
+
+652
+00:38:49.753 --> 00:38:54.126
+Log + replay, huge ecosystem (Connect, Streams, Debezium).
+
+653
+00:38:54.406 --> 00:38:55.217
+Cons:
+
+654
+00:38:55.497 --> 00:38:58.590
+Operational weight; partitions bound parallelism.
+
+655
+00:38:58.870 --> 00:38:59.681
+Verdict:
+
+656
+00:38:59.961 --> 00:39:00.793
+Chosen.
+
+657
+00:39:01.073 --> 00:39:02.843
+RabbitMQ for everything.
+
+658
+00:39:03.123 --> 00:39:03.977
+Pros:
+
+659
+00:39:04.257 --> 00:39:06.518
+Routing, per-message ack or DLX.
+
+660
+00:39:06.798 --> 00:39:07.609
+Cons:
+
+661
+00:39:07.889 --> 00:39:11.366
+No long replay; ordering lost with competing consumers.
+
+662
+00:39:11.646 --> 00:39:12.457
+Verdict:
+
+663
+00:39:12.737 --> 00:39:14.465
+Used for job queues only.
+
+664
+00:39:14.745 --> 00:39:15.619
+Pulsar.
+
+665
+00:39:15.899 --> 00:39:16.753
+Pros:
+
+666
+00:39:17.033 --> 00:39:20.211
+Tiered storage, multi-tenancy, geo-replication.
+
+667
+00:39:20.491 --> 00:39:21.302
+Cons:
+
+668
+00:39:21.582 --> 00:39:24.505
+Smaller ecosystem in the team; more components.
+
+669
+00:39:24.785 --> 00:39:25.595
+Verdict:
+
+670
+00:39:25.875 --> 00:39:27.091
+Rejected for now.
+
+671
+00:39:27.371 --> 00:39:28.630
+NATS JetStream.
+
+672
+00:39:28.910 --> 00:39:29.763
+Pros:
+
+673
+00:39:30.043 --> 00:39:32.753
+Lightweight, Raft streams, simple ops (lab).
+
+674
+00:39:33.033 --> 00:39:33.843
+Cons:
+
+675
+00:39:34.123 --> 00:39:35.937
+Smaller connector ecosystem.
+
+676
+00:39:36.217 --> 00:39:37.027
+Verdict:
+
+677
+00:39:37.307 --> 00:39:39.718
+Accepted for in-cluster low-latency events.
+
+678
+00:39:41.068 --> 00:39:42.604
+SQS or SNS.
+
+679
+00:39:42.884 --> 00:39:43.737
+Pros:
+
+680
+00:39:44.017 --> 00:39:45.041
+Zero ops.
+
+681
+00:39:45.321 --> 00:39:46.132
+Cons:
+
+682
+00:39:46.412 --> 00:39:48.161
+Cloud lock-in; no replay.
+
+683
+00:39:48.441 --> 00:39:49.252
+Verdict:
+
+684
+00:39:49.532 --> 00:39:51.495
+Rejected (multi-cloud plan).
+
+685
+00:39:52.845 --> 00:39:53.527
+8.
+
+686
+00:39:53.807 --> 00:39:54.959
+Failure modes.
+
+687
+00:39:55.239 --> 00:39:56.263
+Broker loss:
+
+688
+00:39:56.543 --> 00:40:00.042
+ISR leader election, producers retry (idempotent).
+
+689
+00:40:00.322 --> 00:40:01.346
+AZ loss:
+
+690
+00:40:01.626 --> 00:40:05.466
+2 of 3 replicas remain, writes continue (min ISR 2).
+
+691
+00:40:05.746 --> 00:40:10.930
+Two brokers lost: writes to affected partitions are refused (no silent loss).
+
+692
+00:40:11.210 --> 00:40:12.319
+Poison message:
+
+693
+00:40:12.599 --> 00:40:13.581
+DLT.
+
+694
+00:40:13.861 --> 00:40:19.749
+Slow consumer: lag alert, scale up to the partition count, degrade non-critical consumers.
+
+695
+00:40:20.029 --> 00:40:23.549
+Schema break: rejected by the registry at produce time.
+
+696
+00:40:24.899 --> 00:40:25.603
+10.
+
+697
+00:40:25.883 --> 00:40:26.971
+Observability.
+
+698
+00:40:27.251 --> 00:40:33.117
+Per group: lag in records and seconds (Burrow or exporter), rebalances per hour, commit rate.
+
+699
+00:40:33.397 --> 00:40:41.077
+Per topic: bytes in or out, under-replicated and under-min-ISR partitions (page), offline partitions (page).
+
+700
+00:40:41.357 --> 00:40:44.365
+Producer: error rate, retries, record-queue-time.
+
+701
+00:40:44.645 --> 00:40:49.467
+DLT: message rate and age of oldest (page if 0 for tier 1).
+
+702
+00:40:49.747 --> 00:40:51.752
+Registry: rejected schemas.
+
+703
+00:40:53.102 --> 00:40:53.955
+14.
+
+704
+00:40:54.235 --> 00:40:58.715
+Decision (ADR-053 to 057 summary).
+
+705
+00:40:58.995 --> 00:41:00.873
+Kafka is the event backbone.
+
+706
+00:41:01.153 --> 00:41:06.955
+Keys are aggregate ids, and partitions are sized with headroom and never changed in place.
+
+707
+00:41:07.235 --> 00:41:14.147
+RF 3 or min ISR 2 or acks=all or idempotent producers or no unclean election.
+
+708
+00:41:14.427 --> 00:41:21.147
+Consumers use cooperative-sticky assignment, static membership, commit-after-processing and idempotent effects.
+
+709
+00:41:21.427 --> 00:41:25.203
+Poison messages go through retry topics to owned DLTs.
+
+710
+00:41:25.483 --> 00:41:29.665
+Avro schemas are enforced as backward compatible by a registry.
+
+711
+00:41:31.015 --> 00:41:31.975
+Part 5.
+
+712
+00:41:32.255 --> 00:41:34.239
+Hands-On Code, Level Ladder.
+
+713
+00:41:35.489 --> 00:41:36.854
+Here is a quick table:
+
+714
+00:41:37.134 --> 00:41:39.822
+Level, and New requirement that forces the step.
+
+715
+00:41:40.102 --> 00:41:40.934
+L1:
+
+716
+00:41:41.214 --> 00:41:43.475
+Show the difference between a queue and a log.
+
+717
+00:41:43.755 --> 00:41:44.822
+(plain Java).
+
+718
+00:41:45.102 --> 00:41:45.913
+L2:
+
+719
+00:41:46.193 --> 00:41:50.587
+Before creating the topic: which key, how many partitions, which assignor?
+
+720
+00:41:50.867 --> 00:41:53.641
+(the real Kafka client library, no broker).
+
+721
+00:41:53.921 --> 00:41:54.774
+L3:
+
+722
+00:41:55.054 --> 00:41:58.403
+Which producer and topic settings lose acknowledged events?
+
+723
+00:41:58.683 --> 00:42:00.369
+(replication simulation).
+
+724
+00:42:00.649 --> 00:42:01.523
+L4:
+
+725
+00:42:01.803 --> 00:42:05.025
+Where do we commit, and what do we do with a poison message?
+
+726
+00:42:05.305 --> 00:42:07.715
+(consumer simulation + Spring Kafka).
+
+727
+00:42:07.995 --> 00:42:08.827
+Labs:
+
+728
+00:42:09.107 --> 00:42:13.993
+Real NATS JetStream (3-node Raft cluster) and real Redis 7 Streams.
+
+729
+00:42:15.343 --> 00:42:16.111
+Info:
+
+730
+00:42:16.391 --> 00:42:18.567
+How the code in this chapter was verified.
+
+731
+00:42:18.847 --> 00:42:23.476
+L1, L3 and L4 are plain Java simulations, run as shown.
+
+732
+00:42:23.756 --> 00:42:39.372
+L2 runs the real Kafka client library (kafka-clients 3.9.0, as shipped in the AutoMQ 1.4.0 distribution, whose partitioner and assignors are upstream Apache Kafka code) without a broker.
+
+733
+00:42:39.652 --> 00:42:41.849
+A Kafka broker couldn't be started here:
+
+734
+00:42:42.129 --> 00:42:48.764
+Apache downloads are blocked, and the only available distribution (AutoMQ) needs object storage.
+
+735
+00:42:49.044 --> 00:42:56.532
+The labs use two real brokers instead: a 3-node NATS JetStream 2.10 cluster and Redis 7.
+
+736
+00:42:56.812 --> 00:43:02.252
+The Spring Kafka configuration below each level wasn't compiled and is marked VERIFY.
+
+737
+00:43:03.602 --> 00:43:06.866
+L1, Concept: queue versus log (plain Java).
+
+738
+00:43:07.146 --> 00:43:08.682
+Here is the Java code.
+
+739
+00:43:08.962 --> 00:43:12.674
+It runs to 64 lines; the full listing is in the chapter.
+
+740
+00:43:12.954 --> 00:43:18.095
+QueueVsLogL1.java, run with: java QueueVsLogL1.java.
+
+741
+00:43:18.375 --> 00:43:26.375
+The two messaging models side by side: a queue (messages removed when acked) and a log (messages kept, readers keep offsets).
+
+742
+00:43:26.655 --> 00:43:29.834
+Queue: competing consumers; an acked message is gone.
+
+743
+00:43:32.684 --> 00:43:34.476
+Actual output from running it:
+
+744
+00:43:35.826 --> 00:43:36.743
+On screen:
+
+745
+00:43:37.023 --> 00:43:37.642
+A.
+
+746
+00:43:37.922 --> 00:43:38.562
+Queue:
+
+747
+00:43:38.842 --> 00:43:48.399
+6 order events, two picking workers compete. worker-1 ord-1, ord-3, ord-5 worker-2 ord-2, ord-4, ord-6 left in queue:
+
+748
+00:43:48.679 --> 00:43:54.653
+0. a notification service subscribing now gets: null (gone: a queue is not a history).
+
+749
+00:43:54.933 --> 00:43:55.615
+B.
+
+750
+00:43:55.895 --> 00:44:18.381
+Log: the same 6 events, several consumer groups. picking reads ord-1, ord-2, ord-3, ord-4, ord-5, ord-6. notifications reads ord-1, ord-2, ord-3 then ord-4, ord-5, ord-6 (own pace). picking reads ord-7 (continues from its offset). analytics, added a month later, replays from offset 0: ord-1, ord-2,
+
+751
+00:44:18.661 --> 00:44:30.181
+ord-3, ord-4. ord-5, ord-6, ord-7. after retention keeps only the last 3, a new 'audit' group from 0 gets: ord-5. ord-6, ord-7.
+
+752
+00:44:33.031 --> 00:44:36.167
+What L1 shows: a queue divides work and forgets it.
+
+753
+00:44:36.447 --> 00:44:42.356
+A log keeps history, and each consumer group keeps its own position, so new consumers can replay.
+
+754
+00:44:42.636 --> 00:44:48.183
+Until retention removes old records: the audit group created late only sees what's left.
+
+755
+00:44:49.533 --> 00:44:53.309
+L2, Designing a topic with the real Kafka client library.
+
+756
+00:44:53.589 --> 00:45:04.426
+Requirement: before creating order.order.placed.v1, answer which key, how many partitions, and which assignor, using the same code the producer and consumers will run.
+
+757
+00:45:05.776 --> 00:45:07.312
+Here is the Java code.
+
+758
+00:45:07.592 --> 00:45:11.539
+It runs to 110 lines; the full listing is in the chapter.
+
+759
+00:45:11.819 --> 00:45:25.835
+KafkaClientsL2.java, run with: java -cp kafka-clients-3.9.0.jar:slf4j-api-1.7.36.jar KafkaClientsL2.java.
+
+760
+00:45:26.115 --> 00:45:38.787
+Uses the REAL Kafka client library (no broker needed): the default partitioner's murmur2 hashing and the real. consumer-group assignors, to answer design questions before you create a topic.
+
+761
+00:45:41.637 --> 00:45:43.429
+Actual output from running it:
+
+762
+00:45:44.779 --> 00:45:45.696
+On screen:
+
+763
+00:45:45.976 --> 00:45:46.595
+A.
+
+764
+00:45:46.875 --> 00:46:03.408
+Keyed records: every event of one order lands in one partition (per-key order). key ord-1001, then partition 6 of 12. key ord-1002, then partition 8 of 12. key ord-1003, then partition 6 of 12.
+
+765
+00:46:03.688 --> 00:46:04.371
+B.
+
+766
+00:46:04.651 --> 00:46:09.728
+Adding partitions later moves keys: order during the change is no longer guaranteed.
+
+767
+00:46:10.008 --> 00:46:11.992
+12, then 24 partitions:
+
+768
+00:46:12.272 --> 00:46:15.621
+50.1 % of keys map to a different partition.
+
+769
+00:46:15.901 --> 00:46:16.584
+C.
+
+770
+00:46:16.864 --> 00:46:30.581
+Key choice and skew: key by storeid, one mega store has 5 % of orders, 24. partitions. busiest partition 1.87x the average, then one consumer in the group is the bottleneck.
+
+771
+00:46:30.861 --> 00:46:31.587
+D.
+
+772
+00:46:31.867 --> 00:46:32.805
+Consumer group:
+
+773
+00:46:33.085 --> 00:46:56.680
+12 partitions, 3 consumers, then a 4th joins (the real assignors). range before c1=0,1,2,3 c2=4,5,6,7 c3=8,9,10,11. after c1=0,1,2 c2=3,4,5 c3=6,7,8 c4=9,10,11. partitions that changed owner:
+
+774
+00:46:56.960 --> 00:46:57.707
+6.
+
+775
+00:46:57.987 --> 00:46:59.501
+The rest is in the chapter.
+
+776
+00:47:02.351 --> 00:47:02.970
+A.
+
+777
+00:47:03.250 --> 00:47:11.122
+Keys pin an order to a partition, and two orders can share one (ord-1001 and ord-1003 both on 6).
+
+778
+00:47:11.402 --> 00:47:13.663
+Order is per key, not per partition.
+
+779
+00:47:13.943 --> 00:47:14.626
+B.
+
+780
+00:47:14.906 --> 00:47:17.253
+Doubling partitions remaps half the keys.
+
+781
+00:47:17.533 --> 00:47:24.274
+For murmur2 mod N going 12, then 24, a key stays only if its hash mod 24 is 12.
+
+782
+00:47:24.554 --> 00:47:30.143
+So size partitions up front, and never grow a keyed topic in place without a migration plan.
+
+783
+00:47:30.423 --> 00:47:31.106
+C.
+
+784
+00:47:31.386 --> 00:47:36.442
+A key with a big share of the traffic makes a hot partition, 1.87x here.
+
+785
+00:47:36.722 --> 00:47:40.797
+Key by order, not by store, or salt the hot key (Ch 11).
+
+786
+00:47:42.147 --> 00:47:42.872
+D.
+
+787
+00:47:43.152 --> 00:48:01.264
+When a 4th consumer joins, range moves 6 partitions and roundrobin 9, and both revoke everything first (eager). cooperative-sticky moves only 3: round 1 revokes 9, 10 and 11, round 2 gives them to c4, and c1, c3 never stop consuming the rest.
+
+788
+00:48:01.544 --> 00:48:04.147
+The Spring Boot configuration that follows from it:
+
+789
+00:48:05.497 --> 00:48:06.798
+application.yml.
+
+790
+00:48:07.078 --> 00:48:08.550
+Here is the YAML code.
+
+791
+00:48:08.830 --> 00:48:12.542
+It runs to 34 lines; the full listing is in the chapter.
+
+792
+00:48:12.822 --> 00:48:19.179
+VERIFY: property names for Spring Boot 4 or Spring Kafka 4 or kafka-clients 4.x.
+
+793
+00:48:22.029 --> 00:48:23.352
+Topic definitions.
+
+794
+00:48:23.632 --> 00:48:25.168
+Here is the Java code.
+
+795
+00:48:25.448 --> 00:48:29.160
+It runs to 25 lines; the full listing is in the chapter.
+
+796
+00:48:32.010 --> 00:48:40.415
+In production, topics are usually created by a platform pipeline (Terraform or GitOps) rather than by applications at startup.
+
+797
+00:48:40.695 --> 00:48:42.893
+The same settings apply.!-- VERIFY --.
+
+798
+00:48:44.243 --> 00:48:47.912
+L3, Replication: which settings lose acknowledged events?
+
+799
+00:48:48.192 --> 00:48:49.280
+(simulation).
+
+800
+00:48:49.560 --> 00:48:59.715
+Requirement: justify acks=all, min.insync.replicas=2, no unclean election and the idempotent producer with evidence, not folklore.
+
+801
+00:48:59.995 --> 00:49:04.368
+The simulation models one partition with RF=3 tick by tick:
+
+802
+00:49:04.648 --> 00:49:07.912
+The leader appends, and followers fetch every 5 ticks.
+
+803
+00:49:08.192 --> 00:49:13.760
+A follower leaves the ISR after 30 ticks without catching up and rejoins when caught up.
+
+804
+00:49:14.040 --> 00:49:17.261
+HW = min LEO over the ISR.
+
+805
+00:49:18.611 --> 00:49:29.790
+Elections are clean (ISR only) or unclean (the best surviving replica), and replicas truncate a divergent suffix to the new leader's log (leader-epoch truncation).
+
+806
+00:49:30.070 --> 00:49:33.569
+Producers retry requests that were in flight to a dead leader.
+
+807
+00:49:34.919 --> 00:49:36.455
+Here is the Java code.
+
+808
+00:49:36.735 --> 00:49:41.108
+It runs to 199 lines; the full listing is in the chapter.
+
+809
+00:49:41.388 --> 00:49:46.593
+ReplicationL3.java, run with: java ReplicationL3.java.
+
+810
+00:49:46.873 --> 00:50:03.343
+One Kafka partition, replication factor 3, simulated tick by tick: leader appends, followers fetch every few. ticks, ISR shrinks when a follower falls behind for replica.lag.time.max, HW = min LEO over the ISR.
+
+811
+00:50:06.193 --> 00:50:07.985
+Actual output from running it:
+
+812
+00:50:09.335 --> 00:50:10.252
+On screen:
+
+813
+00:50:10.532 --> 00:50:11.151
+A.
+
+814
+00:50:11.431 --> 00:50:49.569
+RF=3, 200,000 ticks x 10 seeds; brokers crash and restart (0.03 %/tick) and get cut. off from the leader (0.1 %/tick). producer or topic config acked acked-but-lost duplicates rejected offline. acks=0 2,000,000 31,592 0 0 30,432. acks=1 1,969,568 1,160 0 0 30,432. acks=all,
+
+815
+00:50:49.849 --> 00:51:39.549
+min.insync=1 1,969,532 0 30 0 30,432. acks=all, min.insync=1, unclean election 1,997,899 15,566 70 0 2,065. acks=all, min.insync=2 1,734,271 0 30 235,261 30,432. acks=all, min.insync=2, idempotent producer 1,734,271 0 0 235,261 30,432.
+
+816
+00:51:39.829 --> 00:51:40.512
+B.
+
+817
+00:51:40.792 --> 00:51:58.797
+The case min.insync.replicas exists for: both followers fall out of the ISR, 1,000. more writes arrive. then the leader's DISK dies (broker replaced, comes back empty). min.insync=1 unclean=false writes acked during ISR=leader:
+
+818
+00:51:59.077 --> 00:52:00.699
+1,000 acked-but-lost:
+
+819
+00:52:00.979 --> 00:52:02.493
+The rest is in the chapter.
+
+820
+00:52:05.343 --> 00:52:12.106
+acks=0/acks=1 lose acknowledged data when the leader dies before followers fetch,
+
+821
+00:52:12.386 --> 00:52:39.671
+and acks=0 also succeeds while the partition is offline. acks=all with an unclean election trades 15,566 lost records for being back online sooner (2,065 versus 30,432 offline ticks). min.insync.replicas=2 refuses 12 % of writes in this deliberately harsh fault model (followers cut off 0.1 % of ticks).
+
+822
+00:52:39.951 --> 00:52:49.999
+The refusals are the point: in case B the same 1,000 writes that min.insync=1 acknowledged and then lost with the disk were refused, so the producer knew.
+
+823
+00:52:51.349 --> 00:52:57.259
+Retries after a leader failure duplicated 30 records without idempotence, and 0 with it.
+
+824
+00:52:57.539 --> 00:53:03.405
+The model is simplified: one partition, deterministic fetch interval, no controller delays.
+
+825
+00:53:03.685 --> 00:53:11.579
+The orderings of the results match Kafka's documented guarantees, but the absolute rates depend entirely on the fault rates chosen.
+
+826
+00:53:12.929 --> 00:53:15.958
+L4, Consumer semantics and poison messages.
+
+827
+00:53:16.238 --> 00:53:23.086
+Requirement: pick the commit strategy for each consumer, and handle poison messages without stalling partitions.
+
+828
+00:53:24.436 --> 00:53:25.972
+Here is the Java code.
+
+829
+00:53:26.252 --> 00:53:29.985
+It runs to 87 lines; the full listing is in the chapter.
+
+830
+00:53:30.265 --> 00:53:34.937
+ConsumerL4.java, run with: java ConsumerL4.java.
+
+831
+00:53:35.217 --> 00:53:35.836
+A.
+
+832
+00:53:36.116 --> 00:53:42.004
+Where you commit the offset decides at-most-once versus at-least-once versus effectively-once.
+
+833
+00:53:42.284 --> 00:53:42.967
+B.
+
+834
+00:53:43.247 --> 00:53:50.393
+A poison message: blocking retries stall the partition; a retry topic keeps it flowing but breaks per-key order.
+
+835
+00:53:53.243 --> 00:53:55.035
+Actual output from running it:
+
+836
+00:53:56.385 --> 00:53:57.303
+On screen:
+
+837
+00:53:57.583 --> 00:53:58.201
+A.
+
+838
+00:53:58.481 --> 00:54:08.636
+1,000,000 records, batches of 500, the consumer crashes in 2 % of batches at a. random record. commit strategy never done done twice or more.
+
+839
+00:54:08.916 --> 00:54:12.180
+BEFOREPROCESSING 8,413 0.
+
+840
+00:54:12.460 --> 00:54:16.193
+AFTERPROCESSING 0 9,362.
+
+841
+00:54:16.473 --> 00:54:18.244
+OFFSETINDBTXN 0 0.
+
+842
+00:54:18.524 --> 00:54:19.207
+B.
+
+843
+00:54:19.487 --> 00:54:37.705
+10,000 order events on one partition (100 orders x 100 status events), 2 ms each;. event 500 fails 5 times (1 s backoff). blocking retries max consumer lag 5,002 ms events applied out of order for their. order:
+
+844
+00:54:37.985 --> 00:54:44.001
+0. retry topic max consumer lag 2 ms events applied out of order for their order:
+
+845
+00:54:44.281 --> 00:54:44.921
+1.
+
+846
+00:54:47.771 --> 00:54:48.390
+A.
+
+847
+00:54:48.670 --> 00:54:54.046
+Committing before processing skips 8,413 records after crashes.
+
+848
+00:54:54.326 --> 00:54:58.678
+Committing after processing repeats 9,362.
+
+849
+00:54:58.958 --> 00:55:06.403
+Storing the offset in the same DB transaction as the effect (or dedup with an inbox, Ch 13) gives neither.
+
+850
+00:55:06.683 --> 00:55:07.366
+B.
+
+851
+00:55:07.646 --> 00:55:15.390
+Blocking retries keep order but stall the partition for the whole retry budget (5 s here, hours in §1.1).
+
+852
+00:55:15.670 --> 00:55:22.070
+A retry topic keeps lag at 2 ms, but the failed event lands after later events for the same order.
+
+853
+00:55:22.350 --> 00:55:29.198
+Consumers must then use versions (§2.7), or the retry must hold back that key's later events.
+
+854
+00:55:30.548 --> 00:55:32.489
+Listener with an idempotent effect.
+
+855
+00:55:32.769 --> 00:55:34.305
+Here is the Java code.
+
+856
+00:55:34.585 --> 00:55:38.084
+It runs to 16 lines; the full listing is in the chapter.
+
+857
+00:55:40.934 --> 00:55:42.897
+Retry topics + DLT.
+
+858
+00:55:43.177 --> 00:55:44.713
+Here is the Java code.
+
+859
+00:55:44.993 --> 00:55:59.499
+It runs to 24 lines; the full listing is in the chapter. order.order.placed.v1, then -retry-10000, then -retry-120000, then -dlt; validation errors skip straight to the DLT.
+
+860
+00:56:02.349 --> 00:56:17.112
+The DLT handler records the message in a deadletters table with its headers (original topic, partition, offset, exception, attempts), increments a metric that pages the owning team, and exposes a replay endpoint.!-- VERIFY:
+
+861
+00:56:17.392 --> 00:56:20.485
+Spring Kafka 4 retry-topic builder method names --.
+
+862
+00:56:21.835 --> 00:56:24.011
+Blocking retries for ordered consumers.
+
+863
+00:56:24.291 --> 00:56:25.827
+Here is the Java code.
+
+864
+00:56:26.107 --> 00:56:29.606
+It runs to 15 lines; the full listing is in the chapter.
+
+865
+00:56:29.886 --> 00:56:39.507
+For consumers that must keep strict per-key order (for example, the order-state projector). retry in place a few times for transient errors, then dead-letter.
+
+866
+00:56:39.787 --> 00:56:42.518
+The partition stalls only for the retry budget.
+
+867
+00:56:45.368 --> 00:56:48.440
+Labs, real NATS JetStream and Redis Streams, then.
+
+868
+00:56:48.720 --> 00:56:50.384
+Both scripts were run as-is:
+
+869
+00:56:50.664 --> 00:57:00.733
+NATS server 2.10.22 with natscli 0.2.0 (3 nodes, one host), and Redis 7.0.15.
+
+870
+00:57:01.013 --> 00:57:05.813
+Outputs are verbatim, and your sequence numbers, ids and timings will differ.
+
+871
+00:57:06.093 --> 00:57:09.443
+The scripts are in labs or ch14-messaging/.
+
+872
+00:57:10.793 --> 00:57:11.731
+NATS setup.
+
+873
+00:57:12.011 --> 00:57:13.334
+Here is the shell code.
+
+874
+00:57:13.614 --> 00:57:17.241
+It runs to 21 lines; the full listing is in the chapter.
+
+875
+00:57:17.521 --> 00:57:34.715
+3-node NATS JetStream cluster: clients 4222 or 4223 or 4224, cluster routes 6222 or 6223 or 6224.
+
+876
+00:57:37.565 --> 00:57:38.739
+NATS experiment.
+
+877
+00:57:39.019 --> 00:57:40.341
+Here is the shell code.
+
+878
+00:57:40.621 --> 00:57:44.845
+It runs to 121 lines; the full listing is in the chapter.
+
+879
+00:57:45.125 --> 00:57:49.008
+Real NATS JetStream (Raft-replicated streams), 3 nodes.
+
+880
+00:57:49.288 --> 00:58:01.704
+Run setup.sh first. max-age=7d --max-msg-size=-1 --dupe-window 2m --no-allow-rollup --no-deny-delete --no-deny-purge --defaults /dev or null.
+
+881
+00:58:04.554 --> 00:58:05.621
+NATS output.
+
+882
+00:58:05.901 --> 00:58:11.362
+On screen: == 1. a stream replicated 3 ways (Raft group per stream).
+
+883
+00:58:11.642 --> 00:58:25.978
+ORDERS: leader=n1 replicas='n2', 'n3' messages=0. == 2. idempotent publishing: the same Nats-Msg-Id twice (a producer retry after a lost. ack).
+
+884
+00:58:26.258 --> 00:58:27.367
+Stored in Stream:
+
+885
+00:58:27.647 --> 00:58:28.778
+ORDERS Sequence:
+
+886
+00:58:29.058 --> 00:58:29.698
+1.
+
+887
+00:58:29.978 --> 00:58:31.087
+Stored in Stream:
+
+888
+00:58:31.367 --> 00:58:32.498
+ORDERS Sequence:
+
+889
+00:58:32.778 --> 00:58:44.959
+1 Duplicate: true. == 3. at-least-once: a consumer that never acks gets the message again, until. max-deliver. fetch 1 (no ack): subj: orders.placed or tries:
+
+890
+00:58:45.239 --> 00:58:46.434
+1 or cons seq:
+
+891
+00:58:46.714 --> 00:58:48.143
+1 or str seq:
+
+892
+00:58:48.423 --> 00:58:49.938
+1 /. pending:
+
+893
+00:58:50.218 --> 00:58:54.165
+0. fetch 2 (no ack): subj: orders.placed or tries:
+
+894
+00:58:54.445 --> 00:58:55.661
+2 or cons seq:
+
+895
+00:58:55.941 --> 00:58:57.370
+2 or str seq:
+
+896
+00:58:57.650 --> 00:58:59.165
+1 /. pending:
+
+897
+00:58:59.445 --> 00:59:03.477
+0. fetch 3 (no ack): subj: orders.placed or tries:
+
+898
+00:59:03.757 --> 00:59:05.037
+3 or cons seq:
+
+899
+00:59:05.317 --> 00:59:06.831
+3 or str seq:
+
+900
+00:59:07.111 --> 00:59:08.071
+1 /.
+
+901
+00:59:08.351 --> 00:59:09.866
+The rest is in the chapter.
+
+902
+00:59:12.716 --> 00:59:14.209
+Redis Streams experiment.
+
+903
+00:59:14.489 --> 00:59:15.812
+Here is the shell code.
+
+904
+00:59:16.092 --> 00:59:19.761
+It runs to 68 lines; the full listing is in the chapter.
+
+905
+00:59:20.041 --> 00:59:26.548
+Redis 7 Streams: consumer groups, pending entries, crash takeover, dead-lettering, fan-out, retention.
+
+906
+00:59:26.828 --> 00:59:30.668
+Starts its own redis-server on:6390.
+
+907
+00:59:33.518 --> 00:59:34.947
+Redis Streams output.
+
+908
+00:59:35.227 --> 01:00:00.358
+On screen: == 1. append 10 order events (the log); ids are ms-seq. length 10, first id 1790340831462 to 0. == 2. a consumer group with two workers: each entry goes to ONE worker. w1 got 4, w2 got 4; nobody has acked yet, then pending (PEL):
+
+909
+01:00:00.638 --> 01:00:07.102
+8. w2 processes and ACKs its 4; w1 crashes holding 4; pending now:
+
+910
+01:00:07.382 --> 01:00:17.067
+4. == 3. crash takeover: w2 claims entries idle 1 s (XAUTOCLAIM). w2 claimed 4; delivery counts now:
+
+911
+01:00:17.347 --> 01:00:24.110
+2 2 2 2. == 4. poison message: at 3 deliveries, move it to a dead-letter stream.
+
+912
+01:00:24.390 --> 01:00:37.659
+1790340831462 to 0 delivered 3 times, then orders.dlq has 1 entry: originalid.
+
+913
+01:00:37.939 --> 01:01:04.179
+1790340831462 to 0 deliveries 3 order ord-1 sku ATTA-5KG. == 5. fan-out and replay: a second group starts from the beginning and gets everything. analytics read 10 entries (inventory's progress is independent). == 6. retention: cap the stream at 1,000 entries while a group lags behind.
+
+914
+01:01:04.459 --> 01:01:05.974
+The rest is in the chapter.
+
+915
+01:01:08.824 --> 01:01:10.104
+Reading the NATS lab:
+
+916
+01:01:10.384 --> 01:01:18.277
+Idempotent publishing: the retry with the same Nats-Msg-Id was acknowledged as Duplicate: true at the same sequence.
+
+917
+01:01:18.557 --> 01:01:20.243
+That's the idempotent producer.
+
+918
+01:01:20.523 --> 01:01:25.856
+At-least-once delivery: an unacked message came back after the 2 s ack wait (tries:
+
+919
+01:01:26.136 --> 01:01:27.203
+1, 2, 3).
+
+920
+01:01:27.483 --> 01:01:32.859
+After maxdeliver it stopped, and a maxdeliver advisory was published for a dead-letter handler.
+
+921
+01:01:33.139 --> 01:01:41.885
+Queue versus pub or sub on one stream: two workers on one durable split 100 messages (52 or 48, no overlap).
+
+922
+01:01:42.165 --> 01:01:44.363
+A second durable got all 100.
+
+923
+01:01:45.713 --> 01:01:54.097
+Failover: killing the Raft leader of the R3 stream elected a new leader (~5 to 10 s in repeated runs on this host).
+
+924
+01:01:54.377 --> 01:02:03.145
+All 201 messages were intact, 500 more were accepted with a node down, and the restarted node caught up to 701.
+
+925
+01:02:03.425 --> 01:02:10.443
+R1: the same failure made the single-replica stream unavailable (no responders) until its node came back.
+
+926
+01:02:10.723 --> 01:02:15.161
+Compaction by key: three statuses for ord-1 became one (DELIVERED).
+
+927
+01:02:15.441 --> 01:02:21.563
+Backpressure: maxackpending=5 delivered 5 of the 20 requested until acks arrive.
+
+928
+01:02:21.843 --> 01:02:23.187
+Reading the Redis lab:
+
+929
+01:02:24.537 --> 01:02:30.724
+Consumer group: entries are split between the two workers, and unacked entries sit in the pending-entries list.
+
+930
+01:02:31.004 --> 01:02:39.495
+Crash takeover: a crashed worker's entries were claimed by another after 1 s idle (XAUTOCLAIM), and the delivery count went up to 2.
+
+931
+01:02:39.775 --> 01:02:45.449
+Dead-lettering: at 3 deliveries, the poison entry was copied to orders.dlq and acked.
+
+932
+01:02:45.729 --> 01:02:48.737
+Replay: a new group replayed everything from the start.
+
+933
+01:02:50.087 --> 01:02:59.495
+Retention versus lag: trimming to 1,000 entries while groups lagged by ~3,000 means ~2,000 events will never reach them.
+
+934
+01:02:59.775 --> 01:03:03.381
+The search-indexer group simply started at ord-2001.
+
+935
+01:03:04.731 --> 01:03:06.864
+What changed from L1 to L4.
+
+936
+01:03:07.144 --> 01:03:08.509
+Here is a quick table:
+
+937
+01:03:08.789 --> 01:03:13.077
+Concern, and L1, and L2, and L3, and L4 or Labs.
+
+938
+01:03:13.357 --> 01:03:14.104
+Model.
+
+939
+01:03:14.384 --> 01:03:15.216
+L1:
+
+940
+01:03:15.496 --> 01:03:16.627
+Queue versus log.
+
+941
+01:03:16.907 --> 01:03:17.717
+L2:
+
+942
+01:03:17.997 --> 01:03:19.704
+Partitions, keys, groups.
+
+943
+01:03:19.984 --> 01:03:20.837
+L3:
+
+944
+01:03:21.117 --> 01:03:22.568
+Replicated partition.
+
+945
+01:03:22.848 --> 01:03:24.043
+L4 or Labs:
+
+946
+01:03:24.323 --> 01:03:26.499
+Consumers, errors, real brokers.
+
+947
+01:03:26.779 --> 01:03:27.568
+Ordering.
+
+948
+01:03:27.848 --> 01:03:28.680
+L1:
+
+949
+01:03:28.960 --> 01:03:30.304
+FIFO or per log.
+
+950
+01:03:30.584 --> 01:03:31.395
+L2:
+
+951
+01:03:31.675 --> 01:03:36.048
+Per key, then partition; 50 % remap on 12, then 24.
+
+952
+01:03:36.328 --> 01:03:37.181
+L3:
+
+953
+01:03:37.461 --> 01:03:38.699
+Kept per partition.
+
+954
+01:03:38.979 --> 01:03:40.173
+L4 or Labs:
+
+955
+01:03:40.453 --> 01:03:42.843
+Retry topics can reorder (1 case).
+
+956
+01:03:43.123 --> 01:03:44.083
+Durability.
+
+957
+01:03:44.363 --> 01:03:50.869
+L3: acks=1 lost 1,160; min.insync=2 lost 0.
+
+958
+01:03:51.149 --> 01:03:52.344
+L4 or Labs:
+
+959
+01:03:52.624 --> 01:03:56.293
+R3 stream survived a leader kill; R1 unavailable.
+
+960
+01:03:56.573 --> 01:03:57.555
+Duplicates.
+
+961
+01:03:57.835 --> 01:03:58.688
+L3:
+
+962
+01:03:58.968 --> 01:04:01.272
+30 without idempotence, 0 with.
+
+963
+01:04:01.552 --> 01:04:02.747
+L4 or Labs:
+
+964
+01:04:03.027 --> 01:04:06.077
+Msg-Id dedup; at-least-once redelivery.
+
+965
+01:04:07.427 --> 01:04:08.729
+Commit or ack point.
+
+966
+01:04:09.009 --> 01:04:10.203
+L4 or Labs:
+
+967
+01:04:10.483 --> 01:04:11.294
+Before:
+
+968
+01:04:11.574 --> 01:04:14.411
+8,413 skipped; after:
+
+969
+01:04:14.691 --> 01:04:18.211
+9,362 repeated; in-DB:
+
+970
+01:04:18.491 --> 01:04:19.686
+0 or 0.
+
+971
+01:04:19.966 --> 01:04:21.139
+Poison or lag.
+
+972
+01:04:21.419 --> 01:04:22.230
+L2:
+
+973
+01:04:22.510 --> 01:04:24.601
+Hot key 1.87x.
+
+974
+01:04:24.881 --> 01:04:26.075
+L4 or Labs:
+
+975
+01:04:26.355 --> 01:04:31.753
+Blocking 5 s stall versus retry topic; DLQ; retention trims laggards.
+
+976
+01:04:33.103 --> 01:04:34.041
+Part 6.
+
+977
+01:04:34.321 --> 01:04:35.601
+Production Concerns.
+
+978
+01:04:36.851 --> 01:04:38.003
+Failure modes.
+
+979
+01:04:38.283 --> 01:04:39.649
+Here is a quick table:
+
+980
+01:04:39.929 --> 01:04:43.769
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+981
+01:04:44.049 --> 01:04:45.883
+Unkeyed or wrongly keyed events.
+
+982
+01:04:46.163 --> 01:04:47.358
+Detection signal:
+
+983
+01:04:47.638 --> 01:04:50.603
+Consumers see state regressions; version conflicts.
+
+984
+01:04:50.883 --> 01:04:52.099
+Blast radius:
+
+985
+01:04:52.379 --> 01:04:55.643
+Wrong state for affected entities (§1.1).
+
+986
+01:04:55.923 --> 01:04:56.926
+Mitigation:
+
+987
+01:04:57.206 --> 01:05:00.470
+Key by aggregate id; version-guarded consumers.
+
+988
+01:05:00.750 --> 01:05:02.947
+Poison message, blocking retries.
+
+989
+01:05:03.227 --> 01:05:04.422
+Detection signal:
+
+990
+01:05:04.702 --> 01:05:07.774
+One partition's lag climbs while others are flat.
+
+991
+01:05:08.054 --> 01:05:09.270
+Blast radius:
+
+992
+01:05:09.550 --> 01:05:12.409
+A 1 or N slice of the business stalls (L4:
+
+993
+01:05:12.689 --> 01:05:15.867
+5 s per 5 retries; §1.1:
+
+994
+01:05:16.147 --> 01:05:17.107
+4 h).
+
+995
+01:05:17.387 --> 01:05:18.390
+Mitigation:
+
+996
+01:05:18.670 --> 01:05:22.254
+Classify errors; retry topics; DLT with owner.
+
+997
+01:05:22.534 --> 01:05:24.134
+DLT nobody reads.
+
+998
+01:05:24.414 --> 01:05:25.609
+Detection signal:
+
+999
+01:05:25.889 --> 01:05:27.915
+DLT size or age growing.
+
+1000
+01:05:28.195 --> 01:05:29.411
+Blast radius:
+
+1001
+01:05:29.691 --> 01:05:30.971
+Silent data loss.
+
+1002
+01:05:31.251 --> 01:05:32.254
+Mitigation:
+
+1003
+01:05:32.534 --> 01:05:35.862
+Page on DLT age for tier 1; replay tool.
+
+1004
+01:05:36.142 --> 01:05:37.315
+Rebalance storms.
+
+1005
+01:05:37.595 --> 01:05:38.790
+Detection signal:
+
+1006
+01:05:39.070 --> 01:05:42.249
+Rebalance rate, max.poll.interval exceeded logs.
+
+1007
+01:05:42.529 --> 01:05:43.745
+Blast radius:
+
+1008
+01:05:44.025 --> 01:05:45.646
+Lag spikes across the group.
+
+1009
+01:05:45.926 --> 01:05:46.929
+Mitigation:
+
+1010
+01:05:47.209 --> 01:05:53.033
+Cooperative-sticky or KIP-848, static membership, smaller poll batches.
+
+1011
+01:05:54.383 --> 01:05:56.089
+More consumers than partitions.
+
+1012
+01:05:56.369 --> 01:05:57.564
+Detection signal:
+
+1013
+01:05:57.844 --> 01:05:59.977
+Idle consumers in group describe.
+
+1014
+01:06:00.257 --> 01:06:01.473
+Blast radius:
+
+1015
+01:06:01.753 --> 01:06:03.588
+Wasted pods, no speedup.
+
+1016
+01:06:03.868 --> 01:06:04.871
+Mitigation:
+
+1017
+01:06:05.151 --> 01:06:09.716
+Size partitions for parallelism. acks=1 + leader failure.
+
+1018
+01:06:09.996 --> 01:06:11.191
+Detection signal:
+
+1019
+01:06:11.471 --> 01:06:13.327
+Gaps found by reconciliation.
+
+1020
+01:06:13.607 --> 01:06:14.823
+Blast radius:
+
+1021
+01:06:15.103 --> 01:06:16.916
+Acked events lost (L3:
+
+1022
+01:06:17.196 --> 01:06:19.052
+1,160).
+
+1023
+01:06:19.332 --> 01:06:22.191
+Mitigation: acks=all, min ISR 2.
+
+1024
+01:06:22.471 --> 01:06:24.177
+Under-min-ISR partitions.
+
+1025
+01:06:24.457 --> 01:06:25.652
+Detection signal:
+
+1026
+01:06:25.932 --> 01:06:28.065
+UnderMinIsrPartitionCount 0.
+
+1027
+01:06:28.345 --> 01:06:29.561
+Blast radius:
+
+1028
+01:06:29.841 --> 01:06:31.825
+Writes refused to those partitions.
+
+1029
+01:06:32.105 --> 01:06:33.108
+Mitigation:
+
+1030
+01:06:33.388 --> 01:06:37.591
+Page; fix broker or network; don't lower min ISR in panic.
+
+1031
+01:06:37.871 --> 01:06:39.471
+Unclean election enabled.
+
+1032
+01:06:39.751 --> 01:06:40.945
+Detection signal:
+
+1033
+01:06:41.225 --> 01:06:42.356
+Election logs.
+
+1034
+01:06:42.636 --> 01:06:43.852
+Blast radius:
+
+1035
+01:06:44.132 --> 01:06:46.308
+Silent loss of acked data (L3:
+
+1036
+01:06:46.588 --> 01:06:49.127
+15,566).
+
+1037
+01:06:49.407 --> 01:06:50.409
+Mitigation:
+
+1038
+01:06:50.689 --> 01:06:53.612
+Keep disabled; decide manually per incident.
+
+1039
+01:06:54.962 --> 01:06:56.498
+Lag exceeds retention.
+
+1040
+01:06:56.778 --> 01:06:57.973
+Detection signal:
+
+1041
+01:06:58.253 --> 01:07:00.173
+Lag-in-time approaching retention.
+
+1042
+01:07:00.453 --> 01:07:01.669
+Blast radius:
+
+1043
+01:07:01.949 --> 01:07:05.533
+Unread events deleted (Redis lab: ~2,000).
+
+1044
+01:07:05.813 --> 01:07:06.815
+Mitigation:
+
+1045
+01:07:07.095 --> 01:07:09.826
+Alert at a fraction of retention; tiered storage.
+
+1046
+01:07:10.106 --> 01:07:12.431
+Partition count change on a keyed topic.
+
+1047
+01:07:12.711 --> 01:07:13.906
+Detection signal:
+
+1048
+01:07:14.186 --> 01:07:15.914
+Ordering bugs after the change.
+
+1049
+01:07:16.194 --> 01:07:17.410
+Blast radius:
+
+1050
+01:07:17.690 --> 01:07:19.397
+Per-key order broken (L2:
+
+1051
+01:07:19.677 --> 01:07:21.234
+50 % keys move).
+
+1052
+01:07:21.514 --> 01:07:22.517
+Mitigation:
+
+1053
+01:07:22.797 --> 01:07:24.567
+New topic + migration.
+
+1054
+01:07:24.847 --> 01:07:25.871
+Schema break.
+
+1055
+01:07:26.151 --> 01:07:27.346
+Detection signal:
+
+1056
+01:07:27.626 --> 01:07:30.527
+Deserialization errors, then DLT flood.
+
+1057
+01:07:30.807 --> 01:07:32.023
+Blast radius:
+
+1058
+01:07:32.303 --> 01:07:33.413
+Consumers stop.
+
+1059
+01:07:33.693 --> 01:07:34.695
+Mitigation:
+
+1060
+01:07:34.975 --> 01:07:38.794
+Registry compatibility checks in CI and at produce time.
+
+1061
+01:07:39.074 --> 01:07:40.183
+Hot partition.
+
+1062
+01:07:40.463 --> 01:07:41.658
+Detection signal:
+
+1063
+01:07:41.938 --> 01:07:43.581
+Per-partition bytes-in skew.
+
+1064
+01:07:43.861 --> 01:07:45.077
+Blast radius:
+
+1065
+01:07:45.357 --> 01:07:47.469
+One consumer saturated (L2:
+
+1066
+01:07:47.749 --> 01:07:49.370
+1.87x).
+
+1067
+01:07:49.650 --> 01:07:50.653
+Mitigation:
+
+1068
+01:07:50.933 --> 01:07:53.429
+Better key, salting, dedicated topic.
+
+1069
+01:07:54.779 --> 01:07:55.867
+Observability.
+
+1070
+01:07:56.147 --> 01:08:02.867
+Consumer lag per group and partition, in records and seconds (the age of the oldest unconsumed record).
+
+1071
+01:08:03.147 --> 01:08:05.941
+This is the single most important streaming SLI.
+
+1072
+01:08:06.221 --> 01:08:09.059
+Rebalances per hour and time spent rebalancing.
+
+1073
+01:08:09.339 --> 01:08:11.003
+Commit latency and failures.
+
+1074
+01:08:11.283 --> 01:08:26.600
+Broker: under-replicated partitions, under-min-ISR partitions, offline partitions (page on all three), ISR shrink or expand rate, request latency p99 (produce or fetch), disk usage versus retention.
+
+1075
+01:08:27.950 --> 01:08:34.030
+Producer: record error rate, retries, record-queue-time-avg, batch size, compression ratio.
+
+1076
+01:08:34.310 --> 01:08:40.070
+DLT or retry topics: rates, age of the oldest message, by exception class.
+
+1077
+01:08:40.350 --> 01:08:47.945
+End-to-end latency: event occurredat (HLC), then consumer effect timestamp, as a histogram per consumer.
+
+1078
+01:08:48.225 --> 01:08:54.049
+It catches problems lag alone misses (slow producers, outbox backlog, Ch 13).
+
+1079
+01:08:54.329 --> 01:09:02.478
+Tracing: propagate W3C trace context in headers, with producer and consumer spans linked (Ch 24).
+
+1080
+01:09:03.828 --> 01:09:04.767
+Security.
+
+1081
+01:09:05.047 --> 01:09:08.225
+TLS everywhere (client-broker and inter-broker).
+
+1082
+01:09:08.505 --> 01:09:18.255
+Authenticate with SASL or SCRAM, mTLS or OAUTHBEARER, and ACLs per topic and group (a service writes only its own domain's topics).
+
+1083
+01:09:18.535 --> 01:09:27.623
+Events are data: minimize PII, and encrypt sensitive fields at the application level (the broker and its backups can be read by operators).
+
+1084
+01:09:27.903 --> 01:09:39.103
+Apply retention and deletion policies for DPDP compliance (Ch 36), keeping in mind compacted topics keep the latest value forever unless tombstoned.
+
+1085
+01:09:39.383 --> 01:09:45.420
+The schema registry and Connect REST APIs are admin surfaces: authenticate and restrict them.
+
+1086
+01:09:46.770 --> 01:09:51.207
+DLT replay is a privileged operation: audit who replayed what.
+
+1087
+01:09:52.557 --> 01:09:54.221
+Performance and tuning knobs.
+
+1088
+01:09:54.501 --> 01:09:55.867
+Here is a quick table:
+
+1089
+01:09:56.147 --> 01:10:00.307
+Knob, and Default here, and Effect. acks or enable.idempotence.
+
+1090
+01:10:00.587 --> 01:10:02.293
+Default here: all or true.
+
+1091
+01:10:02.573 --> 01:10:03.363
+Effect:
+
+1092
+01:10:03.643 --> 01:10:09.168
+Durability and dedup versus a few ms of latency. linger.ms or batch.size.
+
+1093
+01:10:09.448 --> 01:10:10.365
+Default here:
+
+1094
+01:10:10.645 --> 01:10:12.864
+5 ms or 64 KB.
+
+1095
+01:10:13.144 --> 01:10:13.933
+Effect:
+
+1096
+01:10:14.213 --> 01:10:17.136
+Throughput versus latency. compression.type.
+
+1097
+01:10:17.416 --> 01:10:19.229
+Default here: zstd.
+
+1098
+01:10:19.509 --> 01:10:20.299
+Effect:
+
+1099
+01:10:20.579 --> 01:10:24.611
+CPU versus network or disk. min.insync.replicas.
+
+1100
+01:10:24.891 --> 01:10:25.808
+Default here:
+
+1101
+01:10:26.088 --> 01:10:27.283
+2 (RF 3).
+
+1102
+01:10:27.563 --> 01:10:28.352
+Effect:
+
+1103
+01:10:28.632 --> 01:10:30.595
+Refuse writes versus risk loss.
+
+1104
+01:10:30.875 --> 01:10:31.813
+Partitions.
+
+1105
+01:10:32.093 --> 01:10:33.011
+Default here:
+
+1106
+01:10:33.291 --> 01:10:35.893
+Sized for consumer parallelism times 2.
+
+1107
+01:10:36.173 --> 01:10:36.963
+Effect:
+
+1108
+01:10:37.243 --> 01:10:43.664
+Parallelism versus overhead; can't shrink. max.poll.records or max.poll.interval.ms.
+
+1109
+01:10:43.944 --> 01:10:44.861
+Default here:
+
+1110
+01:10:45.141 --> 01:10:46.699
+100 or 5 min.
+
+1111
+01:10:46.979 --> 01:10:47.768
+Effect:
+
+1112
+01:10:48.048 --> 01:10:50.544
+Batch efficiency versus rebalance risk.
+
+1113
+01:10:51.894 --> 01:10:54.731
+fetch.min.bytes or fetch.max.wait.ms.
+
+1114
+01:10:55.011 --> 01:10:55.929
+Default here:
+
+1115
+01:10:56.209 --> 01:10:58.363
+1 KB or 100 ms.
+
+1116
+01:10:58.643 --> 01:10:59.433
+Effect:
+
+1117
+01:10:59.713 --> 01:11:01.825
+Consumer throughput versus latency.
+
+1118
+01:11:02.105 --> 01:11:03.875
+Retention or tiered storage.
+
+1119
+01:11:04.155 --> 01:11:05.073
+Default here:
+
+1120
+01:11:05.353 --> 01:11:06.611
+7 days hot.
+
+1121
+01:11:06.891 --> 01:11:07.681
+Effect:
+
+1122
+01:11:07.961 --> 01:11:13.145
+Replay window versus disk. maxackpending or prefetch (NATS or RabbitMQ).
+
+1123
+01:11:13.425 --> 01:11:14.342
+Default here:
+
+1124
+01:11:14.622 --> 01:11:16.414
+Sized to consumer capacity.
+
+1125
+01:11:16.694 --> 01:11:17.483
+Effect:
+
+1126
+01:11:17.763 --> 01:11:19.001
+Backpressure (lab:
+
+1127
+01:11:19.281 --> 01:11:20.049
+5).
+
+1128
+01:11:21.399 --> 01:11:22.124
+Cost.
+
+1129
+01:11:22.404 --> 01:11:26.351
+Storage = bytes per second times retention times RF:
+
+1130
+01:11:26.631 --> 01:11:28.444
+RF 3 triples the disk.
+
+1131
+01:11:28.724 --> 01:11:31.775
+Tiered storage cuts hot-disk cost for long retention.
+
+1132
+01:11:32.055 --> 01:11:42.871
+Cross-AZ traffic is often the biggest line item for Kafka in the cloud: replication (RF minus 1 copies) plus consumers reading from leaders in other AZs.
+
+1133
+01:11:43.151 --> 01:11:50.425
+Use rack-aware follower fetching (KIP-392), so consumers read from a replica in their own AZ.
+
+1134
+01:11:50.705 --> 01:11:55.953
+Partitions have a per-unit cost (memory, controller load, managed-service pricing).
+
+1135
+01:11:56.233 --> 01:11:58.260
+Don't create thousands just in case.
+
+1136
+01:11:59.610 --> 01:12:04.815
+Managed Kafka (MSK, Confluent Cloud, Aiven) trades money for operations.
+
+1137
+01:12:05.095 --> 01:12:11.922
+At this platform's scale (a few MB per second), a small managed cluster is usually cheaper than a team's time.
+
+1138
+01:12:13.272 --> 01:12:14.211
+Part 7.
+
+1139
+01:12:14.491 --> 01:12:16.197
+Anti-Patterns and Pitfalls.
+
+1140
+01:12:17.447 --> 01:12:18.087
+1.
+
+1141
+01:12:18.367 --> 01:12:20.757
+Producing without a key when order matters.
+
+1142
+01:12:22.107 --> 01:12:35.312
+Here is the Java code. before: sticky or round-robin partitioning; an order's events land on different partitions. after: key = aggregate id, then one partition, then per-order order.
+
+1143
+01:12:38.162 --> 01:12:45.095
+2. acks=1 (or acks=all with min.insync.replicas=1) for business events.
+
+1144
+01:12:45.375 --> 01:12:46.186
+Symptom:
+
+1145
+01:12:46.466 --> 01:12:49.431
+Acked events vanish after a broker failure (L3:
+
+1146
+01:12:49.711 --> 01:12:52.250
+1,160; case B:
+
+1147
+01:12:52.530 --> 01:12:53.597
+1,000).
+
+1148
+01:12:53.877 --> 01:13:00.959
+Fix: acks=all, idempotence, RF 3, min.insync.replicas=2, no unclean election.
+
+1149
+01:13:01.239 --> 01:13:01.986
+3.
+
+1150
+01:13:02.266 --> 01:13:04.783
+Auto-commit with slow or failing processing.
+
+1151
+01:13:05.063 --> 01:13:05.874
+Symptom:
+
+1152
+01:13:06.154 --> 01:13:08.415
+Records skipped after a crash (L4:
+
+1153
+01:13:08.695 --> 01:13:10.658
+8,413).
+
+1154
+01:13:10.938 --> 01:13:11.663
+Fix:
+
+1155
+01:13:11.943 --> 01:13:15.250
+Manual commit after processing, with idempotent effects.
+
+1156
+01:13:15.530 --> 01:13:16.234
+4.
+
+1157
+01:13:16.514 --> 01:13:18.199
+Infinite in-place retries.
+
+1158
+01:13:18.479 --> 01:13:19.290
+Symptom:
+
+1159
+01:13:19.570 --> 01:13:23.581
+One bad record stops a partition for hours (§1.1).
+
+1160
+01:13:23.861 --> 01:13:24.586
+Fix:
+
+1161
+01:13:24.866 --> 01:13:29.133
+Bounded retries, then retry topic, then DLT, with a classifier.
+
+1162
+01:13:30.483 --> 01:13:31.251
+5.
+
+1163
+01:13:31.531 --> 01:13:35.883
+More consumers than partitions, or scaling consumers to fix a hot key.
+
+1164
+01:13:36.163 --> 01:13:36.973
+Symptom:
+
+1165
+01:13:37.253 --> 01:13:39.280
+Idle pods, no throughput gain.
+
+1166
+01:13:39.560 --> 01:13:40.285
+Fix:
+
+1167
+01:13:40.565 --> 01:13:43.381
+Partitions ≥ peak consumers.
+
+1168
+01:13:43.661 --> 01:13:44.920
+Fix the key skew.
+
+1169
+01:13:45.200 --> 01:13:45.947
+6.
+
+1170
+01:13:46.227 --> 01:13:49.085
+Increasing partitions on a keyed topic in place.
+
+1171
+01:13:49.365 --> 01:13:50.176
+Symptom:
+
+1172
+01:13:50.456 --> 01:13:53.613
+Out-of-order processing right after the change (L2:
+
+1173
+01:13:53.893 --> 01:13:55.600
+50 % of keys move).
+
+1174
+01:13:55.880 --> 01:13:56.605
+Fix:
+
+1175
+01:13:56.885 --> 01:14:01.301
+Create a new topic with the right count, dual-write, then migrate consumers.
+
+1176
+01:14:02.651 --> 01:14:03.398
+7.
+
+1177
+01:14:03.678 --> 01:14:05.961
+Long processing inside the poll loop.
+
+1178
+01:14:06.241 --> 01:14:13.217
+Symptom: max.poll.interval.ms exceeded, then member kicked, then rebalance, then the same batch is reprocessed.
+
+1179
+01:14:13.497 --> 01:14:14.222
+Fix:
+
+1180
+01:14:14.502 --> 01:14:21.265
+Smaller max.poll.records, faster processing, or pause or resume with async work and careful commits.
+
+1181
+01:14:21.545 --> 01:14:22.227
+8.
+
+1182
+01:14:22.507 --> 01:14:24.470
+Treating the broker as a database.
+
+1183
+01:14:24.750 --> 01:14:25.561
+Symptom:
+
+1184
+01:14:25.841 --> 01:14:31.195
+Services query topics for current state, or keep infinite retention without compaction.
+
+1185
+01:14:31.475 --> 01:14:32.201
+Fix:
+
+1186
+01:14:32.481 --> 01:14:34.721
+Build a read model (Ch 15).
+
+1187
+01:14:35.001 --> 01:14:38.307
+Use compacted topics only for latest-value feeds.
+
+1188
+01:14:38.587 --> 01:14:39.334
+9.
+
+1189
+01:14:39.614 --> 01:14:42.515
+Breaking schema changes on an existing topic.
+
+1190
+01:14:43.865 --> 01:14:59.439
+Here is the JSON code. before: renaming a field in place breaks every existing consumer and every replay. after: add a new optional field with a default; deprecate the old one; breaking changes, then order.order.placed.v2.
+
+1191
+01:15:02.289 --> 01:15:02.993
+10.
+
+1192
+01:15:03.273 --> 01:15:06.601
+Retention shorter than the worst plausible consumer outage.
+
+1193
+01:15:06.881 --> 01:15:07.691
+Symptom:
+
+1194
+01:15:07.971 --> 01:15:16.270
+A consumer is down over a long weekend, and events are deleted before it's back (Redis lab: ~2,000 events never delivered).
+
+1195
+01:15:16.550 --> 01:15:17.275
+Fix:
+
+1196
+01:15:17.555 --> 01:15:25.001
+Retention ≫ lag alert threshold, tiered storage, and a replay-from-source path (CDC re-snapshot, Ch 13).
+
+1197
+01:15:26.351 --> 01:15:27.225
+Part 8.
+
+1198
+01:15:27.505 --> 01:15:28.849
+Interview Q and A.
+
+1199
+01:15:30.099 --> 01:15:30.931
+Beginner.
+
+1200
+01:15:31.211 --> 01:15:32.235
+Question 1.
+
+1201
+01:15:32.515 --> 01:15:35.331
+Queue versus pub or sub log: what's the difference?
+
+1202
+01:15:35.611 --> 01:15:36.977
+Thirty-second answer:
+
+1203
+01:15:37.257 --> 01:15:42.334
+In a queue, each message is processed by one consumer and removed when acknowledged.
+
+1204
+01:15:42.614 --> 01:15:45.153
+Consumers compete, and there's no history.
+
+1205
+01:15:45.433 --> 01:15:50.318
+In a log such as Kafka, messages are appended and kept for a retention period.
+
+1206
+01:15:50.598 --> 01:15:58.555
+Each consumer group tracks its own offset, so many independent consumers can read the same events at their own pace and replay them.
+
+1207
+01:15:59.905 --> 01:16:00.908
+Question 2.
+
+1208
+01:16:01.188 --> 01:16:04.687
+What do at-most-once, at-least-once and exactly-once mean?
+
+1209
+01:16:04.967 --> 01:16:06.332
+Thirty-second answer:
+
+1210
+01:16:06.612 --> 01:16:11.156
+At-most-once: a message is processed zero or one time (can be lost).
+
+1211
+01:16:11.436 --> 01:16:14.508
+At-least-once: one or more times (can be duplicated).
+
+1212
+01:16:14.788 --> 01:16:16.836
+Exactly-once: once in effect.
+
+1213
+01:16:17.116 --> 01:16:28.657
+Where you commit or acknowledge decides it: before processing gives at-most-once, after processing gives at-least-once, and at-least-once plus an idempotent effect gives effectively-once.
+
+1214
+01:16:30.007 --> 01:16:31.053
+Question 3.
+
+1215
+01:16:31.333 --> 01:16:33.957
+Why would you put a message broker between services?
+
+1216
+01:16:34.237 --> 01:16:35.602
+Thirty-second answer:
+
+1217
+01:16:35.882 --> 01:16:48.383
+To decouple them in time (the producer doesn't wait, and the consumer can be down), to fan out one event to many consumers, to absorb bursts (load leveling), and to let new consumers replay history.
+
+1218
+01:16:48.663 --> 01:16:55.341
+The cost is eventual consistency, duplicates, ordering concerns, lag, and another system to operate.
+
+1219
+01:16:56.691 --> 01:16:57.757
+Question 4.
+
+1220
+01:16:58.037 --> 01:16:59.424
+What is a consumer group?
+
+1221
+01:16:59.704 --> 01:17:01.069
+Thirty-second answer:
+
+1222
+01:17:01.349 --> 01:17:07.685
+A set of consumers that share the work of reading a topic: each partition is assigned to exactly one member.
+
+1223
+01:17:07.965 --> 01:17:12.147
+Different groups read the same topic independently, each with its own offsets.
+
+1224
+01:17:12.427 --> 01:17:16.267
+That's how one topic serves picking, notifications and analytics.
+
+1225
+01:17:17.617 --> 01:17:18.619
+Intermediate.
+
+1226
+01:17:18.899 --> 01:17:20.009
+Question 5.
+
+1227
+01:17:20.289 --> 01:17:23.467
+How does Kafka guarantee ordering, and how can you break it?
+
+1228
+01:17:23.747 --> 01:17:25.113
+Thirty-second answer:
+
+1229
+01:17:25.393 --> 01:17:30.811
+Order is guaranteed within a partition, and the key picks the partition (murmur2 mod N).
+
+1230
+01:17:31.091 --> 01:17:34.675
+So all events for one key are ordered if you key by the entity.
+
+1231
+01:17:34.955 --> 01:17:48.353
+You break it with no or wrong keys, by changing the partition count (keys remap), with non-idempotent retries with several in-flight requests, with retry topics, and with parallel processing inside a partition.
+
+1232
+01:17:49.703 --> 01:17:50.812
+Question 6.
+
+1233
+01:17:51.092 --> 01:17:53.140
+How many partitions should a topic have?
+
+1234
+01:17:53.420 --> 01:17:54.785
+Thirty-second answer:
+
+1235
+01:17:55.065 --> 01:18:04.495
+Enough for peak consumer parallelism (and producer throughput) with headroom for 2 to 3 years, because you can't shrink partitions and growing them remaps keys.
+
+1236
+01:18:04.775 --> 01:18:10.769
+Compute it from the slowest consumer's per-record time and the peak rate, then multiply by about 2.
+
+1237
+01:18:12.119 --> 01:18:13.207
+Question 7.
+
+1238
+01:18:13.487 --> 01:18:15.194
+Retention versus compaction?
+
+1239
+01:18:15.474 --> 01:18:16.839
+Thirty-second answer:
+
+1240
+01:18:17.119 --> 01:18:22.581
+Retention deletes old segments by time or size: the topic is a window of history.
+
+1241
+01:18:22.861 --> 01:18:38.370
+Compaction keeps at least the latest record per key and removes older ones (and deleted keys via tombstones): the topic becomes a changelog of current state, good for latest stock per SKU and for rebuilding caches or state stores.
+
+1242
+01:18:39.720 --> 01:18:40.744
+Question 8.
+
+1243
+01:18:41.024 --> 01:18:42.923
+Where should a consumer commit offsets?
+
+1244
+01:18:43.203 --> 01:18:44.568
+Thirty-second answer:
+
+1245
+01:18:44.848 --> 01:18:49.904
+After the effect is durable, making the effect idempotent (at-least-once + dedup).
+
+1246
+01:18:50.184 --> 01:18:55.027
+Or atomically with the effect by storing offsets in the same DB transaction.
+
+1247
+01:18:55.307 --> 01:18:59.189
+Never before processing, unless losing messages is acceptable.
+
+1248
+01:19:00.539 --> 01:19:01.606
+Question 9.
+
+1249
+01:19:01.886 --> 01:19:06.046
+What causes consumer-group rebalances, and how do you reduce their impact?
+
+1250
+01:19:06.326 --> 01:19:07.691
+Thirty-second answer:
+
+1251
+01:19:07.971 --> 01:19:17.699
+Members joining or leaving, crashes (missed heartbeats and session timeout), and a member exceeding max.poll.interval.ms because processing is slow.
+
+1252
+01:19:17.979 --> 01:19:29.499
+To reduce them: use the cooperative-sticky assignor (or KIP-848), static membership for rolling restarts, keep poll batches short, and commit on revoke.
+
+1253
+01:19:30.849 --> 01:19:31.617
+Senior.
+
+1254
+01:19:31.897 --> 01:19:32.943
+Question 10.
+
+1255
+01:19:33.223 --> 01:19:37.873
+Explain ISR, high watermark, acks and min.insync.replicas together.
+
+1256
+01:19:38.153 --> 01:19:39.519
+Thirty-second answer:
+
+1257
+01:19:39.799 --> 01:19:41.420
+Followers fetch from the leader.
+
+1258
+01:19:41.700 --> 01:19:46.308
+Those caught up within replica.lag.time.max.ms form the ISR.
+
+1259
+01:19:46.588 --> 01:20:05.063
+The high watermark is the highest offset all ISR members have, and consumers read only up to it. acks=all waits for the current ISR. min.insync.replicas makes the leader refuse writes when the ISR is too small, so acks=all can't silently degrade to one copy.
+
+1260
+01:20:06.413 --> 01:20:07.543
+Question 11.
+
+1261
+01:20:07.823 --> 01:20:10.341
+How do you handle poison messages in Kafka?
+
+1262
+01:20:10.621 --> 01:20:11.986
+Thirty-second answer:
+
+1263
+01:20:12.266 --> 01:20:13.589
+Classify failures.
+
+1264
+01:20:13.869 --> 01:20:19.266
+Non-retryable ones (bad data, deserialization) go to a DLT immediately.
+
+1265
+01:20:19.546 --> 01:20:31.343
+Retryable ones get bounded retries, either in place for strictly ordered consumers (with a small budget) or through delayed retry topics so the partition keeps flowing, then the DLT.
+
+1266
+01:20:31.623 --> 01:20:35.079
+Every DLT has an owner, an alert and a replay tool.
+
+1267
+01:20:36.429 --> 01:20:37.517
+Question 12.
+
+1268
+01:20:37.797 --> 01:20:41.381
+Does Kafka's exactly-once solve duplicate side effects?
+
+1269
+01:20:41.661 --> 01:20:43.027
+Thirty-second answer:
+
+1270
+01:20:43.307 --> 01:20:44.757
+Only inside Kafka.
+
+1271
+01:20:45.037 --> 01:20:49.240
+The idempotent producer removes duplicates from retries (L3:
+
+1272
+01:20:49.520 --> 01:20:58.331
+30, then 0), and transactions atomically write outputs and consumer offsets for Kafka-to-Kafka processing (readcommitted consumers).
+
+1273
+01:20:58.611 --> 01:21:05.587
+Side effects in databases, emails or APIs still need idempotency or offsets stored with the effect.
+
+1274
+01:21:06.937 --> 01:21:08.217
+Question 13.
+
+1275
+01:21:08.497 --> 01:21:11.803
+How do you evolve event schemas without breaking consumers?
+
+1276
+01:21:12.083 --> 01:21:13.449
+Thirty-second answer:
+
+1277
+01:21:13.729 --> 01:21:25.995
+Use a schema registry with a compatibility mode (backward or full, transitive), and only make compatible changes: add optional fields with defaults, never reuse or retype fields.
+
+1278
+01:21:26.275 --> 01:21:31.161
+For breaking changes, create a versioned topic and dual-publish during migration.
+
+1279
+01:21:31.441 --> 01:21:33.873
+Enforce this in CI with contract tests.
+
+1280
+01:21:35.223 --> 01:21:36.417
+Question 14.
+
+1281
+01:21:36.697 --> 01:21:38.255
+Consumer lag is growing.
+
+1282
+01:21:38.535 --> 01:21:39.516
+What do you do?
+
+1283
+01:21:39.796 --> 01:21:41.161
+Thirty-second answer:
+
+1284
+01:21:41.441 --> 01:21:48.951
+Measure lag in time per partition to see whether it's all partitions (capacity) or one (hot key or poison message).
+
+1285
+01:21:49.231 --> 01:21:54.095
+For one partition: check for a stuck record or DLT flow, or a hot key.
+
+1286
+01:21:54.375 --> 01:22:04.871
+For all partitions: scale consumers up to the partition count, speed up processing (batching, async I or O, a slow dependency?), and shed non-critical work.
+
+1287
+01:22:05.151 --> 01:22:07.753
+Watch retention: lag must never reach it.
+
+1288
+01:22:09.103 --> 01:22:09.999
+Architect.
+
+1289
+01:22:10.279 --> 01:22:11.474
+Question 15.
+
+1290
+01:22:11.754 --> 01:22:15.914
+Kafka, RabbitMQ, Pulsar, NATS, SQS: how do you choose?
+
+1291
+01:22:16.194 --> 01:22:17.559
+Thirty-second answer:
+
+1292
+01:22:17.839 --> 01:22:21.061
+From the model you need and the operations you can afford.
+
+1293
+01:22:21.341 --> 01:22:25.949
+Kafka for a durable, replayable event backbone with a big ecosystem.
+
+1294
+01:22:26.229 --> 01:22:30.133
+RabbitMQ for work queues with rich routing and per-message ack.
+
+1295
+01:22:30.413 --> 01:22:34.829
+Pulsar for multi-tenant, geo-replicated streaming with tiered storage.
+
+1296
+01:22:35.109 --> 01:22:39.567
+NATS JetStream for lightweight low-latency streams with Raft replication.
+
+1297
+01:22:39.847 --> 01:22:43.965
+SQS or SNS for zero-ops cloud queues without replay.
+
+1298
+01:22:45.315 --> 01:22:46.509
+Question 16.
+
+1299
+01:22:46.789 --> 01:22:49.797
+Design the event backbone for the grocery platform.
+
+1300
+01:22:50.077 --> 01:22:51.443
+Thirty-second answer:
+
+1301
+01:22:51.723 --> 01:22:56.117
+Kafka (managed) with RF 3 across AZs and min ISR 2.
+
+1302
+01:22:56.397 --> 01:23:04.824
+Topics per event type named domain.entity.event.vN, keyed by aggregate id and sized for consumer parallelism.
+
+1303
+01:23:05.104 --> 01:23:09.243
+Producers go through outboxes with idempotence and acks=all.
+
+1304
+01:23:09.523 --> 01:23:17.715
+Consumers use cooperative-sticky assignment, static membership, commit-after with inboxes, retry topics and owned DLTs.
+
+1305
+01:23:17.995 --> 01:23:19.403
+Avro with a registry.
+
+1306
+01:23:19.683 --> 01:23:21.155
+Lag-in-time SLOs.
+
+1307
+01:23:22.505 --> 01:23:23.849
+Question 17.
+
+1308
+01:23:24.129 --> 01:23:26.731
+How do you make a consumer both ordered and fast?
+
+1309
+01:23:27.011 --> 01:23:28.377
+Thirty-second answer:
+
+1310
+01:23:28.657 --> 01:23:32.497
+Partition by the ordering key and parallelize across partitions.
+
+1311
+01:23:32.777 --> 01:23:43.273
+Within a partition, process in parallel by key (a key-ordered executor, for example, Confluent's Parallel Consumer), and commit only the contiguous processed prefix.
+
+1312
+01:23:43.553 --> 01:23:46.262
+Batch I or O, and keep per-record work short.
+
+1313
+01:23:47.612 --> 01:23:48.785
+Question 18.
+
+1314
+01:23:49.065 --> 01:23:54.740
+How would you migrate a keyed topic from 12 to 48 partitions without breaking consumers?
+
+1315
+01:23:55.020 --> 01:23:56.385
+Thirty-second answer:
+
+1316
+01:23:56.665 --> 01:24:05.903
+Create...v1 with 48 partitions as a new topic (or a new version), and dual-publish from the producers (via the outbox relay) to both.
+
+1317
+01:24:06.183 --> 01:24:11.068
+Start consumers on the new topic from a point where they can dedup (inbox or versions).
+
+1318
+01:24:11.348 --> 01:24:16.553
+Switch readers, then stop the old publish and retire the old topic after retention.
+
+1319
+01:24:17.903 --> 01:24:19.141
+Question 19.
+
+1320
+01:24:19.421 --> 01:24:24.285
+Your DLT for payments events has 3,000 messages after a deploy.
+
+1321
+01:24:24.565 --> 01:24:25.631
+Walk me through it.
+
+1322
+01:24:25.911 --> 01:24:27.277
+Thirty-second answer:
+
+1323
+01:24:27.557 --> 01:24:48.421
+Stop the bleeding (roll back or disable the failing path), group the DLT by exception and schema version to find the root cause (a schema change? a new validation? a downstream failure?), fix it, then replay from the DLT with an idempotent consumer at a controlled rate, verifying with reconciliation (Ch 45).
+
+1324
+01:24:48.701 --> 01:24:52.285
+Postmortem on why the contract test or canary didn't catch it.
+
+1325
+01:24:53.635 --> 01:24:54.744
+Question 20.
+
+1326
+01:24:55.024 --> 01:24:58.117
+What are the hidden costs of an event-driven architecture?
+
+1327
+01:24:58.397 --> 01:24:59.763
+Thirty-second answer:
+
+1328
+01:25:00.043 --> 01:25:19.371
+Eventual consistency everywhere, duplicate and out-of-order handling in every consumer, schema governance, DLT operations, lag monitoring, harder debugging (flows are implicit), data duplication across read models, PII spread, and a platform to run, plus cross-AZ network costs.
+
+1329
+01:25:20.721 --> 01:25:21.617
+Part 9.
+
+1330
+01:25:21.897 --> 01:25:23.305
+Summary and Practice.
+
+1331
+01:25:24.555 --> 01:25:25.643
+Key takeaways.
+
+1332
+01:25:25.923 --> 01:25:32.899
+Queue or log is the first choice: removal on ack versus retained history with per-group offsets and replay.
+
+1333
+01:25:33.179 --> 01:25:34.629
+Order is per partition.
+
+1334
+01:25:34.909 --> 01:25:39.453
+Key by the aggregate id, and never grow a keyed topic in place (L2:
+
+1335
+01:25:39.733 --> 01:25:41.440
+50 % of keys move).
+
+1336
+01:25:41.720 --> 01:25:48.717
+Size partitions for peak consumer parallelism with headroom, and watch for hot keys (1.87x).
+
+1337
+01:25:48.997 --> 01:25:59.109
+Durability = RF 3 + acks=all + min.insync.replicas=2 + no unclean election + an idempotent producer.
+
+1338
+01:25:59.389 --> 01:26:01.203
+L3 quantified each piece.
+
+1339
+01:26:02.553 --> 01:26:04.622
+The commit point decides the semantics.
+
+1340
+01:26:04.902 --> 01:26:08.273
+Commit after processing with idempotent effects (L4:
+
+1341
+01:26:08.553 --> 01:26:16.297
+8,413 lost versus 9,362 duplicated versus 0 or 0).
+
+1342
+01:26:16.577 --> 01:26:18.987
+Kafka exactly-once is Kafka-to-Kafka.
+
+1343
+01:26:19.267 --> 01:26:22.787
+Databases and APIs need Ch 13's patterns.
+
+1344
+01:26:23.067 --> 01:26:29.531
+Poison messages: classify, bound retries, use retry topics, and give every DLT an owner.
+
+1345
+01:26:29.811 --> 01:26:39.774
+Rebalances hurt: use cooperative-sticky or KIP-848, static membership and short polls (3 versus 6 to 9 partitions moved).
+
+1346
+01:26:40.054 --> 01:26:44.982
+Lag in time is the key SLI, and retention is the hard deadline for lag.
+
+1347
+01:26:46.332 --> 01:26:53.031
+Schemas are contracts: use a registry, backward-compatible changes, and versioned topics for breaking ones.
+
+1348
+01:26:54.381 --> 01:26:55.703
+Decision cheat sheet.
+
+1349
+01:26:55.983 --> 01:26:57.349
+Here is a quick table:
+
+1350
+01:26:57.629 --> 01:26:58.738
+Need, and Choose.
+
+1351
+01:26:59.018 --> 01:27:01.813
+Event backbone with replay and many consumers:
+
+1352
+01:27:02.093 --> 01:27:04.802
+Kafka (log), key = aggregate id.
+
+1353
+01:27:05.082 --> 01:27:07.855
+Jobs with per-message retry, delay, routing:
+
+1354
+01:27:08.135 --> 01:27:12.445
+Queue (RabbitMQ or SQS or share groups or JetStream work-queue).
+
+1355
+01:27:12.725 --> 01:27:14.175
+Latest value per key:
+
+1356
+01:27:14.455 --> 01:27:19.085
+Compacted topic (or JetStream max-msgs-per-subject=1).
+
+1357
+01:27:19.365 --> 01:27:20.773
+No acknowledged loss:
+
+1358
+01:27:21.053 --> 01:27:25.533
+RF 3, min ISR 2, acks=all, idempotence, unclean off.
+
+1359
+01:27:25.813 --> 01:27:27.818
+Effect exactly once in a DB:
+
+1360
+01:27:28.098 --> 01:27:31.789
+At-least-once + inbox or offsets in the same txn.
+
+1361
+01:27:32.069 --> 01:27:33.285
+Poison messages:
+
+1362
+01:27:33.565 --> 01:27:36.829
+Classifier + retry topics + owned DLT.
+
+1363
+01:27:37.109 --> 01:27:38.239
+Ordered and fast:
+
+1364
+01:27:38.519 --> 01:27:42.338
+Partition by key + key-ordered parallelism within a partition.
+
+1365
+01:27:43.688 --> 01:27:45.309
+Lightweight in-cluster streams:
+
+1366
+01:27:45.589 --> 01:27:47.168
+NATS JetStream R3.
+
+1367
+01:27:48.518 --> 01:27:49.649
+Exercises.
+
+1368
+01:27:49.929 --> 01:27:51.294
+Here is a quick table:
+
+1369
+01:27:51.574 --> 01:27:53.430
+Band, and Exercise, and Hint.
+
+1370
+01:27:53.710 --> 01:27:54.542
+B1.
+
+1371
+01:27:54.822 --> 01:27:55.889
+Exercise:
+
+1372
+01:27:56.169 --> 01:28:02.334
+Extend L1's log with compaction (keep the latest per key) and show a consumer rebuilding state.
+
+1373
+01:28:02.614 --> 01:28:03.297
+Hint:
+
+1374
+01:28:03.577 --> 01:28:05.177
+Map of key, then latest.
+
+1375
+01:28:05.457 --> 01:28:06.289
+B1.
+
+1376
+01:28:06.569 --> 01:28:07.635
+Exercise:
+
+1377
+01:28:07.915 --> 01:28:11.499
+Run the NATS lab and explain tries and Duplicate: true.
+
+1378
+01:28:11.779 --> 01:28:12.462
+Hint:
+
+1379
+01:28:12.742 --> 01:28:14.406
+Ack wait, Msg-Id.
+
+1380
+01:28:14.686 --> 01:28:15.561
+B2.
+
+1381
+01:28:15.841 --> 01:28:16.907
+Exercise:
+
+1382
+01:28:17.187 --> 01:28:23.694
+Use L2 to compare keying by orderid versus customerid for skew with 1 % power users.
+
+1383
+01:28:23.974 --> 01:28:24.657
+Hint:
+
+1384
+01:28:24.937 --> 01:28:26.153
+Count per partition.
+
+1385
+01:28:26.433 --> 01:28:27.307
+B2.
+
+1386
+01:28:27.587 --> 01:28:28.654
+Exercise:
+
+1387
+01:28:28.934 --> 01:28:32.731
+In L2, remove a consumer from 4 and compare assignors.
+
+1388
+01:28:33.011 --> 01:28:33.694
+Hint:
+
+1389
+01:28:33.974 --> 01:28:35.041
+Reverse of D.
+
+1390
+01:28:35.321 --> 01:28:36.195
+B3.
+
+1391
+01:28:36.475 --> 01:28:37.542
+Exercise:
+
+1392
+01:28:37.822 --> 01:28:41.513
+Add replica.lag.time.max sensitivity to L3:
+
+1393
+01:28:41.793 --> 01:28:43.691
+10, 30, 100 ticks.
+
+1394
+01:28:43.971 --> 01:28:44.654
+Hint:
+
+1395
+01:28:44.934 --> 01:28:47.387
+ISR shrink rate versus rejections.
+
+1396
+01:28:47.667 --> 01:28:48.542
+B3.
+
+1397
+01:28:48.822 --> 01:28:49.889
+Exercise:
+
+1398
+01:28:50.169 --> 01:28:57.486
+Extend L4's retry topic so later events for a failed key wait (a per-key hold) and show 0 reorderings.
+
+1399
+01:28:57.766 --> 01:28:58.449
+Hint:
+
+1400
+01:28:58.729 --> 01:29:00.009
+Track blocked keys.
+
+1401
+01:29:01.359 --> 01:29:02.233
+B4.
+
+1402
+01:29:02.513 --> 01:29:03.580
+Exercise:
+
+1403
+01:29:03.860 --> 01:29:13.993
+Estimate partitions, storage and cross-AZ cost for rider GPS pings (Ch 47) at 50 K riders times 1 ping or 4 s.
+
+1404
+01:29:14.273 --> 01:29:14.956
+Hint:
+
+1405
+01:29:15.236 --> 01:29:17.796
+Bytes times RF times AZ traffic.
+
+1406
+01:29:18.076 --> 01:29:18.951
+B4.
+
+1407
+01:29:19.231 --> 01:29:20.297
+Exercise:
+
+1408
+01:29:20.577 --> 01:29:24.311
+Write the runbook for under-min-ISR partitions at 2 a.m.
+
+1409
+01:29:24.591 --> 01:29:25.273
+Hint:
+
+1410
+01:29:25.553 --> 01:29:28.220
+Don't lower min ISR; find the broker.
+
+1411
+01:29:29.570 --> 01:29:30.573
+Further reading.
+
+1412
+01:29:30.853 --> 01:29:32.133
+Jay Kreps, The Log:
+
+1413
+01:29:32.413 --> 01:29:38.535
+What every software engineer should know about real-time data's unifying abstraction (2013).
+
+1414
+01:29:38.815 --> 01:30:11.833
+Kafka documentation: design (replication, ISR, delivery semantics), KIP-98 (idempotence or transactions), KIP-101 (leader epoch), KIP-429 (incremental rebalancing), KIP-848 (new consumer protocol), KIP-932 (share groups), KIP-966 (eligible leader replicas), KIP-405 (tiered storage), KIP-392 (follower fetching).
+
+1415
+01:30:12.113 --> 01:30:16.017
+Martin Kleppmann, Designing Data-Intensive Applications ch.
+
+1416
+01:30:16.297 --> 01:30:17.982
+11 (stream processing).
+
+1417
+01:30:19.332 --> 01:30:20.783
+Gwen Shapira et al.
+
+1418
+01:30:21.063 --> 01:30:21.895
+Kafka:
+
+1419
+01:30:22.175 --> 01:30:24.201
+The Definitive Guide, 2nd ed.
+
+1420
+01:30:24.481 --> 01:30:29.857
+Spring for Apache Kafka reference: error handling, non-blocking retries, DLT.
+
+1421
+01:30:30.137 --> 01:30:36.665
+NATS JetStream documentation: streams, consumers, deduplication, maxdeliver, advisories.
+
+1422
+01:30:36.945 --> 01:30:38.396
+Redis documentation:
+
+1423
+01:30:38.676 --> 01:30:40.895
+Streams, consumer groups, XAUTOCLAIM.
+
+1424
+01:30:42.245 --> 01:30:43.482
+Related chapters.
+
+1425
+01:30:43.762 --> 01:31:06.567
+10, Replication, 11, Partitioning and Sharding, 12, Consistency, Time and Consensus, 13, Distributed Transactions, 15, Event-Driven Architecture, CQRS and Event Sourcing, 17, Inter-Service Communication, 18, Resilience Patterns, 24, Observability, 28, Schema and Data Evolution, 40, Notification System.
+
+1426
+01:31:07.917 --> 01:31:09.517
+That's the end of this chapter.
+
+1427
+01:31:09.797 --> 01:31:15.920
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1428
+01:31:16.200 --> 01:31:17.651
+See you in the next chapter.
+

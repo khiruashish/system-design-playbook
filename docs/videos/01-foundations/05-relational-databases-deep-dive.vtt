@@ -1,0 +1,6042 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:02.569
+Relational Databases Deep Dive.
+
+2
+00:00:02.849 --> 00:00:07.137
+Chapter 05, from the Foundations part of the System Design Playbook.
+
+3
+00:00:08.887 --> 00:00:09.847
+At a glance:
+
+4
+00:00:10.127 --> 00:00:11.300
+Chapter at a glance.
+
+5
+00:00:11.580 --> 00:00:12.583
+Reader bands:
+
+6
+00:00:12.863 --> 00:00:15.167
+B1, then B4, Prerequisites:
+
+7
+00:00:15.447 --> 00:00:18.881
+Ch 02, Ch 04, What you will build:
+
+8
+00:00:19.161 --> 00:00:38.276
+Dark-store stock reservation, taken from a lost-update demonstration (L1) to a production PostgreSQL design with atomic conditional updates, deadlock-free locking, N+1-free reads, sized pools, read-replica routing with read-your-writes, and partitioned history (L4), Reading time:
+
+9
+00:00:38.556 --> 00:00:40.348
+110 min + code.
+
+10
+00:00:41.698 --> 00:00:42.551
+Part 1.
+
+11
+00:00:42.831 --> 00:00:44.751
+Introduction and Why It Matters.
+
+12
+00:00:46.001 --> 00:00:46.919
+A story:
+
+13
+00:00:47.199 --> 00:00:51.209
+1,800 orders for 600 packets of onions.
+
+14
+00:00:51.489 --> 00:00:57.505
+The festival sale's headline deal was 1 rupeesonions, 1 kg, limit one per customer.
+
+15
+00:00:57.785 --> 00:01:01.391
+Each of the 50 busiest dark stores had about 12 packets.
+
+16
+00:01:01.671 --> 00:01:03.420
+Inventory code looked like this:
+
+17
+00:01:04.770 --> 00:01:06.306
+Here is the Java code.
+
+18
+00:01:09.156 --> 00:01:16.388
+The code had @Transactional, and the database was PostgreSQL at its default isolation level, READ COMMITTED.
+
+19
+00:01:16.668 --> 00:01:17.927
+Every test passed.
+
+20
+00:01:18.207 --> 00:01:23.284
+In production, 1,800 orders were confirmed for 600 packets.
+
+21
+00:01:23.564 --> 00:01:31.436
+Pickers found empty shelves, and 1,200 customers received a sorry, item unavailable call after paying.
+
+22
+00:01:31.716 --> 00:01:33.615
+Nothing was wrong with the database.
+
+23
+00:01:33.895 --> 00:01:41.447
+At READ COMMITTED, two transactions can read the same available = 12, both compute 11, and both write 11.
+
+24
+00:01:41.727 --> 00:01:48.873
+That's a lost update, and it's allowed at that isolation level. @Transactional doesn't make read-modify-write safe.
+
+25
+00:01:49.153 --> 00:01:51.287
+The fix was one SQL statement:
+
+26
+00:01:52.637 --> 00:01:54.237
+Here is the SQL code.
+
+27
+00:01:57.087 --> 00:01:57.769
+Quote:
+
+28
+00:01:58.049 --> 00:01:59.713
+The thesis of this chapter.
+
+29
+00:01:59.993 --> 00:02:05.561
+A relational database gives you powerful guarantees, but only the ones you actually ask for.
+
+30
+00:02:05.841 --> 00:02:17.084
+Knowing what ACID, isolation levels, MVCC, locks and indexes really do is the difference between a system that is correct and fast, and one that is neither under load.
+
+31
+00:02:18.434 --> 00:02:20.738
+Where this lives in the grocery platform.
+
+32
+00:02:21.018 --> 00:02:22.383
+Here is a quick table:
+
+33
+00:02:22.663 --> 00:02:25.906
+Service, and Relational concern. inventory-service:
+
+34
+00:02:26.186 --> 00:02:30.837
+Concurrent reservations, hot rows, lost updates, deadlocks. order-service:
+
+35
+00:02:31.117 --> 00:02:38.413
+Transactions spanning order + items + outbox; history queries; partitioning. payment-service, wallet-service:
+
+36
+00:02:38.693 --> 00:02:46.287
+Ledger correctness (double entry), serializable invariants, idempotency (Ch 04). catalog-service:
+
+37
+00:02:46.567 --> 00:02:50.962
+Read-heavy; read replicas; denormalized read models. slot-service:
+
+38
+00:02:51.242 --> 00:02:54.399
+Capacity counters per slot (same pattern as stock).
+
+39
+00:02:54.679 --> 00:02:55.981
+Every Spring service:
+
+40
+00:02:56.261 --> 00:03:00.890
+JPA or Hibernate pitfalls, connection pools, transaction boundaries.
+
+41
+00:03:02.240 --> 00:03:03.563
+Learning objectives.
+
+42
+00:03:03.843 --> 00:03:05.208
+Here is a quick table:
+
+43
+00:03:05.488 --> 00:03:07.685
+Band, and After this chapter you can....
+
+44
+00:03:07.965 --> 00:03:08.797
+B1:
+
+45
+00:03:09.077 --> 00:03:14.347
+Explain ACID, tables and indexes, normalization, and read a basic EXPLAIN.
+
+46
+00:03:14.627 --> 00:03:15.501
+B2:
+
+47
+00:03:15.781 --> 00:03:23.227
+Choose isolation levels, use optimistic or pessimistic locking, avoid N+1, and size connection pools.
+
+48
+00:03:23.507 --> 00:03:24.403
+B3:
+
+49
+00:03:24.683 --> 00:03:32.832
+Reason about MVCC, WAL, B+ trees, vacuum, deadlocks and write skew, and design indexes from access patterns.
+
+50
+00:03:33.112 --> 00:03:34.008
+B4:
+
+51
+00:03:34.288 --> 00:03:42.373
+Plan partitioning, read replicas with read-your-writes, online migrations, and when a single relational primary stops being enough.
+
+52
+00:03:43.723 --> 00:03:44.598
+Part 2.
+
+53
+00:03:44.878 --> 00:03:46.777
+Core Concepts, Beginner to Deep.
+
+54
+00:03:48.027 --> 00:03:51.013
+Intuition: the stock register at a kirana shop.
+
+55
+00:03:51.293 --> 00:03:53.555
+A kirana shop owner keeps a ledger book:
+
+56
+00:03:53.835 --> 00:03:56.651
+Tables are pages of the ledger with fixed columns.
+
+57
+00:03:56.931 --> 00:04:00.131
+An index is the alphabetical tab strip on the side.
+
+58
+00:04:00.411 --> 00:04:02.288
+Without it, you flip every page.
+
+59
+00:04:02.568 --> 00:04:05.491
+A transaction is write all of this sale, or none of it.
+
+60
+00:04:05.771 --> 00:04:08.736
+You never record the payment without reducing the stock.
+
+61
+00:04:09.016 --> 00:04:13.624
+Isolation is what happens when two assistants update the same line at once.
+
+62
+00:04:13.904 --> 00:04:19.323
+Does one wait, does one see the other's half-written line, or does one quietly overwrite the other?
+
+63
+00:04:20.673 --> 00:04:27.905
+The WAL is the rough notebook the owner writes in first, so that if the ledger gets wet, the day can be reconstructed.
+
+64
+00:04:29.255 --> 00:04:30.556
+ACID, precisely.
+
+65
+00:04:30.836 --> 00:04:32.201
+Here is a quick table:
+
+66
+00:04:32.481 --> 00:04:38.199
+Property, and What it guarantees, and What it does not guarantee, and Mechanism (PostgreSQL).
+
+67
+00:04:38.479 --> 00:04:39.481
+Atomicity.
+
+68
+00:04:39.761 --> 00:04:40.956
+What it guarantees:
+
+69
+00:04:41.236 --> 00:04:44.031
+All statements in a transaction commit, or none do.
+
+70
+00:04:44.311 --> 00:04:45.804
+What it does not guarantee:
+
+71
+00:04:46.084 --> 00:04:48.623
+That concurrent transactions don't interfere.
+
+72
+00:04:48.903 --> 00:04:50.951
+Mechanism (PostgreSQL):
+
+73
+00:04:51.231 --> 00:04:54.495
+WAL + transaction status (commit log).
+
+74
+00:04:54.775 --> 00:04:55.841
+Consistency.
+
+75
+00:04:56.121 --> 00:04:57.316
+What it guarantees:
+
+76
+00:04:57.596 --> 00:05:01.991
+Declared constraints hold after commit (PK, FK, UNIQUE, CHECK).
+
+77
+00:05:02.271 --> 00:05:03.764
+What it does not guarantee:
+
+78
+00:05:04.044 --> 00:05:06.988
+Business invariants you didn't declare (no overselling).
+
+79
+00:05:07.268 --> 00:05:09.316
+Mechanism (PostgreSQL):
+
+80
+00:05:09.596 --> 00:05:10.684
+Constraint checks.
+
+81
+00:05:10.964 --> 00:05:12.009
+Isolation.
+
+82
+00:05:12.289 --> 00:05:13.484
+What it guarantees:
+
+83
+00:05:13.764 --> 00:05:18.735
+Concurrent transactions behave as if isolated to the degree of the chosen level.
+
+84
+00:05:19.015 --> 00:05:20.508
+What it does not guarantee:
+
+85
+00:05:20.788 --> 00:05:23.156
+Serializability, unless you choose it.
+
+86
+00:05:23.436 --> 00:05:25.484
+Mechanism (PostgreSQL):
+
+87
+00:05:25.764 --> 00:05:29.156
+MVCC snapshots + row locks + SSI.
+
+88
+00:05:29.436 --> 00:05:30.396
+Durability.
+
+89
+00:05:30.676 --> 00:05:31.871
+What it guarantees:
+
+90
+00:05:32.151 --> 00:05:33.985
+Committed data survives a crash.
+
+91
+00:05:34.265 --> 00:05:35.759
+What it does not guarantee:
+
+92
+00:05:36.039 --> 00:05:39.729
+Survival of disk loss (that needs replication and backups).
+
+93
+00:05:40.009 --> 00:05:42.057
+Mechanism (PostgreSQL):
+
+94
+00:05:42.337 --> 00:05:44.812
+WAL flushed (fsync) at commit.
+
+95
+00:05:46.162 --> 00:05:46.802
+Tip:
+
+96
+00:05:47.082 --> 00:05:49.663
+Encode invariants in the database when you can.
+
+97
+00:05:49.943 --> 00:05:58.989
+CHECK (available = 0) on the stock table turns an oversell bug into a failed transaction instead of a silent inconsistency.
+
+98
+00:05:59.269 --> 00:06:02.298
+Constraints are the cheapest correctness tests you'll ever write.
+
+99
+00:06:03.648 --> 00:06:07.040
+Storage internals: pages, heap, B+ trees, WAL.
+
+100
+00:06:07.320 --> 00:06:08.472
+Pages and heap.
+
+101
+00:06:08.752 --> 00:06:13.979
+PostgreSQL stores table rows in 8 KB pages in an unordered heap.
+
+102
+00:06:14.259 --> 00:06:23.112
+Each row version (a tuple) has hidden header fields: xmin (the creating transaction) and xmax (the deleting or updating transaction).
+
+103
+00:06:23.392 --> 00:06:26.421
+Those power MVCC (§2.7).
+
+104
+00:06:26.701 --> 00:06:28.195
+B+ tree indexes.
+
+105
+00:06:28.475 --> 00:06:31.248
+The default index is a balanced tree of pages.
+
+106
+00:06:31.528 --> 00:06:38.184
+Leaf pages hold sorted keys with pointers (TIDs) to heap tuples, and are linked for range scans.
+
+107
+00:06:39.534 --> 00:06:40.878
+Here is the diagram.
+
+108
+00:06:44.728 --> 00:06:46.093
+Here is a quick table:
+
+109
+00:06:46.373 --> 00:06:48.549
+Property, and Consequence for design.
+
+110
+00:06:48.829 --> 00:06:54.013
+Height ~3 to 4 for millions to billions of rows (hundreds of keys per page):
+
+111
+00:06:54.293 --> 00:06:57.963
+Point lookups cost ~3 to 4 page reads, mostly cached.
+
+112
+00:06:58.243 --> 00:06:59.352
+Sorted leaves:
+
+113
+00:06:59.632 --> 00:07:02.896
+Range queries and ORDER BY on the index prefix are cheap.
+
+114
+00:07:03.176 --> 00:07:04.648
+Leftmost-prefix rule:
+
+115
+00:07:04.928 --> 00:07:11.157
+An index on (customerid, createdat) helps WHERE customerid =? but not WHERE createdat? alone.
+
+116
+00:07:11.437 --> 00:07:14.445
+Every index must be updated on insert or update:
+
+117
+00:07:14.725 --> 00:07:18.501
+Indexes cost write throughput and storage (write amplification).
+
+118
+00:07:18.781 --> 00:07:22.280
+Random-key inserts (UUIDv4) split pages everywhere:
+
+119
+00:07:22.560 --> 00:07:29.600
+Prefer time-ordered keys (UUIDv7, ULID, sequences) for large, insert-heavy tables (Ch 20).
+
+120
+00:07:30.950 --> 00:07:34.619
+L1 (§5) shows the effect of a sorted structure:
+
+121
+00:07:34.899 --> 00:07:43.283
+2 M rows and a customer or date-range query take a ~60 ms scan versus ~1 ms seek in plain Java.
+
+122
+00:07:43.563 --> 00:07:47.275
+In a database the gap grows further once pages come from disk.
+
+123
+00:07:47.555 --> 00:07:49.561
+Write-ahead log (WAL).
+
+124
+00:07:50.911 --> 00:07:53.577
+The sequence diagram walks through it step by step.
+
+125
+00:07:53.857 --> 00:07:55.009
+App to PG:
+
+126
+00:07:55.289 --> 00:07:57.060
+UPDATE stock... then COMMIT.
+
+127
+00:07:57.340 --> 00:08:01.841
+PG to SB: modify page in memory (page is now dirty).
+
+128
+00:08:02.121 --> 00:08:04.575
+PG to WAL: append change record.
+
+129
+00:08:04.855 --> 00:08:08.844
+PG to WAL: fsync at COMMIT (synchronouscommit = on).
+
+130
+00:08:09.124 --> 00:08:10.212
+PG to App:
+
+131
+00:08:10.492 --> 00:08:11.921
+COMMIT OK (durable).
+
+132
+00:08:15.771 --> 00:08:17.137
+Here is a quick table:
+
+133
+00:08:17.417 --> 00:08:19.678
+WAL fact, and Why you care.
+
+134
+00:08:19.958 --> 00:08:23.201
+Commit latency about WAL fsync latency:
+
+135
+00:08:23.481 --> 00:08:27.001
+Fast disks and group commit matter for write-heavy services.
+
+136
+00:08:27.281 --> 00:08:32.230
+Replication ships WAL (physical) or decoded changes (logical):
+
+137
+00:08:32.510 --> 00:08:41.598
+Replicas and CDC (Debezium, Ch 13) read the WAL. synchronouscommit = off trades durability for latency:
+
+138
+00:08:41.878 --> 00:08:45.249
+Acceptable for clickstream, never for orders or payments.
+
+139
+00:08:45.529 --> 00:08:49.305
+Full-page writes after checkpoints spike WAL volume:
+
+140
+00:08:49.585 --> 00:08:53.211
+Tune checkpointtimeout and maxwalsize for write-heavy loads.
+
+141
+00:08:54.561 --> 00:08:55.948
+Other storage engines:
+
+142
+00:08:56.228 --> 00:09:04.953
+MySQL InnoDB uses a clustered index (the table is the primary-key B+ tree, and secondary indexes point to the PK).
+
+143
+00:09:05.233 --> 00:09:10.161
+That makes PK range scans very fast and random PKs very expensive.
+
+144
+00:09:10.441 --> 00:09:16.991
+LSM-tree engines (RocksDB, Cassandra) trade read cost for write throughput (Ch 06).
+
+145
+00:09:18.341 --> 00:09:22.458
+Indexes: composite, covering, partial, and reading EXPLAIN, then.
+
+146
+00:09:22.738 --> 00:09:24.103
+Here is a quick table:
+
+147
+00:09:24.383 --> 00:09:26.538
+Index type, and Example, and Use when.
+
+148
+00:09:26.818 --> 00:09:27.885
+Single column.
+
+149
+00:09:28.165 --> 00:09:29.039
+Example:
+
+150
+00:09:29.319 --> 00:09:30.322
+(customerid).
+
+151
+00:09:30.602 --> 00:09:31.477
+Use when:
+
+152
+00:09:31.757 --> 00:09:33.165
+One selective filter.
+
+153
+00:09:33.445 --> 00:09:34.341
+Composite.
+
+154
+00:09:34.621 --> 00:09:35.495
+Example:
+
+155
+00:09:35.775 --> 00:09:38.442
+(customerid, createdat DESC, id DESC).
+
+156
+00:09:38.722 --> 00:09:39.597
+Use when:
+
+157
+00:09:39.877 --> 00:09:43.461
+Filter + sort (keyset pagination, Ch 04).
+
+158
+00:09:43.741 --> 00:09:44.935
+Covering (INCLUDE).
+
+159
+00:09:45.215 --> 00:09:46.090
+Example:
+
+160
+00:09:46.370 --> 00:09:48.589
+(storeid, sku) INCLUDE (available).
+
+161
+00:09:48.869 --> 00:09:49.743
+Use when:
+
+162
+00:09:50.023 --> 00:09:52.882
+Answer from the index alone (index-only scan).
+
+163
+00:09:53.162 --> 00:09:53.994
+Partial.
+
+164
+00:09:54.274 --> 00:09:55.149
+Example:
+
+165
+00:09:55.429 --> 00:09:57.797
+(expiresat) WHERE status = 'HELD'.
+
+166
+00:09:58.077 --> 00:09:58.951
+Use when:
+
+167
+00:09:59.231 --> 00:10:03.093
+You only ever query a small subset, such as active reservations.
+
+168
+00:10:03.373 --> 00:10:04.183
+Unique.
+
+169
+00:10:04.463 --> 00:10:05.338
+Example:
+
+170
+00:10:05.618 --> 00:10:07.111
+UNIQUE (orderid, sku).
+
+171
+00:10:07.391 --> 00:10:08.266
+Use when:
+
+172
+00:10:08.546 --> 00:10:10.231
+An invariant, plus a lookup.
+
+173
+00:10:10.511 --> 00:10:11.514
+Expression.
+
+174
+00:10:11.794 --> 00:10:12.669
+Example:
+
+175
+00:10:12.949 --> 00:10:14.079
+(lower(email)).
+
+176
+00:10:14.359 --> 00:10:15.234
+Use when:
+
+177
+00:10:15.514 --> 00:10:17.114
+Queries use the expression.
+
+178
+00:10:18.464 --> 00:10:19.147
+GIN.
+
+179
+00:10:19.427 --> 00:10:20.301
+Example:
+
+180
+00:10:20.581 --> 00:10:23.056
+(tags) USING gin, full-text, JSONB.
+
+181
+00:10:23.336 --> 00:10:24.211
+Use when:
+
+182
+00:10:24.491 --> 00:10:27.093
+Containment queries, arrays, JSONB.
+
+183
+00:10:27.373 --> 00:10:28.099
+BRIN.
+
+184
+00:10:28.379 --> 00:10:29.253
+Example:
+
+185
+00:10:29.533 --> 00:10:31.197
+(createdat) USING brin.
+
+186
+00:10:31.477 --> 00:10:32.352
+Use when:
+
+187
+00:10:32.632 --> 00:10:36.643
+Huge, naturally time-ordered append-only tables (tiny index).
+
+188
+00:10:37.993 --> 00:10:43.070
+Composite column order: equality columns first, then range or sort columns:
+
+189
+00:10:43.350 --> 00:10:46.635
+(storeid, status, createdat) for WHERE storeid =?
+
+190
+00:10:46.915 --> 00:10:48.174
+AND status =?
+
+191
+00:10:48.454 --> 00:10:49.841
+ORDER BY createdat.
+
+192
+00:10:50.121 --> 00:10:54.707
+Put the most selective equality columns first when several queries share a prefix.
+
+193
+00:10:54.987 --> 00:11:00.086
+Reading EXPLAIN (ANALYZE, BUFFERS), a representative plan (your numbers will differ):
+
+194
+00:11:01.436 --> 00:11:04.145
+On screen: -- Before: no suitable index.
+
+195
+00:11:04.425 --> 00:11:22.537
+Seq Scan on orders (cost=0.00..48213.00 rows=11 width=96) (actual time=41.2..212.7. rows=9 loops=1).
+
+196
+00:11:22.817 --> 00:11:23.649
+Filter:
+
+197
+00:11:23.929 --> 00:11:32.228
+((customerid = 'cust-4242') AND (createdat = '2026 to 09 to 01')).
+
+198
+00:11:32.508 --> 00:11:34.172
+Rows Removed by Filter:
+
+199
+00:11:34.452 --> 00:11:38.612
+1999991.
+
+200
+00:11:38.892 --> 00:11:45.143
+Buffers: shared hit=1204 read=21809.
+
+201
+00:11:45.423 --> 00:11:46.660
+Execution Time:
+
+202
+00:11:46.940 --> 00:11:49.649
+212.9 ms. -- After:
+
+203
+00:11:49.929 --> 00:11:56.841
+CREATE INDEX CONCURRENTLY idxorderscustomerkeyset ON orders (customerid. createdat DESC, id DESC);.
+
+204
+00:11:57.121 --> 00:12:15.873
+Index Scan using idxorderscustomerkeyset on orders (cost=0.43..12.61 rows=11. width=96) (actual time=0.031..0.044 rows=9 loops=1).
+
+205
+00:12:16.153 --> 00:12:17.199
+Index Cond:
+
+206
+00:12:17.479 --> 00:12:25.777
+((customerid = 'cust-4242') AND (createdat = '2026 to 09 to 01')).
+
+207
+00:12:26.057 --> 00:12:27.572
+The rest is in the chapter.
+
+208
+00:12:30.422 --> 00:12:31.787
+Here is a quick table:
+
+209
+00:12:32.067 --> 00:12:34.883
+Plan node or field, and Meaning, and Red flag.
+
+210
+00:12:35.163 --> 00:12:36.102
+Seq Scan.
+
+211
+00:12:36.382 --> 00:12:37.171
+Meaning:
+
+212
+00:12:37.451 --> 00:12:38.774
+Reads the whole table.
+
+213
+00:12:39.054 --> 00:12:39.993
+Red flag:
+
+214
+00:12:40.273 --> 00:12:42.321
+On large tables in OLTP paths.
+
+215
+00:12:42.601 --> 00:12:44.649
+Index Scan or Index Only Scan.
+
+216
+00:12:44.929 --> 00:12:45.718
+Meaning:
+
+217
+00:12:45.998 --> 00:12:48.729
+Uses the index (and heap unless index-only).
+
+218
+00:12:49.009 --> 00:12:49.947
+Red flag:
+
+219
+00:12:50.227 --> 00:12:55.625
+Index-only scans that still show heap fetches, then vacuum or visibility map lagging.
+
+220
+00:12:55.905 --> 00:12:57.206
+Bitmap Heap Scan.
+
+221
+00:12:57.486 --> 00:12:58.275
+Meaning:
+
+222
+00:12:58.555 --> 00:13:01.286
+Collects many TIDs, then reads pages.
+
+223
+00:13:01.566 --> 00:13:02.505
+Red flag:
+
+224
+00:13:02.785 --> 00:13:04.598
+Fine for medium selectivity.
+
+225
+00:13:04.878 --> 00:13:07.523
+Nested Loop or Hash Join or Merge Join.
+
+226
+00:13:07.803 --> 00:13:08.593
+Meaning:
+
+227
+00:13:08.873 --> 00:13:10.089
+Join strategies.
+
+228
+00:13:10.369 --> 00:13:11.307
+Red flag:
+
+229
+00:13:11.587 --> 00:13:16.921
+Nested loop with a large outer side. rows= estimate versus actual rows.
+
+230
+00:13:17.201 --> 00:13:17.990
+Meaning:
+
+231
+00:13:18.270 --> 00:13:20.233
+Planner estimate versus reality.
+
+232
+00:13:20.513 --> 00:13:21.451
+Red flag:
+
+233
+00:13:21.731 --> 00:13:26.937
+100 times differences mean stale statistics (ANALYZE) or correlated columns.
+
+234
+00:13:28.287 --> 00:13:29.951
+Rows Removed by Filter.
+
+235
+00:13:30.231 --> 00:13:31.020
+Meaning:
+
+236
+00:13:31.300 --> 00:13:32.900
+Rows read and discarded.
+
+237
+00:13:33.180 --> 00:13:34.119
+Red flag:
+
+238
+00:13:34.399 --> 00:13:37.001
+Large numbers mean a missing or wrong index.
+
+239
+00:13:37.281 --> 00:13:38.711
+Buffers: read=.
+
+240
+00:13:38.991 --> 00:13:39.780
+Meaning:
+
+241
+00:13:40.060 --> 00:13:41.575
+Pages read from disk.
+
+242
+00:13:41.855 --> 00:13:42.793
+Red flag:
+
+243
+00:13:43.073 --> 00:13:47.169
+High reads on hot paths mean a working set larger than RAM.
+
+244
+00:13:47.449 --> 00:13:49.284
+Sort Method: external merge.
+
+245
+00:13:49.564 --> 00:13:50.353
+Meaning:
+
+246
+00:13:50.633 --> 00:13:51.935
+Sort spilled to disk.
+
+247
+00:13:52.215 --> 00:13:53.153
+Red flag:
+
+248
+00:13:53.433 --> 00:13:56.932
+Increase workmem for that query, or add an index for the order.
+
+249
+00:13:58.282 --> 00:13:59.029
+Warning:
+
+250
+00:13:59.309 --> 00:14:00.482
+Index hygiene.
+
+251
+00:14:00.762 --> 00:14:03.450
+Every index slows writes and consumes memory.
+
+252
+00:14:03.730 --> 00:14:09.874
+Review pgstatuserindexes for idxscan = 0 (unused) and for duplicate prefixes.
+
+253
+00:14:10.154 --> 00:14:17.109
+In production, create indexes with CREATE INDEX CONCURRENTLY to avoid blocking writes (§2.12).
+
+254
+00:14:18.459 --> 00:14:21.296
+Normalization versus denormalization.
+
+255
+00:14:21.576 --> 00:14:22.941
+Here is a quick table:
+
+256
+00:14:23.221 --> 00:14:26.656
+Normal form, and Rule of thumb, and Violation example.
+
+257
+00:14:26.936 --> 00:14:27.896
+1NF.
+
+258
+00:14:28.176 --> 00:14:29.221
+Rule of thumb:
+
+259
+00:14:29.501 --> 00:14:31.869
+Atomic values, no repeating groups.
+
+260
+00:14:32.149 --> 00:14:37.696
+Violation example: items = 'SKU1:2,SKU2:1' in one column.
+
+261
+00:14:37.976 --> 00:14:38.915
+2NF.
+
+262
+00:14:39.195 --> 00:14:40.240
+Rule of thumb:
+
+263
+00:14:40.520 --> 00:14:43.016
+Non-key columns depend on the whole key.
+
+264
+00:14:43.296 --> 00:14:44.661
+Violation example:
+
+265
+00:14:44.941 --> 00:14:50.061
+In orderitem(orderid, sku, productname), productname depends only on sku.
+
+266
+00:14:50.341 --> 00:14:51.280
+3NF.
+
+267
+00:14:51.560 --> 00:14:52.605
+Rule of thumb:
+
+268
+00:14:52.885 --> 00:14:55.168
+No dependency on non-key columns.
+
+269
+00:14:55.448 --> 00:14:59.075
+Violation example: orders(customerid, customercity).
+
+270
+00:14:59.355 --> 00:15:00.336
+BCNF.
+
+271
+00:15:00.616 --> 00:15:01.661
+Rule of thumb:
+
+272
+00:15:01.941 --> 00:15:04.245
+Every determinant is a candidate key.
+
+273
+00:15:04.525 --> 00:15:05.891
+Violation example:
+
+274
+00:15:06.171 --> 00:15:07.323
+Rare in practice.
+
+275
+00:15:08.673 --> 00:15:14.283
+Normalize by default for write paths: one fact in one place means no update anomalies.
+
+276
+00:15:14.563 --> 00:15:18.638
+Denormalize deliberately for reads, and keep it correct with a clear owner:
+
+277
+00:15:19.988 --> 00:15:21.353
+Here is a quick table:
+
+278
+00:15:21.633 --> 00:15:30.444
+Denormalization, and Why it's correct in the grocery platform. orderitem.productname, unitprice, gstrate copied at order time:
+
+279
+00:15:30.724 --> 00:15:39.855
+Historical truth: the invoice must show the price and tax at purchase, not today's. orders.deliveryaddress snapshot (JSONB or columns):
+
+280
+00:15:40.135 --> 00:15:47.836
+The customer may edit their address later, and the order shouldn't change. ordersummary read model in tracking (Ch 03):
+
+281
+00:15:48.116 --> 00:15:56.457
+A different service, a different access pattern, fed by events (Ch 15). stock.available alongside onhand and reserved:
+
+282
+00:15:56.737 --> 00:16:00.791
+A derived counter kept by the same transaction, protected by CHECK.
+
+283
+00:16:02.141 --> 00:16:02.887
+Note:
+
+284
+00:16:03.167 --> 00:16:04.810
+Snapshot versus reference.
+
+285
+00:16:05.090 --> 00:16:07.778
+Ask should this value change when the source changes?
+
+286
+00:16:08.058 --> 00:16:11.407
+If no (price at purchase, address at delivery), snapshot it.
+
+287
+00:16:11.687 --> 00:16:15.335
+If yes (product description on the catalog page), reference it.
+
+288
+00:16:15.615 --> 00:16:20.053
+Most denormalization bugs come from answering this question implicitly.
+
+289
+00:16:21.403 --> 00:16:23.515
+Isolation levels and anomalies.
+
+290
+00:16:23.795 --> 00:16:25.160
+Here is a quick table:
+
+291
+00:16:25.440 --> 00:16:28.320
+Anomaly, and What happens, and Grocery example.
+
+292
+00:16:28.600 --> 00:16:29.560
+Dirty read.
+
+293
+00:16:29.840 --> 00:16:30.779
+What happens:
+
+294
+00:16:31.059 --> 00:16:32.509
+Read uncommitted data.
+
+295
+00:16:32.789 --> 00:16:34.027
+Grocery example:
+
+296
+00:16:34.307 --> 00:16:36.803
+See a stock decrement that later rolls back.
+
+297
+00:16:37.083 --> 00:16:38.427
+Non-repeatable read.
+
+298
+00:16:38.707 --> 00:16:39.645
+What happens:
+
+299
+00:16:39.925 --> 00:16:42.635
+The same row read twice gives different values.
+
+300
+00:16:42.915 --> 00:16:44.152
+Grocery example:
+
+301
+00:16:44.432 --> 00:16:47.035
+Price changes between validating and charging.
+
+302
+00:16:47.315 --> 00:16:48.189
+Phantom.
+
+303
+00:16:48.469 --> 00:16:49.408
+What happens:
+
+304
+00:16:49.688 --> 00:16:52.120
+The same query returns different row sets.
+
+305
+00:16:52.400 --> 00:16:53.637
+Grocery example:
+
+306
+00:16:53.917 --> 00:16:56.371
+Slot booking count changes mid-transaction.
+
+307
+00:16:56.651 --> 00:16:57.717
+Lost update.
+
+308
+00:16:57.997 --> 00:16:58.936
+What happens:
+
+309
+00:16:59.216 --> 00:17:01.989
+Two read-modify-writes, one overwrites the other.
+
+310
+00:17:02.269 --> 00:17:05.917
+Grocery example: §1.1 onion oversell.
+
+311
+00:17:06.197 --> 00:17:07.136
+Write skew.
+
+312
+00:17:07.416 --> 00:17:08.355
+What happens:
+
+313
+00:17:08.635 --> 00:17:14.309
+Two transactions read overlapping data, write different rows, and together break an invariant.
+
+314
+00:17:14.589 --> 00:17:15.827
+Grocery example:
+
+315
+00:17:16.107 --> 00:17:21.824
+Two riders each check ≥ 1 rider on shift at this store and both go off shift.
+
+316
+00:17:23.174 --> 00:17:29.851
+What each level prevents in PostgreSQL (it differs from the SQL standard table and from MySQL):
+
+317
+00:17:31.201 --> 00:17:32.567
+Here is a quick table:
+
+318
+00:17:32.847 --> 00:17:39.737
+Level (PostgreSQL), and Dirty read, and Non-repeatable, and Phantom, and Lost update, and Write skew, and Notes.
+
+319
+00:17:40.017 --> 00:17:41.169
+READ UNCOMMITTED.
+
+320
+00:17:41.449 --> 00:17:42.367
+Dirty read:
+
+321
+00:17:42.647 --> 00:17:44.524
+Prevented (treated as RC).
+
+322
+00:17:44.804 --> 00:17:46.276
+READ COMMITTED (default).
+
+323
+00:17:46.556 --> 00:17:52.636
+Lost update: for read-modify-write in the app; for SET x = x - 1 in SQL.
+
+324
+00:17:52.916 --> 00:17:53.727
+Notes:
+
+325
+00:17:54.007 --> 00:17:55.585
+New snapshot per statement.
+
+326
+00:17:55.865 --> 00:17:57.060
+REPEATABLE READ.
+
+327
+00:17:57.340 --> 00:17:58.193
+Phantom:
+
+328
+00:17:58.473 --> 00:17:59.412
+(snapshot).
+
+329
+00:17:59.692 --> 00:18:00.759
+Lost update:
+
+330
+00:18:01.039 --> 00:18:04.025
+(errors with 40001 on concurrent update).
+
+331
+00:18:04.305 --> 00:18:05.116
+Notes:
+
+332
+00:18:05.396 --> 00:18:06.783
+Snapshot isolation.
+
+333
+00:18:08.133 --> 00:18:09.242
+SERIALIZABLE.
+
+334
+00:18:09.522 --> 00:18:10.333
+Notes:
+
+335
+00:18:10.613 --> 00:18:14.005
+SSI: may abort with 40001, so retry.
+
+336
+00:18:15.355 --> 00:18:16.272
+Watch out:
+
+337
+00:18:16.552 --> 00:18:18.899
+The single most important line in this section.
+
+338
+00:18:19.179 --> 00:18:23.829
+At READ COMMITTED, UPDATE stock SET available = available - 1 WHERE...
+
+339
+00:18:24.109 --> 00:18:26.072
+AND available = 1 is safe.
+
+340
+00:18:26.352 --> 00:18:32.987
+PostgreSQL re-evaluates the WHERE clause against the latest committed row after waiting for the row lock.
+
+341
+00:18:33.267 --> 00:18:38.856
+The same logic written as SELECT, compute in Java, then UPDATE with a value is not safe.
+
+342
+00:18:39.136 --> 00:18:43.787
+Push the arithmetic into the database, or lock, or use optimistic versioning.
+
+343
+00:18:45.137 --> 00:18:52.561
+MySQL InnoDB differences: the default is REPEATABLE READ, and plain SELECTs read a consistent snapshot.
+
+344
+00:18:52.841 --> 00:18:53.673
+SELECT...
+
+345
+00:18:53.953 --> 00:19:05.174
+FOR UPDATE and UPDATEs read the latest data and take gap and next-key locks to prevent phantoms, which is a frequent source of unexpected lock waits and deadlocks on range predicates.
+
+346
+00:19:06.524 --> 00:19:09.425
+MVCC: how readers don't block writers.
+
+347
+00:19:09.705 --> 00:19:16.532
+With Multi-Version Concurrency Control, an UPDATE writes a new tuple version and marks the old one with xmax.
+
+348
+00:19:16.812 --> 00:19:20.417
+Each transaction reads the versions visible to its snapshot.
+
+349
+00:19:21.767 --> 00:19:23.111
+Here is the diagram.
+
+350
+00:19:26.961 --> 00:19:28.327
+Here is a quick table:
+
+351
+00:19:28.607 --> 00:19:30.761
+Consequence, and Design implication.
+
+352
+00:19:31.041 --> 00:19:34.625
+Readers never block writers, and writers never block readers:
+
+353
+00:19:34.905 --> 00:19:37.103
+Great concurrency for mixed workloads.
+
+354
+00:19:37.383 --> 00:19:40.711
+Writers to the same row still serialize on the row lock:
+
+355
+00:19:40.991 --> 00:19:44.233
+Hot rows (the 1 rupeesonion) are throughput-limited.
+
+356
+00:19:44.513 --> 00:19:46.135
+Dead tuples accumulate:
+
+357
+00:19:46.415 --> 00:19:50.703
+VACUUM or autovacuum must keep up, or tables and indexes bloat.
+
+358
+00:19:50.983 --> 00:19:54.204
+Long-running transactions keep old snapshots alive:
+
+359
+00:19:54.484 --> 00:19:57.151
+They block vacuum everywhere, and bloat grows.
+
+360
+00:19:57.431 --> 00:20:01.591
+Kill idle-in-transaction sessions (idleintransactionsessiontimeout).
+
+361
+00:20:02.941 --> 00:20:10.557
+HOT updates (heap-only tuples) avoid index updates when no indexed column changes and the page has room:
+
+362
+00:20:10.837 --> 00:20:18.325
+Keep frequently updated columns (available) out of indexes when possible, and use fillfactor 100 for hot tables.
+
+363
+00:20:18.605 --> 00:20:20.418
+Transaction ID wraparound:
+
+364
+00:20:20.698 --> 00:20:22.597
+Vacuum must freeze old tuples.
+
+365
+00:20:22.877 --> 00:20:25.074
+Monitor age(datfrozenxid).
+
+366
+00:20:26.424 --> 00:20:29.133
+Locking: optimistic versus pessimistic.
+
+367
+00:20:29.413 --> 00:20:30.779
+Here is a quick table:
+
+368
+00:20:31.059 --> 00:20:33.747
+Strategy, and How, and Best when, and Cost.
+
+369
+00:20:34.027 --> 00:20:35.755
+Atomic conditional update.
+
+370
+00:20:36.035 --> 00:20:36.696
+How:
+
+371
+00:20:36.976 --> 00:20:37.829
+UPDATE...
+
+372
+00:20:38.109 --> 00:20:39.880
+SET x = x - n WHERE...
+
+373
+00:20:40.160 --> 00:20:41.461
+AND x = n.
+
+374
+00:20:41.741 --> 00:20:42.637
+Best when:
+
+375
+00:20:42.917 --> 00:20:45.392
+Counters and simple invariants on one row.
+
+376
+00:20:45.672 --> 00:20:46.397
+Cost:
+
+377
+00:20:46.677 --> 00:20:49.493
+One statement, and the row lock is held briefly.
+
+378
+00:20:49.773 --> 00:20:50.883
+Default choice.
+
+379
+00:20:51.163 --> 00:20:52.613
+Optimistic (version).
+
+380
+00:20:52.893 --> 00:20:53.555
+How:
+
+381
+00:20:53.835 --> 00:20:54.688
+UPDATE...
+
+382
+00:20:54.968 --> 00:20:56.184
+WHERE id =?
+
+383
+00:20:56.464 --> 00:21:01.307
+AND version =? where 0 rows means a conflict (JPA @Version).
+
+384
+00:21:01.587 --> 00:21:02.483
+Best when:
+
+385
+00:21:02.763 --> 00:21:07.008
+Low contention, user-facing edits (Ch 04 ETags).
+
+386
+00:21:07.288 --> 00:21:08.013
+Cost:
+
+387
+00:21:08.293 --> 00:21:10.811
+Retries under contention; wasted work.
+
+388
+00:21:11.091 --> 00:21:12.093
+Pessimistic.
+
+389
+00:21:12.373 --> 00:21:13.035
+How:
+
+390
+00:21:13.315 --> 00:21:14.147
+SELECT...
+
+391
+00:21:14.427 --> 00:21:15.899
+FOR UPDATE then update.
+
+392
+00:21:16.179 --> 00:21:17.075
+Best when:
+
+393
+00:21:17.355 --> 00:21:21.173
+Multi-row read-then-decide logic that can't be one statement.
+
+394
+00:21:21.453 --> 00:21:22.179
+Cost:
+
+395
+00:21:22.459 --> 00:21:25.957
+Holds locks for the transaction duration; deadlock risk.
+
+396
+00:21:27.307 --> 00:21:28.715
+FOR UPDATE SKIP LOCKED.
+
+397
+00:21:28.995 --> 00:21:29.657
+How:
+
+398
+00:21:29.937 --> 00:21:31.643
+Take the next unlocked rows.
+
+399
+00:21:31.923 --> 00:21:32.819
+Best when:
+
+400
+00:21:33.099 --> 00:21:35.894
+Work queues (outbox relay, webhook worker).
+
+401
+00:21:36.174 --> 00:21:36.899
+Cost:
+
+402
+00:21:37.179 --> 00:21:39.718
+Not for correctness checks on specific rows.
+
+403
+00:21:39.998 --> 00:21:41.193
+FOR UPDATE NOWAIT.
+
+404
+00:21:41.473 --> 00:21:42.134
+How:
+
+405
+00:21:42.414 --> 00:21:44.078
+Fail immediately if locked.
+
+406
+00:21:44.358 --> 00:21:45.254
+Best when:
+
+407
+00:21:45.534 --> 00:21:47.241
+UI someone else is editing.
+
+408
+00:21:47.521 --> 00:21:48.246
+Cost:
+
+409
+00:21:48.526 --> 00:21:49.571
+Error handling.
+
+410
+00:21:49.851 --> 00:21:51.067
+Advisory locks.
+
+411
+00:21:51.347 --> 00:21:53.502
+How: pgadvisoryxactlock(key).
+
+412
+00:21:53.782 --> 00:21:54.678
+Best when:
+
+413
+00:21:54.958 --> 00:21:58.414
+Serializing a logical operation that isn't a row.
+
+414
+00:21:58.694 --> 00:21:59.419
+Cost:
+
+415
+00:21:59.699 --> 00:22:01.683
+Easy to misuse; must be scoped.
+
+416
+00:22:01.963 --> 00:22:03.073
+SERIALIZABLE.
+
+417
+00:22:03.353 --> 00:22:04.014
+How:
+
+418
+00:22:04.294 --> 00:22:06.235
+Let SSI detect conflicts.
+
+419
+00:22:06.515 --> 00:22:07.411
+Best when:
+
+420
+00:22:07.691 --> 00:22:10.422
+Complex invariants across rows (write skew).
+
+421
+00:22:10.702 --> 00:22:11.427
+Cost:
+
+422
+00:22:11.707 --> 00:22:14.545
+Aborts under contention; needs retry loops.
+
+423
+00:22:15.895 --> 00:22:16.791
+Deadlocks.
+
+424
+00:22:17.071 --> 00:22:22.724
+Transaction A locks row 1 and waits for row 2, while B locks row 2 and waits for row 1.
+
+425
+00:22:23.004 --> 00:22:28.764
+PostgreSQL detects this after deadlocktimeout (1 s by default) and aborts one of them.
+
+426
+00:22:29.044 --> 00:22:31.924
+Prevention: lock rows in a consistent order.
+
+427
+00:22:32.204 --> 00:22:36.343
+For a multi-SKU order, sort lines by sku before updating.
+
+428
+00:22:36.623 --> 00:22:42.276
+Mitigation: keep transactions short, and retry on SQLSTATE 40P01.
+
+429
+00:22:43.626 --> 00:22:45.781
+JPA or Hibernate pitfalls.
+
+430
+00:22:46.061 --> 00:22:47.426
+Here is a quick table:
+
+431
+00:22:47.706 --> 00:22:49.519
+Pitfall, and Symptom, and Fix.
+
+432
+00:22:49.799 --> 00:22:51.143
+N+1 selects.
+
+433
+00:22:51.423 --> 00:22:52.234
+Symptom:
+
+434
+00:22:52.514 --> 00:22:59.426
+Loading 20 orders fires 1 + 20 item queries (+ 20 more for each lazy association touched).
+
+435
+00:22:59.706 --> 00:23:00.431
+Fix:
+
+436
+00:23:00.711 --> 00:23:11.271
+JOIN FETCH / @EntityGraph for single queries; @BatchSize or hibernate.defaultbatchfetchsize for collections; DTO projections for read APIs.
+
+437
+00:23:11.551 --> 00:23:13.535
+Collection fetch + pagination.
+
+438
+00:23:13.815 --> 00:23:14.626
+Symptom:
+
+439
+00:23:14.906 --> 00:23:21.967
+Hibernate warns it's paginating in memory (HHH90003004) and loads everything.
+
+440
+00:23:22.247 --> 00:23:22.973
+Fix:
+
+441
+00:23:23.253 --> 00:23:28.245
+Two queries: page the parent ids (keyset), then fetch children WHERE orderid IN (...).
+
+442
+00:23:28.525 --> 00:23:31.789
+Open Session in View (on by default in Spring Boot).
+
+443
+00:23:32.069 --> 00:23:32.879
+Symptom:
+
+444
+00:23:33.159 --> 00:23:40.541
+Lazy loads fire during JSON serialization, outside your transaction, holding a connection for the whole request.
+
+445
+00:23:40.821 --> 00:23:46.389
+Fix: spring.jpa.open-in-view=false; fetch what you need in the service layer.
+
+446
+00:23:47.739 --> 00:23:49.765
+LazyInitializationException.
+
+447
+00:23:50.045 --> 00:23:50.856
+Symptom:
+
+448
+00:23:51.136 --> 00:23:55.019
+Accessing a lazy association after the transaction closed.
+
+449
+00:23:55.299 --> 00:23:56.024
+Fix:
+
+450
+00:23:56.304 --> 00:24:00.379
+Fetch explicitly in the query; don't return entities from services.
+
+451
+00:24:00.659 --> 00:24:03.411
+IDENTITY ids disable insert batching.
+
+452
+00:24:03.691 --> 00:24:04.501
+Symptom:
+
+453
+00:24:04.781 --> 00:24:08.003
+1,000 inserts = 1,000 round trips.
+
+454
+00:24:08.283 --> 00:24:09.008
+Fix:
+
+455
+00:24:09.288 --> 00:24:17.693
+Use SEQUENCE with a pooled optimizer (allocationSize = 50), plus hibernate.jdbc.batchsize and orderinserts.
+
+456
+00:24:17.973 --> 00:24:19.829
+Dirty checking on large sessions.
+
+457
+00:24:20.109 --> 00:24:20.920
+Symptom:
+
+458
+00:24:21.200 --> 00:24:23.141
+Slow flushes, high CPU.
+
+459
+00:24:23.421 --> 00:24:29.800
+Fix: @Transactional(readOnly = true) for reads; projections instead of managed entities.
+
+460
+00:24:30.080 --> 00:24:32.085
+Read-modify-write via entities.
+
+461
+00:24:32.365 --> 00:24:33.176
+Symptom:
+
+462
+00:24:33.456 --> 00:24:35.824
+Lost updates (§1.1).
+
+463
+00:24:36.104 --> 00:24:42.717
+Fix: @Version, or @Modifying @Query(update... set x = x -:n where... and x =:n).
+
+464
+00:24:44.067 --> 00:24:47.374
+@Transactional on private methods or self-invocation.
+
+465
+00:24:47.654 --> 00:24:48.465
+Symptom:
+
+466
+00:24:48.745 --> 00:24:50.366
+Silently no transaction.
+
+467
+00:24:50.646 --> 00:24:51.371
+Fix:
+
+468
+00:24:51.651 --> 00:24:55.641
+Call through the Spring proxy; transactions on public service methods.
+
+469
+00:24:55.921 --> 00:24:58.182
+Long transactions around remote calls.
+
+470
+00:24:58.462 --> 00:24:59.273
+Symptom:
+
+471
+00:24:59.553 --> 00:25:02.411
+Connections held for seconds; pool exhaustion.
+
+472
+00:25:02.691 --> 00:25:03.417
+Fix:
+
+473
+00:25:03.697 --> 00:25:08.731
+Do remote calls outside the transaction; keep transactions to DB work only.
+
+474
+00:25:09.011 --> 00:25:12.211
+CascadeType.ALL + orphanRemoval everywhere.
+
+475
+00:25:12.491 --> 00:25:13.302
+Symptom:
+
+476
+00:25:13.582 --> 00:25:15.950
+Unexpected deletes, huge cascades.
+
+477
+00:25:16.230 --> 00:25:16.955
+Fix:
+
+478
+00:25:17.235 --> 00:25:20.307
+Cascade only within an aggregate (Ch 33).
+
+479
+00:25:20.587 --> 00:25:24.022
+Entities in equals or hashCode on generated ids.
+
+480
+00:25:24.302 --> 00:25:25.113
+Symptom:
+
+481
+00:25:25.393 --> 00:25:27.142
+Broken sets before persist.
+
+482
+00:25:27.422 --> 00:25:28.147
+Fix:
+
+483
+00:25:28.427 --> 00:25:31.926
+Use a business key or id-based equality done carefully.
+
+484
+00:25:33.276 --> 00:25:44.113
+Detecting N+1 early: enable Hibernate statistics or a datasource proxy in tests, and assert the query count for key endpoints (L2 or L3 below).
+
+485
+00:25:45.463 --> 00:25:48.237
+Connection pooling: sizing HikariCP.
+
+486
+00:25:48.517 --> 00:25:50.287
+Two constraints must both hold:
+
+487
+00:25:50.567 --> 00:25:57.885
+App side (Little's Law, Ch 02): busy connections = request rate times DB time per request.
+
+488
+00:25:58.165 --> 00:26:04.117
+At 850 checkouts per second times 20 ms that's ~17 across the fleet.
+
+489
+00:26:04.397 --> 00:26:05.613
+Database side:
+
+490
+00:26:05.893 --> 00:26:12.741
+PostgreSQL does best with a small number of active connections, roughly a small multiple of CPU cores.
+
+491
+00:26:13.021 --> 00:26:20.829
+HikariCP's guidance starts from connections about (cores times 2) + effectivespindlecount for the whole database.
+
+492
+00:26:21.109 --> 00:26:26.741
+Beyond that, adding connections adds contention (context switching, lock waits), not throughput.
+
+493
+00:26:28.091 --> 00:26:29.456
+Here is a quick table:
+
+494
+00:26:29.736 --> 00:26:32.424
+Setting, and Guidance. maximum-pool-size:
+
+495
+00:26:32.704 --> 00:26:41.856
+From Little's Law per pod times headroom, and Σ pods times pool at most DB budget (Ch 02 connection budget). minimum-idle:
+
+496
+00:26:42.136 --> 00:26:48.600
+Equal to max (fixed-size pool) for predictable latency, unless many pods idle. connection-timeout:
+
+497
+00:26:48.880 --> 00:26:55.216
+250 ms, 1 s: fail fast instead of queuing behind a sick DB. max-lifetime:
+
+498
+00:26:55.496 --> 00:27:02.984
+Below any network or DB idle kill (for example 25 to 30 min), with jitter built in. idle-timeout:
+
+499
+00:27:03.264 --> 00:27:07.232
+Only relevant when minimum-idle max. leak-detection-threshold:
+
+500
+00:27:07.512 --> 00:27:12.184
+2 to 5 s in staging to catch connections held across remote calls.
+
+501
+00:27:12.464 --> 00:27:13.637
+Statement timeout:
+
+502
+00:27:13.917 --> 00:27:19.763
+SET statementtimeout per role or query: no query should run unbounded on an OLTP path.
+
+503
+00:27:21.113 --> 00:27:23.395
+PgBouncer (transaction mode):
+
+504
+00:27:23.675 --> 00:27:27.793
+When Σ pods times pool exceeds what PostgreSQL should hold.
+
+505
+00:27:28.073 --> 00:27:35.134
+Breaks session features (session-level prepared statements in older setups, SET, advisory session locks, LISTEN).
+
+506
+00:27:36.484 --> 00:27:37.124
+Tip:
+
+507
+00:27:37.404 --> 00:27:40.839
+Virtual threads make pool limits more important, not less.
+
+508
+00:27:41.119 --> 00:27:44.916
+With virtual threads, thousands of requests can run concurrently.
+
+509
+00:27:45.196 --> 00:27:49.015
+The connection pool becomes the concurrency limiter for the database.
+
+510
+00:27:49.295 --> 00:27:54.159
+That's good, as long as the pool is sized deliberately and connection-timeout is short.
+
+511
+00:27:55.509 --> 00:27:57.813
+Read replicas and replication lag.
+
+512
+00:27:58.093 --> 00:28:08.589
+Streaming replicas apply the primary's WAL asynchronously (typically milliseconds, sometimes seconds under load, or much longer during long queries on the replica).
+
+513
+00:28:09.939 --> 00:28:11.304
+Here is a quick table:
+
+514
+00:28:11.584 --> 00:28:13.269
+Read type, and Where, and Why.
+
+515
+00:28:13.549 --> 00:28:16.621
+Right after the user's own write (my order just placed).
+
+516
+00:28:16.901 --> 00:28:17.563
+Where:
+
+517
+00:28:17.843 --> 00:28:21.192
+Primary, or a replica that has caught up to the write's LSN.
+
+518
+00:28:21.472 --> 00:28:22.155
+Why:
+
+519
+00:28:22.435 --> 00:28:23.501
+Read-your-writes.
+
+520
+00:28:23.781 --> 00:28:26.768
+Decision reads inside a transaction (stock check).
+
+521
+00:28:27.048 --> 00:28:27.709
+Where:
+
+522
+00:28:27.989 --> 00:28:28.843
+Primary.
+
+523
+00:28:29.123 --> 00:28:29.805
+Why:
+
+524
+00:28:30.085 --> 00:28:31.195
+Must be current.
+
+525
+00:28:31.475 --> 00:28:35.656
+Browsing catalog, reports, order history older than a few seconds.
+
+526
+00:28:35.936 --> 00:28:36.597
+Where:
+
+527
+00:28:36.877 --> 00:28:37.752
+Replica.
+
+528
+00:28:38.032 --> 00:28:38.715
+Why:
+
+529
+00:28:38.995 --> 00:28:40.275
+Offload the primary.
+
+530
+00:28:40.555 --> 00:28:42.027
+Analytics and exports.
+
+531
+00:28:42.307 --> 00:28:42.968
+Where:
+
+532
+00:28:43.248 --> 00:28:46.939
+A separate analytics replica or warehouse (Ch 21).
+
+533
+00:28:47.219 --> 00:28:47.901
+Why:
+
+534
+00:28:48.181 --> 00:28:53.045
+Long queries on OLTP replicas cause replay lag or query cancellation.
+
+535
+00:28:54.395 --> 00:29:11.846
+Read-your-writes techniques: route by @Transactional(readOnly) plus sticky to primary for N seconds after a write (session or cookie); or compare the write's LSN (pgcurrentwallsn()) with the replica's pglastwalreplaylsn() (precise, implemented in L4).
+
+536
+00:29:13.196 --> 00:29:15.095
+Schema changes without downtime.
+
+537
+00:29:15.375 --> 00:29:16.740
+Here is a quick table:
+
+538
+00:29:17.020 --> 00:29:18.428
+Operation, and Safe?
+
+539
+00:29:18.708 --> 00:29:21.033
+(PostgreSQL), and Safe approach.
+
+540
+00:29:21.313 --> 00:29:22.593
+Add nullable column.
+
+541
+00:29:22.873 --> 00:29:23.599
+Safe?
+
+542
+00:29:23.879 --> 00:29:25.201
+(PostgreSQL):
+
+543
+00:29:25.481 --> 00:29:27.060
+Fast (metadata only).
+
+544
+00:29:27.340 --> 00:29:29.196
+Add column with constant default.
+
+545
+00:29:29.476 --> 00:29:30.201
+Safe?
+
+546
+00:29:30.481 --> 00:29:31.804
+(PostgreSQL):
+
+547
+00:29:32.084 --> 00:29:33.727
+Fast since PG 11.
+
+548
+00:29:34.007 --> 00:29:36.097
+Add NOT NULL to an existing column.
+
+549
+00:29:36.377 --> 00:29:37.103
+Safe?
+
+550
+00:29:37.383 --> 00:29:38.705
+(PostgreSQL):
+
+551
+00:29:38.985 --> 00:29:41.055
+Scans the table under a strong lock.
+
+552
+00:29:41.335 --> 00:29:42.380
+Safe approach:
+
+553
+00:29:42.660 --> 00:29:47.823
+Add CHECK (col IS NOT NULL) NOT VALID, then VALIDATE CONSTRAINT, then SET NOT NULL.
+
+554
+00:29:48.103 --> 00:29:49.233
+Create index.
+
+555
+00:29:49.513 --> 00:29:50.239
+Safe?
+
+556
+00:29:50.519 --> 00:29:51.841
+(PostgreSQL):
+
+557
+00:29:52.121 --> 00:29:53.188
+Blocks writes.
+
+558
+00:29:53.468 --> 00:29:54.513
+Safe approach:
+
+559
+00:29:54.793 --> 00:30:01.151
+CREATE INDEX CONCURRENTLY (outside a transaction; retry if it fails, drop the INVALID leftovers).
+
+560
+00:30:01.431 --> 00:30:02.519
+Add foreign key.
+
+561
+00:30:02.799 --> 00:30:03.524
+Safe?
+
+562
+00:30:03.804 --> 00:30:05.127
+(PostgreSQL):
+
+563
+00:30:05.407 --> 00:30:06.815
+Validates under lock.
+
+564
+00:30:07.095 --> 00:30:08.140
+Safe approach:
+
+565
+00:30:08.420 --> 00:30:11.108
+NOT VALID, then VALIDATE CONSTRAINT separately.
+
+566
+00:30:12.458 --> 00:30:15.125
+Rename or drop a column used by running code.
+
+567
+00:30:15.405 --> 00:30:16.130
+Safe?
+
+568
+00:30:16.410 --> 00:30:17.733
+(PostgreSQL):
+
+569
+00:30:18.013 --> 00:30:19.207
+Breaks old pods.
+
+570
+00:30:19.487 --> 00:30:20.533
+Safe approach:
+
+571
+00:30:20.813 --> 00:30:25.463
+Expand, then migrate, then contract across releases (Ch 28).
+
+572
+00:30:25.743 --> 00:30:27.045
+Change column type.
+
+573
+00:30:27.325 --> 00:30:28.050
+Safe?
+
+574
+00:30:28.330 --> 00:30:29.653
+(PostgreSQL):
+
+575
+00:30:29.933 --> 00:30:31.426
+Often rewrites the table.
+
+576
+00:30:31.706 --> 00:30:32.751
+Safe approach:
+
+577
+00:30:33.031 --> 00:30:35.122
+New column + backfill + switch.
+
+578
+00:30:36.472 --> 00:30:46.819
+Always set locktimeout for migrations (for example 5 s), so a migration waiting behind a long transaction doesn't queue every subsequent query behind itself.
+
+579
+00:30:48.169 --> 00:30:50.622
+When one relational primary isn't enough.
+
+580
+00:30:50.902 --> 00:30:52.267
+Here is a quick table:
+
+581
+00:30:52.547 --> 00:30:54.894
+Pressure, and First moves, and Later moves.
+
+582
+00:30:55.174 --> 00:30:56.369
+Read QPS.
+
+583
+00:30:56.649 --> 00:30:57.630
+First moves:
+
+584
+00:30:57.910 --> 00:31:01.537
+Caching (Ch 07), read replicas, read models.
+
+585
+00:31:01.817 --> 00:31:02.841
+Later moves:
+
+586
+00:31:03.121 --> 00:31:05.766
+CQRS projections (Ch 15).
+
+587
+00:31:06.046 --> 00:31:07.902
+Write QPS on one primary.
+
+588
+00:31:08.182 --> 00:31:09.163
+First moves:
+
+589
+00:31:09.443 --> 00:31:13.049
+Batching, fewer indexes, HOT updates, bigger instance.
+
+590
+00:31:13.329 --> 00:31:14.353
+Later moves:
+
+591
+00:31:14.633 --> 00:31:19.283
+Functional partitioning (a DB per service), then sharding (Ch 11).
+
+592
+00:31:19.563 --> 00:31:21.142
+Table size (TB).
+
+593
+00:31:21.422 --> 00:31:22.403
+First moves:
+
+594
+00:31:22.683 --> 00:31:24.753
+Partitioning by time, archiving.
+
+595
+00:31:25.033 --> 00:31:26.057
+Later moves:
+
+596
+00:31:26.337 --> 00:31:28.790
+Sharding, moving cold data to a warehouse.
+
+597
+00:31:29.070 --> 00:31:30.051
+Hot rows.
+
+598
+00:31:30.331 --> 00:31:31.313
+First moves:
+
+599
+00:31:31.593 --> 00:31:33.811
+Atomic updates, short transactions.
+
+600
+00:31:34.091 --> 00:31:35.115
+Later moves:
+
+601
+00:31:35.395 --> 00:31:40.174
+Row splitting (buckets), queuing, reservation redesign (Ch 46).
+
+602
+00:31:40.454 --> 00:31:41.862
+Global distribution.
+
+603
+00:31:42.142 --> 00:31:43.123
+First moves:
+
+604
+00:31:43.403 --> 00:31:44.939
+Regional read replicas.
+
+605
+00:31:45.219 --> 00:31:46.243
+Later moves:
+
+606
+00:31:46.523 --> 00:31:52.667
+Distributed SQL (CockroachDB, YugabyteDB, Spanner-style) with latency trade-offs.
+
+607
+00:31:54.017 --> 00:31:54.913
+Part 3.
+
+608
+00:31:55.193 --> 00:31:56.921
+Architecture and Diagrams.
+
+609
+00:31:58.171 --> 00:32:00.689
+Data model: inventory reservation.
+
+610
+00:32:00.969 --> 00:32:02.313
+Here is the diagram.
+
+611
+00:32:06.163 --> 00:32:09.427
+Sequence: happy path, reserve a multi-item order.
+
+612
+00:32:09.707 --> 00:32:12.373
+The sequence diagram walks through it step by step.
+
+613
+00:32:12.653 --> 00:32:13.635
+CO to INV:
+
+614
+00:32:13.915 --> 00:32:16.901
+POST or reservations orderId, store, lines:
+
+615
+00:32:17.181 --> 00:32:22.579
+RICE-5KG x1, ONION-1KG x2, MILK-1L x3.
+
+616
+00:32:22.859 --> 00:32:26.336
+INV to INV: sort lines by sku (deadlock prevention).
+
+617
+00:32:26.616 --> 00:32:27.768
+INV to PG:
+
+618
+00:32:28.048 --> 00:32:28.859
+BEGIN.
+
+619
+00:32:29.139 --> 00:32:30.291
+INV to PG:
+
+620
+00:32:30.571 --> 00:32:33.941
+INSERT reservation (orderid UNIQUE, then idempotent).
+
+621
+00:32:34.221 --> 00:32:35.373
+INV to PG:
+
+622
+00:32:35.653 --> 00:32:42.544
+UPDATE stock SET available = available - q, reserved = reserved + q WHERE store=?
+
+623
+00:32:42.824 --> 00:32:43.933
+AND sku=?
+
+624
+00:32:44.213 --> 00:32:45.792
+AND available = q.
+
+625
+00:32:46.072 --> 00:32:47.245
+PG to INV:
+
+626
+00:32:47.525 --> 00:32:48.379
+1 row.
+
+627
+00:32:48.659 --> 00:32:49.811
+INV to PG:
+
+628
+00:32:50.091 --> 00:32:56.085
+INSERT reservationline x3, INSERT outbox (inventory.stock.reserved.v1).
+
+629
+00:32:56.365 --> 00:32:57.517
+INV to PG:
+
+630
+00:32:57.797 --> 00:32:58.544
+COMMIT.
+
+631
+00:32:58.824 --> 00:32:59.763
+INV to CO:
+
+632
+00:33:00.043 --> 00:33:04.288
+201 reservationId, expiresAt: +15 min.
+
+633
+00:33:08.138 --> 00:33:13.130
+Sequence: failure path, a line is sold out, concurrent buyer, and a deadlock avoided.
+
+634
+00:33:13.410 --> 00:33:16.077
+The sequence diagram walks through it step by step.
+
+635
+00:33:16.357 --> 00:33:17.402
+A to PG:
+
+636
+00:33:17.682 --> 00:33:21.287
+UPDATE stock... sku='MILK-1L' (row lock acquired).
+
+637
+00:33:21.567 --> 00:33:22.677
+B to PG:
+
+638
+00:33:22.957 --> 00:33:26.029
+UPDATE stock... sku='MILK-1L' (waits for A).
+
+639
+00:33:26.309 --> 00:33:27.354
+A to PG:
+
+640
+00:33:27.634 --> 00:33:32.135
+UPDATE stock... sku='ONION-1KG' AND available = 2.
+
+641
+00:33:32.415 --> 00:33:33.503
+PG to A:
+
+642
+00:33:33.783 --> 00:33:35.362
+0 rows (sold out).
+
+643
+00:33:35.642 --> 00:33:36.687
+A to PG:
+
+644
+00:33:36.967 --> 00:33:40.103
+ROLLBACK (releases MILK lock, restores MILK stock).
+
+645
+00:33:40.383 --> 00:33:41.258
+A to A:
+
+646
+00:33:41.538 --> 00:33:43.479
+409 unavailable:
+
+647
+00:33:43.759 --> 00:33:45.125
+ONION-1KG.
+
+648
+00:33:45.405 --> 00:33:46.535
+PG to B:
+
+649
+00:33:46.815 --> 00:33:50.378
+MILK update proceeds (re-evaluates WHERE on latest version).
+
+650
+00:33:50.658 --> 00:33:51.767
+B to PG:
+
+651
+00:33:52.047 --> 00:33:56.570
+UPDATE stock... sku='ONION-1KG' AND available = 1.
+
+652
+00:33:56.850 --> 00:33:57.981
+PG to B:
+
+653
+00:33:58.261 --> 00:33:59.349
+0 rows.
+
+654
+00:33:59.629 --> 00:34:00.738
+B to PG:
+
+655
+00:34:01.018 --> 00:34:01.871
+ROLLBACK.
+
+656
+00:34:05.721 --> 00:34:06.468
+Note:
+
+657
+00:34:06.748 --> 00:34:13.788
+What the system guarantees after this failure path. available never goes below zero (conditional update plus CHECK).
+
+658
+00:34:14.068 --> 00:34:23.689
+A partially reservable order reserves nothing: the transaction rolls back and returns the unavailable SKUs so the app can offer substitutions.
+
+659
+00:34:23.969 --> 00:34:27.745
+Consistent lock ordering removes the deadlock class entirely.
+
+660
+00:34:28.025 --> 00:34:34.404
+Any remaining 40P01 or 40001 errors are retried a bounded number of times.
+
+661
+00:34:35.754 --> 00:34:37.781
+State: reservation lifecycle.
+
+662
+00:34:38.061 --> 00:34:39.405
+Here is the diagram.
+
+663
+00:34:43.255 --> 00:34:44.172
+Part 4.
+
+664
+00:34:44.452 --> 00:34:46.073
+Design Document Excerpt:
+
+665
+00:34:46.353 --> 00:34:48.380
+Inventory Reservation Storage.
+
+666
+00:34:49.630 --> 00:34:50.995
+Here is a quick table:
+
+667
+00:34:51.275 --> 00:34:52.577
+Field, and Value.
+
+668
+00:34:52.857 --> 00:34:54.201
+Author or Reviewers:
+
+669
+00:34:54.481 --> 00:34:57.915
+Inventory team or Checkout, SRE, DBA guild.
+
+670
+00:34:58.195 --> 00:34:59.091
+Status:
+
+671
+00:34:59.371 --> 00:35:00.246
+Approved.
+
+672
+00:35:00.526 --> 00:35:01.849
+Related ADRs:
+
+673
+00:35:02.129 --> 00:35:11.899
+ADR-024 Atomic conditional updates for counters; ADR-025 Replica routing with LSN-based read-your-writes.
+
+674
+00:35:13.249 --> 00:35:13.889
+1.
+
+675
+00:35:14.169 --> 00:35:15.577
+Context and Problem.
+
+676
+00:35:15.857 --> 00:35:22.236
+A read-modify-write in JPA oversold flash-sale items 3 times (§1.1).
+
+677
+00:35:22.516 --> 00:35:30.004
+Deadlocks appeared on multi-item orders during peaks, and order-history queries loaded items with N+1 selects.
+
+678
+00:35:30.284 --> 00:35:30.988
+2.
+
+679
+00:35:31.268 --> 00:35:32.612
+Goals or Non-Goals.
+
+680
+00:35:32.892 --> 00:35:46.865
+Goals: never oversell; reserve all-or-nothing; no deadlocks by construction; p99 reservation at most 50 ms at P90 load; history reads offloaded to replicas without breaking read-your-writes.
+
+681
+00:35:47.145 --> 00:35:57.620
+Non-goals: a national single-SKU flash deal above hot-row limits (Ch 46 bucketing or queueing); multi-region writes (Ch 27).
+
+682
+00:35:58.970 --> 00:35:59.717
+3.
+
+683
+00:35:59.997 --> 00:36:00.957
+Requirements.
+
+684
+00:36:02.307 --> 00:36:03.672
+Here is a quick table:
+
+685
+00:36:03.952 --> 00:36:05.424
+ID, and Requirement.
+
+686
+00:36:05.704 --> 00:36:06.643
+FR-1:
+
+687
+00:36:06.923 --> 00:36:09.888
+Reserve all lines of an order at one store, or none.
+
+688
+00:36:10.168 --> 00:36:11.107
+FR-2:
+
+689
+00:36:11.387 --> 00:36:14.117
+Confirm, release and expire reservations.
+
+690
+00:36:14.397 --> 00:36:15.443
+NFR-1:
+
+691
+00:36:15.723 --> 00:36:22.187
+Invariant: available = 0 and available = onhand - reserved, enforced in the DB.
+
+692
+00:36:22.467 --> 00:36:23.512
+NFR-2:
+
+693
+00:36:23.792 --> 00:36:32.368
+Reservation p99 at most 50 ms; retry on 40P01 or 40001 at most 3 times.
+
+694
+00:36:32.648 --> 00:36:33.715
+NFR-3:
+
+695
+00:36:33.995 --> 00:36:37.621
+Reserving the same order twice is idempotent (orderid UNIQUE).
+
+696
+00:36:37.901 --> 00:36:38.989
+NFR-4:
+
+697
+00:36:39.269 --> 00:36:43.003
+Expired holds return stock within 60 s of expiresat.
+
+698
+00:36:43.283 --> 00:36:44.328
+NFR-5:
+
+699
+00:36:44.608 --> 00:36:49.216
+Order or stock views after a user's write reflect that write (read-your-writes).
+
+700
+00:36:50.566 --> 00:36:51.270
+4.
+
+701
+00:36:51.550 --> 00:36:52.830
+Capacity estimates.
+
+702
+00:36:54.180 --> 00:36:55.545
+Here is a quick table:
+
+703
+00:36:55.825 --> 00:36:57.148
+Item, and Estimate.
+
+704
+00:36:57.428 --> 00:36:58.495
+Stock rows:
+
+705
+00:36:58.775 --> 00:37:10.743
+500 stores times ~6,000 SKUs = 3 M rows, ~150 B each about 450 MB + indexes, so it fits in RAM.
+
+706
+00:37:11.023 --> 00:37:19.812
+Reservations at P90 peak: ~420 orders per second times 1.2 attempts about 500 per second.
+
+707
+00:37:20.092 --> 00:37:21.415
+Row updates at peak:
+
+708
+00:37:21.695 --> 00:37:36.607
+500 per second times ~8 lines about 4 K stock UPDATEs per second + 4 K line inserts + 500 reservation inserts + 500 outbox inserts about ~9 K writes per second.
+
+709
+00:37:36.887 --> 00:37:48.087
+Hottest row: ~50 reservations per second on one store-SKU (Ch 02) versus ~500 to 1,000 per second row-lock capacity:
+
+710
+00:37:48.367 --> 00:37:49.135
+OK.
+
+711
+00:37:49.415 --> 00:37:54.151
+Transaction duration: ~8 short statements about 5 to 10 ms.
+
+712
+00:37:54.431 --> 00:37:55.583
+Busy connections:
+
+713
+00:37:55.863 --> 00:38:00.983
+500 tx per second times 10 ms about 5 (Little's Law); pools:
+
+714
+00:38:01.263 --> 00:38:04.676
+6 pods times 8 = 48 at most budget.
+
+715
+00:38:06.026 --> 00:38:15.413
+WAL volume: ~9 K writes per second times ~200 B about 1.8 MB per second (+ full-page writes).
+
+716
+00:38:16.763 --> 00:38:17.680
+Success:
+
+717
+00:38:17.960 --> 00:38:19.432
+What the estimate tells us.
+
+718
+00:38:19.712 --> 00:38:23.083
+One PostgreSQL primary handles this comfortably.
+
+719
+00:38:23.363 --> 00:38:31.085
+The dataset fits in memory, and ~9 K writes per second is well within a tuned 8 to 16 vCPU instance.
+
+720
+00:38:31.365 --> 00:38:36.293
+The risks are correctness (lost updates, deadlocks) and hot rows, not raw capacity.
+
+721
+00:38:37.643 --> 00:38:39.073
+5.3 Schema.
+
+722
+00:38:40.423 --> 00:38:42.023
+Here is the SQL code.
+
+723
+00:38:42.303 --> 00:38:45.673
+It runs to 30 lines; the full listing is in the chapter.
+
+724
+00:38:48.523 --> 00:38:49.270
+7.
+
+725
+00:38:49.550 --> 00:38:51.065
+Alternatives considered.
+
+726
+00:38:52.415 --> 00:38:53.780
+Here is a quick table:
+
+727
+00:38:54.060 --> 00:38:56.620
+Option, and Pros, and Cons, and Verdict.
+
+728
+00:38:56.900 --> 00:38:59.673
+JPA read-modify-write (status quo).
+
+729
+00:38:59.953 --> 00:39:00.807
+Pros:
+
+730
+00:39:01.087 --> 00:39:01.919
+Familiar.
+
+731
+00:39:02.199 --> 00:39:03.009
+Cons:
+
+732
+00:39:03.289 --> 00:39:05.081
+Lost updates at READ COMMITTED.
+
+733
+00:39:05.361 --> 00:39:06.172
+Verdict:
+
+734
+00:39:06.452 --> 00:39:09.844
+Rejected (incident). @Version optimistic locking.
+
+735
+00:39:10.124 --> 00:39:10.977
+Pros:
+
+736
+00:39:11.257 --> 00:39:12.516
+Detects conflicts.
+
+737
+00:39:12.796 --> 00:39:13.607
+Cons:
+
+738
+00:39:13.887 --> 00:39:18.217
+Hot rows cause retry storms (50 conflicts per second on one row).
+
+739
+00:39:18.497 --> 00:39:19.308
+Verdict:
+
+740
+00:39:19.588 --> 00:39:22.489
+Rejected for counters; kept for admin edits.
+
+741
+00:39:22.769 --> 00:39:23.601
+SELECT...
+
+742
+00:39:23.881 --> 00:39:25.439
+FOR UPDATE then compute.
+
+743
+00:39:25.719 --> 00:39:26.572
+Pros:
+
+744
+00:39:26.852 --> 00:39:27.833
+Explicit.
+
+745
+00:39:28.113 --> 00:39:28.924
+Cons:
+
+746
+00:39:29.204 --> 00:39:31.359
+Longer lock hold, more round trips.
+
+747
+00:39:31.639 --> 00:39:32.449
+Verdict:
+
+748
+00:39:32.729 --> 00:39:35.481
+Used only where logic can't be a single UPDATE.
+
+749
+00:39:35.761 --> 00:39:37.553
+SERIALIZABLE for everything.
+
+750
+00:39:37.833 --> 00:39:38.687
+Pros:
+
+751
+00:39:38.967 --> 00:39:39.884
+Strongest.
+
+752
+00:39:40.164 --> 00:39:40.975
+Cons:
+
+753
+00:39:41.255 --> 00:39:44.711
+Aborts under contention; retry complexity everywhere.
+
+754
+00:39:44.991 --> 00:39:45.801
+Verdict:
+
+755
+00:39:46.081 --> 00:39:49.217
+Reserved for ledger invariants (Ch 45).
+
+756
+00:39:50.567 --> 00:39:54.365
+Atomic conditional UPDATE, sorted lock order, CHECK constraints.
+
+757
+00:39:54.645 --> 00:39:55.498
+Pros:
+
+758
+00:39:55.778 --> 00:40:00.279
+One round trip per line, minimal lock time, DB-enforced invariant.
+
+759
+00:40:00.559 --> 00:40:01.370
+Cons:
+
+760
+00:40:01.650 --> 00:40:03.165
+Hot-row ceiling remains.
+
+761
+00:40:03.445 --> 00:40:04.255
+Verdict:
+
+762
+00:40:04.535 --> 00:40:05.367
+Chosen.
+
+763
+00:40:05.647 --> 00:40:07.205
+Redis counters (DECRBY).
+
+764
+00:40:07.485 --> 00:40:08.338
+Pros:
+
+765
+00:40:08.618 --> 00:40:09.642
+Very fast.
+
+766
+00:40:09.922 --> 00:40:10.733
+Cons:
+
+767
+00:40:11.013 --> 00:40:15.450
+Not in the same transaction as the reservation and outbox; durability.
+
+768
+00:40:15.730 --> 00:40:16.541
+Verdict:
+
+769
+00:40:16.821 --> 00:40:21.621
+Rejected for the source of truth (Ch 46 discusses a Redis front-gate).
+
+770
+00:40:22.971 --> 00:40:23.653
+8.
+
+771
+00:40:23.933 --> 00:40:25.085
+Failure modes.
+
+772
+00:40:25.365 --> 00:40:31.424
+A deadlock (shouldn't happen, given ordering) or a serialization failure: bounded retry with jitter.
+
+773
+00:40:31.704 --> 00:40:38.509
+A primary failover: in-flight transactions abort, and clients retry with idempotency (orderid unique).
+
+774
+00:40:38.789 --> 00:40:47.280
+Autovacuum falling behind on stock: bloat and slower updates, so tune per-table autovacuum thresholds and monitor dead tuples.
+
+775
+00:40:47.560 --> 00:40:53.555
+A sweeper crash: holds expire late, bounded by the alert on HELD past expiry 60 s.
+
+776
+00:40:54.905 --> 00:40:55.609
+10.
+
+777
+00:40:55.889 --> 00:41:15.537
+Observability. inventory.reservationoutcome=reservedpartialunavailableretry, lock wait time (pgstatactivity wait events), deadlocks from pgstatdatabase, dead tuples on stock, replication lag, Hikari active or pending, and slow-query log for anything 50 ms.
+
+778
+00:41:16.887 --> 00:41:17.740
+14.
+
+779
+00:41:18.020 --> 00:41:20.857
+Decision (ADR-024 summary).
+
+780
+00:41:21.137 --> 00:41:28.391
+All counters with invariants (stock, slot capacity, coupon usage) are changed with a single conditional UPDATE...
+
+781
+00:41:28.671 --> 00:41:31.273
+SET x = x ± n WHERE...
+
+782
+00:41:31.553 --> 00:41:34.049
+AND invariant inside short transactions.
+
+783
+00:41:34.329 --> 00:41:37.444
+Multi-row updates lock in a deterministic order.
+
+784
+00:41:37.724 --> 00:41:40.071
+Invariants are declared as CHECK constraints.
+
+785
+00:41:40.351 --> 00:41:49.780
+Read-modify-write of counters in application code is prohibited, and a code review checklist plus ArchUnit rule flag save() on counter entities.
+
+786
+00:41:51.130 --> 00:41:52.090
+Part 5.
+
+787
+00:41:52.370 --> 00:41:54.354
+Hands-On Code, Level Ladder.
+
+788
+00:41:55.604 --> 00:41:58.356
+We build dark-store stock reservation four times:
+
+789
+00:41:59.706 --> 00:42:01.071
+Here is a quick table:
+
+790
+00:42:01.351 --> 00:42:04.039
+Level, and New requirement that forces the step.
+
+791
+00:42:04.319 --> 00:42:05.151
+L1:
+
+792
+00:42:05.431 --> 00:42:09.271
+Show why read-modify-write oversells, and why indexes matter.
+
+793
+00:42:09.551 --> 00:42:11.215
+(plain Java simulation).
+
+794
+00:42:11.495 --> 00:42:12.306
+L2:
+
+795
+00:42:12.586 --> 00:42:17.941
+Reserve stock through Spring or JPA the 'usual' way, and show order history efficiently.
+
+796
+00:42:18.221 --> 00:42:19.074
+L3:
+
+797
+00:42:19.354 --> 00:42:26.799
+Never oversell, never deadlock, all-or-nothing, idempotent, bounded queries, sized pools, proven by concurrent tests.
+
+798
+00:42:27.079 --> 00:42:27.954
+L4:
+
+799
+00:42:28.234 --> 00:42:34.207
+Offload reads to replicas without breaking read-your-writes; partition history; change schemas online.
+
+800
+00:42:35.557 --> 00:42:37.669
+L1, Concept (plain Java).
+
+801
+00:42:37.949 --> 00:42:39.485
+Here is the Java code.
+
+802
+00:42:39.765 --> 00:42:43.883
+It runs to 107 lines; the full listing is in the chapter.
+
+803
+00:42:44.163 --> 00:42:50.029
+StockReservationL1.java, run with: java StockReservationL1.java.
+
+804
+00:42:50.309 --> 00:42:53.595
+Two database ideas simulated in plain Java:
+
+805
+00:42:53.875 --> 00:42:54.493
+A.
+
+806
+00:42:54.773 --> 00:43:00.171
+Lost updates: read, compute, write versus an atomic conditional update (UPDATE...
+
+807
+00:43:00.451 --> 00:43:02.072
+WHERE available = n).
+
+808
+00:43:04.922 --> 00:43:06.714
+Actual output from running it:
+
+809
+00:43:08.064 --> 00:43:08.981
+On screen:
+
+810
+00:43:09.261 --> 00:43:09.880
+A.
+
+811
+00:43:10.160 --> 00:43:15.749
+500 buyers race for 100 units of '1 rupeesonions'. read-modify-write:
+
+812
+00:43:16.029 --> 00:43:25.437
+500 orders confirmed, stock left 99, then 400 OVERSOLD, 499 lost. updates. conditional UPDATE:
+
+813
+00:43:25.717 --> 00:43:29.344
+100 orders confirmed, stock left 0, then correct.
+
+814
+00:43:29.624 --> 00:43:30.307
+B.
+
+815
+00:43:30.587 --> 00:43:35.493
+Find one customer's orders in a date range among 2,000,000 rows. full scan:
+
+816
+00:43:35.773 --> 00:43:43.069
+3 rows matched in 59,636 µs (touched 2,000,000 rows). index seek:
+
+817
+00:43:43.349 --> 00:43:47.851
+3 rows matched in 1,012 µs (touched ~3 rows).
+
+818
+00:43:50.701 --> 00:44:00.621
+What L1 shows: when there's I or O between the read and the write (as in every real service), 500 successful orders go out for 100 units.
+
+819
+00:44:00.901 --> 00:44:04.655
+The atomic decrement only if enough version is exactly right.
+
+820
+00:44:04.935 --> 00:44:09.031
+A sorted index turns a 2 M-row scan into a handful of lookups.
+
+821
+00:44:09.311 --> 00:44:11.893
+What L1 can't do: it's not a database.
+
+822
+00:44:12.173 --> 00:44:19.021
+There's no durability, no transactions across several rows, no isolation levels, and no crash recovery.
+
+823
+00:44:20.371 --> 00:44:23.336
+L2, Spring Data JPA, the usual way.
+
+824
+00:44:23.616 --> 00:44:28.501
+Here is the Kotlin code. build.gradle.kts (module l2-spring).
+
+825
+00:44:31.351 --> 00:44:32.183
+Entities.
+
+826
+00:44:32.463 --> 00:44:33.999
+Here is the Java code.
+
+827
+00:44:34.279 --> 00:44:37.927
+It runs to 28 lines; the full listing is in the chapter.
+
+828
+00:44:40.777 --> 00:44:42.313
+Here is the Java code.
+
+829
+00:44:42.593 --> 00:44:46.263
+It runs to 32 lines; the full listing is in the chapter.
+
+830
+00:44:49.113 --> 00:44:50.649
+Here is the Java code.
+
+831
+00:44:50.929 --> 00:44:54.555
+It runs to 21 lines; the full listing is in the chapter.
+
+832
+00:44:57.405 --> 00:45:00.072
+Repositories (N+1 and its fix).
+
+833
+00:45:00.352 --> 00:45:01.888
+Here is the Java code.
+
+834
+00:45:04.738 --> 00:45:06.274
+Here is the Java code.
+
+835
+00:45:06.554 --> 00:45:12.634
+N+1: touching getLines() on each result fires one extra SELECT per reservation.
+
+836
+00:45:12.914 --> 00:45:16.306
+Fix for small pages: fetch lines in the same query.
+
+837
+00:45:16.586 --> 00:45:21.023
+(Don't combine collection fetch with pagination on large sets, see L3.).
+
+838
+00:45:23.873 --> 00:45:25.601
+Service (lost-update bug).
+
+839
+00:45:25.881 --> 00:45:27.417
+Here is the Java code.
+
+840
+00:45:27.697 --> 00:45:31.367
+It runs to 38 lines; the full listing is in the chapter.
+
+841
+00:45:34.217 --> 00:45:35.753
+Here is the Java code.
+
+842
+00:45:38.603 --> 00:45:40.117
+Test: count the queries.
+
+843
+00:45:40.397 --> 00:45:41.933
+Here is the Java code.
+
+844
+00:45:42.213 --> 00:45:45.648
+It runs to 40 lines; the full listing is in the chapter.
+
+845
+00:45:48.498 --> 00:46:00.978
+What L2 fixed: a real schema with constraints, transactions, @Version (so the entity path fails loudly instead of overselling), and a demonstrated N+1 fix with a query-count test.
+
+846
+00:46:01.258 --> 00:46:02.922
+What L2 still gets wrong:
+
+847
+00:46:04.272 --> 00:46:05.637
+Here is a quick table:
+
+848
+00:46:05.917 --> 00:46:07.133
+Problem, and Why.
+
+849
+00:46:07.413 --> 00:46:10.059
+Hot rows produce optimistic-lock failures:
+
+850
+00:46:10.339 --> 00:46:13.645
+Every concurrent buyer of the same SKU conflicts.
+
+851
+00:46:13.925 --> 00:46:16.421
+At 50 per second on one row, most fail.
+
+852
+00:46:16.701 --> 00:46:18.707
+Deadlocks on multi-item orders:
+
+853
+00:46:18.987 --> 00:46:20.843
+Lines are locked in request order.
+
+854
+00:46:21.123 --> 00:46:22.253
+Not idempotent:
+
+855
+00:46:22.533 --> 00:46:31.323
+Retrying the same orderId hits the UNIQUE constraint as a 500, not a replay. @EntityGraph + a page limit on a collection:
+
+856
+00:46:31.603 --> 00:46:34.696
+In-memory pagination at scale (Hibernate warns).
+
+857
+00:46:34.976 --> 00:46:37.643
+Pool, timeouts and statement limits at defaults:
+
+858
+00:46:37.923 --> 00:46:39.821
+Unbounded queries and long waits.
+
+859
+00:46:41.171 --> 00:46:43.795
+L3, Production-Grade PostgreSQL.
+
+860
+00:46:44.075 --> 00:46:51.222
+The design: explicit SQL for the write path (JdbcClient) so every statement is atomic and visible.
+
+861
+00:46:51.502 --> 00:46:53.401
+Lines are sorted before locking.
+
+862
+00:46:53.681 --> 00:46:55.409
+A CHECK backs up the invariant.
+
+863
+00:46:55.689 --> 00:46:59.891
+Retries are bounded for 40P01 and 40001.
+
+864
+00:47:00.171 --> 00:47:01.814
+The sweeper is deadlock-safe.
+
+865
+00:47:02.094 --> 00:47:04.718
+Reads use two queries with no N+1.
+
+866
+00:47:04.998 --> 00:47:07.217
+Pools and timeouts are set on purpose.
+
+867
+00:47:08.567 --> 00:47:10.807
+Repository (atomic SQL).
+
+868
+00:47:11.087 --> 00:47:12.623
+Here is the Java code.
+
+869
+00:47:12.903 --> 00:47:16.935
+It runs to 120 lines; the full listing is in the chapter.
+
+870
+00:47:17.215 --> 00:47:22.057
+Idempotent: a second call for the same order inserts nothing (returns false).
+
+871
+00:47:24.907 --> 00:47:27.211
+Service (all-or-nothing, ordered locks).
+
+872
+00:47:27.491 --> 00:47:29.027
+Here is the Java code.
+
+873
+00:47:29.307 --> 00:47:33.041
+It runs to 72 lines; the full listing is in the chapter.
+
+874
+00:47:35.891 --> 00:47:38.109
+Delegate (bounded retries), Sweeper.
+
+875
+00:47:38.389 --> 00:47:39.925
+Here is the Java code.
+
+876
+00:47:40.205 --> 00:47:43.960
+It runs to 45 lines; the full listing is in the chapter.
+
+877
+00:47:46.810 --> 00:47:48.346
+Here is the Java code.
+
+878
+00:47:48.626 --> 00:47:52.295
+It runs to 32 lines; the full listing is in the chapter.
+
+879
+00:47:52.575 --> 00:47:54.517
+Returns stock from expired holds.
+
+880
+00:47:54.797 --> 00:48:02.007
+Safe to run on every pod: markExpired() is a conditional UPDATE. so only one pod wins each reservation.
+
+881
+00:48:02.287 --> 00:48:05.039
+Each reservation is its own short transaction.
+
+882
+00:48:07.889 --> 00:48:09.425
+Pool and DB settings.
+
+883
+00:48:09.705 --> 00:48:11.177
+Here is the YAML code.
+
+884
+00:48:11.457 --> 00:48:15.084
+It runs to 21 lines; the full listing is in the chapter.
+
+885
+00:48:17.934 --> 00:48:19.534
+Here is the SQL code.
+
+886
+00:48:19.814 --> 00:48:23.931
+Per-table autovacuum for the hot, frequently updated stock table.
+
+887
+00:48:24.211 --> 00:48:28.201
+Role-level safety net for anything that bypasses the pool settings.
+
+888
+00:48:31.051 --> 00:48:33.312
+Integration tests (Testcontainers).
+
+889
+00:48:33.592 --> 00:48:35.128
+Here is the Java code.
+
+890
+00:48:35.408 --> 00:48:39.141
+It runs to 87 lines; the full listing is in the chapter.
+
+891
+00:48:41.991 --> 00:49:04.967
+What L3 guarantees: no oversell under any concurrency (atomic statements plus CHECK), all-or-nothing reservations, no deadlocks between reservations and sweeps (deterministic lock order), idempotency per order, bounded retries for transient failures, two queries instead of N+1, and server-side timeouts on every statement and idle transaction.
+
+892
+00:49:05.247 --> 00:49:12.586
+What L3 still lacks: every read hits the primary, and order or reservation history grows forever in one table.
+
+893
+00:49:12.866 --> 00:49:17.901
+Schema changes and index additions on big tables still need an online playbook.
+
+894
+00:49:19.251 --> 00:49:20.744
+L4, Enterprise:
+
+895
+00:49:21.024 --> 00:49:25.205
+Replica Routing with Read-Your-Writes, Partitioning, Online Migrations.
+
+896
+00:49:25.485 --> 00:49:26.829
+Here is the diagram.
+
+897
+00:49:30.679 --> 00:49:32.130
+Read or write routing.
+
+898
+00:49:32.410 --> 00:49:33.946
+Here is the Java code.
+
+899
+00:49:34.226 --> 00:49:37.874
+It runs to 28 lines; the full listing is in the chapter.
+
+900
+00:49:38.154 --> 00:49:51.274
+LazyConnectionDataSourceProxy defers fetching a physical connection until the first statement. after the transaction's read-only flag is known, and then routes read-only transactions to the replica.
+
+901
+00:49:54.124 --> 00:49:55.660
+Here is the Java code.
+
+902
+00:49:55.940 --> 00:49:59.759
+It runs to 37 lines; the full listing is in the chapter.
+
+903
+00:50:00.039 --> 00:50:11.281
+Read-your-writes: if the request carries a minimum LSN (from its own earlier write), use the replica only. when it has replayed at least that far; otherwise read from the primary.
+
+904
+00:50:11.561 --> 00:50:13.332
+No token, then replica.
+
+905
+00:50:16.182 --> 00:50:17.718
+Here is the Java code.
+
+906
+00:50:17.998 --> 00:50:21.689
+It runs to 41 lines; the full listing is in the chapter.
+
+907
+00:50:21.969 --> 00:50:24.059
+Reads: apply the caller's token.
+
+908
+00:50:24.339 --> 00:50:32.595
+Writes: after the response is produced, attach the primary's current LSN. so the client (BFF) can echo it on its next read.
+
+909
+00:50:35.445 --> 00:50:36.192
+Warning:
+
+910
+00:50:36.472 --> 00:50:37.923
+Keep the token honest.
+
+911
+00:50:38.203 --> 00:50:41.808
+The LSN must be read after the write transaction commits.
+
+912
+00:50:42.088 --> 00:50:55.208
+In production, capture it in the service right after commit (a TransactionSynchronization.afterCommit hook) and return it from the delegate, rather than relying on a filter running after the body may already be flushed.
+
+913
+00:50:55.488 --> 00:50:57.365
+The filter above shows the idea.
+
+914
+00:50:57.645 --> 00:51:01.293
+The unit test below exercises the routing decision itself.
+
+915
+00:51:02.643 --> 00:51:03.923
+Partitioned history.
+
+916
+00:51:04.203 --> 00:51:05.803
+Here is the SQL code.
+
+917
+00:51:06.083 --> 00:51:09.838
+It runs to 26 lines; the full listing is in the chapter.
+
+918
+00:51:10.118 --> 00:51:13.361
+V20reservationhistorypartitioned.sql.
+
+919
+00:51:13.641 --> 00:51:19.166
+Closed reservations move to a monthly-partitioned history table (hot table stays small).
+
+920
+00:51:22.016 --> 00:51:23.381
+Here is a quick table:
+
+921
+00:51:23.661 --> 00:51:25.581
+Partitioning benefit, and Detail.
+
+922
+00:51:25.861 --> 00:51:27.056
+Partition pruning:
+
+923
+00:51:27.336 --> 00:51:31.112
+Queries with a createdat range touch only the relevant months.
+
+924
+00:51:31.392 --> 00:51:32.501
+Cheap retention:
+
+925
+00:51:32.781 --> 00:51:36.216
+Detach and drop a month instead of DELETE millions of rows.
+
+926
+00:51:36.496 --> 00:51:38.288
+Smaller indexes per partition:
+
+927
+00:51:38.568 --> 00:51:40.723
+Better cache hit rates for recent data.
+
+928
+00:51:41.003 --> 00:51:42.517
+Maintenance per partition:
+
+929
+00:51:42.797 --> 00:51:44.973
+Vacuum and reindex smaller units.
+
+930
+00:51:45.253 --> 00:51:45.979
+Cost:
+
+931
+00:51:46.259 --> 00:51:58.248
+Queries without the partition key scan all partitions; unique constraints must include the partition key; manage partition creation ahead of time (pgpartman or a scheduled job).
+
+932
+00:51:59.598 --> 00:52:01.027
+Online migrations.
+
+933
+00:52:01.307 --> 00:52:02.907
+Here is the SQL code.
+
+934
+00:52:03.187 --> 00:52:06.707
+V21idxreservationstorecreated.sql.
+
+935
+00:52:06.987 --> 00:52:15.841
+Paired config file V21idxreservationstorecreated.sql.conf contains: executeInTransaction=false.
+
+936
+00:52:16.121 --> 00:52:19.790
+(CREATE INDEX CONCURRENTLY cannot run inside a transaction).
+
+937
+00:52:22.640 --> 00:52:24.240
+Here is the SQL code.
+
+938
+00:52:24.520 --> 00:52:31.368
+V22stockaddshelflife.sql, adding a NOT NULL column to a 3M-row hot table, safely.
+
+939
+00:52:31.648 --> 00:52:39.819
+2. app release N writes the column for new or updated rows; backfill job updates old rows in batches of 5,000.
+
+940
+00:52:42.669 --> 00:52:43.309
+Tip:
+
+941
+00:52:43.589 --> 00:52:45.594
+If CREATE INDEX CONCURRENTLY fails.
+
+942
+00:52:45.874 --> 00:52:47.965
+It leaves an INVALID index behind.
+
+943
+00:52:48.245 --> 00:52:56.159
+Check SELECT indexrelid::regclass FROM pgindex WHERE NOT indisvalid;, then drop it (DROP INDEX CONCURRENTLY) and retry.
+
+944
+00:52:57.509 --> 00:52:58.320
+Tests.
+
+945
+00:52:58.600 --> 00:53:00.136
+Here is the Java code.
+
+946
+00:53:00.416 --> 00:53:04.213
+It runs to 63 lines; the full listing is in the chapter.
+
+947
+00:53:07.063 --> 00:53:07.810
+Note:
+
+948
+00:53:08.090 --> 00:53:09.626
+ADR-025:
+
+949
+00:53:09.906 --> 00:53:12.658
+Replica routing with LSN-based read-your-writes.
+
+950
+00:53:12.938 --> 00:53:13.855
+Context.
+
+951
+00:53:14.135 --> 00:53:24.973
+Read traffic on inventory and orders (history, store dashboards) is ~10 times write traffic and competes with reservations for primary CPU during peaks.
+
+952
+00:53:25.253 --> 00:53:30.330
+Naive replica reads show users stale data immediately after their own writes.
+
+953
+00:53:31.680 --> 00:53:32.555
+Decision.
+
+954
+00:53:32.835 --> 00:53:39.917
+(1) @Transactional(readOnly = true) routes to a replica via LazyConnectionDataSourceProxy.
+
+955
+00:53:40.197 --> 00:53:45.829
+(2) Writes return a consistency token (the primary's WAL LSN after commit).
+
+956
+00:53:46.109 --> 00:53:57.459
+The BFF echoes it on subsequent reads for that user for ~30 s, and the service reads from the replica only if it has replayed past that LSN, otherwise from the primary.
+
+957
+00:53:57.739 --> 00:54:02.389
+(3) Decision reads inside write transactions always use the primary.
+
+958
+00:54:02.669 --> 00:54:05.933
+(4) Replicas used by OLTP never serve analytics.
+
+959
+00:54:06.213 --> 00:54:09.072
+Those go to a dedicated replica or warehouse.
+
+960
+00:54:10.422 --> 00:54:11.446
+Consequences.
+
+961
+00:54:11.726 --> 00:54:15.630
+(+) ~70 to 80 % of reads leave the primary.
+
+962
+00:54:15.910 --> 00:54:18.683
+(+) Users never see their own write disappear.
+
+963
+00:54:18.963 --> 00:54:22.227
+(minus ) An extra cheap query per token-bearing read.
+
+964
+00:54:22.507 --> 00:54:26.347
+(minus ) The token has to be plumbed through BFF responses.
+
+965
+00:54:26.627 --> 00:54:31.854
+(minus ) During large replica lag, token-bearing reads concentrate on the primary.
+
+966
+00:54:32.134 --> 00:54:33.905
+Alert on lag above 1 s.
+
+967
+00:54:34.185 --> 00:54:45.939
+Revisit when: write volume outgrows one primary (functional split or sharding, Ch 11), or multi-region reads need a different consistency model (Ch 27).
+
+968
+00:54:47.289 --> 00:54:49.423
+What changed from L1 to L4.
+
+969
+00:54:49.703 --> 00:54:51.068
+Here is a quick table:
+
+970
+00:54:51.348 --> 00:54:54.804
+Concern, and L1, and L2, and L3, and L4.
+
+971
+00:54:55.084 --> 00:54:56.364
+Oversell protection.
+
+972
+00:54:56.644 --> 00:54:57.476
+L1:
+
+973
+00:54:57.756 --> 00:54:59.185
+Atomic in-memory check.
+
+974
+00:54:59.465 --> 00:55:02.793
+L2: @Version (fails loudly, retry storms).
+
+975
+00:55:03.073 --> 00:55:03.927
+L3:
+
+976
+00:55:04.207 --> 00:55:06.319
+Atomic conditional UPDATE + CHECK.
+
+977
+00:55:06.599 --> 00:55:07.836
+L4: same.
+
+978
+00:55:08.116 --> 00:55:09.695
+Multi-item atomicity.
+
+979
+00:55:09.975 --> 00:55:10.785
+L2:
+
+980
+00:55:11.065 --> 00:55:12.047
+Transaction.
+
+981
+00:55:12.327 --> 00:55:13.180
+L3:
+
+982
+00:55:13.460 --> 00:55:17.727
+Transaction + all-or-nothing rollback with full unavailable list.
+
+983
+00:55:18.007 --> 00:55:19.244
+L4: same.
+
+984
+00:55:19.524 --> 00:55:20.420
+Deadlocks.
+
+985
+00:55:20.700 --> 00:55:21.511
+L2:
+
+986
+00:55:21.791 --> 00:55:23.433
+Possible (request order).
+
+987
+00:55:23.713 --> 00:55:24.567
+L3:
+
+988
+00:55:24.847 --> 00:55:27.684
+Prevented (sorted locks) + bounded retry.
+
+989
+00:55:27.964 --> 00:55:29.201
+L4: same.
+
+990
+00:55:29.481 --> 00:55:30.612
+Idempotency.
+
+991
+00:55:30.892 --> 00:55:31.703
+L2:
+
+992
+00:55:31.983 --> 00:55:33.625
+UNIQUE, then 500.
+
+993
+00:55:33.905 --> 00:55:34.759
+L3:
+
+994
+00:55:35.039 --> 00:55:37.279
+ON CONFLICT DO NOTHING, then replay.
+
+995
+00:55:37.559 --> 00:55:38.796
+L4: same.
+
+996
+00:55:40.146 --> 00:55:40.914
+Reads.
+
+997
+00:55:41.194 --> 00:55:42.026
+L1:
+
+998
+00:55:42.306 --> 00:55:43.351
+Index demo.
+
+999
+00:55:43.631 --> 00:55:44.442
+L2:
+
+1000
+00:55:44.722 --> 00:55:47.303
+N+1 found, @EntityGraph fix.
+
+1001
+00:55:47.583 --> 00:55:48.437
+L3:
+
+1002
+00:55:48.717 --> 00:55:51.277
+2-query batch, keyset, partial index.
+
+1003
+00:55:51.557 --> 00:55:54.309
+L4: + replica routing with read-your-writes.
+
+1004
+00:55:54.589 --> 00:55:55.847
+Timeouts and pools.
+
+1005
+00:55:56.127 --> 00:55:56.938
+L2:
+
+1006
+00:55:57.218 --> 00:55:58.135
+Defaults.
+
+1007
+00:55:58.415 --> 00:55:59.269
+L3:
+
+1008
+00:55:59.549 --> 00:56:03.431
+Little's Law pool, statement or lock or idle-in-tx timeouts.
+
+1009
+00:56:03.711 --> 00:56:05.567
+L4: per-DataSource pools.
+
+1010
+00:56:05.847 --> 00:56:06.615
+Growth.
+
+1011
+00:56:06.895 --> 00:56:07.749
+L3:
+
+1012
+00:56:08.029 --> 00:56:09.287
+Hot table only.
+
+1013
+00:56:09.567 --> 00:56:10.442
+L4:
+
+1014
+00:56:10.722 --> 00:56:14.519
+Monthly partitions, online index or constraint migrations.
+
+1015
+00:56:15.869 --> 00:56:16.808
+Part 6.
+
+1016
+00:56:17.088 --> 00:56:18.368
+Production Concerns.
+
+1017
+00:56:19.618 --> 00:56:20.770
+Failure modes.
+
+1018
+00:56:21.050 --> 00:56:22.415
+Here is a quick table:
+
+1019
+00:56:22.695 --> 00:56:26.535
+Failure, and Detection signal, and Blast radius, and Mitigation.
+
+1020
+00:56:26.815 --> 00:56:28.437
+Lost updates or oversell.
+
+1021
+00:56:28.717 --> 00:56:29.911
+Detection signal:
+
+1022
+00:56:30.191 --> 00:56:34.757
+Negative-stock attempts rejected by CHECK; picker item missing reports.
+
+1023
+00:56:35.037 --> 00:56:36.253
+Blast radius:
+
+1024
+00:56:36.533 --> 00:56:37.578
+Money, trust.
+
+1025
+00:56:37.858 --> 00:56:38.861
+Mitigation:
+
+1026
+00:56:39.141 --> 00:56:43.002
+Atomic conditional updates; CHECK constraints; code review rule.
+
+1027
+00:56:43.282 --> 00:56:44.178
+Deadlocks.
+
+1028
+00:56:44.458 --> 00:56:49.621
+Detection signal: pgstatdatabase.deadlocks; 40P01 in logs.
+
+1029
+00:56:49.901 --> 00:56:51.117
+Blast radius:
+
+1030
+00:56:51.397 --> 00:56:52.570
+Failed requests.
+
+1031
+00:56:52.850 --> 00:56:53.853
+Mitigation:
+
+1032
+00:56:54.133 --> 00:56:58.079
+Deterministic lock order; short transactions; bounded retry.
+
+1033
+00:56:58.359 --> 00:57:01.026
+Long-running or idle-in-transaction sessions.
+
+1034
+00:57:01.306 --> 00:57:05.871
+Detection signal: pgstatactivity with old xactstart; vacuum lag.
+
+1035
+00:57:06.151 --> 00:57:07.367
+Blast radius:
+
+1036
+00:57:07.647 --> 00:57:09.503
+Bloat everywhere, lock pile-ups.
+
+1037
+00:57:09.783 --> 00:57:18.637
+Mitigation: idleintransactionsessiontimeout; no remote calls inside transactions; alert on transactions older than 30 s.
+
+1038
+00:57:18.917 --> 00:57:20.602
+Lock queue behind a migration.
+
+1039
+00:57:20.882 --> 00:57:22.077
+Detection signal:
+
+1040
+00:57:22.357 --> 00:57:26.325
+Sudden p99 spike during deploys; pglocks waiters.
+
+1041
+00:57:26.605 --> 00:57:27.821
+Blast radius:
+
+1042
+00:57:28.101 --> 00:57:29.658
+Every query on that table.
+
+1043
+00:57:29.938 --> 00:57:35.143
+Mitigation: locktimeout in migrations; CONCURRENTLY; expand or contract.
+
+1044
+00:57:36.493 --> 00:57:38.221
+Autovacuum falling behind.
+
+1045
+00:57:38.501 --> 00:57:42.491
+Detection signal: ndeadtup rising; table and index bloat.
+
+1046
+00:57:42.771 --> 00:57:43.987
+Blast radius:
+
+1047
+00:57:44.267 --> 00:57:46.485
+Slower scans and updates, disk growth.
+
+1048
+00:57:46.765 --> 00:57:47.768
+Mitigation:
+
+1049
+00:57:48.048 --> 00:57:52.357
+Per-table autovacuum settings; avoid long transactions; monitor.
+
+1050
+00:57:52.637 --> 00:57:54.963
+Transaction ID wraparound approaching.
+
+1051
+00:57:55.243 --> 00:57:58.272
+Detection signal: age(datfrozenxid) growth.
+
+1052
+00:57:58.552 --> 00:57:59.768
+Blast radius:
+
+1053
+00:58:00.048 --> 00:58:02.949
+The database forces read-only to protect itself.
+
+1054
+00:58:03.229 --> 00:58:04.232
+Mitigation:
+
+1055
+00:58:04.512 --> 00:58:07.883
+Vacuum freeze monitoring and alerting well before the limit.
+
+1056
+00:58:08.163 --> 00:58:09.379
+Pool exhaustion.
+
+1057
+00:58:09.659 --> 00:58:10.853
+Detection signal:
+
+1058
+00:58:11.133 --> 00:58:14.141
+Hikari pending 0, connection-timeout errors.
+
+1059
+00:58:14.421 --> 00:58:15.637
+Blast radius:
+
+1060
+00:58:15.917 --> 00:58:18.776
+Requests fail fast (good) or hang (bad config).
+
+1061
+00:58:19.056 --> 00:58:20.059
+Mitigation:
+
+1062
+00:58:20.339 --> 00:58:23.773
+Pools from Little's Law; short transactions; leak detection.
+
+1063
+00:58:24.053 --> 00:58:25.739
+Too many connections at DB.
+
+1064
+00:58:26.019 --> 00:58:29.496
+Detection signal: maxconnections errors after scale-out.
+
+1065
+00:58:29.776 --> 00:58:30.992
+Blast radius:
+
+1066
+00:58:31.272 --> 00:58:32.680
+New pods can't connect.
+
+1067
+00:58:32.960 --> 00:58:33.963
+Mitigation:
+
+1068
+00:58:34.243 --> 00:58:37.720
+Connection budget (Ch 02); PgBouncer.
+
+1069
+00:58:39.070 --> 00:58:42.291
+Plan regression (stale stats, new data distribution).
+
+1070
+00:58:42.571 --> 00:58:43.766
+Detection signal:
+
+1071
+00:58:44.046 --> 00:58:49.273
+A query suddenly 100 times slower; pgstatstatements top list changes.
+
+1072
+00:58:49.553 --> 00:58:50.769
+Blast radius:
+
+1073
+00:58:51.049 --> 00:58:52.457
+One endpoint or all.
+
+1074
+00:58:52.737 --> 00:58:53.739
+Mitigation:
+
+1075
+00:58:54.019 --> 00:59:00.526
+ANALYZE; extended statistics for correlated columns; review plans in CI for critical queries.
+
+1076
+00:59:00.806 --> 00:59:01.873
+Replica lag.
+
+1077
+00:59:02.153 --> 00:59:06.675
+Detection signal: pgstatreplication replay lag; stale reads.
+
+1078
+00:59:06.955 --> 00:59:08.171
+Blast radius:
+
+1079
+00:59:08.451 --> 00:59:10.478
+Stale data for replica readers.
+
+1080
+00:59:10.758 --> 00:59:11.761
+Mitigation:
+
+1081
+00:59:12.041 --> 00:59:17.289
+LSN tokens (L4); route critical reads to primary; alert above 1 s.
+
+1082
+00:59:17.569 --> 00:59:18.785
+Primary failover.
+
+1083
+00:59:19.065 --> 00:59:20.259
+Detection signal:
+
+1084
+00:59:20.539 --> 00:59:22.779
+Connection errors for 10 to 60 s.
+
+1085
+00:59:23.059 --> 00:59:24.275
+Blast radius:
+
+1086
+00:59:24.555 --> 00:59:26.326
+In-flight transactions abort.
+
+1087
+00:59:26.606 --> 00:59:27.609
+Mitigation:
+
+1088
+00:59:27.889 --> 00:59:34.331
+Idempotent retries; client reconnect; DNS or endpoint TTLs low (Ch 03).
+
+1089
+00:59:35.681 --> 00:59:36.769
+Observability.
+
+1090
+00:59:37.049 --> 00:59:38.415
+Here is a quick table:
+
+1091
+00:59:38.695 --> 00:59:40.423
+Signal, and Source, and Use.
+
+1092
+00:59:40.703 --> 00:59:43.796
+Top queries by total time, calls, mean, rows.
+
+1093
+00:59:44.076 --> 00:59:45.953
+Source: pgstatstatements.
+
+1094
+00:59:46.233 --> 00:59:46.937
+Use:
+
+1095
+00:59:47.217 --> 00:59:50.183
+The first place to look for any DB performance issue.
+
+1096
+00:59:50.463 --> 00:59:51.743
+Slow query log.
+
+1097
+00:59:52.023 --> 00:59:57.441
+Source: logmindurationstatement = 250ms + autoexplain.
+
+1098
+00:59:57.721 --> 00:59:58.425
+Use:
+
+1099
+00:59:58.705 --> 01:00:01.095
+Catch plan regressions with actual plans.
+
+1100
+01:00:01.375 --> 01:00:02.399
+Lock waits.
+
+1101
+01:00:02.679 --> 01:00:06.945
+Source: pgstatactivity.waiteventtype = 'Lock', pglocks.
+
+1102
+01:00:07.225 --> 01:00:07.929
+Use:
+
+1103
+01:00:08.209 --> 01:00:09.788
+Contention and lock queues.
+
+1104
+01:00:10.068 --> 01:00:12.052
+Deadlocks, rollbacks, temp files.
+
+1105
+01:00:12.332 --> 01:00:14.188
+Source: pgstatdatabase.
+
+1106
+01:00:14.468 --> 01:00:15.172
+Use:
+
+1107
+01:00:15.452 --> 01:00:17.628
+Error trends; sorts spilling to disk.
+
+1108
+01:00:17.908 --> 01:00:19.999
+Dead tuples, last autovacuum.
+
+1109
+01:00:20.279 --> 01:00:22.241
+Source: pgstatusertables.
+
+1110
+01:00:22.521 --> 01:00:23.225
+Use:
+
+1111
+01:00:23.505 --> 01:00:24.508
+Vacuum health.
+
+1112
+01:00:25.858 --> 01:00:27.095
+Unused indexes.
+
+1113
+01:00:27.375 --> 01:00:31.023
+Source: pgstatuserindexes.idxscan = 0.
+
+1114
+01:00:31.303 --> 01:00:32.007
+Use:
+
+1115
+01:00:32.287 --> 01:00:33.653
+Remove write overhead.
+
+1116
+01:00:33.933 --> 01:00:35.085
+Cache hit ratio.
+
+1117
+01:00:35.365 --> 01:00:37.050
+Source: pgstatio.
+
+1118
+01:00:37.330 --> 01:00:38.034
+Use:
+
+1119
+01:00:38.314 --> 01:00:40.191
+Working set versus RAM.
+
+1120
+01:00:40.471 --> 01:00:41.709
+Replication lag.
+
+1121
+01:00:41.989 --> 01:00:45.637
+Source: pgstatreplication, pglastwalreplaylsn().
+
+1122
+01:00:45.917 --> 01:00:46.621
+Use:
+
+1123
+01:00:46.901 --> 01:00:48.159
+Replica freshness.
+
+1124
+01:00:48.439 --> 01:00:51.426
+Hikari active, idle, pending, acquire time.
+
+1125
+01:00:51.706 --> 01:00:52.495
+Source:
+
+1126
+01:00:52.775 --> 01:00:54.162
+Micrometer hikaricp.
+
+1127
+01:00:54.442 --> 01:00:55.146
+Use:
+
+1128
+01:00:55.426 --> 01:00:56.685
+Pool saturation.
+
+1129
+01:00:56.965 --> 01:00:58.991
+Query count per request (tests).
+
+1130
+01:00:59.271 --> 01:01:00.061
+Source:
+
+1131
+01:01:00.341 --> 01:01:03.050
+Hibernate statistics or datasource-proxy.
+
+1132
+01:01:03.330 --> 01:01:04.034
+Use:
+
+1133
+01:01:04.314 --> 01:01:06.191
+N+1 regression guard.
+
+1134
+01:01:07.541 --> 01:01:09.589
+inventory.reservationoutcome.
+
+1135
+01:01:09.869 --> 01:01:10.659
+Source:
+
+1136
+01:01:10.939 --> 01:01:11.963
+App metrics.
+
+1137
+01:01:12.243 --> 01:01:12.947
+Use:
+
+1138
+01:01:13.227 --> 01:01:16.896
+Business view: reserved versus unavailable versus retry.
+
+1139
+01:01:18.246 --> 01:01:19.185
+Security.
+
+1140
+01:01:19.465 --> 01:01:24.158
+Least privilege per service: the app role has DML on its own tables only.
+
+1141
+01:01:24.438 --> 01:01:26.699
+Migrations use a separate owner role.
+
+1142
+01:01:26.979 --> 01:01:28.451
+No superuser in apps.
+
+1143
+01:01:28.731 --> 01:01:31.142
+One database (or schema) per service.
+
+1144
+01:01:31.422 --> 01:01:33.321
+No cross-service table access.
+
+1145
+01:01:33.601 --> 01:01:37.014
+Share data via APIs or events (Ch 16).
+
+1146
+01:01:37.294 --> 01:01:43.225
+Parameterized SQL only (JdbcClient params, JPA bind parameters).
+
+1147
+01:01:43.505 --> 01:01:49.990
+Never concatenate user input, including sort fields, which need an allow-list (Ch 04).
+
+1148
+01:01:51.340 --> 01:01:52.236
+Encryption:
+
+1149
+01:01:52.516 --> 01:02:04.484
+TLS to the DB (sslmode=verify-full), encryption at rest via the platform, and column-level encryption or tokenization for sensitive fields (Ch 23).
+
+1150
+01:02:04.764 --> 01:02:05.660
+Secrets:
+
+1151
+01:02:05.940 --> 01:02:08.436
+DB credentials from a vault, rotated.
+
+1152
+01:02:08.716 --> 01:02:12.705
+Consider short-lived IAM-based auth where the platform supports it.
+
+1153
+01:02:12.985 --> 01:02:19.385
+Row-level security for multi-tenant tables (seller data), as defense in depth (Ch 30).
+
+1154
+01:02:19.665 --> 01:02:20.476
+Auditing:
+
+1155
+01:02:20.756 --> 01:02:27.689
+DDL and privileged access logged (pgaudit), with retention per compliance needs (Ch 36).
+
+1156
+01:02:29.039 --> 01:02:33.199
+Backups encrypted and tested by restore drills (Ch 27).
+
+1157
+01:02:34.549 --> 01:02:36.213
+Performance and tuning knobs.
+
+1158
+01:02:36.493 --> 01:02:37.859
+Here is a quick table:
+
+1159
+01:02:38.139 --> 01:02:41.872
+Knob, and Typical starting point, and Guidance. sharedbuffers.
+
+1160
+01:02:42.152 --> 01:02:45.544
+Typical starting point: ~25 % of RAM.
+
+1161
+01:02:45.824 --> 01:02:46.720
+Guidance:
+
+1162
+01:02:47.000 --> 01:02:50.797
+The OS page cache handles the rest. effectivecachesize.
+
+1163
+01:02:51.077 --> 01:02:55.621
+Typical starting point: ~50 to 75 % of RAM.
+
+1164
+01:02:55.901 --> 01:02:56.797
+Guidance:
+
+1165
+01:02:57.077 --> 01:02:59.147
+A planner hint only. workmem.
+
+1166
+01:02:59.427 --> 01:03:00.835
+Typical starting point:
+
+1167
+01:03:01.115 --> 01:03:02.736
+8 to 64 MB.
+
+1168
+01:03:03.016 --> 01:03:03.912
+Guidance:
+
+1169
+01:03:04.192 --> 01:03:06.645
+Per sort or hash operation per query.
+
+1170
+01:03:06.925 --> 01:03:11.405
+Raise per role or session for reports, not globally. maxconnections.
+
+1171
+01:03:11.685 --> 01:03:13.093
+Typical starting point:
+
+1172
+01:03:13.373 --> 01:03:14.440
+Low hundreds.
+
+1173
+01:03:14.720 --> 01:03:15.616
+Guidance:
+
+1174
+01:03:15.896 --> 01:03:20.675
+Use PgBouncer rather than raising it into the thousands. randompagecost.
+
+1175
+01:03:20.955 --> 01:03:22.363
+Typical starting point:
+
+1176
+01:03:22.643 --> 01:03:25.267
+1.1 on SSD or NVMe.
+
+1177
+01:03:25.547 --> 01:03:26.443
+Guidance:
+
+1178
+01:03:26.723 --> 01:03:31.992
+Default 4.0 assumes spinning disks. checkpointtimeout or maxwalsize.
+
+1179
+01:03:32.272 --> 01:03:33.680
+Typical starting point:
+
+1180
+01:03:33.960 --> 01:03:36.029
+15 min or several GB.
+
+1181
+01:03:36.309 --> 01:03:37.205
+Guidance:
+
+1182
+01:03:37.485 --> 01:03:39.555
+Smooth checkpoints for write-heavy loads.
+
+1183
+01:03:40.905 --> 01:03:42.057
+synchronouscommit.
+
+1184
+01:03:42.337 --> 01:03:44.897
+Typical starting point: on (orders, payments).
+
+1185
+01:03:45.177 --> 01:03:48.057
+Guidance: off only for tolerably lossy data.
+
+1186
+01:03:48.337 --> 01:03:49.595
+Table fillfactor.
+
+1187
+01:03:49.875 --> 01:03:51.283
+Typical starting point:
+
+1188
+01:03:51.563 --> 01:03:54.038
+80 to 90 for hot-update tables.
+
+1189
+01:03:54.318 --> 01:03:55.214
+Guidance:
+
+1190
+01:03:55.494 --> 01:03:57.201
+Enables HOT updates.
+
+1191
+01:03:57.481 --> 01:03:58.953
+Autovacuum per table.
+
+1192
+01:03:59.233 --> 01:04:00.641
+Typical starting point:
+
+1193
+01:04:00.921 --> 01:04:06.531
+Scale factors ~0.01 to 0.05 on hot tables.
+
+1194
+01:04:06.811 --> 01:04:07.707
+Guidance:
+
+1195
+01:04:07.987 --> 01:04:13.726
+Keep dead tuples low. statementtimeout, locktimeout, idleintransactionsessiontimeout.
+
+1196
+01:04:14.006 --> 01:04:15.414
+Typical starting point:
+
+1197
+01:04:15.694 --> 01:04:18.638
+2 s or 1 s or 10 s for OLTP roles.
+
+1198
+01:04:18.918 --> 01:04:19.814
+Guidance:
+
+1199
+01:04:20.094 --> 01:04:21.374
+Server-side guards.
+
+1200
+01:04:21.654 --> 01:04:25.686
+Hibernate jdbc.batchsize, orderinserts, orderupdates.
+
+1201
+01:04:25.966 --> 01:04:27.374
+Typical starting point:
+
+1202
+01:04:27.654 --> 01:04:28.955
+50, true, true.
+
+1203
+01:04:29.235 --> 01:04:30.131
+Guidance:
+
+1204
+01:04:30.411 --> 01:04:31.777
+With SEQUENCE ids.
+
+1205
+01:04:33.127 --> 01:04:34.599
+defaultbatchfetchsize.
+
+1206
+01:04:34.879 --> 01:04:36.287
+Typical starting point:
+
+1207
+01:04:36.567 --> 01:04:38.081
+16 to 64.
+
+1208
+01:04:38.361 --> 01:04:39.257
+Guidance:
+
+1209
+01:04:39.537 --> 01:04:42.204
+Blunt but effective N+1 mitigation.
+
+1210
+01:04:43.554 --> 01:04:44.279
+Cost.
+
+1211
+01:04:44.559 --> 01:04:46.031
+RAM is the lever.
+
+1212
+01:04:46.311 --> 01:04:50.386
+A working set that fits in memory turns disk reads into cache hits.
+
+1213
+01:04:50.666 --> 01:04:54.015
+Size instances by working set, not by total data.
+
+1214
+01:04:54.295 --> 01:04:57.666
+Indexes cost storage, RAM and write I or O.
+
+1215
+01:04:57.946 --> 01:04:59.205
+Drop unused ones.
+
+1216
+01:04:59.485 --> 01:05:06.759
+Read replicas are cheaper than a bigger primary for read-heavy loads, and each adds a cross-AZ replication traffic cost.
+
+1217
+01:05:07.039 --> 01:05:12.821
+Partitioning plus archiving moves cold data to object storage at a fraction of the price.
+
+1218
+01:05:14.171 --> 01:05:23.600
+Managed services (RDS or Aurora, Cloud SQL, Azure) trade higher unit cost for less operational toil (patching, backups, failover).
+
+1219
+01:05:23.880 --> 01:05:25.949
+For most teams, that's the right trade.
+
+1220
+01:05:26.229 --> 01:05:35.872
+The expensive database is usually a query problem: one missing index or an N+1 can cost more CPU than the rest of the workload combined.
+
+1221
+01:05:36.152 --> 01:05:39.352
+Review pgstatstatements before scaling hardware.
+
+1222
+01:05:40.702 --> 01:05:41.641
+Part 7.
+
+1223
+01:05:41.921 --> 01:05:43.627
+Anti-Patterns and Pitfalls.
+
+1224
+01:05:44.877 --> 01:05:45.517
+1.
+
+1225
+01:05:45.797 --> 01:05:48.165
+Read-modify-write in application code.
+
+1226
+01:05:49.515 --> 01:05:59.094
+Here is the Java code. before: two transactions read 12, both write 11. after: the database does the arithmetic and the check atomically.
+
+1227
+01:06:01.944 --> 01:06:02.648
+2.
+
+1228
+01:06:02.928 --> 01:06:05.552
+Believing @Transactional means serialized.
+
+1229
+01:06:05.832 --> 01:06:06.643
+Symptom:
+
+1230
+01:06:06.923 --> 01:06:09.141
+It's in a transaction, so it can't race.
+
+1231
+01:06:09.421 --> 01:06:10.147
+Fix:
+
+1232
+01:06:10.427 --> 01:06:11.941
+Know your isolation level.
+
+1233
+01:06:12.221 --> 01:06:17.277
+READ COMMITTED allows lost updates in app-level read-modify-write and write skew.
+
+1234
+01:06:17.557 --> 01:06:18.304
+3.
+
+1235
+01:06:18.584 --> 01:06:20.653
+Remote calls inside transactions.
+
+1236
+01:06:22.003 --> 01:06:36.873
+Here is the Java code. before: holds a DB connection + row locks while waiting on Razorpay (seconds). after: short DB transactions; remote call outside; outbox or saga for coordination (Ch 13).
+
+1237
+01:06:39.723 --> 01:06:40.427
+4.
+
+1238
+01:06:40.707 --> 01:06:43.331
+N+1 queries hidden by lazy loading.
+
+1239
+01:06:43.611 --> 01:06:44.421
+Symptom:
+
+1240
+01:06:44.701 --> 01:06:49.096
+The endpoint does 200 queries, and nobody notices until the peak.
+
+1241
+01:06:49.376 --> 01:06:50.101
+Fix:
+
+1242
+01:06:50.381 --> 01:06:55.139
+Batch or fetch explicitly, disable open-in-view, and use query-count tests.
+
+1243
+01:06:55.419 --> 01:06:56.187
+5.
+
+1244
+01:06:56.467 --> 01:06:58.259
+Indexing everything (or nothing).
+
+1245
+01:06:58.539 --> 01:06:59.349
+Symptom:
+
+1246
+01:06:59.629 --> 01:07:03.704
+Slow writes and bloated storage, or sequential scans on hot paths.
+
+1247
+01:07:03.984 --> 01:07:04.709
+Fix:
+
+1248
+01:07:04.989 --> 01:07:11.539
+Design indexes from access patterns, verify with EXPLAIN (ANALYZE, BUFFERS), and drop unused ones.
+
+1249
+01:07:11.819 --> 01:07:12.565
+6.
+
+1250
+01:07:12.845 --> 01:07:15.171
+Offset pagination on large tables.
+
+1251
+01:07:15.451 --> 01:07:16.965
+See Ch 04.
+
+1252
+01:07:17.245 --> 01:07:18.248
+Use keyset.
+
+1253
+01:07:19.598 --> 01:07:20.345
+7.
+
+1254
+01:07:20.625 --> 01:07:22.758
+Unbounded queries and no timeouts.
+
+1255
+01:07:23.038 --> 01:07:23.849
+Symptom:
+
+1256
+01:07:24.129 --> 01:07:27.862
+One report query holds locks and connections for 10 minutes.
+
+1257
+01:07:28.142 --> 01:07:34.627
+Fix: statementtimeout per role, LIMIT on every OLTP query, and analytics on replicas or a warehouse.
+
+1258
+01:07:34.907 --> 01:07:35.590
+8.
+
+1259
+01:07:35.870 --> 01:07:38.217
+Blocking schema changes in a deploy.
+
+1260
+01:07:39.567 --> 01:07:45.476
+Here is the SQL code. before: blocks writes on a 3M-row hot table for the whole build.
+
+1261
+01:07:48.326 --> 01:07:49.073
+9.
+
+1262
+01:07:49.353 --> 01:07:51.273
+Pool size = big number.
+
+1263
+01:07:51.553 --> 01:07:52.363
+Symptom:
+
+1264
+01:07:52.643 --> 01:08:00.174
+50 times 30 pods = 1,500 connections, and the database spends its time context-switching.
+
+1265
+01:08:00.454 --> 01:08:01.179
+Fix:
+
+1266
+01:08:01.459 --> 01:08:05.683
+Size from Little's Law and the DB core count, and add PgBouncer.
+
+1267
+01:08:05.963 --> 01:08:06.667
+10.
+
+1268
+01:08:06.947 --> 01:08:12.814
+Random UUIDv4 primary keys on huge insert-heavy tables (especially InnoDB).
+
+1269
+01:08:13.094 --> 01:08:13.905
+Symptom:
+
+1270
+01:08:14.185 --> 01:08:17.257
+Page splits, index bloat, and poor cache locality.
+
+1271
+01:08:17.537 --> 01:08:18.262
+Fix:
+
+1272
+01:08:18.542 --> 01:08:22.979
+Time-ordered ids (UUIDv7, ULID, sequences) (Ch 20).
+
+1273
+01:08:24.329 --> 01:08:25.204
+Part 8.
+
+1274
+01:08:25.484 --> 01:08:26.828
+Interview Q and A.
+
+1275
+01:08:28.078 --> 01:08:28.910
+Beginner.
+
+1276
+01:08:29.190 --> 01:08:30.214
+Question 1.
+
+1277
+01:08:30.494 --> 01:08:33.929
+Explain ACID with an example from an e-commerce order.
+
+1278
+01:08:34.209 --> 01:08:35.574
+Thirty-second answer:
+
+1279
+01:08:35.854 --> 01:08:41.358
+Atomicity: order, items, stock reservation and outbox commit together or not at all.
+
+1280
+01:08:41.638 --> 01:08:48.934
+Consistency: declared constraints (unique order id, available = 0, foreign keys) hold after commit.
+
+1281
+01:08:49.214 --> 01:08:55.721
+Isolation: concurrent transactions don't see each other's partial work, to the degree of the isolation level.
+
+1282
+01:08:56.001 --> 01:09:00.822
+Durability: once committed, the order survives a crash (WAL fsync).
+
+1283
+01:09:02.172 --> 01:09:03.175
+Question 2.
+
+1284
+01:09:03.455 --> 01:09:05.695
+What is an index, and when does it not help?
+
+1285
+01:09:05.975 --> 01:09:07.340
+Thirty-second answer:
+
+1286
+01:09:07.620 --> 01:09:15.343
+A sorted structure (a B+ tree) mapping key values to row locations, so lookups and ranges avoid full scans.
+
+1287
+01:09:15.623 --> 01:09:29.447
+It doesn't help when the query doesn't use the index's leftmost prefix, when a filter matches a large fraction of rows (a scan is cheaper), when functions are applied to the column without an expression index, or on tiny tables.
+
+1288
+01:09:30.797 --> 01:09:31.842
+Question 3.
+
+1289
+01:09:32.122 --> 01:09:36.218
+Normalization versus denormalization: when do you denormalize?
+
+1290
+01:09:36.498 --> 01:09:37.863
+Thirty-second answer:
+
+1291
+01:09:38.143 --> 01:09:41.237
+Normalize writes so each fact lives in one place.
+
+1292
+01:09:41.517 --> 01:09:51.842
+Denormalize deliberately for read performance or for historical truth: snapshotting price, tax and address on an order is correct because they must not change later.
+
+1293
+01:09:52.122 --> 01:09:56.431
+Read models built from events are denormalized copies with a clear owner.
+
+1294
+01:09:57.781 --> 01:09:58.848
+Question 4.
+
+1295
+01:09:59.128 --> 01:10:01.283
+What is a transaction isolation level?
+
+1296
+01:10:01.563 --> 01:10:02.928
+Thirty-second answer:
+
+1297
+01:10:03.208 --> 01:10:12.168
+It defines which concurrency anomalies a transaction can observe: dirty reads, non-repeatable reads, phantoms, lost updates, write skew.
+
+1298
+01:10:12.448 --> 01:10:22.603
+The levels are READ UNCOMMITTED, READ COMMITTED (the PostgreSQL default), REPEATABLE READ (snapshot isolation in PostgreSQL) and SERIALIZABLE.
+
+1299
+01:10:23.953 --> 01:10:24.955
+Intermediate.
+
+1300
+01:10:25.235 --> 01:10:26.345
+Question 5.
+
+1301
+01:10:26.625 --> 01:10:30.209
+How do you prevent overselling inventory under high concurrency?
+
+1302
+01:10:30.489 --> 01:10:31.854
+Thirty-second answer:
+
+1303
+01:10:32.134 --> 01:10:38.705
+Use a single atomic conditional update, UPDATE stock SET available = available -:q WHERE...
+
+1304
+01:10:38.985 --> 01:10:42.803
+AND available =:q, and treat 0 rows as sold out.
+
+1305
+01:10:43.083 --> 01:10:45.195
+Add CHECK (available = 0).
+
+1306
+01:10:45.475 --> 01:10:52.665
+For multi-item orders, do it in one transaction with lines locked in sorted order, and roll back if any line fails.
+
+1307
+01:10:54.015 --> 01:10:55.124
+Question 6.
+
+1308
+01:10:55.404 --> 01:10:59.009
+Optimistic versus pessimistic locking: when do you use each?
+
+1309
+01:10:59.289 --> 01:11:00.655
+Thirty-second answer:
+
+1310
+01:11:00.935 --> 01:11:09.532
+Optimistic (a version column, 0 rows = conflict) suits low-contention edits and user-facing concurrency (ETags).
+
+1311
+01:11:09.812 --> 01:11:11.241
+Pessimistic (SELECT...
+
+1312
+01:11:11.521 --> 01:11:18.455
+FOR UPDATE) suits high-contention or multi-step logic that can't be one statement, at the cost of holding locks.
+
+1313
+01:11:18.735 --> 01:11:22.020
+For counters, an atomic conditional update beats both.
+
+1314
+01:11:23.370 --> 01:11:24.458
+Question 7.
+
+1315
+01:11:24.738 --> 01:11:28.557
+What is the N+1 problem, and how do you fix it in JPA?
+
+1316
+01:11:28.837 --> 01:11:30.202
+Thirty-second answer:
+
+1317
+01:11:30.482 --> 01:11:36.605
+Loading N parents, then lazily loading each parent's association, issues 1 + N queries.
+
+1318
+01:11:36.885 --> 01:11:53.823
+Fix it with fetch joins or @EntityGraph for single queries, batch fetching (@BatchSize or defaultbatchfetchsize) for collections, DTO projections for read APIs, and a two-query pattern (page parents, then fetch children by IN list) when paginating.
+
+1319
+01:11:55.173 --> 01:11:56.197
+Question 8.
+
+1320
+01:11:56.477 --> 01:11:58.717
+How do you size a HikariCP pool?
+
+1321
+01:11:58.997 --> 01:12:00.363
+Thirty-second answer:
+
+1322
+01:12:00.643 --> 01:12:07.021
+From Little's Law: busy connections = request rate times DB time per request, plus headroom.
+
+1323
+01:12:07.301 --> 01:12:16.688
+Split across pods, and check that Σ pods times pool fits the database's connection budget, which should stay near a small multiple of DB cores.
+
+1324
+01:12:16.968 --> 01:12:20.232
+Keep connection-timeout short, and use a fixed-size pool.
+
+1325
+01:12:21.582 --> 01:12:22.649
+Question 9.
+
+1326
+01:12:22.929 --> 01:12:27.430
+Explain MVCC and why long-running transactions are dangerous.
+
+1327
+01:12:27.710 --> 01:12:29.075
+Thirty-second answer:
+
+1328
+01:12:29.355 --> 01:12:34.987
+MVCC keeps multiple row versions so readers see a snapshot without blocking writers.
+
+1329
+01:12:35.267 --> 01:12:39.342
+Old versions are removed by vacuum once no snapshot needs them.
+
+1330
+01:12:39.622 --> 01:12:50.353
+A long-running (or idle-in-transaction) session keeps an old snapshot alive, so vacuum can't clean anything newer, and tables and indexes bloat across the whole database.
+
+1331
+01:12:51.703 --> 01:12:52.471
+Senior.
+
+1332
+01:12:52.751 --> 01:12:53.796
+Question 10.
+
+1333
+01:12:54.076 --> 01:12:55.889
+You're seeing deadlocks during peak.
+
+1334
+01:12:56.169 --> 01:12:58.089
+How do you diagnose and fix them?
+
+1335
+01:12:58.369 --> 01:12:59.735
+Thirty-second answer:
+
+1336
+01:13:00.015 --> 01:13:06.436
+Read the deadlock report in the PostgreSQL logs (the processes, the waiting locks and the statements).
+
+1337
+01:13:06.716 --> 01:13:13.692
+Typical causes are multi-row updates in inconsistent orders, or foreign-key checks and triggers taking locks.
+
+1338
+01:13:13.972 --> 01:13:28.543
+Fix by locking in a deterministic order (sort by key), keeping transactions short, avoiding lock upgrades (read then update the same row, which should be a single UPDATE), and adding bounded retries for 40P01.
+
+1339
+01:13:29.893 --> 01:13:31.023
+Question 11.
+
+1340
+01:13:31.303 --> 01:13:33.693
+What is write skew, and how do you prevent it?
+
+1341
+01:13:33.973 --> 01:13:35.274
+Give a real example.
+
+1342
+01:13:35.554 --> 01:13:36.919
+Thirty-second answer:
+
+1343
+01:13:37.199 --> 01:13:43.450
+Two transactions each read a condition, then write different rows, and together they violate an invariant.
+
+1344
+01:13:43.730 --> 01:13:49.703
+For example, each rider checks at least one other rider is on shift at this store and both go off shift.
+
+1345
+01:13:49.983 --> 01:13:53.418
+REPEATABLE READ (snapshot isolation) doesn't prevent it.
+
+1346
+01:13:53.698 --> 01:13:58.434
+Prevent it with SERIALIZABLE (and retries), by locking a common row (SELECT...
+
+1347
+01:13:58.714 --> 01:14:06.287
+FOR UPDATE on the store's shift record), or by materializing the invariant as a constraint or counter updated atomically.
+
+1348
+01:14:07.637 --> 01:14:08.725
+Question 12.
+
+1349
+01:14:09.005 --> 01:14:12.056
+Walk me through reading an EXPLAIN plan for a slow query.
+
+1350
+01:14:12.336 --> 01:14:13.701
+Thirty-second answer:
+
+1351
+01:14:13.981 --> 01:14:16.029
+Run EXPLAIN (ANALYZE, BUFFERS).
+
+1352
+01:14:16.309 --> 01:14:18.656
+Find the node with the most actual time.
+
+1353
+01:14:18.936 --> 01:14:35.341
+Compare estimated versus actual rows (big gaps mean statistics problems), look for Seq Scans with large Rows Removed by Filter (a missing index), nested loops over large outer sets, sorts spilling to disk, and high buffer reads (cache misses).
+
+1354
+01:14:36.691 --> 01:14:37.971
+Question 13.
+
+1355
+01:14:38.251 --> 01:14:42.198
+How do you change the schema of a hot, large table without downtime?
+
+1356
+01:14:42.478 --> 01:14:43.843
+Thirty-second answer:
+
+1357
+01:14:44.123 --> 01:14:47.409
+Expand, then migrate, then contract across releases.
+
+1358
+01:14:47.689 --> 01:14:49.353
+Add nullable columns first.
+
+1359
+01:14:49.633 --> 01:14:50.913
+Backfill in batches.
+
+1360
+01:14:51.193 --> 01:14:53.966
+Add constraints as NOT VALID and then validate.
+
+1361
+01:14:54.246 --> 01:14:55.910
+Create indexes CONCURRENTLY.
+
+1362
+01:14:56.190 --> 01:15:00.329
+Set locktimeout so migrations fail fast instead of queuing traffic.
+
+1363
+01:15:00.609 --> 01:15:04.619
+Only drop or rename after no running code uses the old shape.
+
+1364
+01:15:05.969 --> 01:15:07.164
+Question 14.
+
+1365
+01:15:07.444 --> 01:15:10.068
+When and how do you use read replicas safely?
+
+1366
+01:15:10.348 --> 01:15:11.713
+Thirty-second answer:
+
+1367
+01:15:11.993 --> 01:15:17.476
+Route read-only, staleness-tolerant queries to replicas (browsing, history, dashboards).
+
+1368
+01:15:17.756 --> 01:15:26.481
+Keep decision reads and anything right after a user's write on the primary, or verify the replica has replayed the write's LSN (read-your-writes).
+
+1369
+01:15:26.761 --> 01:15:30.217
+Monitor lag, and never run analytics on OLTP replicas.
+
+1370
+01:15:31.567 --> 01:15:32.463
+Architect.
+
+1371
+01:15:32.743 --> 01:15:33.938
+Question 15.
+
+1372
+01:15:34.218 --> 01:15:38.421
+The orders database is growing 2 TB a year and writes are rising.
+
+1373
+01:15:38.701 --> 01:15:39.682
+What's your plan?
+
+1374
+01:15:39.962 --> 01:15:41.327
+Thirty-second answer:
+
+1375
+01:15:41.607 --> 01:15:44.637
+First, measure (top queries, write mix, working set).
+
+1376
+01:15:44.917 --> 01:16:01.642
+Then, in order: fix queries and indexes; partition orders by month (pruning, cheap retention); archive cold partitions to object storage or a warehouse; move reads to replicas and read models; reduce write amplification (fewer indexes, batching).
+
+1377
+01:16:01.922 --> 01:16:13.293
+Only when a single primary's write capacity is on a runway shorter than the migration lead time, plan sharding (by customer or region) or a distributed SQL database.
+
+1378
+01:16:14.643 --> 01:16:15.837
+Question 16.
+
+1379
+01:16:16.117 --> 01:16:20.747
+How do you choose isolation levels and locking strategies as a platform standard?
+
+1380
+01:16:21.027 --> 01:16:22.392
+Thirty-second answer:
+
+1381
+01:16:22.672 --> 01:16:41.403
+Default to READ COMMITTED with atomic statements for counters and invariants, optimistic versions for user edits, pessimistic locks with deterministic order where logic can't be one statement, and SERIALIZABLE only for complex cross-row invariants (ledgers) with mandatory retry wrappers.
+
+1382
+01:16:41.683 --> 01:16:43.624
+Declare invariants as constraints.
+
+1383
+01:16:43.904 --> 01:16:48.448
+Encode the rules in shared libraries, review checklists and architecture tests.
+
+1384
+01:16:49.798 --> 01:16:51.142
+Question 17.
+
+1385
+01:16:51.422 --> 01:16:54.067
+Should each microservice have its own database?
+
+1386
+01:16:54.347 --> 01:16:56.011
+What about reporting across them?
+
+1387
+01:16:56.291 --> 01:16:57.657
+Thirty-second answer:
+
+1388
+01:16:57.937 --> 01:17:06.726
+Yes: database-per-service (or schema-per-service with enforced ownership) keeps services independently deployable and prevents hidden coupling.
+
+1389
+01:17:07.006 --> 01:17:15.689
+Cross-service reporting goes through events or CDC into a warehouse or lakehouse (Ch 21), not cross-database joins.
+
+1390
+01:17:15.969 --> 01:17:18.273
+Share data via APIs and events.
+
+1391
+01:17:19.623 --> 01:17:20.796
+Question 18.
+
+1392
+01:17:21.076 --> 01:17:26.409
+Managed PostgreSQL versus self-managed on Kubernetes: how do you decide?
+
+1393
+01:17:26.689 --> 01:17:28.055
+Thirty-second answer:
+
+1394
+01:17:28.335 --> 01:17:38.425
+Managed services (RDS or Aurora, Cloud SQL) give automated backups, patching, failover and monitoring, which is the right default for most teams.
+
+1395
+01:17:38.705 --> 01:17:54.791
+Self-managed (operators like CloudNativePG on Kubernetes) gives control, portability and possibly lower cost at scale, but needs real DBA and SRE expertise for backups, upgrades, failover testing and storage performance.
+
+1396
+01:17:56.141 --> 01:17:57.378
+Question 19.
+
+1397
+01:17:57.658 --> 01:18:01.242
+How do you design a ledger (wallet) in a relational database?
+
+1398
+01:18:01.522 --> 01:18:02.887
+Thirty-second answer:
+
+1399
+01:18:03.167 --> 01:18:13.685
+Use append-only double-entry records: every transfer inserts balanced debit and credit entries in one transaction (the sum is zero), and entries are never updated.
+
+1400
+01:18:13.965 --> 01:18:24.013
+Balances are either derived (sum of entries) or kept as a cached balance row updated atomically with a CHECK (balance = 0) in the same transaction.
+
+1401
+01:18:24.293 --> 01:18:30.927
+Use idempotency keys for every movement, and reconcile daily with external sources (Razorpay settlements).
+
+1402
+01:18:32.277 --> 01:18:33.387
+Question 20.
+
+1403
+01:18:33.667 --> 01:18:37.059
+When would you move a workload off PostgreSQL entirely?
+
+1404
+01:18:37.339 --> 01:18:38.704
+Thirty-second answer:
+
+1405
+01:18:38.984 --> 01:18:47.859
+When the access pattern fits another model much better, and the relational benefits (transactions, joins, constraints) aren't needed for that workload.
+
+1406
+01:18:48.139 --> 01:19:06.592
+Examples: very high write rates of time-series or events (a time-series or LSM store), full-text relevance search (a search engine), large key-value session state (Redis or DynamoDB), graph traversals, or analytical scans over TBs (a columnar warehouse).
+
+1407
+01:19:06.872 --> 01:19:10.456
+Keep the system of record relational where correctness matters.
+
+1408
+01:19:11.806 --> 01:19:12.702
+Part 9.
+
+1409
+01:19:12.982 --> 01:19:14.390
+Summary and Practice.
+
+1410
+01:19:15.640 --> 01:19:16.728
+Key takeaways.
+
+1411
+01:19:17.008 --> 01:19:24.005
+ACID gives you only what you declare and choose: constraints for consistency, isolation levels for concurrency.
+
+1412
+01:19:24.285 --> 01:19:28.168
+At READ COMMITTED, app-level read-modify-write loses updates.
+
+1413
+01:19:28.448 --> 01:19:33.376
+Use atomic conditional updates for counters, and back invariants with CHECK constraints.
+
+1414
+01:19:33.656 --> 01:19:40.781
+MVCC lets readers and writers coexist, but long transactions block vacuum and cause bloat everywhere.
+
+1415
+01:19:41.061 --> 01:19:43.216
+Indexes are sorted B+ trees.
+
+1416
+01:19:43.496 --> 01:19:50.707
+Design composite, covering and partial indexes from access patterns, and verify with EXPLAIN (ANALYZE, BUFFERS).
+
+1417
+01:19:52.057 --> 01:19:59.139
+Lock in a deterministic order to prevent deadlocks, keep transactions short, and never make remote calls inside them.
+
+1418
+01:19:59.419 --> 01:20:04.006
+Write skew needs SERIALIZABLE, a common lock, or a materialized counter.
+
+1419
+01:20:04.286 --> 01:20:06.334
+Snapshot isolation isn't enough.
+
+1420
+01:20:06.614 --> 01:20:08.043
+JPA pitfalls:
+
+1421
+01:20:08.323 --> 01:20:14.190
+N+1, open-in-view, IDENTITY disabling batching, collection fetch + pagination.
+
+1422
+01:20:14.470 --> 01:20:16.241
+Assert query counts in tests.
+
+1423
+01:20:16.521 --> 01:20:21.747
+Pool size is set by Little's Law and the database's capacity, not by guesswork.
+
+1424
+01:20:22.027 --> 01:20:25.121
+Use server-side statement, lock and idle timeouts.
+
+1425
+01:20:25.401 --> 01:20:30.158
+Replicas need read-your-writes handling (LSN tokens) and lag monitoring.
+
+1426
+01:20:31.508 --> 01:20:36.649
+Grow with partitioning, archiving and online migrations before considering sharding.
+
+1427
+01:20:37.999 --> 01:20:39.322
+Decision cheat sheet.
+
+1428
+01:20:39.602 --> 01:20:40.967
+Here is a quick table:
+
+1429
+01:20:41.247 --> 01:20:42.719
+Situation, and Choose.
+
+1430
+01:20:42.999 --> 01:20:46.050
+Counter with an invariant (stock, slots, coupons):
+
+1431
+01:20:46.330 --> 01:20:47.183
+UPDATE...
+
+1432
+01:20:47.463 --> 01:20:49.234
+SET x = x - n WHERE...
+
+1433
+01:20:49.514 --> 01:20:51.306
+AND x = n + CHECK.
+
+1434
+01:20:51.586 --> 01:20:52.994
+User editing a record:
+
+1435
+01:20:53.274 --> 01:20:56.623
+Optimistic version or ETag (Ch 04).
+
+1436
+01:20:56.903 --> 01:20:59.527
+Multi-row logic that can't be one statement:
+
+1437
+01:20:59.807 --> 01:21:00.639
+SELECT...
+
+1438
+01:21:00.919 --> 01:21:03.437
+FOR UPDATE in sorted order, short tx.
+
+1439
+01:21:03.717 --> 01:21:05.999
+Cross-row invariant (write skew risk):
+
+1440
+01:21:06.279 --> 01:21:09.842
+SERIALIZABLE + retry, or a materialized counter.
+
+1441
+01:21:10.122 --> 01:21:11.466
+Work queue in the DB:
+
+1442
+01:21:11.746 --> 01:21:13.154
+FOR UPDATE SKIP LOCKED.
+
+1443
+01:21:13.434 --> 01:21:14.821
+Filter + sort list:
+
+1444
+01:21:15.101 --> 01:21:19.154
+Composite index matching WHERE equality + ORDER BY + keyset.
+
+1445
+01:21:19.434 --> 01:21:21.333
+Only a small subset is queried:
+
+1446
+01:21:21.613 --> 01:21:22.743
+Partial index.
+
+1447
+01:21:24.093 --> 01:21:25.565
+Huge time-ordered table:
+
+1448
+01:21:25.845 --> 01:21:29.344
+Range partitioning by time (+ BRIN for some cases).
+
+1449
+01:21:29.624 --> 01:21:31.523
+Read-heavy, staleness-tolerant:
+
+1450
+01:21:31.803 --> 01:21:34.000
+Replica + read-your-writes tokens.
+
+1451
+01:21:35.350 --> 01:21:36.481
+Exercises.
+
+1452
+01:21:36.761 --> 01:21:38.126
+Here is a quick table:
+
+1453
+01:21:38.406 --> 01:21:40.262
+Band, and Exercise, and Hint.
+
+1454
+01:21:40.542 --> 01:21:41.374
+B1.
+
+1455
+01:21:41.654 --> 01:21:42.721
+Exercise:
+
+1456
+01:21:43.001 --> 01:21:48.931
+Run L1 with 1 ms and 0 ms delays between read and write, and explain the difference.
+
+1457
+01:21:49.211 --> 01:21:49.894
+Hint:
+
+1458
+01:21:50.174 --> 01:21:51.262
+The race window.
+
+1459
+01:21:51.542 --> 01:21:52.374
+B1.
+
+1460
+01:21:52.654 --> 01:21:53.721
+Exercise:
+
+1461
+01:21:54.001 --> 01:21:56.817
+Write the EXPLAIN you'd expect for WHERE storeid =?
+
+1462
+01:21:57.097 --> 01:22:00.467
+AND status = 'HELD' with and without the partial index.
+
+1463
+01:22:00.747 --> 01:22:01.430
+Hint:
+
+1464
+01:22:01.710 --> 01:22:03.779
+Partial index predicate must match.
+
+1465
+01:22:04.059 --> 01:22:04.934
+B2.
+
+1466
+01:22:05.214 --> 01:22:06.281
+Exercise:
+
+1467
+01:22:06.561 --> 01:22:13.281
+Reproduce a lost update in two psql sessions at READ COMMITTED, then fix it with a conditional UPDATE.
+
+1468
+01:22:13.561 --> 01:22:14.243
+Hint:
+
+1469
+01:22:14.523 --> 01:22:16.806
+Interleave the SELECT and UPDATE by hand.
+
+1470
+01:22:17.086 --> 01:22:17.961
+B2.
+
+1471
+01:22:18.241 --> 01:22:19.307
+Exercise:
+
+1472
+01:22:19.587 --> 01:22:23.171
+Add a query-count assertion to an endpoint in your own project.
+
+1473
+01:22:23.451 --> 01:22:24.134
+Hint:
+
+1474
+01:22:24.414 --> 01:22:27.123
+Hibernate statistics or datasource-proxy.
+
+1475
+01:22:28.473 --> 01:22:29.348
+B3.
+
+1476
+01:22:29.628 --> 01:22:30.695
+Exercise:
+
+1477
+01:22:30.975 --> 01:22:38.143
+Reproduce write skew with the rider-shift example at REPEATABLE READ, then fix it with SERIALIZABLE and with a counter.
+
+1478
+01:22:38.423 --> 01:22:39.105
+Hint:
+
+1479
+01:22:39.385 --> 01:22:40.367
+Two sessions.
+
+1480
+01:22:40.647 --> 01:22:41.521
+B3.
+
+1481
+01:22:41.801 --> 01:22:42.868
+Exercise:
+
+1482
+01:22:43.148 --> 01:22:49.335
+Run L3's deadlock test with sorting removed and observe pgstatdatabase.deadlocks.
+
+1483
+01:22:49.615 --> 01:22:50.297
+Hint:
+
+1484
+01:22:50.577 --> 01:22:51.900
+Then restore sorting.
+
+1485
+01:22:52.180 --> 01:22:53.055
+B4.
+
+1486
+01:22:53.335 --> 01:22:54.401
+Exercise:
+
+1487
+01:22:54.681 --> 01:23:00.399
+Design monthly partitioning plus archiving for orders, including how order-history queries prune.
+
+1488
+01:23:00.679 --> 01:23:01.361
+Hint:
+
+1489
+01:23:01.641 --> 01:23:03.753
+Queries must include the time range.
+
+1490
+01:23:04.033 --> 01:23:04.908
+B4.
+
+1491
+01:23:05.188 --> 01:23:06.255
+Exercise:
+
+1492
+01:23:06.535 --> 01:23:12.956
+Write ADR-026: when inventory moves from one primary to per-region databases.
+
+1493
+01:23:13.236 --> 01:23:13.919
+Hint:
+
+1494
+01:23:14.199 --> 01:23:15.777
+Runway versus lead time.
+
+1495
+01:23:17.127 --> 01:23:18.130
+Further reading.
+
+1496
+01:23:18.410 --> 01:23:20.501
+PostgreSQL documentation:
+
+1497
+01:23:20.781 --> 01:23:29.527
+Concurrency Control (MVCC, isolation, explicit locking), Indexes, Using EXPLAIN, Routine Vacuuming, Table Partitioning.
+
+1498
+01:23:29.807 --> 01:23:34.010
+Martin Kleppmann, Designing Data-Intensive Applications: ch.
+
+1499
+01:23:34.290 --> 01:23:36.679
+3 (storage and retrieval) and ch.
+
+1500
+01:23:36.959 --> 01:23:38.410
+7 (transactions).
+
+1501
+01:23:38.690 --> 01:23:43.469
+Markus Winand, SQL Performance Explained or use-the-index-luke.com.
+
+1502
+01:23:43.749 --> 01:23:46.906
+Vlad Mihalcea, High-Performance Java Persistence.
+
+1503
+01:23:47.186 --> 01:23:48.679
+HikariCP wiki:
+
+1504
+01:23:48.959 --> 01:23:50.239
+About Pool Sizing.
+
+1505
+01:23:51.589 --> 01:23:58.651
+Ports and Grittner, Serializable Snapshot Isolation in PostgreSQL (VLDB 2012).
+
+1506
+01:24:00.001 --> 01:24:01.238
+Related chapters.
+
+1507
+01:24:01.518 --> 01:24:20.697
+02, Estimation, 04, API Design, 06, NoSQL and Polyglot Persistence, 10, Replication, 11, Partitioning and Sharding, 13, Distributed Transactions, 28, Schema and Data Evolution, 46, Checkout and Inventory Reservation.
+
+1508
+01:24:22.047 --> 01:24:23.647
+That's the end of this chapter.
+
+1509
+01:24:23.927 --> 01:24:30.049
+Try the exercises and the hands-on labs, then answer the interview questions out loud without looking.
+
+1510
+01:24:30.329 --> 01:24:31.780
+See you in the next chapter.
+
